@@ -1,0 +1,47 @@
+defaults:
+  output_root: ./downloads
+  audio_format: mp3
+  audio_quality: 0
+  max_downloads: 3
+  playlist_end: 3
+  cookie_path: /tmp/cookies.txt
+
+youtube:
+
+  - name: ACG
+    url: https://www.youtube.com/playlist?list=PL62tz83FJJjlEpRdOT63lruxsTA6m1t9s
+
+  - name: MrMattyPlays
+    url: https://www.youtube.com/playlist?list=UUmXH6CX_juGwNFTj3PESdoA
+
+  - name: LordanARTS
+    url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
+
+  - name: TheNeedledrop
+    url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
+
+  - name: XboxReady
+    url: https://www.youtube.com/playlist?list=UUBmhLJgK9sLTXjxKcOHuzlQ
+
+  - name: PlumeGaming
+    url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
+
+podcasts:
+
+  - name: StrictlyAnonymous
+    url: https://feeds.megaphone.fm/strictlyanonymous
+
+  - name: TheTimDillonShow
+    url: https://audioboom.com/channels/5093219.rss
+
+  - name: JesseMichels
+    url: https://feeds.megaphone.fm/jessemichels
+
+  - name: Area52
+    url: https://anchor.fm/s/e81d3f74/podcast/rss
+
+  - name: StavvysWorld
+    url: https://audioboom.com/channels/5135319.rss
+
+  - name: TheWhyFiles
+    url: https://audioboom.com/channels/5117675.rss
