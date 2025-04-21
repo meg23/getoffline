@@ -40,7 +40,6 @@ for cookie in cj:
     cookie_jar.set_cookie(cookie)
 cookie_jar.save(ignore_discard=True, ignore_expires=True)
 
-# === YouTube Downloads ===
 for entry in config.get("youtube", []):
     try:
         name = sanitize(entry["name"])
@@ -75,7 +74,6 @@ for entry in config.get("youtube", []):
     except Exception as e:
         log.error(f"❌ Failed to download YouTube: {entry}: {e}")
 
-# === Podcast RSS Downloads ===
 for entry in config.get("podcasts", []):
     try:
         name = sanitize(entry["name"])
