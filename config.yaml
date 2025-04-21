@@ -1,4 +1,5 @@
 defaults:
+
   output_root: ./downloads
   audio_format: mp3
   audio_quality: 0
@@ -17,7 +18,7 @@ youtube:
   - name: LordanARTS
     url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
 
-  - name: TheNeedledrop
+  - name: TheNeedleDrop
     url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
 
   - name: XboxReady
