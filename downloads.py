@@ -48,26 +48,40 @@ for entry in config.get("youtube", []):
         archive = os.path.join(folder, f"{name}_downloaded.txt")
         ensure_dir(folder)
 
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "cookiefile": cookie_path,
-            "extract_audio": True,
-            "audio_format": defaults["audio_format"],
-            "audio_quality": str(defaults["audio_quality"]),
-            "max_downloads": defaults["max_downloads"],
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': defaults['audio_quality']
-            }],
-            "playlistend": defaults["playlist_end"],
-            "restrictfilenames": True,
-            "outtmpl_na_placeholder": "NA",
-            "download_archive": archive,
-            "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
-        }
+        download_type = entry.get("type", "audio").lower()
 
-        log.info(f"▶️ Downloading YouTube: {name}")
+        if download_type == "video":
+            ydl_opts = {
+                "format": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]"
+                "cookiefile": cookie_path,
+                "max_downloads": defaults["max_downloads"],
+                "playlistend": defaults["playlist_end"],
+                "restrictfilenames": True,
+                "outtmpl_na_placeholder": "NA",
+                "download_archive": archive,
+                "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
+            }
+        else:  # audio
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "cookiefile": cookie_path,
+                "extract_audio": True,
+                "audio_format": defaults["audio_format"],
+                "audio_quality": str(defaults["audio_quality"]),
+                "max_downloads": defaults["max_downloads"],
+                "playlistend": defaults["playlist_end"],
+                "restrictfilenames": True,
+                "outtmpl_na_placeholder": "NA",
+                "download_archive": archive,
+                "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': defaults['audio_quality']
+                }],
+            }
+
+        log.info(f"▶️ Downloading YouTube ({download_type}): {name}")
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 

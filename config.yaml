@@ -11,21 +11,30 @@ youtube:
 
   - name: ACG
     url: https://www.youtube.com/playlist?list=PL62tz83FJJjlEpRdOT63lruxsTA6m1t9s
+    type: audio
 
   - name: MrMattyPlays
     url: https://www.youtube.com/playlist?list=UUmXH6CX_juGwNFTj3PESdoA
+    type: audio
 
   - name: LordanARTS
     url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
+    type: audio
 
   - name: TheNeedleDrop
     url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
 
   - name: XboxReady
     url: https://www.youtube.com/playlist?list=UUBmhLJgK9sLTXjxKcOHuzlQ
+    type: audio
 
   - name: PlumeGaming
     url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
+    type: audio
+
+  - name: TheXboxTester
+    url: https://www.youtube.com/playlist?list=UU5xaXb_q4rHfSHIw5JOb8Lw
+    type: video
 
 podcasts:
 
@@ -46,3 +55,6 @@ podcasts:
 
   - name: TheWhyFiles
     url: https://audioboom.com/channels/5117675.rss
+
+  - name: Flagrant
+    url: https://feeds.megaphone.fm/APPI6857213837
