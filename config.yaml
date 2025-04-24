@@ -23,6 +23,7 @@ youtube:
 
   - name: TheNeedleDrop
     url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
+    type: audio
 
   - name: XboxReady
     url: https://www.youtube.com/playlist?list=UUBmhLJgK9sLTXjxKcOHuzlQ
