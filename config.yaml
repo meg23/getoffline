@@ -32,9 +32,21 @@ youtube:
     url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
     type: audio
 
-  - name: TheXboxTester
-    url: https://www.youtube.com/playlist?list=UU5xaXb_q4rHfSHIw5JOb8Lw
+  - name: LukeStephens
+    url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
+    type: audio
+
+  - name: IncognitoMode
+    url: https://www.youtube.com/@IHincognitoMode
+    type: audio
+
+  - name: NakeyJakey
+    url: https://www.youtube.com/@NakeyJakey
     type: video
+
+  - name: JesseMichels
+    url: https://www.youtube.com/watch?v=09KP8XVf5nY&list=PLpvZy2482-kjlxGoFLPHJFQ1lNRD_49uN
+    type: audio
 
 podcasts:
 
@@ -43,9 +55,6 @@ podcasts:
 
   - name: TheTimDillonShow
     url: https://audioboom.com/channels/5093219.rss
-
-  - name: JesseMichels
-    url: https://feeds.megaphone.fm/jessemichels
 
   - name: Area52
     url: https://anchor.fm/s/e81d3f74/podcast/rss
