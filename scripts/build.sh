@@ -1,4 +1,4 @@
 pex --sources-directory=$PWD/src -r $PWD/requirements.txt \
-    -o getthem \
+    -o ./bin/getthem \
     -m downloads \
     --venv append
