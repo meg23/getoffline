@@ -37,6 +37,7 @@ cookie_path = os.path.expanduser(defaults["cookie_path"])
 cj = browser_cookie3.chrome(domain_name="youtube.com")
 cookie_jar = http.cookiejar.MozillaCookieJar(cookie_path)
 for cookie in cj:
+    print(cookie)
     cookie_jar.set_cookie(cookie)
 cookie_jar.save(ignore_discard=True, ignore_expires=True)
 
