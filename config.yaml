@@ -9,6 +9,14 @@ defaults:
 
 youtube:
 
+  - name: NakeyJakey
+    url: https://www.youtube.com/@NakeyJakey
+    type: video
+
+  - name: IncognitoMode
+    url: https://www.youtube.com/@IHincognitoMode
+    type: audio
+
   - name: ACG
     url: https://www.youtube.com/playlist?list=PL62tz83FJJjlEpRdOT63lruxsTA6m1t9s
     type: audio
@@ -37,16 +45,12 @@ youtube:
     url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
     type: audio
 
-  - name: IncognitoMode
-    url: https://www.youtube.com/@IHincognitoMode
-    type: audio
-
-  - name: NakeyJakey
-    url: https://www.youtube.com/@NakeyJakey
-    type: video
-
   - name: JesseMichels
     url: https://www.youtube.com/watch?v=09KP8XVf5nY&list=PLpvZy2482-kjlxGoFLPHJFQ1lNRD_49uN
+    type: audio
+
+  - name: JakeBaldino
+    url: https://www.youtube.com/playlist?list=UU7s6t5KCNwRkb7U_3-E1Tpw
     type: audio
 
 podcasts:
@@ -65,6 +69,3 @@ podcasts:
 
   - name: TheWhyFiles
     url: https://audioboom.com/channels/5117675.rss
-
-  - name: Flagrant
-    url: https://feeds.megaphone.fm/APPI6857213837

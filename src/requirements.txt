@@ -2,4 +2,3 @@ yt-dlp>=2024.3.10
 feedparser>=6.0.10
 browser-cookie3>=0.19.1
 PyYAML>=6.0.1
-pex
