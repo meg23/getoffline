@@ -5,8 +5,11 @@ import feedparser
 import logging
 import browser_cookie3
 import http.cookiejar
-from yt_dlp import YoutubeDL
+from datetime import datetime
 from pathlib import Path
+
+from pywebcopy import save_website
+from yt_dlp import YoutubeDL
 
 log_path = os.path.expanduser("~/youtube/youtube_batch_dl.log")
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -131,6 +134,33 @@ for entry in config.get("podcasts", []):
 
     except Exception as e:
         log.error(f"❌ Failed to process podcast {entry}: {e}")
+
+for entry in config.get("websites", []):
+    try:
+        name = sanitize(entry["name"])
+        url = entry["url"]
+        folder = os.path.join(output_root, name)
+        ensure_dir(folder)
+
+        base_date = datetime.now().strftime("%Y-%m-%d")
+        project_name = base_date
+        counter = 1
+        while os.path.exists(os.path.join(folder, project_name)):
+            project_name = f"{base_date}_{counter:02d}"
+            counter += 1
+
+        log.info(f"🌐 Downloading website: {name} → {project_name}")
+        save_website(
+            url=url,
+            project_folder=folder,
+            project_name=project_name,
+            bypass_robots=True,
+        )
+
+        downloaded_items.append(f"Website: {name} – {project_name}")
+
+    except Exception as e:
+        log.error(f"❌ Failed to download website {entry}: {e}")
 
 # Print summary of what was actually downloaded
 if downloaded_items:

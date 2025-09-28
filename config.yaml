@@ -89,3 +89,7 @@ podcasts:
 
   - name: TheMicahHanksProgram
     url: https://feeds.libsyn.com/34165/rss
+
+websites:
+  - name: ExampleSite
+    url: https://example.com
