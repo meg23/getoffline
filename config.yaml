@@ -41,9 +41,6 @@ youtube:
     url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
     type: audio
 
-  - name: LukeStephens
-    url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
-    type: audio
 
   - name: JesseMichels
     url: https://www.youtube.com/watch?v=09KP8XVf5nY&list=PLpvZy2482-kjlxGoFLPHJFQ1lNRD_49uN
@@ -52,6 +49,26 @@ youtube:
   - name: JakeBaldino
     url: https://www.youtube.com/playlist?list=UU7s6t5KCNwRkb7U_3-E1Tpw
     type: audio
+
+  - name: Gameranx
+    url: https://www.youtube.com/playlist?list=PLJAzFcYKyx4RX5JBq_rXbQNmUdc9Ugbv1
+    type: audio
+
+  - name: WeirdHistory
+    url: https://www.youtube.com/@WeirdHistory
+    type: audio
+
+  - name: LukeStephens
+    url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
+    type: audio
+
+  - name: Voidzilla
+    url: https://www.youtube.com/@coffeezillaextras
+    type: audio
+
+  - name: ZexyZek
+    url: https://www.youtube.com/playlist?list=PLhoaHQftxxgMkS8FyumijtHwjGIfFEWWW
+    type: video
 
 podcasts:
 
@@ -69,3 +86,6 @@ podcasts:
 
   - name: TheWhyFiles
     url: https://audioboom.com/channels/5117675.rss
+
+  - name: TheMicahHanksProgram
+    url: https://feeds.libsyn.com/34165/rss

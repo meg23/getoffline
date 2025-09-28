@@ -61,7 +61,7 @@ for entry in config.get("youtube", []):
             "outtmpl_na_placeholder": "NA",
             "download_archive": archive,
             "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
-            "progress_hooks": [lambda d: downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}") if d['status'] == 'finished' else None]
+            "progress_hooks": [lambda d: downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}") if d['status'] == 'finished' else None],
         }
 
         if download_type == "video":
