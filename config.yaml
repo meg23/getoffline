@@ -42,11 +42,6 @@ youtube:
     url: https://www.youtube.com/playlist?list=UUBmhLJgK9sLTXjxKcOHuzlQ
     type: audio
 
-  - name: PlumeGaming
-    url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
-    type: audio
-
-
   - name: JesseMichels
     url: https://www.youtube.com/watch?v=09KP8XVf5nY&list=PLpvZy2482-kjlxGoFLPHJFQ1lNRD_49uN
     type: audio
@@ -69,6 +64,10 @@ youtube:
 
   - name: Voidzilla
     url: https://www.youtube.com/@coffeezillaextras
+    type: audio
+
+  - name: Coffeezilla
+    url: https://www.youtube.com/playlist?list=UUFQMnBA3CS502aghlcr0_aw
     type: audio
 
   - name: ZexyZek
@@ -95,6 +94,11 @@ podcasts:
   - name: TheMicahHanksProgram
     url: https://feeds.libsyn.com/34165/rss
 
+  - name: RedThread
+    url: https://feeds.megaphone.fm/HMG9026615958
+
 websites:
-  - name: ExampleSite
-    url: https://example.com
+
+  - name: drudgereport.com
+    url: https://www.drudgereport.com
+
