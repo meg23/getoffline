@@ -27,7 +27,8 @@ if ! git clone --depth=1 "$COOMER_REPO" "$COOMER_DIR"; then
     exit 1
 fi
 
-if ! COOMER_DIR="$COOMER_DIR" PYTHON_VENDOR_DIR="$PYTHON_VENDOR_DIR" python3 - <<'PY'; then
+if ! COOMER_DIR="$COOMER_DIR" PYTHON_VENDOR_DIR="$PYTHON_VENDOR_DIR" python3 - <<'PY'
+then
     echo "Failed to stage Coomer CLI Python sources" >&2
     exit 1
 fi
