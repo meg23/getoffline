@@ -98,3 +98,9 @@ podcasts:
 websites:
   - name: ExampleSite
     url: https://example.com
+
+coomer:
+  - name: ExampleCreator
+    artist: examplecreator
+    service: onlyfans
+    limit: 10
