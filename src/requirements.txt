@@ -4,4 +4,3 @@ browser-cookie3>=0.19.1
 PyYAML>=6.0.1
 pywebcopy>=7.0.2
 requests>=2.31.0
-coomer-cli @ git+https://github.com/Emy69/Coomer-cli.git
