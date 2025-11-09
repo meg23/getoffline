@@ -90,6 +90,8 @@ if not staged_anything:
     sys.exit(1)
 PY
 
+fi
+
 declare -a SOURCE_ARGS=(
     "--sources-directory=$SRC_DIR"
     "--sources-directory=$PYTHON_VENDOR_DIR"
