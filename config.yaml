@@ -5,6 +5,7 @@ defaults:
   max_downloads: 3
   playlist_end: 3
   cookie_path: /tmp/cookies.txt
+
 youtube:
 
   - name: NakeyJakey
@@ -118,7 +119,3 @@ podcasts:
   - name: TraceEvidence
     url: https://www.spreaker.com/show/3207798/episodes/feed
 
-websites:
-
-  - name: drudgereport.com
-    url: https://www.drudgereport.com
