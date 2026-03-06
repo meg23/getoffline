@@ -30,6 +30,10 @@ youtube:
     url: https://www.youtube.com/playlist?list=UUmXH6CX_juGwNFTj3PESdoA
     type: audio
 
+  - name: PlumeGaming
+    url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
+    type: audio
+
   - name: LordanARTS
     url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
     type: audio
@@ -74,6 +78,27 @@ youtube:
     url: https://www.youtube.com/playlist?list=PLhoaHQftxxgMkS8FyumijtHwjGIfFEWWW
     type: video
 
+  - name: Shiey
+    url: https://www.youtube.com/@shiey
+    type: video
+
+  - name: UAPGerb
+    url: https://www.youtube.com/@UAPGerb
+    type: audio
+
+  - name: MortisimalGaming
+    url: https://www.youtube.com/playlist?list=PL8LVeoHzXqxABZf16T5YdZQfLt8UUgTRM
+    type: audio
+
+  - name: MaxAfterBurner
+    url: https://www.youtube.com/playlist?list=UU6-y2wMNk24Fi-J2qbTTYQA
+    type: audio
+
+  - name: WarFronts
+    url: https://www.youtube.com/playlist?list=UU9h8BDcXwkhZtnqoQJ7PggA
+    type: audio
+    
+
 podcasts:
 
   - name: StrictlyAnonymous
@@ -97,8 +122,10 @@ podcasts:
   - name: RedThread
     url: https://feeds.megaphone.fm/HMG9026615958
 
+  - name: TraceEvidence
+    url: https://www.spreaker.com/show/3207798/episodes/feed
+
 websites:
 
   - name: drudgereport.com
     url: https://www.drudgereport.com
-
