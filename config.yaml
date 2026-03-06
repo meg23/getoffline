@@ -6,63 +6,119 @@ defaults:
   playlist_end: 3
   cookie_path: /tmp/cookies.txt
 youtube:
-- name: NakeyJakey
-  url: https://www.youtube.com/@NakeyJakey
-  type: video
-- name: IncognitoMode
-  url: https://www.youtube.com/@IHincognitoMode
-  type: audio
-- name: ACG
-  url: https://www.youtube.com/playlist?list=PL62tz83FJJjlEpRdOT63lruxsTA6m1t9s
-  type: audio
-- name: MrMattyPlays
-  url: https://www.youtube.com/playlist?list=UUmXH6CX_juGwNFTj3PESdoA
-  type: audio
-- name: LordanARTS
-  url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
-  type: audio
-- name: TheNeedleDrop
-  url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
-  type: audio
-- name: XboxReady
-  url: https://www.youtube.com/playlist?list=UUBmhLJgK9sLTXjxKcOHuzlQ
-  type: audio
-- name: JesseMichels
-  url: https://www.youtube.com/watch?v=09KP8XVf5nY&list=PLpvZy2482-kjlxGoFLPHJFQ1lNRD_49uN
-  type: audio
-- name: JakeBaldino
-  url: https://www.youtube.com/playlist?list=UU7s6t5KCNwRkb7U_3-E1Tpw
-  type: audio
-- name: Gameranx
-  url: https://www.youtube.com/playlist?list=PLJAzFcYKyx4RX5JBq_rXbQNmUdc9Ugbv1
-  type: audio
-- name: WeirdHistory
-  url: https://www.youtube.com/@WeirdHistory
-  type: audio
-- name: LukeStephens
-  url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
-  type: audio
-- name: Voidzilla
-  url: https://www.youtube.com/@coffeezillaextras
-  type: audio
-- name: Coffeezilla
-  url: https://www.youtube.com/playlist?list=UUFQMnBA3CS502aghlcr0_aw
-  type: audio
-- name: ZexyZek
-  url: https://www.youtube.com/playlist?list=PLhoaHQftxxgMkS8FyumijtHwjGIfFEWWW
-  type: video
+
+  - name: NakeyJakey
+    url: https://www.youtube.com/@NakeyJakey
+    type: video
+
+  - name: IncognitoMode
+    url: https://www.youtube.com/@IHincognitoMode
+    type: audio
+
+  - name: ACG
+    url: https://www.youtube.com/playlist?list=PL62tz83FJJjlEpRdOT63lruxsTA6m1t9s
+    type: audio
+
+  - name: MrMattyPlays
+    url: https://www.youtube.com/playlist?list=UUmXH6CX_juGwNFTj3PESdoA
+    type: audio
+
+  - name: PlumeGaming
+    url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
+    type: audio
+
+  - name: LordanARTS
+    url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
+    type: audio
+
+  - name: TheNeedleDrop
+    url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
+    type: audio
+
+  - name: XboxReady
+    url: https://www.youtube.com/playlist?list=UUBmhLJgK9sLTXjxKcOHuzlQ
+    type: audio
+
+  - name: JesseMichels
+    url: https://www.youtube.com/watch?v=09KP8XVf5nY&list=PLpvZy2482-kjlxGoFLPHJFQ1lNRD_49uN
+    type: audio
+
+  - name: JakeBaldino
+    url: https://www.youtube.com/playlist?list=UU7s6t5KCNwRkb7U_3-E1Tpw
+    type: audio
+
+  - name: Gameranx
+    url: https://www.youtube.com/playlist?list=PLJAzFcYKyx4RX5JBq_rXbQNmUdc9Ugbv1
+    type: audio
+
+  - name: WeirdHistory
+    url: https://www.youtube.com/@WeirdHistory
+    type: audio
+
+  - name: LukeStephens
+    url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
+    type: audio
+
+  - name: Voidzilla
+    url: https://www.youtube.com/@coffeezillaextras
+    type: audio
+
+  - name: Coffeezilla
+    url: https://www.youtube.com/playlist?list=UUFQMnBA3CS502aghlcr0_aw
+    type: audio
+
+  - name: ZexyZek
+    url: https://www.youtube.com/playlist?list=PLhoaHQftxxgMkS8FyumijtHwjGIfFEWWW
+    type: video
+
+  - name: Shiey
+    url: https://www.youtube.com/@shiey
+    type: video
+
+  - name: UAPGerb
+    url: https://www.youtube.com/@UAPGerb
+    type: audio
+
+  - name: MortisimalGaming
+    url: https://www.youtube.com/playlist?list=PL8LVeoHzXqxABZf16T5YdZQfLt8UUgTRM
+    type: audio
+
+  - name: MaxAfterBurner
+    url: https://www.youtube.com/playlist?list=UU6-y2wMNk24Fi-J2qbTTYQA
+    type: audio
+
+  - name: WarFronts
+    url: https://www.youtube.com/playlist?list=UU9h8BDcXwkhZtnqoQJ7PggA
+    type: audio
+    
+
 podcasts:
-- name: StrictlyAnonymous
-  url: https://feeds.megaphone.fm/strictlyanonymous
-- name: TheTimDillonShow
-  url: https://audioboom.com/channels/5093219.rss
-- name: Area52
-  url: https://anchor.fm/s/e81d3f74/podcast/rss
-- name: StavvysWorld
-  url: https://audioboom.com/channels/5135319.rss
-- name: TheWhyFiles
-  url: https://audioboom.com/channels/5117675.rss
-- name: TheMicahHanksProgram
-  url: https://feeds.libsyn.com/34165/rss
-- name: RedThread
-  url: https://feeds.megaphone.fm/HMG9026615958
+
+  - name: StrictlyAnonymous
+    url: https://feeds.megaphone.fm/strictlyanonymous
+
+  - name: TheTimDillonShow
+    url: https://audioboom.com/channels/5093219.rss
+
+  - name: Area52
+    url: https://anchor.fm/s/e81d3f74/podcast/rss
+
+  - name: StavvysWorld
+    url: https://audioboom.com/channels/5135319.rss
+
+  - name: TheWhyFiles
+    url: https://audioboom.com/channels/5117675.rss
+
+  - name: TheMicahHanksProgram
+    url: https://feeds.libsyn.com/34165/rss
+
+  - name: RedThread
+    url: https://feeds.megaphone.fm/HMG9026615958
+
+  - name: TraceEvidence
+    url: https://www.spreaker.com/show/3207798/episodes/feed
+
+websites:
+
+  - name: drudgereport.com
+    url: https://www.drudgereport.com
