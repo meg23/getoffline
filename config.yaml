@@ -6,7 +6,7 @@ defaults:
   playlist_end: 3
   cookie_path: /tmp/cookies.txt
   ad_scrubber:
-    enabled: false
+    enabled: true
     model: base
     min_ad_seconds: 8.0
     pre_roll: 2.0
