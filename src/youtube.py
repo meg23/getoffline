@@ -1,6 +1,7 @@
 import os
 import time
 from pathlib import Path
+from typing import List
 
 from yt_dlp import YoutubeDL
 
@@ -27,6 +28,28 @@ def download_youtube_items(config, downloaded_items):
 
             download_type = entry.get("type", "audio").lower()
 
+            extracted_audio_files: List[Path] = []
+
+            def record_download_progress(d):
+                if d.get("status") == "finished":
+                    downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}")
+
+            def record_postprocess_file(d):
+                if d.get("status") != "finished":
+                    return
+                info = d.get("info_dict") or {}
+                candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
+                if not candidate:
+                    return
+
+                path = Path(candidate)
+                expected_ext = f".{defaults['audio_format']}"
+                if path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
+                    path = path.with_suffix(expected_ext)
+
+                if path.suffix.lower() == expected_ext and path.exists():
+                    extracted_audio_files.append(path.resolve())
+
             ydl_opts = {
                 "cookiefile": cookie_path,
                 "max_downloads": defaults["max_downloads"],
@@ -35,13 +58,8 @@ def download_youtube_items(config, downloaded_items):
                 "outtmpl_na_placeholder": "NA",
                 "download_archive": archive,
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
-                "progress_hooks": [
-                    lambda d: downloaded_items.append(
-                        f"YouTube: {name} – {d['info_dict']['title']}"
-                    )
-                    if d["status"] == "finished"
-                    else None
-                ],
+                "progress_hooks": [record_download_progress],
+                "postprocessor_hooks": [record_postprocess_file],
             }
 
             if download_type == "video":
@@ -78,22 +96,32 @@ def download_youtube_items(config, downloaded_items):
                 continue
 
             after = {p.resolve() for p in Path(folder).glob("*.mp3")}
-            new_files = sorted(after - before)
+            delta_files = sorted(after - before)
+            hook_files = sorted(set(extracted_audio_files))
+            new_files = sorted(set(delta_files + hook_files))
 
             log.info(
-                "📦 YouTube audio files for %s: before=%d after=%d detected_new=%d",
+                "📦 YouTube audio files for %s: before=%d after=%d detected_new=%d hook_detected=%d",
                 name,
                 len(before),
                 len(after),
-                len(new_files),
+                len(delta_files),
+                len(hook_files),
             )
+
+            if hook_files:
+                log.info(
+                    "🎯 yt-dlp postprocessor reported %d audio file(s) for %s",
+                    len(hook_files),
+                    name,
+                )
 
             if not new_files:
                 recent_files = sorted(
                     [
                         mp3
                         for mp3 in after
-                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 5)
+                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 10)
                     ]
                 )
                 if recent_files:
@@ -105,7 +133,10 @@ def download_youtube_items(config, downloaded_items):
                     new_files = recent_files
 
             if not new_files:
-                log.info("ℹ️ No new MP3 files found for ad scrubbing in %s", name)
+                log.warning(
+                    "⚠️ No candidate MP3 files found for ad scrubbing in %s after download",
+                    name,
+                )
 
             for mp3 in new_files:
                 log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
