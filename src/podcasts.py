@@ -56,8 +56,9 @@ def download_podcasts(config, downloaded_items):
                 final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
                 if scrubber_cfg.get("enabled", False) and final_audio.exists():
                     try:
-                        if scrub_audio_file(final_audio, scrubber_cfg):
-                            downloaded_items.append(f"Ad scrubbed: Podcast – {ep_title}")
+                        scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
+                        if scrubbed_output:
+                            downloaded_items.append(f"Ad scrubbed: Podcast – {scrubbed_output.name}")
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
 

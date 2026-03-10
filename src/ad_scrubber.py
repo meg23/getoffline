@@ -1,6 +1,5 @@
 import json
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -52,6 +51,11 @@ AD_PATTERNS = [
     r"\bgoogle play(?: store)?\b",
 ]
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in AD_PATTERNS]
+
+
+def scrubbed_output_path(input_file: Path) -> Path:
+    input_file = Path(input_file)
+    return input_file.with_name(f"{input_file.stem}.scrubbed{input_file.suffix}")
 
 
 def run(cmd):
@@ -181,10 +185,12 @@ def cut_and_concat(input_file: Path, keep_ranges, output_file: Path):
 
 def scrub_audio_file(input_file: Path, settings: dict):
     input_file = Path(input_file)
-    marker = input_file.with_suffix(f"{input_file.suffix}.adscrubbed.json")
-    if marker.exists() and marker.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info(f"⏭️ Ad scrub skipped (already processed): {input_file.name}")
-        return False
+    output_file = scrubbed_output_path(input_file)
+    marker = output_file.with_suffix(f"{output_file.suffix}.adscrubbed.json")
+
+    if marker.exists() and output_file.exists() and output_file.stat().st_mtime >= input_file.stat().st_mtime:
+        log.info("⏭️ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
+        return output_file
 
     try:
         import whisper
@@ -196,7 +202,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     post_roll = float(settings.get("post_roll", 2.0))
     min_hits = int(settings.get("min_hits", 1))
 
-    log.info(f"🧠 Transcribing for ad-scrub: {input_file.name} ({model_name})")
+    log.info("🧠 Transcribing for ad-scrub: %s (%s)", input_file.name, model_name)
     model = whisper.load_model(model_name)
     result = model.transcribe(str(input_file), fp16=False)
 
@@ -220,11 +226,20 @@ def scrub_audio_file(input_file: Path, settings: dict):
 
     if not cut_ranges:
         marker.write_text(
-            json.dumps({"input": str(input_file), "cut_ranges": []}, indent=2),
+            json.dumps(
+                {
+                    "input": str(input_file),
+                    "output": str(output_file),
+                    "cut_ranges": [],
+                    "removed_seconds": 0.0,
+                    "removed_percent": 0.0,
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
-        log.info(f"✅ No ad ranges removed for {input_file.name} (0.00s removed)")
-        return False
+        log.info("✅ No ad ranges removed for %s (0.00s removed)", input_file.name)
+        return None
 
     keep_ranges = invert_ranges(total_duration, cut_ranges)
     keep_ranges = clamp_ranges(keep_ranges, total_duration, min_len=0.35)
@@ -248,7 +263,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
 
     try:
         cut_and_concat(input_file, keep_ranges, tmp_path)
-        shutil.move(str(tmp_path), str(input_file))
+        tmp_path.replace(output_file)
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -257,6 +272,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
         json.dumps(
             {
                 "input": str(input_file),
+                "output": str(output_file),
                 "duration": total_duration,
                 "cut_ranges": cut_ranges,
                 "keep_ranges": keep_ranges,
@@ -273,10 +289,11 @@ def scrub_audio_file(input_file: Path, settings: dict):
     )
 
     log.info(
-        "✅ Ad scrub complete for %s: removed %.2fs (%.2f%%) across %d range(s)",
+        "✅ Ad scrub complete for %s -> %s: removed %.2fs (%.2f%%) across %d range(s)",
         input_file.name,
+        output_file.name,
         removed_seconds,
         removed_pct,
         len(cut_ranges),
     )
-    return True
+    return output_file

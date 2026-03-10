@@ -169,9 +169,10 @@ def download_youtube_items(config, downloaded_items):
             for mp3 in new_files:
                 log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
                 try:
-                    if scrub_audio_file(mp3, scrubber_cfg):
-                        log.info("✅ Ad scrubbed YouTube file: %s", mp3.name)
-                        downloaded_items.append(f"Ad scrubbed: YouTube – {mp3.name}")
+                    scrubbed_output = scrub_audio_file(mp3, scrubber_cfg)
+                    if scrubbed_output:
+                        log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
+                        downloaded_items.append(f"Ad scrubbed: YouTube – {scrubbed_output.name}")
                     else:
                         log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", mp3.name)
                 except Exception as scrub_exc:

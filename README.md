@@ -84,9 +84,13 @@ Clean up generated files:
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
 
-When ad scrubbing is enabled, a sidecar marker file is written next to each processed audio file:
+When ad scrubbing is enabled and ads are detected, the original downloaded audio is preserved and a new scrubbed file is created:
 
-- `<audio_file>.adscrubbed.json`
+- `<audio_file>.scrubbed.<ext>`
+
+A sidecar marker JSON is also written for scrub decisions:
+
+- `<audio_file>.scrubbed.<ext>.adscrubbed.json`
 
 ## 📝 Logging
 
