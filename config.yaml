@@ -5,6 +5,13 @@ defaults:
   max_downloads: 3
   playlist_end: 3
   cookie_path: /tmp/cookies.txt
+  ad_scrubber:
+    enabled: false
+    model: base
+    min_ad_seconds: 8.0
+    pre_roll: 2.0
+    post_roll: 2.0
+    min_hits: 1
 
 youtube:
 
