@@ -1,11 +1,17 @@
 import os
+from pathlib import Path
+
 import feedparser
 from yt_dlp import YoutubeDL
+
+from ad_scrubber import scrub_audio_file
 from logger import log
-from utils import sanitize, ensure_dir
+from utils import ensure_dir, sanitize
+
 
 def download_podcasts(config, downloaded_items):
     defaults = config["defaults"]
+    scrubber_cfg = defaults.get("ad_scrubber", {})
 
     for entry in config.get("podcasts", []):
         try:
@@ -17,15 +23,16 @@ def download_podcasts(config, downloaded_items):
 
             downloaded = set()
             if os.path.exists(archive):
-                with open(archive) as f:
+                with open(archive, encoding="utf-8") as f:
                     downloaded = set(line.strip() for line in f)
 
             feed = feedparser.parse(url)
-            entries = feed.entries[:defaults["max_downloads"]]
+            entries = feed.entries[: defaults["max_downloads"]]
 
             for ep in entries:
                 if not ep.enclosures:
                     continue
+
                 mp3_url = ep.enclosures[0].href
                 if mp3_url in downloaded:
                     continue
@@ -46,11 +53,19 @@ def download_podcasts(config, downloaded_items):
                 with YoutubeDL(ydl_opts) as ydl:
                     ydl.download([mp3_url])
 
-                with open(archive, "a") as f:
+                final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
+                if scrubber_cfg.get("enabled", False) and final_audio.exists():
+                    try:
+                        scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
+                        if scrubbed_output:
+                            downloaded_items.append(f"Ad scrubbed: Podcast – {scrubbed_output.name}")
+                    except Exception as scrub_exc:
+                        log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
+
+                with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")
 
                 downloaded_items.append(f"Podcast: {name} – {ep_title}")
 
         except Exception as e:
             log.error(f"❌ Failed to process podcast {entry}: {e}")
-
