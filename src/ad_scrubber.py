@@ -34,6 +34,22 @@ AD_PATTERNS = [
     r"\bfree trial\b",
     r"\blimited time\b",
     r"\bterms and conditions\b",
+    r"\bridge wallet\b",
+    r"\bfactor(?:\s+meals?|\s*75|\s*[_-]?\d+)?\b",
+    r"\bhellofresh\b",
+    r"\bgreen chef\b",
+    r"\bhome chef\b",
+    r"\bblue apron\b",
+    r"\bworld of warships\b",
+    r"\bwar thunder\b",
+    r"\braid\s+shadow\s+legends\b",
+    r"\bafk\s+journey\b",
+    r"\bstate of survival\b",
+    r"\bhero wars\b",
+    r"\bmobile game(?:s)?\b",
+    r"\bdownload (?:the|this) game\b",
+    r"\bavailable on the app store\b",
+    r"\bgoogle play(?: store)?\b",
 ]
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in AD_PATTERNS]
 

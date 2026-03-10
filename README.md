@@ -41,7 +41,7 @@ defaults:
   playlist_end: 3
   cookie_path: /tmp/cookies.txt
   ad_scrubber:
-    enabled: false
+    enabled: true
     model: base
     min_ad_seconds: 8.0
     pre_roll: 2.0
@@ -58,7 +58,7 @@ podcasts:
     url: https://audioboom.com/channels/...
 ```
 
-Set `defaults.ad_scrubber.enabled: true` to enable ad scrubbing.
+Ad scrubbing is enabled by default (`defaults.ad_scrubber.enabled: true`). Set it to `false` if you want to disable it.
 
 ## 🛠 Usage
 

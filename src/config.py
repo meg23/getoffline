@@ -8,7 +8,7 @@ from logger import log
 
 
 DEFAULT_AD_SCRUBBER = {
-    "enabled": False,
+    "enabled": True,
     "model": "base",
     "min_ad_seconds": 8.0,
     "pre_roll": 2.0,
