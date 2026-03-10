@@ -183,6 +183,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     input_file = Path(input_file)
     marker = input_file.with_suffix(f"{input_file.suffix}.adscrubbed.json")
     if marker.exists() and marker.stat().st_mtime >= input_file.stat().st_mtime:
+        log.info(f"⏭️ Ad scrub skipped (already processed): {input_file.name}")
         return False
 
     try:
@@ -191,27 +192,56 @@ def scrub_audio_file(input_file: Path, settings: dict):
         raise RuntimeError("openai-whisper is required for ad scrubbing.") from exc
 
     model_name = settings.get("model", "base")
+    pre_roll = float(settings.get("pre_roll", 2.0))
+    post_roll = float(settings.get("post_roll", 2.0))
+    min_hits = int(settings.get("min_hits", 1))
+
     log.info(f"🧠 Transcribing for ad-scrub: {input_file.name} ({model_name})")
     model = whisper.load_model(model_name)
     result = model.transcribe(str(input_file), fp16=False)
 
     cut_ranges, raw_hits = detect_ad_segments(
         result,
-        pre_roll=float(settings.get("pre_roll", 2.0)),
-        post_roll=float(settings.get("post_roll", 2.0)),
-        min_hits=int(settings.get("min_hits", 1)),
+        pre_roll=pre_roll,
+        post_roll=post_roll,
+        min_hits=min_hits,
     )
 
     total_duration = ffprobe_duration(input_file)
     min_ad_seconds = float(settings.get("min_ad_seconds", 8.0))
     cut_ranges = clamp_ranges(cut_ranges, total_duration, min_len=min_ad_seconds)
 
+    log.info(
+        "🔎 Ad scrub analysis for %s: %d matched transcript segments, %d cut range(s) after filtering",
+        input_file.name,
+        len(raw_hits),
+        len(cut_ranges),
+    )
+
     if not cut_ranges:
-        marker.write_text(json.dumps({"input": str(input_file), "cut_ranges": []}, indent=2), encoding="utf-8")
+        marker.write_text(
+            json.dumps({"input": str(input_file), "cut_ranges": []}, indent=2),
+            encoding="utf-8",
+        )
+        log.info(f"✅ No ad ranges removed for {input_file.name} (0.00s removed)")
         return False
 
     keep_ranges = invert_ranges(total_duration, cut_ranges)
     keep_ranges = clamp_ranges(keep_ranges, total_duration, min_len=0.35)
+
+    removed_seconds = sum((end - start) for start, end in cut_ranges)
+    removed_pct = (removed_seconds / total_duration * 100.0) if total_duration > 0 else 0.0
+
+    for idx, (start, end) in enumerate(cut_ranges, start=1):
+        log.info(
+            "✂️ Cut range %d/%d for %s: %.2fs -> %.2fs (%.2fs)",
+            idx,
+            len(cut_ranges),
+            input_file.name,
+            start,
+            end,
+            end - start,
+        )
 
     with tempfile.NamedTemporaryFile(suffix=input_file.suffix, delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -230,6 +260,8 @@ def scrub_audio_file(input_file: Path, settings: dict):
                 "duration": total_duration,
                 "cut_ranges": cut_ranges,
                 "keep_ranges": keep_ranges,
+                "removed_seconds": removed_seconds,
+                "removed_percent": removed_pct,
                 "matched_segments": [
                     {"start": s, "end": e, "text": txt, "hits": hits}
                     for s, e, txt, hits in raw_hits
@@ -238,5 +270,13 @@ def scrub_audio_file(input_file: Path, settings: dict):
             indent=2,
         ),
         encoding="utf-8",
+    )
+
+    log.info(
+        "✅ Ad scrub complete for %s: removed %.2fs (%.2f%%) across %d range(s)",
+        input_file.name,
+        removed_seconds,
+        removed_pct,
+        len(cut_ranges),
     )
     return True
