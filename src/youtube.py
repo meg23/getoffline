@@ -29,26 +29,42 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
 
             extracted_audio_files: List[Path] = []
+            hook_events = 0
 
             def record_download_progress(d):
                 if d.get("status") == "finished":
                     downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}")
 
             def record_postprocess_file(d):
-                if d.get("status") != "finished":
-                    return
+                nonlocal hook_events
+                hook_events += 1
+
                 info = d.get("info_dict") or {}
+                status = d.get("status")
+                postprocessor = d.get("postprocessor") or "unknown"
                 candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
                 if not candidate:
                     return
 
                 path = Path(candidate)
                 expected_ext = f".{defaults['audio_format']}"
-                if path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
+
+                # For audio extraction hooks, pre-compute the target audio path even if it
+                # does not exist yet at hook time.
+                if path.suffix.lower() != expected_ext and postprocessor == "FFmpegExtractAudio":
+                    path = path.with_suffix(expected_ext)
+                elif path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
                     path = path.with_suffix(expected_ext)
 
-                if path.suffix.lower() == expected_ext and path.exists():
-                    extracted_audio_files.append(path.resolve())
+                extracted_audio_files.append(path.resolve())
+
+                log.info(
+                    "🪝 yt-dlp hook (%s/%s) for %s: %s",
+                    postprocessor,
+                    status,
+                    name,
+                    path.name,
+                )
 
             ydl_opts = {
                 "cookiefile": cookie_path,
@@ -97,23 +113,26 @@ def download_youtube_items(config, downloaded_items):
 
             after = {p.resolve() for p in Path(folder).glob("*.mp3")}
             delta_files = sorted(after - before)
-            hook_files = sorted(set(extracted_audio_files))
+            hook_files_all = sorted(set(extracted_audio_files))
+            hook_files = [p for p in hook_files_all if p.exists()]
             new_files = sorted(set(delta_files + hook_files))
 
             log.info(
-                "📦 YouTube audio files for %s: before=%d after=%d detected_new=%d hook_detected=%d",
+                "📦 YouTube audio files for %s: before=%d after=%d detected_new=%d hook_events=%d hook_candidates=%d",
                 name,
                 len(before),
                 len(after),
                 len(delta_files),
-                len(hook_files),
+                hook_events,
+                len(hook_files_all),
             )
 
-            if hook_files:
+            if hook_files_all:
                 log.info(
-                    "🎯 yt-dlp postprocessor reported %d audio file(s) for %s",
-                    len(hook_files),
+                    "🎯 yt-dlp hook suggested %d candidate file(s) for %s (%d currently exist)",
+                    len(hook_files_all),
                     name,
+                    len(hook_files),
                 )
 
             if not new_files:
@@ -121,7 +140,7 @@ def download_youtube_items(config, downloaded_items):
                     [
                         mp3
                         for mp3 in after
-                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 10)
+                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 20)
                     ]
                 )
                 if recent_files:
@@ -131,6 +150,15 @@ def download_youtube_items(config, downloaded_items):
                         len(recent_files),
                     )
                     new_files = recent_files
+
+            if not new_files and after:
+                newest = max(after, key=lambda f: f.stat().st_mtime)
+                log.warning(
+                    "🛟 Last-resort fallback for %s: scrubbing newest MP3 %s",
+                    name,
+                    newest.name,
+                )
+                new_files = [newest]
 
             if not new_files:
                 log.warning(
