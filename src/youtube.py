@@ -1,5 +1,4 @@
 import os
-import time
 from pathlib import Path
 from typing import List
 
@@ -98,7 +97,6 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
-            run_started_at = time.time()
             before = {p.resolve() for p in Path(folder).glob("*.mp3")}
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -136,43 +134,8 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             if not new_files:
-                recent_files = sorted(
-                    [
-                        mp3
-                        for mp3 in after
-                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 60)
-                    ]
-                )
-                if recent_files:
-                    log.info(
-                        "🛟 Using recent-file fallback for %s: %d MP3 file(s) modified during this run",
-                        name,
-                        len(recent_files),
-                    )
-                    new_files = recent_files
-
-            if not new_files:
-                all_audio_candidates = sorted(
-                    [
-                        mp3
-                        for mp3 in after
-                        if mp3.exists() and not mp3.stem.endswith('.scrubbed')
-                    ],
-                    key=lambda f: f.stat().st_mtime,
-                    reverse=True,
-                )
-                if all_audio_candidates:
-                    max_candidates = max(1, int(defaults.get('max_downloads', 3)))
-                    new_files = sorted(all_audio_candidates[:max_candidates])
-                    log.warning(
-                        "🛟 Broad fallback for %s: forcing scrub attempt on %d recent MP3 file(s)",
-                        name,
-                        len(new_files),
-                    )
-
-            if not new_files:
-                log.warning(
-                    "⚠️ No candidate MP3 files found for ad scrubbing in %s after download",
+                log.info(
+                    "ℹ️ No newly downloaded MP3 files found for ad scrubbing in %s; existing files are intentionally skipped",
                     name,
                 )
 
