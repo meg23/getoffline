@@ -1,13 +1,15 @@
 # 🎧 Listens: Automated Media Downloader
 
-**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes using a simple YAML configuration. It supports cookies for YouTube downloads and automatic audio extraction using `yt-dlp`.
+**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes using a simple YAML configuration. It supports cookies for YouTube downloads, automatic audio extraction using `yt-dlp`, and optional ad scrubbing for downloaded audio.
 
 ## 🚀 Features
 
-- Batch download from YouTube playlists and podcast RSS feeds
+- Batch download from YouTube playlists/channels and podcast RSS feeds
 - Automatic audio extraction to MP3
-- Customizable download settings
-- Browser cookie support for private videos
+- Optional AI-assisted ad scrubbing for:
+  - YouTube entries configured as `type: audio`
+  - Downloaded podcast episodes
+- Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
 
 ## 📦 Requirements
@@ -17,11 +19,13 @@
 - `feedparser`
 - `browser_cookie3`
 - `PyYAML`
+- `ffmpeg`/`ffprobe`
+- `openai-whisper` (only needed if ad scrubbing is enabled)
 
 Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r src/requirements.txt
 ```
 
 ## ⚙️ Configuration
@@ -36,55 +40,64 @@ defaults:
   max_downloads: 3
   playlist_end: 3
   cookie_path: /tmp/cookies.txt
+  ad_scrubber:
+    enabled: true
+    model: base
+    min_ad_seconds: 8.0
+    pre_roll: 2.0
+    post_roll: 2.0
+    min_hits: 1
 
 youtube:
   - name: ACG
     url: https://www.youtube.com/playlist?list=...
+    type: audio
 
 podcasts:
   - name: TheTimDillonShow
     url: https://audioboom.com/channels/...
 ```
 
+Ad scrubbing is enabled by default (`defaults.ad_scrubber.enabled: true`). Set it to `false` if you want to disable it.
+
 ## 🛠 Usage
 
 Run the downloader:
 
 ```bash
-python downloads.py
+python src/main.py
 ```
 
 To build a standalone executable with Pex:
 
 ```bash
-./build.sh
+./scripts/build.sh
 ```
 
 Clean up generated files:
 
 ```bash
-./clean.sh
+./scripts/clean.sh
 ```
 
 ## 📁 Output
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
 
-## 🔒 Cookie Support
+When ad scrubbing is enabled and ads are detected, the original downloaded audio is preserved and a new scrubbed file is created:
 
-The downloader can use your Chrome browser's cookies to access private or age-restricted YouTube videos. You can also export cookies manually and save them to the path defined in `cookie_path`.
+- `<audio_file>.scrubbed.<ext>`
+
+A sidecar marker JSON is also written for scrub decisions:
+
+- `<audio_file>.scrubbed.<ext>.adscrubbed.json`
 
 ## 📝 Logging
 
 Logs are written to:
 
-```
+```bash
 ~/youtube/youtube_batch_dl.log
 ```
 
 And streamed to your terminal.
-
----
-
-Feel free to customize `config.yaml` with your favorite channels and podcasts!
-
