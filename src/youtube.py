@@ -140,7 +140,7 @@ def download_youtube_items(config, downloaded_items):
                     [
                         mp3
                         for mp3 in after
-                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 20)
+                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 60)
                     ]
                 )
                 if recent_files:
@@ -151,14 +151,24 @@ def download_youtube_items(config, downloaded_items):
                     )
                     new_files = recent_files
 
-            if not new_files and after:
-                newest = max(after, key=lambda f: f.stat().st_mtime)
-                log.warning(
-                    "🛟 Last-resort fallback for %s: scrubbing newest MP3 %s",
-                    name,
-                    newest.name,
+            if not new_files:
+                all_audio_candidates = sorted(
+                    [
+                        mp3
+                        for mp3 in after
+                        if mp3.exists() and not mp3.stem.endswith('.scrubbed')
+                    ],
+                    key=lambda f: f.stat().st_mtime,
+                    reverse=True,
                 )
-                new_files = [newest]
+                if all_audio_candidates:
+                    max_candidates = max(1, int(defaults.get('max_downloads', 3)))
+                    new_files = sorted(all_audio_candidates[:max_candidates])
+                    log.warning(
+                        "🛟 Broad fallback for %s: forcing scrub attempt on %d recent MP3 file(s)",
+                        name,
+                        len(new_files),
+                    )
 
             if not new_files:
                 log.warning(
