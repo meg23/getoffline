@@ -133,12 +133,6 @@ def download_youtube_items(config, downloaded_items):
                     len(hook_files),
                 )
 
-            if not new_files:
-                log.info(
-                    "ℹ️ No newly downloaded MP3 files found for ad scrubbing in %s; existing files are intentionally skipped",
-                    name,
-                )
-
             for mp3 in new_files:
                 log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
                 try:
@@ -147,7 +141,7 @@ def download_youtube_items(config, downloaded_items):
                         log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
                         downloaded_items.append(f"Ad scrubbed: YouTube – {scrubbed_output.name}")
                     else:
-                        log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", mp3.name)
+                        log.info("ℹ️  Ad scrub made no changes for YouTube file: %s", mp3.name)
                 except Exception as scrub_exc:
                     log.warning(f"Ad scrub failed for {mp3}: {scrub_exc}")
 
