@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -63,6 +64,7 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
+            run_started_at = time.time()
             before = {p.resolve() for p in Path(folder).glob("*.mp3")}
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -75,23 +77,46 @@ def download_youtube_items(config, downloaded_items):
                 log.info("⏭️ Ad scrub disabled in config for %s", name)
                 continue
 
-            if download_type == "audio" and scrubber_enabled:
-                after = {p.resolve() for p in Path(folder).glob("*.mp3")}
-                new_files = sorted(after - before)
+            after = {p.resolve() for p in Path(folder).glob("*.mp3")}
+            new_files = sorted(after - before)
 
-                if not new_files:
-                    log.info("ℹ️ No new MP3 files found for ad scrubbing in %s", name)
+            log.info(
+                "📦 YouTube audio files for %s: before=%d after=%d detected_new=%d",
+                name,
+                len(before),
+                len(after),
+                len(new_files),
+            )
 
-                for mp3 in new_files:
-                    log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
-                    try:
-                        if scrub_audio_file(mp3, scrubber_cfg):
-                            log.info("✅ Ad scrubbed YouTube file: %s", mp3.name)
-                            downloaded_items.append(f"Ad scrubbed: YouTube – {mp3.name}")
-                        else:
-                            log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", mp3.name)
-                    except Exception as scrub_exc:
-                        log.warning(f"Ad scrub failed for {mp3}: {scrub_exc}")
+            if not new_files:
+                recent_files = sorted(
+                    [
+                        mp3
+                        for mp3 in after
+                        if mp3.exists() and mp3.stat().st_mtime >= (run_started_at - 5)
+                    ]
+                )
+                if recent_files:
+                    log.info(
+                        "🛟 Using recent-file fallback for %s: %d MP3 file(s) modified during this run",
+                        name,
+                        len(recent_files),
+                    )
+                    new_files = recent_files
+
+            if not new_files:
+                log.info("ℹ️ No new MP3 files found for ad scrubbing in %s", name)
+
+            for mp3 in new_files:
+                log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
+                try:
+                    if scrub_audio_file(mp3, scrubber_cfg):
+                        log.info("✅ Ad scrubbed YouTube file: %s", mp3.name)
+                        downloaded_items.append(f"Ad scrubbed: YouTube – {mp3.name}")
+                    else:
+                        log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", mp3.name)
+                except Exception as scrub_exc:
+                    log.warning(f"Ad scrub failed for {mp3}: {scrub_exc}")
 
         except Exception as e:
             log.error(f"❌ Failed to download YouTube: {entry}: {e}")
