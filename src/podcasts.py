@@ -51,6 +51,9 @@ def download_podcasts(config, downloaded_items):
                     "restrictfilenames": True,
                     "outtmpl_na_placeholder": "NA",
                     "outtmpl": out_path,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noprogress": True,
                 }
 
                 log.info(f"🎙️ Downloading podcast: {name} – {ep_title}")

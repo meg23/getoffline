@@ -51,7 +51,6 @@ def download_youtube_items(config, downloaded_items):
                 hook_events += 1
 
                 info = d.get("info_dict") or {}
-                status = d.get("status")
                 postprocessor = d.get("postprocessor") or "unknown"
                 candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
                 if not candidate:
@@ -69,13 +68,6 @@ def download_youtube_items(config, downloaded_items):
 
                 extracted_audio_files.append(path.resolve())
 
-                log.info(
-                    "🪝 yt-dlp hook (%s/%s) for %s: %s",
-                    postprocessor,
-                    status,
-                    name,
-                    path.name,
-                )
 
             ydl_opts = {
                 "cookiefile": cookie_path,
@@ -89,6 +81,9 @@ def download_youtube_items(config, downloaded_items):
                 "postprocessor_hooks": [record_postprocess_file],
                 "match_filter": skip_live_streams,
                 "ignoreerrors": True,
+                "quiet": True,
+                "no_warnings": True,
+                "noprogress": True,
             }
 
             if download_type == "video":
