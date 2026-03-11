@@ -3,6 +3,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 from logger import log
 
@@ -49,6 +50,108 @@ AD_PATTERNS = [
     r"\bdownload (?:the|this) game\b",
     r"\bavailable on the app store\b",
     r"\bgoogle play(?: store)?\b",
+    r"\bblue\s*chew\b",
+    r"\bblu(?:e)?\s*chew(?:\.com)?\b",
+    r"\bmood\s+gummies?\b",
+    r"\bmood\.com\b",
+    r"\bmicrodose\s+gummies?\b",
+    r"\bviia\s+hemp\b",
+    r"\bmagic\s+mind\b",
+    r"\bbetterhelp\b",
+    r"\btalkspace\b",
+    r"\bpolicygenius\b",
+    r"\bzip\s*recruiter\b",
+    r"\bindeed\b",
+    r"\bsquarespace\b",
+    r"\bshopify\b",
+    r"\bshipstation\b",
+    r"\bstamps\.com\b",
+    r"\brocket\s*mortgage\b",
+    r"\bquickbooks\b",
+    r"\bnetsuite\b",
+    r"\bhims\b",
+    r"\bhers\b",
+    r"\bhims\s+and\s+hers\b",
+    r"\broman\b",
+    r"\bkeeps\b",
+    r"\bnutrafol\b",
+    r"\bag1\b",
+    r"\bathletic\s+greens\b",
+    r"\blmnt\b",
+    r"\bliquid\s*i\.?v\b",
+    r"\bseed\s+probiotics?\b",
+    r"\bcare\/?of\b",
+    r"\bcalm\b",
+    r"\bheadspace\b",
+    r"\bnoom\b",
+    r"\bweight\s*watchers\b",
+    r"\bmasterclass\b",
+    r"\bskillshare\b",
+    r"\baudible\b",
+    r"\baudible\.com\b",
+    r"\bamazon\s+music\b",
+    r"\bspotify\s+premium\b",
+    r"\bmanscaped\b",
+    r"\bmeundies\b",
+    r"\bbombas\b",
+    r"\bshady\s*rays\b",
+    r"\bwarby\s*parker\b",
+    r"\braycon\b",
+    r"\btheragun\b",
+    r"\bwhoop\b",
+    r"\bpeloton\b",
+    r"\btonal\b",
+    r"\bmirror\s+workout\b",
+    r"\bair\s*doctor\b",
+    r"\bmolekule\b",
+    r"\bsimpli\s*safe\b",
+    r"\bsimplesafe\b",
+    r"\blink\s*home\s*security\b",
+    r"\bvivint\b",
+    r"\bstate\s*farm\b",
+    r"\bprogressive\b",
+    r"\bgeico\b",
+    r"\ballstate\b",
+    r"\bmint\s*mobile\b",
+    r"\bvisible\s+wireless\b",
+    r"\bverizon\b",
+    r"\batt\b",
+    r"\bt-?mobile\b",
+    r"\bchime\b",
+    r"\bsofi\b",
+    r"\brobinhood\b",
+    r"\bwealthfront\b",
+    r"\bbetterment\b",
+    r"\bupstart\b",
+    r"\bcredit\s*karma\b",
+    r"\bnerdwallet\b",
+    r"\bexpressvpn\b",
+    r"\bnordvpn\b",
+    r"\bsurfshark\b",
+    r"\bprivate\s+internet\s+access\b",
+    r"\bdraftkings\b",
+    r"\bfanduel\b",
+    r"\bbetmgm\b",
+    r"\bprizepicks\b",
+    r"\bmybookie\b",
+    r"\bcash\s*app\b",
+    r"\bvenmo\b",
+    r"\bpaypal\b",
+    r"\bcoinbase\b",
+    r"\bcrypto\.com\b",
+    r"\bopensea\b",
+    r"\bmeta\s*quest\b",
+    r"\boculus\b",
+    r"\bhello\s+tushy\b",
+    r"\btushy\b",
+    r"\bdisplate\b",
+    r"\bdoor\s*dash\b",
+    r"\buber\s*eats\b",
+    r"\binstacart\b",
+    r"\bpostmates\b",
+    r"\bbetter\s*sleep\b",
+    r"\bpublic\.com\b",
+    r"\bm1\s+finance\b",
 ]
 def _compile_patterns(patterns):
     compiled = []
@@ -65,11 +168,17 @@ COMPILED_PATTERNS = _compile_patterns(AD_PATTERNS)
 
 def scrubbed_output_path(input_file: Path) -> Path:
     input_file = Path(input_file)
-    return input_file.with_name(f"{input_file.stem}.scrubbed{input_file.suffix}")
+    return input_file.with_name(f"{input_file.stem}.no_ads{input_file.suffix}")
 
 
 def run(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed ({result.returncode}): {' '.join(cmd)}\n{result.stderr}"
@@ -196,7 +305,8 @@ def cut_and_concat(input_file: Path, keep_ranges, output_file: Path):
 def scrub_audio_file(input_file: Path, settings: dict):
     input_file = Path(input_file)
     output_file = scrubbed_output_path(input_file)
-    marker = output_file.with_suffix(f"{output_file.suffix}.adscrubbed.json")
+    marker = output_file.with_name(f".{output_file.name}.adscrubbed.json")
+    removed_text_report = output_file.with_suffix(f"{output_file.suffix}.removed_text.txt")
 
     if marker.exists() and output_file.exists() and output_file.stat().st_mtime >= input_file.stat().st_mtime:
         log.info("⏭️ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
@@ -298,6 +408,34 @@ def scrub_audio_file(input_file: Path, settings: dict):
         encoding="utf-8",
     )
 
+    removed_segments = []
+    for seg in result.get("segments", []):
+        seg_start = float(seg.get("start", 0.0))
+        seg_end = float(seg.get("end", 0.0))
+        seg_text = (seg.get("text") or "").strip()
+        if not seg_text:
+            continue
+
+        for cut_start, cut_end in cut_ranges:
+            overlaps = max(seg_start, cut_start) < min(seg_end, cut_end)
+            if overlaps:
+                removed_segments.append((seg_start, seg_end, seg_text))
+                break
+
+    with removed_text_report.open("w", encoding="utf-8") as report_file:
+        report_file.write(f"Input: {input_file}\n")
+        report_file.write(f"Output: {output_file}\n\n")
+        report_file.write("Removed ranges:\n")
+        for idx, (start, end) in enumerate(cut_ranges, start=1):
+            report_file.write(f"{idx:02d}. {start:.2f}s - {end:.2f}s ({end - start:.2f}s)\n")
+
+        report_file.write("\nRemoved transcript segments (overlapping removed ranges):\n")
+        if removed_segments:
+            for seg_start, seg_end, seg_text in removed_segments:
+                report_file.write(f"- [{seg_start:.2f}s - {seg_end:.2f}s] {seg_text}\n")
+        else:
+            report_file.write("- No transcript segments overlapped removed ranges.\n")
+
     log.info(
         "✅ Ad scrub complete for %s -> %s: removed %.2fs (%.2f%%) across %d range(s)",
         input_file.name,
@@ -307,3 +445,96 @@ def scrub_audio_file(input_file: Path, settings: dict):
         len(cut_ranges),
     )
     return output_file
+
+
+
+
+def _parse_srt_timestamp(value: str) -> float:
+    hours, minutes, seconds_millis = value.split(":")
+    seconds, millis = seconds_millis.split(",")
+    return (
+        int(hours) * 3600
+        + int(minutes) * 60
+        + int(seconds)
+        + int(millis) / 1000.0
+    )
+
+
+def _format_srt_timestamp(value: float) -> str:
+    value = max(0.0, value)
+    hours = int(value // 3600)
+    value -= hours * 3600
+    minutes = int(value // 60)
+    value -= minutes * 60
+    seconds = int(value)
+    millis = int(round((value - seconds) * 1000))
+
+    if millis == 1000:
+        millis = 0
+        seconds += 1
+    if seconds == 60:
+        seconds = 0
+        minutes += 1
+    if minutes == 60:
+        minutes = 0
+        hours += 1
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _shift_srt_timestamps(srt_path: Path, offset_seconds: float):
+    if abs(offset_seconds) < 1e-6:
+        return
+
+    lines = srt_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    shifted = []
+    timestamp_re = re.compile(
+        r"^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})(.*)$"
+    )
+
+    for line in lines:
+        match = timestamp_re.match(line)
+        if not match:
+            shifted.append(line)
+            continue
+
+        start_raw, end_raw, tail = match.groups()
+        start = _parse_srt_timestamp(start_raw) + offset_seconds
+        end = _parse_srt_timestamp(end_raw) + offset_seconds
+
+        start = max(0.0, start)
+        end = max(start + 0.01, end)
+
+        shifted.append(
+            f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}{tail}"
+        )
+
+    srt_path.write_text("\n".join(shifted) + "\n", encoding="utf-8")
+
+def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: Optional[Path] = None):
+    input_file = Path(input_file)
+    subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
+
+    if subtitle_path.exists() and subtitle_path.stat().st_mtime >= input_file.stat().st_mtime:
+        log.info("⏭️ Subtitle generation skipped (already up to date): %s", subtitle_path.name)
+        return subtitle_path
+
+    try:
+        import whisper
+        from whisper.utils import get_writer
+    except ImportError as exc:
+        raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
+
+    model_name = settings.get("subtitle_model", settings.get("model", "base"))
+    log.info("📝 Generating subtitles: %s (%s)", input_file.name, model_name)
+    model = whisper.load_model(model_name)
+    result = model.transcribe(str(input_file), fp16=False)
+
+    writer = get_writer("srt", str(subtitle_path.parent))
+    writer(result, subtitle_path.stem)
+
+    subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
+    _shift_srt_timestamps(subtitle_path, subtitle_offset)
+
+    log.info("✅ Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
+    return subtitle_path
