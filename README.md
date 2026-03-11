@@ -9,6 +9,7 @@
 - Optional AI-assisted ad scrubbing for:
   - YouTube entries configured as `type: audio`
   - Downloaded podcast episodes
+  - Automatic subtitle (`.srt`) generation for new podcast downloads using Whisper
 - Per-entry `scrub` flag for YouTube and podcast sources (`true`/`false`)
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
@@ -89,14 +90,20 @@ Clean up generated files:
 ## 📁 Output
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
+When ad scrubbing is enabled and ads are detected, the original downloaded audio is preserved and a new ad-removed file is created:
 
-When ad scrubbing is enabled and ads are detected, the original downloaded audio is preserved and a new scrubbed file is created:
+- `<audio_file>.no_ads.<ext>`
 
-- `<audio_file>.scrubbed.<ext>`
+Sidecar files are also written:
 
-A sidecar marker JSON is also written for scrub decisions:
+- `<audio_file>.no_ads.<ext>.adscrubbed.json` (cut ranges and metadata)
+- `<audio_file>.no_ads.<ext>.removed_text.txt` (human-readable removed transcript text)
 
-- `<audio_file>.scrubbed.<ext>.adscrubbed.json`
+For newly downloaded podcast episodes, subtitles are generated with Whisper as:
+
+- `<playback_audio>.srt`
+
+VLC auto-loads these subtitles when the `.srt` basename matches the media file in the same folder.
 
 ## 📝 Logging
 
