@@ -4,7 +4,7 @@ from pathlib import Path
 import feedparser
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import scrub_audio_file
+from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
 from utils import ensure_dir, sanitize
 
@@ -18,6 +18,8 @@ def download_podcasts(config, downloaded_items):
             name = sanitize(entry["name"])
             url = entry["url"]
             entry_scrub_enabled = entry.get("scrub", True)
+            entry_subtitles_enabled = entry.get("subtitles", False)
+            subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)
             archive = os.path.join(folder, f"{name}_downloaded.txt")
             ensure_dir(folder)
@@ -55,15 +57,27 @@ def download_podcasts(config, downloaded_items):
                     ydl.download([mp3_url])
 
                 final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
+                playback_audio = final_audio
+
                 if scrubber_cfg.get("enabled", False) and entry_scrub_enabled and final_audio.exists():
                     try:
                         scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
                         if scrubbed_output:
-                            downloaded_items.append(f"Ad scrubbed: Podcast – {scrubbed_output.name}")
+                            playback_audio = scrubbed_output
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                 elif final_audio.exists() and not entry_scrub_enabled:
                     log.info("⏭️ Ad scrub disabled for podcast %s", name)
+
+                if entry_subtitles_enabled and playback_audio.exists():
+                    try:
+                        subtitle_settings = dict(scrubber_cfg)
+                        if subtitle_offset_seconds is not None:
+                            subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
+                        subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
+                        downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
+                    except Exception as subtitle_exc:
+                        log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
 
                 with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")
