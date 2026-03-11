@@ -9,6 +9,8 @@
 - Optional AI-assisted ad scrubbing for:
   - YouTube entries configured as `type: audio`
   - Downloaded podcast episodes
+- Per-entry `scrub` flag for YouTube and podcast sources (`true`/`false`)
+- Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
 
@@ -52,13 +54,17 @@ youtube:
   - name: ACG
     url: https://www.youtube.com/playlist?list=...
     type: audio
+    scrub: true
 
 podcasts:
   - name: TheTimDillonShow
     url: https://audioboom.com/channels/...
+    scrub: true
 ```
 
-Ad scrubbing is enabled by default (`defaults.ad_scrubber.enabled: true`). Set it to `false` if you want to disable it.
+Ad scrubbing is enabled by default (`defaults.ad_scrubber.enabled: true`). Set it to `false` if you want to disable it globally, or set `scrub: false` on individual YouTube/podcast entries to disable scrubbing just for those sources.
+
+YouTube live streams are skipped automatically and will not be downloaded.
 
 ## 🛠 Usage
 
