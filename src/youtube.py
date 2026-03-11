@@ -40,16 +40,12 @@ def download_youtube_items(config, downloaded_items):
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
             extracted_audio_files: List[Path] = []
-            hook_events = 0
 
             def record_download_progress(d):
                 if d.get("status") == "finished":
                     downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}")
 
             def record_postprocess_file(d):
-                nonlocal hook_events
-                hook_events += 1
-
                 info = d.get("info_dict") or {}
                 postprocessor = d.get("postprocessor") or "unknown"
                 candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
@@ -137,21 +133,12 @@ def download_youtube_items(config, downloaded_items):
             new_audio_files = sorted(set(delta_audio + hook_files))
 
             log.info(
-                "📦 YouTube files for %s: new_audio=%d new_video=%d hook_events=%d hook_candidates=%d",
+                "📦 YouTube files for %s: new_audio=%d new_video=%d postprocess_candidates=%d",
                 name,
                 len(new_audio_files),
                 len(delta_video),
-                hook_events,
                 len(hook_files_all),
             )
-
-            if hook_files_all:
-                log.info(
-                    "🎯 yt-dlp hook suggested %d candidate file(s) for %s (%d currently exist)",
-                    len(hook_files_all),
-                    name,
-                    len(hook_files),
-                )
 
             playback_files = []
             if download_type == "audio":
