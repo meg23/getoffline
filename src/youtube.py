@@ -113,7 +113,7 @@ def download_youtube_items(config, downloaded_items):
                     }
                 )
 
-            log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
+            log.info(f"▶️ Downloading YouTube ({download_type}): {name}")
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
@@ -160,7 +160,7 @@ def download_youtube_items(config, downloaded_items):
                                 playback_audio = scrubbed_output
                                 log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
                             else:
-                                log.info("ℹ️  Ad scrub made no changes for YouTube file: %s", mp3.name)
+                                log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", mp3.name)
                         except Exception as scrub_exc:
                             log.warning("Ad scrub failed for %s: %s", mp3, scrub_exc)
                         playback_files.append(playback_audio)
