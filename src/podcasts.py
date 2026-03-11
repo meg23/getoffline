@@ -84,7 +84,7 @@ def download_podcasts(config, downloaded_items):
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                 elif final_audio.exists() and not entry_scrub_enabled:
-                    log.info("⏭️ Ad scrub disabled for podcast %s", name)
+                    log.info("⏩ Ad scrub disabled for podcast %s", name)
 
                 if entry_subtitles_enabled and playback_audio.exists():
                     try:
@@ -104,7 +104,7 @@ def download_podcasts(config, downloaded_items):
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
                 elif entry_visualize_enabled:
-                    log.info("⏭️ Visualizer skipped for podcast %s because subtitles are disabled", name)
+                    log.info("⏩ Visualizer skipped for podcast %s because subtitles are disabled", name)
 
                 with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")

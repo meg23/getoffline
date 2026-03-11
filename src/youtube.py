@@ -48,7 +48,7 @@ def _process_audio_media_file(
         except Exception as scrub_exc:
             log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
     else:
-        log.info("⏭️ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
+        log.info("⏩ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
 
     if entry_subtitles_enabled and playback_audio.exists():
         try:
@@ -67,7 +67,7 @@ def _process_audio_media_file(
         except Exception as subtitle_exc:
             log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
     elif entry_visualize_enabled:
-        log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
+        log.info("⏩ Visualizer skipped for %s because subtitles are disabled", name)
 
     return downloaded_summary_items
 
@@ -240,7 +240,7 @@ def download_youtube_items(config, downloaded_items):
                                 log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
             else:
                 if entry_visualize_enabled and not entry_subtitles_enabled:
-                    log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
+                    log.info("⏩ Visualizer skipped for %s because subtitles are disabled", name)
                 elif entry_subtitles_enabled:
                     for media_file in delta_video:
                         if not media_file.exists():
@@ -254,7 +254,7 @@ def download_youtube_items(config, downloaded_items):
                         except Exception as subtitle_exc:
                             log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
                 else:
-                    log.info("⏭️ Ad scrub skipped for %s (type=%s)", name, download_type)
+                    log.info("⏩ Ad scrub skipped for %s (type=%s)", name, download_type)
 
         except Exception as e:
             log.error(f"❌ Failed to download YouTube: {entry}: {e}")

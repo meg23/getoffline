@@ -179,7 +179,7 @@ def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str)
     with _TRANSCRIPTION_CACHE_LOCK:
         cached = _TRANSCRIPTION_CACHE.get(cache_key)
     if cached is not None:
-        log.info("⏭️ Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
+        log.info("⏩ Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
         return cached
 
     try:
@@ -342,7 +342,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     removed_text_report = output_file.with_suffix(f"{output_file.suffix}.removed_text.txt")
 
     if marker.exists() and output_file.exists() and output_file.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("⏭️ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
+        log.info("⏩ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
         return output_file
 
     model_name = settings.get("model", "base")
@@ -543,7 +543,7 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
 
     if subtitle_path.exists() and subtitle_path.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("⏭️ Subtitle generation skipped (already up to date): %s", subtitle_path.name)
+        log.info("⏩ Subtitle generation skipped (already up to date): %s", subtitle_path.name)
         return subtitle_path
 
     try:
