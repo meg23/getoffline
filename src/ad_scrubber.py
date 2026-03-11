@@ -305,7 +305,7 @@ def cut_and_concat(input_file: Path, keep_ranges, output_file: Path):
 def scrub_audio_file(input_file: Path, settings: dict):
     input_file = Path(input_file)
     output_file = scrubbed_output_path(input_file)
-    marker = output_file.with_suffix(f"{output_file.suffix}.adscrubbed.json")
+    marker = output_file.with_name(f".{output_file.name}.adscrubbed.json")
     removed_text_report = output_file.with_suffix(f"{output_file.suffix}.removed_text.txt")
 
     if marker.exists() and output_file.exists() and output_file.stat().st_mtime >= input_file.stat().st_mtime:

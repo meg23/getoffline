@@ -4,7 +4,7 @@ from typing import List
 
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import scrub_audio_file
+from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
 from utils import ensure_dir, sanitize
 
@@ -35,6 +35,7 @@ def download_youtube_items(config, downloaded_items):
 
             download_type = entry.get("type", "audio").lower()
             entry_scrub_enabled = entry.get("scrub", True)
+            entry_subtitles_enabled = entry.get("subtitles", False)
 
             extracted_audio_files: List[Path] = []
             hook_events = 0
@@ -108,30 +109,26 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
-            before = {p.resolve() for p in Path(folder).glob("*.mp3")}
+            before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
+            before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
+
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            if download_type != "audio":
-                log.info("⏭️ Ad scrub skipped for %s (type=%s)", name, download_type)
-                continue
+            after_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
+            after_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
-            if not scrubber_enabled or not entry_scrub_enabled:
-                log.info("⏭️ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
-                continue
-
-            after = {p.resolve() for p in Path(folder).glob("*.mp3")}
-            delta_files = sorted(after - before)
+            delta_audio = sorted(after_audio - before_audio)
+            delta_video = sorted(after_video - before_video)
             hook_files_all = sorted(set(extracted_audio_files))
             hook_files = [p for p in hook_files_all if p.exists()]
-            new_files = sorted(set(delta_files + hook_files))
+            new_audio_files = sorted(set(delta_audio + hook_files))
 
             log.info(
-                "📦 YouTube audio files for %s: before=%d after=%d detected_new=%d hook_events=%d hook_candidates=%d",
+                "📦 YouTube files for %s: new_audio=%d new_video=%d hook_events=%d hook_candidates=%d",
                 name,
-                len(before),
-                len(after),
-                len(delta_files),
+                len(new_audio_files),
+                len(delta_video),
                 hook_events,
                 len(hook_files_all),
             )
@@ -144,17 +141,38 @@ def download_youtube_items(config, downloaded_items):
                     len(hook_files),
                 )
 
-            for mp3 in new_files:
-                log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
-                try:
-                    scrubbed_output = scrub_audio_file(mp3, scrubber_cfg)
-                    if scrubbed_output:
-                        log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
-                        downloaded_items.append(f"Ad scrubbed: YouTube – {scrubbed_output.name}")
-                    else:
-                        log.info("ℹ️  Ad scrub made no changes for YouTube file: %s", mp3.name)
-                except Exception as scrub_exc:
-                    log.warning(f"Ad scrub failed for {mp3}: {scrub_exc}")
+            playback_files = []
+            if download_type == "audio":
+                if scrubber_enabled and entry_scrub_enabled:
+                    for mp3 in new_audio_files:
+                        log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
+                        playback_audio = mp3
+                        try:
+                            scrubbed_output = scrub_audio_file(mp3, scrubber_cfg)
+                            if scrubbed_output:
+                                playback_audio = scrubbed_output
+                                log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
+                            else:
+                                log.info("ℹ️  Ad scrub made no changes for YouTube file: %s", mp3.name)
+                        except Exception as scrub_exc:
+                            log.warning("Ad scrub failed for %s: %s", mp3, scrub_exc)
+                        playback_files.append(playback_audio)
+                else:
+                    log.info("⏭️ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
+                    playback_files.extend(new_audio_files)
+            else:
+                log.info("⏭️ Ad scrub skipped for %s (type=%s)", name, download_type)
+                playback_files.extend(delta_video)
+
+            if entry_subtitles_enabled:
+                for media_file in playback_files:
+                    if not media_file.exists():
+                        continue
+                    try:
+                        subtitle_path = generate_whisper_subtitles(media_file, scrubber_cfg)
+                        log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+                    except Exception as subtitle_exc:
+                        log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
 
         except Exception as e:
             log.error(f"❌ Failed to download YouTube: {entry}: {e}")
