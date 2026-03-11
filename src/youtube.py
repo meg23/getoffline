@@ -36,6 +36,7 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", False)
+            subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
             extracted_audio_files: List[Path] = []
             hook_events = 0
@@ -169,7 +170,10 @@ def download_youtube_items(config, downloaded_items):
                     if not media_file.exists():
                         continue
                     try:
-                        subtitle_path = generate_whisper_subtitles(media_file, scrubber_cfg)
+                        subtitle_settings = dict(scrubber_cfg)
+                        if subtitle_offset_seconds is not None:
+                            subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
+                        subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
                         log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)

@@ -12,6 +12,7 @@
   - Automatic subtitle (`.srt`) generation for new downloads when `subtitles: true`
 - Per-entry `scrub` flag for YouTube and podcast sources (`true`/`false`)
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
+- Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
@@ -51,6 +52,7 @@ defaults:
     pre_roll: 2.0
     post_roll: 2.0
     min_hits: 1
+    subtitle_time_offset_seconds: -0.2
 
 youtube:
   - name: ACG
@@ -102,7 +104,8 @@ Sidecar files are also written:
 - `.<audio_file>.no_ads.<ext>.adscrubbed.json` (hidden cut-range metadata)
 - `<audio_file>.no_ads.<ext>.removed_text.txt` (human-readable removed transcript text)
 
-For newly downloaded YouTube/podcast media, subtitles are generated with Whisper when `subtitles: true`:
+For newly downloaded YouTube/podcast media, subtitles are generated with Whisper when `subtitles: true`.
+A global timing adjustment can be set with `defaults.ad_scrubber.subtitle_time_offset_seconds` (and overridden per entry with `subtitle_offset_seconds`) to keep SRT timing in sync:
 
 - `<playback_media>.srt`
 

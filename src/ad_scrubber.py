@@ -447,6 +447,70 @@ def scrub_audio_file(input_file: Path, settings: dict):
     return output_file
 
 
+
+
+def _parse_srt_timestamp(value: str) -> float:
+    hours, minutes, seconds_millis = value.split(":")
+    seconds, millis = seconds_millis.split(",")
+    return (
+        int(hours) * 3600
+        + int(minutes) * 60
+        + int(seconds)
+        + int(millis) / 1000.0
+    )
+
+
+def _format_srt_timestamp(value: float) -> str:
+    value = max(0.0, value)
+    hours = int(value // 3600)
+    value -= hours * 3600
+    minutes = int(value // 60)
+    value -= minutes * 60
+    seconds = int(value)
+    millis = int(round((value - seconds) * 1000))
+
+    if millis == 1000:
+        millis = 0
+        seconds += 1
+    if seconds == 60:
+        seconds = 0
+        minutes += 1
+    if minutes == 60:
+        minutes = 0
+        hours += 1
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _shift_srt_timestamps(srt_path: Path, offset_seconds: float):
+    if abs(offset_seconds) < 1e-6:
+        return
+
+    lines = srt_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    shifted = []
+    timestamp_re = re.compile(
+        r"^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})(.*)$"
+    )
+
+    for line in lines:
+        match = timestamp_re.match(line)
+        if not match:
+            shifted.append(line)
+            continue
+
+        start_raw, end_raw, tail = match.groups()
+        start = _parse_srt_timestamp(start_raw) + offset_seconds
+        end = _parse_srt_timestamp(end_raw) + offset_seconds
+
+        start = max(0.0, start)
+        end = max(start + 0.01, end)
+
+        shifted.append(
+            f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}{tail}"
+        )
+
+    srt_path.write_text("\n".join(shifted) + "\n", encoding="utf-8")
+
 def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: Optional[Path] = None):
     input_file = Path(input_file)
     subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
@@ -469,5 +533,8 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     writer = get_writer("srt", str(subtitle_path.parent))
     writer(result, subtitle_path.stem)
 
-    log.info("✅ Subtitles generated: %s", subtitle_path.name)
+    subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
+    _shift_srt_timestamps(subtitle_path, subtitle_offset)
+
+    log.info("✅ Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
     return subtitle_path

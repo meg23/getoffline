@@ -14,6 +14,7 @@ DEFAULT_AD_SCRUBBER = {
     "pre_roll": 2.0,
     "post_roll": 2.0,
     "min_hits": 1,
+    "subtitle_time_offset_seconds": -0.2,
 }
 
 
