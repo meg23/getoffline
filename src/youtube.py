@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 
 from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
@@ -113,8 +114,23 @@ def download_youtube_items(config, downloaded_items):
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
+            download_warning = None
             with YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                try:
+                    ydl.download([url])
+                except DownloadError as exc:
+                    message = str(exc)
+                    if "Maximum number of downloads reached" in message:
+                        download_warning = message
+                        log.info(
+                            "⏭️ yt-dlp stopped early for %s due to max_downloads; continuing post-processing",
+                            name,
+                        )
+                    else:
+                        raise
+
+            if download_warning:
+                log.info("ℹ️ yt-dlp notice for %s: %s", name, download_warning)
 
             after_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             after_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
