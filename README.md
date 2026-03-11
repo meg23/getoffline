@@ -9,8 +9,9 @@
 - Optional AI-assisted ad scrubbing for:
   - YouTube entries configured as `type: audio`
   - Downloaded podcast episodes
-  - Automatic subtitle (`.srt`) generation for new podcast downloads using Whisper
+  - Automatic subtitle (`.srt`) generation for new downloads when `subtitles: true`
 - Per-entry `scrub` flag for YouTube and podcast sources (`true`/`false`)
+- Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
@@ -56,11 +57,13 @@ youtube:
     url: https://www.youtube.com/playlist?list=...
     type: audio
     scrub: true
+    subtitles: true
 
 podcasts:
   - name: TheTimDillonShow
     url: https://audioboom.com/channels/...
     scrub: true
+    subtitles: true
 ```
 
 Ad scrubbing is enabled by default (`defaults.ad_scrubber.enabled: true`). Set it to `false` if you want to disable it globally, or set `scrub: false` on individual YouTube/podcast entries to disable scrubbing just for those sources.
@@ -96,12 +99,12 @@ When ad scrubbing is enabled and ads are detected, the original downloaded audio
 
 Sidecar files are also written:
 
-- `<audio_file>.no_ads.<ext>.adscrubbed.json` (cut ranges and metadata)
+- `.<audio_file>.no_ads.<ext>.adscrubbed.json` (hidden cut-range metadata)
 - `<audio_file>.no_ads.<ext>.removed_text.txt` (human-readable removed transcript text)
 
-For newly downloaded podcast episodes, subtitles are generated with Whisper as:
+For newly downloaded YouTube/podcast media, subtitles are generated with Whisper when `subtitles: true`:
 
-- `<playback_audio>.srt`
+- `<playback_media>.srt`
 
 VLC auto-loads these subtitles when the `.srt` basename matches the media file in the same folder.
 
