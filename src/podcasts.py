@@ -6,7 +6,19 @@ from yt_dlp import YoutubeDL
 
 from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
-from utils import ensure_dir, sanitize
+from utils import create_audio_visualizer_video, ensure_dir, sanitize
+
+
+class _YoutubeDlQuietLogger:
+    def debug(self, msg):
+        _ = msg
+
+    def warning(self, msg):
+        _ = msg
+
+    def error(self, msg):
+        if msg:
+            log.error("yt-dlp: %s", msg)
 
 
 def download_podcasts(config, downloaded_items):
@@ -19,6 +31,7 @@ def download_podcasts(config, downloaded_items):
             url = entry["url"]
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", False)
+            entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)
             archive = os.path.join(folder, f"{name}_downloaded.txt")
@@ -50,6 +63,10 @@ def download_podcasts(config, downloaded_items):
                     "restrictfilenames": True,
                     "outtmpl_na_placeholder": "NA",
                     "outtmpl": out_path,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noprogress": True,
+                    "logger": _YoutubeDlQuietLogger(),
                 }
 
                 log.info(f"🎙️ Downloading podcast: {name} – {ep_title}")
@@ -67,7 +84,7 @@ def download_podcasts(config, downloaded_items):
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                 elif final_audio.exists() and not entry_scrub_enabled:
-                    log.info("⏭️ Ad scrub disabled for podcast %s", name)
+                    log.info("⏩ Ad scrub disabled for podcast %s", name)
 
                 if entry_subtitles_enabled and playback_audio.exists():
                     try:
@@ -76,8 +93,18 @@ def download_podcasts(config, downloaded_items):
                             subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
                         subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
                         downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
+                        log.info("✅ Generated podcast subtitles: %s", subtitle_path.name)
+
+                        if entry_visualize_enabled:
+                            try:
+                                visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
+                                log.info("🎬 Generated podcast visualizer: %s", visualizer_path.name)
+                            except Exception as viz_exc:
+                                log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
+                elif entry_visualize_enabled:
+                    log.info("⏩ Visualizer skipped for podcast %s because subtitles are disabled", name)
 
                 with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")

@@ -1,7 +1,9 @@
 import json
 import re
 import subprocess
+import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -165,6 +167,37 @@ def _compile_patterns(patterns):
 
 COMPILED_PATTERNS = _compile_patterns(AD_PATTERNS)
 
+_WHISPER_MODEL_CACHE = {}
+_TRANSCRIPTION_CACHE = {}
+_TRANSCRIPTION_CACHE_LOCK = threading.Lock()
+_WHISPER_MODEL_LOCK = threading.Lock()
+
+
+def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
+    input_file = Path(input_file).resolve()
+    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name)
+    with _TRANSCRIPTION_CACHE_LOCK:
+        cached = _TRANSCRIPTION_CACHE.get(cache_key)
+    if cached is not None:
+        log.info("⏩ Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
+        return cached
+
+    try:
+        import whisper
+    except ImportError as exc:
+        raise RuntimeError("openai-whisper is required for transcription.") from exc
+
+    with _WHISPER_MODEL_LOCK:
+        model = _WHISPER_MODEL_CACHE.get(model_name)
+        if model is None:
+            model = whisper.load_model(model_name)
+            _WHISPER_MODEL_CACHE[model_name] = model
+
+    result = model.transcribe(str(input_file), fp16=False)
+    with _TRANSCRIPTION_CACHE_LOCK:
+        _TRANSCRIPTION_CACHE[cache_key] = result
+    return result
+
 
 def scrubbed_output_path(input_file: Path) -> Path:
     input_file = Path(input_file)
@@ -309,13 +342,8 @@ def scrub_audio_file(input_file: Path, settings: dict):
     removed_text_report = output_file.with_suffix(f"{output_file.suffix}.removed_text.txt")
 
     if marker.exists() and output_file.exists() and output_file.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("⏭️ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
+        log.info("⏩ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
         return output_file
-
-    try:
-        import whisper
-    except ImportError as exc:
-        raise RuntimeError("openai-whisper is required for ad scrubbing.") from exc
 
     model_name = settings.get("model", "base")
     pre_roll = float(settings.get("pre_roll", 2.0))
@@ -323,8 +351,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     min_hits = int(settings.get("min_hits", 1))
 
     log.info("🧠 Transcribing for ad-scrub: %s (%s)", input_file.name, model_name)
-    model = whisper.load_model(model_name)
-    result = model.transcribe(str(input_file), fp16=False)
+    result = _transcribe_with_whisper(input_file, model_name, "ad-scrub")
 
     cut_ranges, raw_hits = detect_ad_segments(
         result,
@@ -516,22 +543,37 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
 
     if subtitle_path.exists() and subtitle_path.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("⏭️ Subtitle generation skipped (already up to date): %s", subtitle_path.name)
+        log.info("⏩ Subtitle generation skipped (already up to date): %s", subtitle_path.name)
         return subtitle_path
 
     try:
-        import whisper
         from whisper.utils import get_writer
     except ImportError as exc:
         raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     log.info("📝 Generating subtitles: %s (%s)", input_file.name, model_name)
-    model = whisper.load_model(model_name)
-    result = model.transcribe(str(input_file), fp16=False)
+    result = _transcribe_with_whisper(input_file, model_name, "subtitle-generation")
 
-    writer = get_writer("srt", str(subtitle_path.parent))
-    writer(result, subtitle_path.stem)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_dir_path = Path(tmp_dir)
+        temp_stem = "subtitle_output"
+        writer = get_writer("srt", str(tmp_dir_path))
+        writer(result, temp_stem)
+
+        generated_subtitle_path = tmp_dir_path / f"{temp_stem}.srt"
+        if not generated_subtitle_path.exists():
+            srt_candidates = sorted(tmp_dir_path.glob("*.srt"))
+            if srt_candidates:
+                generated_subtitle_path = srt_candidates[0]
+            else:
+                raise RuntimeError(f"Whisper did not produce subtitle file in {tmp_dir_path}")
+
+        subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(generated_subtitle_path, subtitle_path)
+
+    if not subtitle_path.exists():
+        raise RuntimeError(f"Subtitle output file was not created: {subtitle_path}")
 
     subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
