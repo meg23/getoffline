@@ -6,7 +6,7 @@ from yt_dlp import YoutubeDL
 
 from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
-from utils import ensure_dir, sanitize
+from utils import create_audio_visualizer_video, ensure_dir, sanitize
 
 
 def download_youtube_items(config, downloaded_items):
@@ -36,6 +36,7 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", False)
+            entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
             extracted_audio_files: List[Path] = []
@@ -190,8 +191,18 @@ def download_youtube_items(config, downloaded_items):
                             subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
                         subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
                         log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+
+                        if download_type == "audio" and entry_visualize_enabled:
+                            try:
+                                visualizer_path = create_audio_visualizer_video(media_file, subtitle_path)
+                                log.info("🎬 Generated YouTube visualizer: %s", visualizer_path.name)
+                                downloaded_items.append(f"Visualizer: YouTube – {visualizer_path.name}")
+                            except Exception as viz_exc:
+                                log.warning("Visualizer generation failed for %s: %s", media_file, viz_exc)
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
+            elif entry_visualize_enabled:
+                log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
 
         except Exception as e:
             log.error(f"❌ Failed to download YouTube: {entry}: {e}")
