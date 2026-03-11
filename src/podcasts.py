@@ -19,6 +19,7 @@ def download_podcasts(config, downloaded_items):
             url = entry["url"]
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", False)
+            subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)
             archive = os.path.join(folder, f"{name}_downloaded.txt")
             ensure_dir(folder)
@@ -70,7 +71,10 @@ def download_podcasts(config, downloaded_items):
 
                 if entry_subtitles_enabled and playback_audio.exists():
                     try:
-                        subtitle_path = generate_whisper_subtitles(playback_audio, scrubber_cfg)
+                        subtitle_settings = dict(scrubber_cfg)
+                        if subtitle_offset_seconds is not None:
+                            subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
+                        subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
                         downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
