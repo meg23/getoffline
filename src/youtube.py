@@ -17,6 +17,14 @@ def download_youtube_items(config, downloaded_items):
 
     log.info("🧼 YouTube ad scrubber enabled: %s", scrubber_enabled)
 
+    def skip_live_streams(info_dict, *, incomplete=False):
+        _ = incomplete
+        live_status = (info_dict.get("live_status") or "").lower()
+        if info_dict.get("is_live") or live_status in {"is_live", "is_upcoming", "was_live", "post_live"}:
+            title = info_dict.get("title", "unknown title")
+            return f"Skipping live stream: {title}"
+        return None
+
     for entry in config.get("youtube", []):
         try:
             name = sanitize(entry["name"])
@@ -26,6 +34,7 @@ def download_youtube_items(config, downloaded_items):
             ensure_dir(folder)
 
             download_type = entry.get("type", "audio").lower()
+            entry_scrub_enabled = entry.get("scrub", True)
 
             extracted_audio_files: List[Path] = []
             hook_events = 0
@@ -75,6 +84,8 @@ def download_youtube_items(config, downloaded_items):
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
                 "progress_hooks": [record_download_progress],
                 "postprocessor_hooks": [record_postprocess_file],
+                "match_filter": skip_live_streams,
+                "ignoreerrors": True,
             }
 
             if download_type == "video":
@@ -105,8 +116,8 @@ def download_youtube_items(config, downloaded_items):
                 log.info("⏭️ Ad scrub skipped for %s (type=%s)", name, download_type)
                 continue
 
-            if not scrubber_enabled:
-                log.info("⏭️ Ad scrub disabled in config for %s", name)
+            if not scrubber_enabled or not entry_scrub_enabled:
+                log.info("⏭️ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
                 continue
 
             after = {p.resolve() for p in Path(folder).glob("*.mp3")}
