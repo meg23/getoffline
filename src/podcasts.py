@@ -17,6 +17,7 @@ def download_podcasts(config, downloaded_items):
         try:
             name = sanitize(entry["name"])
             url = entry["url"]
+            entry_scrub_enabled = entry.get("scrub", True)
             folder = os.path.join(defaults["output_root"], name)
             archive = os.path.join(folder, f"{name}_downloaded.txt")
             ensure_dir(folder)
@@ -54,13 +55,15 @@ def download_podcasts(config, downloaded_items):
                     ydl.download([mp3_url])
 
                 final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
-                if scrubber_cfg.get("enabled", False) and final_audio.exists():
+                if scrubber_cfg.get("enabled", False) and entry_scrub_enabled and final_audio.exists():
                     try:
                         scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
                         if scrubbed_output:
                             downloaded_items.append(f"Ad scrubbed: Podcast – {scrubbed_output.name}")
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
+                elif final_audio.exists() and not entry_scrub_enabled:
+                    log.info("⏭️ Ad scrub disabled for podcast %s", name)
 
                 with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")
