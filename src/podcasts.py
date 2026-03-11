@@ -99,7 +99,6 @@ def download_podcasts(config, downloaded_items):
                             try:
                                 visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
                                 log.info("🎬 Generated podcast visualizer: %s", visualizer_path.name)
-                                downloaded_items.append(f"Visualizer: Podcast – {visualizer_path.name}")
                             except Exception as viz_exc:
                                 log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
                     except Exception as subtitle_exc:

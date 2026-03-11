@@ -62,7 +62,6 @@ def _process_audio_media_file(
                 try:
                     visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
                     log.info("🎬 Generated YouTube visualizer: %s", visualizer_path.name)
-                    downloaded_summary_items.append(f"Visualizer: YouTube – {visualizer_path.name}")
                 except Exception as viz_exc:
                     log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
         except Exception as subtitle_exc:
