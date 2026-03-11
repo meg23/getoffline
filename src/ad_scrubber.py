@@ -166,6 +166,32 @@ def _compile_patterns(patterns):
 
 COMPILED_PATTERNS = _compile_patterns(AD_PATTERNS)
 
+_WHISPER_MODEL_CACHE = {}
+_TRANSCRIPTION_CACHE = {}
+
+
+def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
+    input_file = Path(input_file).resolve()
+    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name)
+    cached = _TRANSCRIPTION_CACHE.get(cache_key)
+    if cached is not None:
+        log.info("⏭️ Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
+        return cached
+
+    try:
+        import whisper
+    except ImportError as exc:
+        raise RuntimeError("openai-whisper is required for transcription.") from exc
+
+    model = _WHISPER_MODEL_CACHE.get(model_name)
+    if model is None:
+        model = whisper.load_model(model_name)
+        _WHISPER_MODEL_CACHE[model_name] = model
+
+    result = model.transcribe(str(input_file), fp16=False)
+    _TRANSCRIPTION_CACHE[cache_key] = result
+    return result
+
 
 def scrubbed_output_path(input_file: Path) -> Path:
     input_file = Path(input_file)
@@ -313,19 +339,13 @@ def scrub_audio_file(input_file: Path, settings: dict):
         log.info("⏭️ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
         return output_file
 
-    try:
-        import whisper
-    except ImportError as exc:
-        raise RuntimeError("openai-whisper is required for ad scrubbing.") from exc
-
     model_name = settings.get("model", "base")
     pre_roll = float(settings.get("pre_roll", 2.0))
     post_roll = float(settings.get("post_roll", 2.0))
     min_hits = int(settings.get("min_hits", 1))
 
     log.info("🧠 Transcribing for ad-scrub: %s (%s)", input_file.name, model_name)
-    model = whisper.load_model(model_name)
-    result = model.transcribe(str(input_file), fp16=False)
+    result = _transcribe_with_whisper(input_file, model_name, "ad-scrub")
 
     cut_ranges, raw_hits = detect_ad_segments(
         result,
@@ -521,15 +541,13 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         return subtitle_path
 
     try:
-        import whisper
         from whisper.utils import get_writer
     except ImportError as exc:
         raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     log.info("📝 Generating subtitles: %s (%s)", input_file.name, model_name)
-    model = whisper.load_model(model_name)
-    result = model.transcribe(str(input_file), fp16=False)
+    result = _transcribe_with_whisper(input_file, model_name, "subtitle-generation")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
