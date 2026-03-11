@@ -1,13 +1,28 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from yt_dlp import YoutubeDL
 
 from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
 from utils import create_audio_visualizer_video, ensure_dir, normalize_media_filename, sanitize
+
+
+def _human_size(num_bytes: Optional[float]) -> str:
+    if not num_bytes or num_bytes <= 0:
+        return "unknown size"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(num_bytes)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{num_bytes:.0f} B"
 
 
 class _YoutubeDlQuietLogger:
@@ -100,10 +115,36 @@ def download_youtube_items(config, downloaded_items):
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
             extracted_audio_files: List[Path] = []
+            completed_download_ids = set()
+
+            def get_download_key(info: dict, fallback: str) -> str:
+                return (
+                    str(info.get("id") or "").strip()
+                    or str(info.get("webpage_url") or "").strip()
+                    or str(info.get("original_url") or "").strip()
+                    or fallback
+                )
 
             def record_download_progress(d):
-                if d.get("status") == "finished":
-                    downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}")
+                status = d.get("status")
+                info = d.get("info_dict") or {}
+                title = info.get("title", "unknown title")
+
+                if status == "finished":
+                    output_file = d.get("filename") or info.get("_filename") or "unknown file"
+                    total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
+                    download_key = get_download_key(info, output_file)
+
+                    log.info(
+                        "⬇️ yt-dlp finished download for %s: %s (%s)",
+                        name,
+                        output_file,
+                        _human_size(total_bytes),
+                    )
+
+                    if download_key not in completed_download_ids:
+                        completed_download_ids.add(download_key)
+                        downloaded_items.append(f"YouTube: {name} – {title}")
 
             def record_postprocess_file(d):
                 info = d.get("info_dict") or {}
@@ -123,6 +164,12 @@ def download_youtube_items(config, downloaded_items):
                     path = path.with_suffix(expected_ext)
 
                 extracted_audio_files.append(path.resolve())
+                log.info(
+                    "⚙️ yt-dlp post-processed for %s via %s: %s",
+                    name,
+                    postprocessor,
+                    path.name,
+                )
 
 
             ydl_opts = {
