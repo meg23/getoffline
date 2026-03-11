@@ -19,43 +19,43 @@ youtube:
   - name: NakeyJakey
     url: https://www.youtube.com/@NakeyJakey
     type: video
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: IncognitoMode
     url: https://www.youtube.com/@IHincognitoMode
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: ACG
     url: https://www.youtube.com/playlist?list=PL62tz83FJJjlEpRdOT63lruxsTA6m1t9s
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: MrMattyPlays
     url: https://www.youtube.com/playlist?list=UUmXH6CX_juGwNFTj3PESdoA
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: PlumeGaming
     url: https://www.youtube.com/playlist?list=UUifXxrnBgxO2alElghlDqyw
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: LordanARTS
     url: https://www.youtube.com/playlist?list=UUWoe_w-oadmQxcXZV2KMZgg
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: TheNeedleDrop
     url: https://www.youtube.com/watch?v=NBB4FZ0Pf0Y&list=PLP4CSgl7K7ormBIO138tYonB949PHnNcP
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: XboxReady
@@ -73,37 +73,37 @@ youtube:
   - name: JakeBaldino
     url: https://www.youtube.com/playlist?list=UU7s6t5KCNwRkb7U_3-E1Tpw
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: Gameranx
-    url: https://www.youtube.com/playlist?list=PLJAzFcYKyx4RX5JBq_rXbQNmUdc9Ugbv1
+    url: https://www.youtube.com/@gameranxTV
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: WeirdHistory
     url: https://www.youtube.com/@WeirdHistory
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: LukeStephens
     url: https://www.youtube.com/playlist?list=UUe4_UPAmhz2sqorGbF8oZHA
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: Voidzilla
     url: https://www.youtube.com/@coffeezillaextras
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: Coffeezilla
     url: https://www.youtube.com/playlist?list=UUFQMnBA3CS502aghlcr0_aw
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: ZexyZek
@@ -115,8 +115,8 @@ youtube:
   - name: Shiey
     url: https://www.youtube.com/@shiey
     type: video
-    scrub: true
-    subtitles: true
+    scrub: false
+    subtitles: false
 
   - name: UAPGerb
     url: https://www.youtube.com/@UAPGerb
@@ -127,13 +127,13 @@ youtube:
   - name: MortisimalGaming
     url: https://www.youtube.com/playlist?list=PL8LVeoHzXqxABZf16T5YdZQfLt8UUgTRM
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: MaxAfterBurner
     url: https://www.youtube.com/playlist?list=UU6-y2wMNk24Fi-J2qbTTYQA
     type: audio
-    scrub: true
+    scrub: false
     subtitles: true
 
   - name: WarFronts
