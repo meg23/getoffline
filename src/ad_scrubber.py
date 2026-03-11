@@ -50,7 +50,17 @@ AD_PATTERNS = [
     r"\bavailable on the app store\b",
     r"\bgoogle play(?: store)?\b",
 ]
-COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in AD_PATTERNS]
+def _compile_patterns(patterns):
+    compiled = []
+    for pattern in patterns:
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE))
+        except re.error as exc:
+            log.warning("Skipping invalid ad pattern %r: %s", pattern, exc)
+    return compiled
+
+
+COMPILED_PATTERNS = _compile_patterns(AD_PATTERNS)
 
 
 def scrubbed_output_path(input_file: Path) -> Path:
