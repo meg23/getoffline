@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -530,8 +531,18 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     model = whisper.load_model(model_name)
     result = model.transcribe(str(input_file), fp16=False)
 
-    writer = get_writer("srt", str(subtitle_path.parent))
-    writer(result, subtitle_path.stem)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_dir_path = Path(tmp_dir)
+        temp_stem = "subtitle_output"
+        writer = get_writer("srt", str(tmp_dir_path))
+        writer(result, temp_stem)
+
+        generated_subtitle_path = tmp_dir_path / f"{temp_stem}.srt"
+        if not generated_subtitle_path.exists():
+            raise RuntimeError(f"Whisper did not produce subtitle file: {generated_subtitle_path}")
+
+        subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(generated_subtitle_path), str(subtitle_path))
 
     subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
