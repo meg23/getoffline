@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List
 
 from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
 
 from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
@@ -118,7 +117,7 @@ def download_youtube_items(config, downloaded_items):
             with YoutubeDL(ydl_opts) as ydl:
                 try:
                     ydl.download([url])
-                except DownloadError as exc:
+                except Exception as exc:
                     message = str(exc)
                     if "Maximum number of downloads reached" in message:
                         download_warning = message
