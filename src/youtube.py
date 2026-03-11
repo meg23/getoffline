@@ -6,7 +6,19 @@ from yt_dlp import YoutubeDL
 
 from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
 from logger import log
-from utils import ensure_dir, sanitize
+from utils import create_audio_visualizer_video, ensure_dir, normalize_media_filename, sanitize
+
+
+class _YoutubeDlQuietLogger:
+    def debug(self, msg):
+        _ = msg
+
+    def warning(self, msg):
+        _ = msg
+
+    def error(self, msg):
+        if msg:
+            log.error("yt-dlp: %s", msg)
 
 
 def download_youtube_items(config, downloaded_items):
@@ -36,21 +48,17 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", False)
+            entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
             extracted_audio_files: List[Path] = []
-            hook_events = 0
 
             def record_download_progress(d):
                 if d.get("status") == "finished":
                     downloaded_items.append(f"YouTube: {name} – {d['info_dict']['title']}")
 
             def record_postprocess_file(d):
-                nonlocal hook_events
-                hook_events += 1
-
                 info = d.get("info_dict") or {}
-                status = d.get("status")
                 postprocessor = d.get("postprocessor") or "unknown"
                 candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
                 if not candidate:
@@ -68,17 +76,9 @@ def download_youtube_items(config, downloaded_items):
 
                 extracted_audio_files.append(path.resolve())
 
-                log.info(
-                    "🪝 yt-dlp hook (%s/%s) for %s: %s",
-                    postprocessor,
-                    status,
-                    name,
-                    path.name,
-                )
 
             ydl_opts = {
                 "cookiefile": cookie_path,
-                "max_downloads": defaults["max_downloads"],
                 "playlistend": defaults["playlist_end"],
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
@@ -88,6 +88,10 @@ def download_youtube_items(config, downloaded_items):
                 "postprocessor_hooks": [record_postprocess_file],
                 "match_filter": skip_live_streams,
                 "ignoreerrors": True,
+                "quiet": True,
+                "no_warnings": True,
+                "noprogress": True,
+                "logger": _YoutubeDlQuietLogger(),
             }
 
             if download_type == "video":
@@ -113,23 +117,8 @@ def download_youtube_items(config, downloaded_items):
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
-            download_warning = None
             with YoutubeDL(ydl_opts) as ydl:
-                try:
-                    ydl.download([url])
-                except Exception as exc:
-                    message = str(exc)
-                    if "Maximum number of downloads reached" in message:
-                        download_warning = message
-                        log.info(
-                            "⏭️ yt-dlp stopped early for %s due to max_downloads; continuing post-processing",
-                            name,
-                        )
-                    else:
-                        raise
-
-            if download_warning:
-                log.info("ℹ️ yt-dlp notice for %s: %s", name, download_warning)
+                ydl.download([url])
 
             after_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             after_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
@@ -140,22 +129,24 @@ def download_youtube_items(config, downloaded_items):
             hook_files = [p for p in hook_files_all if p.exists()]
             new_audio_files = sorted(set(delta_audio + hook_files))
 
+            if download_type == "audio":
+                normalized_audio_files = []
+                for audio_path in new_audio_files:
+                    if not audio_path.exists():
+                        continue
+                    normalized_audio = normalize_media_filename(audio_path)
+                    if normalized_audio != audio_path:
+                        log.info("🧹 Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
+                    normalized_audio_files.append(normalized_audio)
+                new_audio_files = sorted(set(normalized_audio_files))
+
             log.info(
-                "📦 YouTube files for %s: new_audio=%d new_video=%d hook_events=%d hook_candidates=%d",
+                "📦 YouTube files for %s: new_audio=%d new_video=%d postprocess_candidates=%d",
                 name,
                 len(new_audio_files),
                 len(delta_video),
-                hook_events,
                 len(hook_files_all),
             )
-
-            if hook_files_all:
-                log.info(
-                    "🎯 yt-dlp hook suggested %d candidate file(s) for %s (%d currently exist)",
-                    len(hook_files_all),
-                    name,
-                    len(hook_files),
-                )
 
             playback_files = []
             if download_type == "audio":
@@ -190,8 +181,18 @@ def download_youtube_items(config, downloaded_items):
                             subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
                         subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
                         log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+
+                        if download_type == "audio" and entry_visualize_enabled:
+                            try:
+                                visualizer_path = create_audio_visualizer_video(media_file, subtitle_path)
+                                log.info("🎬 Generated YouTube visualizer: %s", visualizer_path.name)
+                                downloaded_items.append(f"Visualizer: YouTube – {visualizer_path.name}")
+                            except Exception as viz_exc:
+                                log.warning("Visualizer generation failed for %s: %s", media_file, viz_exc)
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
+            elif entry_visualize_enabled:
+                log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
 
         except Exception as e:
             log.error(f"❌ Failed to download YouTube: {entry}: {e}")
