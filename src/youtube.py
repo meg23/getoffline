@@ -260,9 +260,8 @@ def download_youtube_items(config, downloaded_items):
                     }
                 )
 
-            log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
-            log.info("🔎 yt-dlp target for %s: %s", name, url)
-            log.info("🗂️ yt-dlp archive for %s: %s", name, archive)
+            log.info(f"Downloading YouTube ({download_type}): {name}")
+            log.info("yt-dlp archive for %s: %s", name, archive)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
