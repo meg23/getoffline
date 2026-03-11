@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List
 
@@ -20,6 +21,56 @@ class _YoutubeDlQuietLogger:
         if msg:
             log.error("yt-dlp: %s", msg)
 
+
+
+def _process_audio_media_file(
+    media_file: Path,
+    name: str,
+    scrubber_cfg: dict,
+    scrubber_enabled: bool,
+    entry_scrub_enabled: bool,
+    entry_subtitles_enabled: bool,
+    entry_visualize_enabled: bool,
+    subtitle_offset_seconds,
+):
+    downloaded_summary_items = []
+    playback_audio = media_file
+
+    if scrubber_enabled and entry_scrub_enabled:
+        log.info("🧼 Starting ad scrub for YouTube file: %s", media_file.name)
+        try:
+            scrubbed_output = scrub_audio_file(media_file, scrubber_cfg)
+            if scrubbed_output:
+                playback_audio = scrubbed_output
+                log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
+            else:
+                log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", media_file.name)
+        except Exception as scrub_exc:
+            log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
+    else:
+        log.info("⏭️ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
+
+    if entry_subtitles_enabled and playback_audio.exists():
+        try:
+            subtitle_settings = dict(scrubber_cfg)
+            if subtitle_offset_seconds is not None:
+                subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
+            subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
+            log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+
+            if entry_visualize_enabled:
+                try:
+                    visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
+                    log.info("🎬 Generated YouTube visualizer: %s", visualizer_path.name)
+                    downloaded_summary_items.append(f"Visualizer: YouTube – {visualizer_path.name}")
+                except Exception as viz_exc:
+                    log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
+        except Exception as subtitle_exc:
+            log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
+    elif entry_visualize_enabled:
+        log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
+
+    return downloaded_summary_items
 
 def download_youtube_items(config, downloaded_items):
     defaults = config["defaults"]
@@ -148,51 +199,63 @@ def download_youtube_items(config, downloaded_items):
                 len(hook_files_all),
             )
 
-            playback_files = []
             if download_type == "audio":
-                if scrubber_enabled and entry_scrub_enabled:
+                worker_count = int(defaults.get("processing_workers", 2))
+                worker_count = max(1, min(worker_count, len(new_audio_files) or 1))
+                log.info("⚙️ Running YouTube post-processing with %d worker(s) for %s", worker_count, name)
+
+                if worker_count == 1:
                     for mp3 in new_audio_files:
-                        log.info("🧼 Starting ad scrub for YouTube file: %s", mp3.name)
-                        playback_audio = mp3
-                        try:
-                            scrubbed_output = scrub_audio_file(mp3, scrubber_cfg)
-                            if scrubbed_output:
-                                playback_audio = scrubbed_output
-                                log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
-                            else:
-                                log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", mp3.name)
-                        except Exception as scrub_exc:
-                            log.warning("Ad scrub failed for %s: %s", mp3, scrub_exc)
-                        playback_files.append(playback_audio)
+                        downloaded_items.extend(
+                            _process_audio_media_file(
+                                mp3,
+                                name,
+                                scrubber_cfg,
+                                scrubber_enabled,
+                                entry_scrub_enabled,
+                                entry_subtitles_enabled,
+                                entry_visualize_enabled,
+                                subtitle_offset_seconds,
+                            )
+                        )
                 else:
-                    log.info("⏭️ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
-                    playback_files.extend(new_audio_files)
-            else:
-                log.info("⏭️ Ad scrub skipped for %s (type=%s)", name, download_type)
-                playback_files.extend(delta_video)
-
-            if entry_subtitles_enabled:
-                for media_file in playback_files:
-                    if not media_file.exists():
-                        continue
-                    try:
-                        subtitle_settings = dict(scrubber_cfg)
-                        if subtitle_offset_seconds is not None:
-                            subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
-                        subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
-                        log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
-
-                        if download_type == "audio" and entry_visualize_enabled:
+                    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                        futures = [
+                            executor.submit(
+                                _process_audio_media_file,
+                                mp3,
+                                name,
+                                scrubber_cfg,
+                                scrubber_enabled,
+                                entry_scrub_enabled,
+                                entry_subtitles_enabled,
+                                entry_visualize_enabled,
+                                subtitle_offset_seconds,
+                            )
+                            for mp3 in new_audio_files
+                        ]
+                        for future in as_completed(futures):
                             try:
-                                visualizer_path = create_audio_visualizer_video(media_file, subtitle_path)
-                                log.info("🎬 Generated YouTube visualizer: %s", visualizer_path.name)
-                                downloaded_items.append(f"Visualizer: YouTube – {visualizer_path.name}")
-                            except Exception as viz_exc:
-                                log.warning("Visualizer generation failed for %s: %s", media_file, viz_exc)
-                    except Exception as subtitle_exc:
-                        log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
-            elif entry_visualize_enabled:
-                log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
+                                downloaded_items.extend(future.result())
+                            except Exception as processing_exc:
+                                log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
+            else:
+                if entry_visualize_enabled and not entry_subtitles_enabled:
+                    log.info("⏭️ Visualizer skipped for %s because subtitles are disabled", name)
+                elif entry_subtitles_enabled:
+                    for media_file in delta_video:
+                        if not media_file.exists():
+                            continue
+                        try:
+                            subtitle_settings = dict(scrubber_cfg)
+                            if subtitle_offset_seconds is not None:
+                                subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
+                            subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
+                            log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+                        except Exception as subtitle_exc:
+                            log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
+                else:
+                    log.info("⏭️ Ad scrub skipped for %s (type=%s)", name, download_type)
 
         except Exception as e:
             log.error(f"❌ Failed to download YouTube: {entry}: {e}")
