@@ -89,7 +89,7 @@ for entry in config.get("youtube", []):
                 }],
             })
 
-        log.info(f"▶️ Downloading YouTube ({download_type}): {name}")
+        log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 

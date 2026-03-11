@@ -44,7 +44,7 @@ def _process_audio_media_file(
                 playback_audio = scrubbed_output
                 log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
             else:
-                log.info("ℹ️ Ad scrub made no changes for YouTube file: %s", media_file.name)
+                log.info("ℹ️  Ad scrub made no changes for YouTube file: %s", media_file.name)
         except Exception as scrub_exc:
             log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
     else:
@@ -76,8 +76,6 @@ def download_youtube_items(config, downloaded_items):
     cookie_path = defaults["cookie_path"]
     scrubber_cfg = defaults.get("ad_scrubber", {})
     scrubber_enabled = scrubber_cfg.get("enabled", False)
-
-    log.info("🧼 YouTube ad scrubber enabled: %s", scrubber_enabled)
 
     def skip_live_streams(info_dict, *, incomplete=False):
         _ = incomplete
@@ -163,7 +161,7 @@ def download_youtube_items(config, downloaded_items):
                     }
                 )
 
-            log.info(f"▶️ Downloading YouTube ({download_type}): {name}")
+            log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
@@ -201,7 +199,7 @@ def download_youtube_items(config, downloaded_items):
             if download_type == "audio":
                 worker_count = int(defaults.get("processing_workers", 2))
                 worker_count = max(1, min(worker_count, len(new_audio_files) or 1))
-                log.info("⚙️ Running YouTube post-processing with %d worker(s) for %s", worker_count, name)
+                log.info("⚙️  Running YouTube post-processing with %d worker(s) for %s", worker_count, name)
 
                 if worker_count == 1:
                     for mp3 in new_audio_files:
