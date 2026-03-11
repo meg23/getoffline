@@ -159,6 +159,15 @@ youtube:
     scrub: true
     subtitles: true
     visualize: true
+
+  - name: PigeonThief
+    url: https://www.youtube.com/@itspigeonthief
+    type: video
+    scrub: false
+    subtitles: false
+    visualize: false
+    
+
     
 
 podcasts:
