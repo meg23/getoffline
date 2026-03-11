@@ -27,10 +27,21 @@ def _human_size(num_bytes: Optional[float]) -> str:
 
 class _YoutubeDlQuietLogger:
     def debug(self, msg):
-        _ = msg
+        if not msg:
+            return
+        message = str(msg).strip()
+        if not message:
+            return
+
+        # yt-dlp sends normal activity lines to debug(); keep them visible.
+        if message.startswith("[debug]"):
+            log.debug("yt-dlp: %s", message)
+        else:
+            log.info("yt-dlp: %s", message)
 
     def warning(self, msg):
-        _ = msg
+        if msg:
+            log.warning("yt-dlp: %s", msg)
 
     def error(self, msg):
         if msg:
@@ -116,6 +127,7 @@ def download_youtube_items(config, downloaded_items):
 
             extracted_audio_files: List[Path] = []
             completed_download_ids = set()
+            download_progress_markers = {}
 
             def get_download_key(info: dict, fallback: str) -> str:
                 return (
@@ -129,18 +141,48 @@ def download_youtube_items(config, downloaded_items):
                 status = d.get("status")
                 info = d.get("info_dict") or {}
                 title = info.get("title", "unknown title")
+                output_file = d.get("filename") or info.get("_filename") or "unknown file"
+                download_key = get_download_key(info, output_file)
+
+                if status == "downloading":
+                    downloaded_bytes = d.get("downloaded_bytes") or 0
+                    total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
+                    if total_bytes:
+                        pct = int((float(downloaded_bytes) / float(total_bytes)) * 100)
+                        step = (pct // 10) * 10
+                        previous_step = download_progress_markers.get(download_key, -10)
+                        if step >= previous_step + 10:
+                            download_progress_markers[download_key] = step
+                            log.info(
+                                "⬇️ yt-dlp downloading %s: %s%% (%s/%s)",
+                                name,
+                                min(step, 100),
+                                _human_size(downloaded_bytes),
+                                _human_size(total_bytes),
+                            )
+                    elif download_key not in download_progress_markers:
+                        download_progress_markers[download_key] = 0
+                        log.info("⬇️ yt-dlp downloading %s: %s (size unknown)", name, output_file)
 
                 if status == "finished":
-                    output_file = d.get("filename") or info.get("_filename") or "unknown file"
                     total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
-                    download_key = get_download_key(info, output_file)
+                    elapsed = d.get("elapsed")
 
-                    log.info(
-                        "⬇️ yt-dlp finished download for %s: %s (%s)",
-                        name,
-                        output_file,
-                        _human_size(total_bytes),
-                    )
+                    if elapsed:
+                        log.info(
+                            "⬇️ yt-dlp finished download for %s: %s (%s in %.1fs)",
+                            name,
+                            output_file,
+                            _human_size(total_bytes),
+                            float(elapsed),
+                        )
+                    else:
+                        log.info(
+                            "⬇️ yt-dlp finished download for %s: %s (%s)",
+                            name,
+                            output_file,
+                            _human_size(total_bytes),
+                        )
 
                     if download_key not in completed_download_ids:
                         completed_download_ids.add(download_key)
@@ -149,6 +191,7 @@ def download_youtube_items(config, downloaded_items):
             def record_postprocess_file(d):
                 info = d.get("info_dict") or {}
                 postprocessor = d.get("postprocessor") or "unknown"
+                pp_status = d.get("status")
                 candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
                 if not candidate:
                     return
@@ -164,12 +207,21 @@ def download_youtube_items(config, downloaded_items):
                     path = path.with_suffix(expected_ext)
 
                 extracted_audio_files.append(path.resolve())
-                log.info(
-                    "⚙️ yt-dlp post-processed for %s via %s: %s",
-                    name,
-                    postprocessor,
-                    path.name,
-                )
+                if pp_status:
+                    log.info(
+                        "⚙️ yt-dlp post-process %s for %s via %s: %s",
+                        pp_status,
+                        name,
+                        postprocessor,
+                        path.name,
+                    )
+                else:
+                    log.info(
+                        "⚙️ yt-dlp post-processed for %s via %s: %s",
+                        name,
+                        postprocessor,
+                        path.name,
+                    )
 
 
             ydl_opts = {
@@ -209,6 +261,8 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
+            log.info("🔎 yt-dlp target for %s: %s", name, url)
+            log.info("🗂️ yt-dlp archive for %s: %s", name, archive)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
