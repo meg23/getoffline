@@ -1,15 +1,14 @@
 import json
 import re
 import subprocess
-import shutil
 import tempfile
-import threading
 from pathlib import Path
-from typing import Optional
+from typing import Tuple
 
 from logger import get_logger
+from transcription import TranscriptionError, transcribe_with_whisper
 
-log = get_logger("ad_scrubber")
+log = get_logger("scrubbing")
 
 AD_PATTERNS = [
     r"\bwe(?:'|’)ll be right back\b",
@@ -157,6 +156,8 @@ AD_PATTERNS = [
     r"\bpublic\.com\b",
     r"\bm1\s+finance\b",
 ]
+
+
 def _compile_patterns(patterns):
     compiled = []
     for pattern in patterns:
@@ -168,47 +169,6 @@ def _compile_patterns(patterns):
 
 
 COMPILED_PATTERNS = _compile_patterns(AD_PATTERNS)
-
-_WHISPER_MODEL_CACHE = {}
-_TRANSCRIPTION_CACHE = {}
-_TRANSCRIPTION_CACHE_LOCK = threading.Lock()
-_WHISPER_MODEL_LOCK = threading.Lock()
-
-
-class TranscriptionError(RuntimeError):
-    """Raised when Whisper transcription cannot be completed for a media file."""
-
-
-def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
-    input_file = Path(input_file).resolve()
-    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name)
-    with _TRANSCRIPTION_CACHE_LOCK:
-        cached = _TRANSCRIPTION_CACHE.get(cache_key)
-    if cached is not None:
-        log.info("Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
-        return cached
-
-    try:
-        import whisper
-    except ImportError as exc:
-        raise RuntimeError("openai-whisper is required for transcription.") from exc
-
-    with _WHISPER_MODEL_LOCK:
-        model = _WHISPER_MODEL_CACHE.get(model_name)
-        if model is None:
-            model = whisper.load_model(model_name)
-            _WHISPER_MODEL_CACHE[model_name] = model
-
-    try:
-        result = model.transcribe(str(input_file), fp16=False)
-    except Exception as exc:
-        raise TranscriptionError(
-            f"Transcription failed for {input_file.name} ({model_name}): {exc}"
-        ) from exc
-
-    with _TRANSCRIPTION_CACHE_LOCK:
-        _TRANSCRIPTION_CACHE[cache_key] = result
-    return result
 
 
 def scrubbed_output_path(input_file: Path) -> Path:
@@ -363,7 +323,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     min_hits = int(settings.get("min_hits", 1))
 
     log.info("Transcribing for ad-scrub: %s (%s)", input_file.name, model_name)
-    result = _transcribe_with_whisper(input_file, model_name, "ad-scrub")
+    result = transcribe_with_whisper(input_file, model_name, "ad-scrub")
 
     cut_ranges, raw_hits = detect_ad_segments(
         result,
@@ -486,109 +446,39 @@ def scrub_audio_file(input_file: Path, settings: dict):
     return output_file
 
 
+def scrub_media_file(
+    media_file: Path,
+    scrubber_cfg: dict,
+    scrubber_enabled: bool,
+    entry_scrub_enabled: bool,
+    logger,
+    context_name: str,
+    context_label: str,
+) -> Tuple[Path, bool]:
+    """Return playback media path and whether subtitles should be skipped after scrub failure."""
+    playback_media = media_file
+    skip_subtitles_after_scrub_failure = False
 
-
-def _parse_srt_timestamp(value: str) -> float:
-    hours, minutes, seconds_millis = value.split(":")
-    seconds, millis = seconds_millis.split(",")
-    return (
-        int(hours) * 3600
-        + int(minutes) * 60
-        + int(seconds)
-        + int(millis) / 1000.0
-    )
-
-
-def _format_srt_timestamp(value: float) -> str:
-    value = max(0.0, value)
-    hours = int(value // 3600)
-    value -= hours * 3600
-    minutes = int(value // 60)
-    value -= minutes * 60
-    seconds = int(value)
-    millis = int(round((value - seconds) * 1000))
-
-    if millis == 1000:
-        millis = 0
-        seconds += 1
-    if seconds == 60:
-        seconds = 0
-        minutes += 1
-    if minutes == 60:
-        minutes = 0
-        hours += 1
-
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
-
-
-def _shift_srt_timestamps(srt_path: Path, offset_seconds: float):
-    if abs(offset_seconds) < 1e-6:
-        return
-
-    lines = srt_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    shifted = []
-    timestamp_re = re.compile(
-        r"^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})(.*)$"
-    )
-
-    for line in lines:
-        match = timestamp_re.match(line)
-        if not match:
-            shifted.append(line)
-            continue
-
-        start_raw, end_raw, tail = match.groups()
-        start = _parse_srt_timestamp(start_raw) + offset_seconds
-        end = _parse_srt_timestamp(end_raw) + offset_seconds
-
-        start = max(0.0, start)
-        end = max(start + 0.01, end)
-
-        shifted.append(
-            f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}{tail}"
+    if scrubber_enabled and entry_scrub_enabled:
+        logger.info("Starting ad scrub for %s file: %s", context_label, media_file.name)
+        try:
+            scrubbed_output = scrub_audio_file(media_file, scrubber_cfg)
+            if scrubbed_output:
+                playback_media = scrubbed_output
+                logger.info("Ad scrubbed %s file: %s", context_label, scrubbed_output.name)
+            else:
+                logger.info("Ad scrub made no changes for %s file: %s", context_label, media_file.name)
+        except TranscriptionError as scrub_exc:
+            skip_subtitles_after_scrub_failure = True
+            logger.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
+        except Exception as scrub_exc:
+            logger.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
+    else:
+        logger.info(
+            "Ad scrub disabled for %s (global=%s entry=%s)",
+            context_name,
+            scrubber_enabled,
+            entry_scrub_enabled,
         )
 
-    srt_path.write_text("\n".join(shifted) + "\n", encoding="utf-8")
-
-def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: Optional[Path] = None):
-    input_file = Path(input_file)
-    subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
-
-    if subtitle_path.exists() and subtitle_path.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("Subtitle generation skipped (already up to date): %s", subtitle_path.name)
-        return subtitle_path
-
-    try:
-        from whisper.utils import get_writer
-    except ImportError as exc:
-        raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
-
-    model_name = settings.get("subtitle_model", settings.get("model", "base"))
-    log.info("Generating subtitles: %s (%s)", input_file.name, model_name)
-    result = _transcribe_with_whisper(input_file, model_name, "subtitle-generation")
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_dir_path = Path(tmp_dir)
-        temp_stem = "subtitle_output"
-        writer = get_writer("srt", str(tmp_dir_path))
-        writer(result, temp_stem)
-
-        generated_subtitle_path = tmp_dir_path / f"{temp_stem}.srt"
-        if not generated_subtitle_path.exists():
-            srt_candidates = sorted(tmp_dir_path.glob("*.srt"))
-            if srt_candidates:
-                generated_subtitle_path = srt_candidates[0]
-            else:
-                raise RuntimeError(f"Whisper did not produce subtitle file in {tmp_dir_path}")
-
-        subtitle_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(generated_subtitle_path, subtitle_path)
-
-    if not subtitle_path.exists():
-        raise RuntimeError(f"Subtitle output file was not created: {subtitle_path}")
-
-    subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
-    _shift_srt_timestamps(subtitle_path, subtitle_offset)
-
-    log.info("Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
-    return subtitle_path
+    return playback_media, skip_subtitles_after_scrub_failure
