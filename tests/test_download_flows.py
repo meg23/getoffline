@@ -88,19 +88,16 @@ def _build_sample_config_from_repo_config(output_root):
             "audio_format": "mp3",
             "audio_quality": 0,
             "processing_workers": 1,
-            "ad_scrubber": {"enabled": False},
         },
         "youtube": [{
             "name": youtube_entry["name"],
             "url": youtube_entry["url"],
             "type": "audio",
-            "scrub": False,
             "subtitles": True,
         }],
         "podcasts": [{
             "name": podcast_entry["name"],
             "url": podcast_entry["url"],
-            "scrub": False,
             "subtitles": True,
         }],
     }
@@ -168,14 +165,12 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                    "ad_scrubber": {"enabled": False},
-                },
+                        },
                 "youtube": [{
                     "name": "Sample",
                     "url": "https://youtube.com/watch?v=video-1",
                     "type": "audio",
-                    "scrub": False,
-                }],
+                        }],
             }
 
             with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
@@ -235,15 +230,13 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                    "ad_scrubber": {"enabled": False},
-                },
+                        },
                 "youtube": [
                     {
                         "name": "WarFronts",
                         "url": "https://youtube.com/watch?v=video-1",
                         "type": "video",
-                        "scrub": False,
-                        "subtitles": True,
+                                    "subtitles": True,
                     }
                 ],
             }
@@ -266,13 +259,11 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                    "ad_scrubber": {"enabled": False},
-                },
+                        },
                 "podcasts": [{
                     "name": "PodcastA",
                     "url": "https://example.com/rss",
-                    "scrub": False,
-                }],
+                        }],
             }
             mp3_url = "https://cdn.example.com/episode-1.mp3"
             fake_feed = SimpleNamespace(entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)])])
@@ -303,7 +294,6 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
 
             subtitle_path = subtitles.create_subtitles(
                 media_file=media,
-                scrubber_cfg={"enabled": False},
                 subtitle_offset_seconds=None,
                 entry_subtitles_enabled=True,
                 logger=youtube.log,
