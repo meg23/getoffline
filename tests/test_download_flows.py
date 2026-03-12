@@ -68,14 +68,6 @@ def _fake_subtitle_generator(media_path, subtitle_settings):
     return srt_path
 
 
-def _fake_visualizer_generator(media_path, subtitle_path):
-    _ = subtitle_path
-    media_path = Path(media_path)
-    viz_path = media_path.with_suffix(".visualizer.mp4")
-    viz_path.write_text("fake video", encoding="utf-8")
-    return viz_path
-
-
 def _build_sample_config_from_repo_config(output_root):
     with open("config.yaml", encoding="utf-8") as f:
         source = yaml.safe_load(f)
@@ -83,15 +75,9 @@ def _build_sample_config_from_repo_config(output_root):
     youtube_entry = next(
         item
         for item in source.get("youtube", [])
-        if item.get("type", "audio").lower() == "audio"
-        and item.get("subtitles")
-        and item.get("visualize")
+        if item.get("type", "audio").lower() == "audio" and item.get("subtitles")
     )
-    podcast_entry = next(
-        item
-        for item in source.get("podcasts", [])
-        if item.get("subtitles") and item.get("visualize")
-    )
+    podcast_entry = next(item for item in source.get("podcasts", []) if item.get("subtitles"))
 
     return {
         "defaults": {
@@ -110,14 +96,12 @@ def _build_sample_config_from_repo_config(output_root):
             "type": "audio",
             "scrub": False,
             "subtitles": True,
-            "visualize": True,
         }],
         "podcasts": [{
             "name": podcast_entry["name"],
             "url": podcast_entry["url"],
             "scrub": False,
             "subtitles": True,
-            "visualize": True,
         }],
     }
 
@@ -126,7 +110,7 @@ class DownloadFlowTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
-    def test_sample_config_single_youtube_and_podcast_with_subtitles_and_visualizer(self):
+    def test_sample_config_single_youtube_and_podcast_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config_from_repo_config(tmpdir)
 
@@ -143,9 +127,7 @@ class DownloadFlowTests(unittest.TestCase):
             downloaded_items = []
             with patch("youtube.YoutubeDL", FakeYoutubeDL), patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
                 "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator), patch(
-                "subtitles.create_audio_visualizer_video", side_effect=_fake_visualizer_generator
-            ):
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -162,13 +144,199 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertIsNotNone(podcast_mp3)
 
             self.assertTrue(youtube_mp3.with_suffix(".srt").exists())
-            self.assertTrue(youtube_mp3.with_suffix(".visualizer.mp4").exists())
             self.assertTrue(podcast_mp3.with_suffix(".srt").exists())
-            self.assertTrue(podcast_mp3.with_suffix(".visualizer.mp4").exists())
+            self.assertFalse(any(youtube_folder.glob("*.visualizer.mp4")))
+            self.assertFalse(any(podcast_folder.glob("*.visualizer.mp4")))
 
             self.assertTrue(any(item.startswith("YouTube: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Podcast: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+
+
+class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
+    def setUp(self):
+        FakeYoutubeDL.instances = []
+
+    def test_youtube_download_configures_english_caption_download(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ad_scrubber": {"enabled": False},
+                },
+                "youtube": [{
+                    "name": "Sample",
+                    "url": "https://youtube.com/watch?v=video-1",
+                    "type": "audio",
+                    "scrub": False,
+                }],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            ):
+                youtube.download_youtube_items(config, [])
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertTrue(opts["writesubtitles"])
+            self.assertTrue(opts["writeautomaticsub"])
+            self.assertEqual(opts["subtitlesformat"], "srt/best")
+            self.assertIn("en", opts["subtitleslangs"])
+
+
+    def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
+        class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                info_main = {
+                    "id": "video-1",
+                    "title": "Main Title",
+                    "webpage_url": "https://youtube.com/watch?v=video-1",
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_main,
+                            "filename": "/tmp/Main Title.mp4",
+                            "total_bytes": 4096,
+                        }
+                    )
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": {"_filename": "/tmp/Main Title.en.vtt"},
+                            "filename": "/tmp/Main Title.en.vtt",
+                            "total_bytes": 512,
+                        }
+                    )
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": {"_filename": "/tmp/Main Title.en.srt"},
+                            "filename": "/tmp/Main Title.en.srt",
+                            "total_bytes": 512,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ad_scrubber": {"enabled": False},
+                },
+                "youtube": [
+                    {
+                        "name": "WarFronts",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "video",
+                        "scrub": False,
+                        "subtitles": True,
+                    }
+                ],
+            }
+
+            downloaded_items = []
+            with patch("youtube.YoutubeDL", FakeYoutubeDLWithSubtitleEvents):
+                youtube.download_youtube_items(config, downloaded_items)
+
+            youtube_items = [item for item in downloaded_items if item.startswith("YouTube: ")]
+            self.assertEqual(youtube_items, ["YouTube: WarFronts – Main Title"])
+
+    def test_podcast_subtitles_default_to_enabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ad_scrubber": {"enabled": False},
+                },
+                "podcasts": [{
+                    "name": "PodcastA",
+                    "url": "https://example.com/rss",
+                    "scrub": False,
+                }],
+            }
+            mp3_url = "https://cdn.example.com/episode-1.mp3"
+            fake_feed = SimpleNamespace(entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)])])
+
+            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+                downloaded_items = []
+                podcasts.download_podcasts(config, downloaded_items)
+
+            self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+
+
+class SubtitleSidecarCleanupTests(unittest.TestCase):
+    def test_reused_english_sidecars_are_consolidated_to_single_srt(self):
+        import subtitles
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "20260311-Cuba_is_Next.mp3"
+            media.write_text("fake", encoding="utf-8")
+
+            en_orig = media.with_name(f"{media.stem}.en-orig.srt")
+            en_srt = media.with_name(f"{media.stem}.en.srt")
+            en_vtt = media.with_name(f"{media.stem}.en.vtt")
+            en_orig.write_text("orig", encoding="utf-8")
+            en_srt.write_text("en srt", encoding="utf-8")
+            en_vtt.write_text("vtt", encoding="utf-8")
+
+            subtitle_path = subtitles.create_subtitles(
+                media_file=media,
+                scrubber_cfg={"enabled": False},
+                subtitle_offset_seconds=None,
+                entry_subtitles_enabled=True,
+                logger=youtube.log,
+                context_name="test",
+                context_label="YouTube",
+            )
+
+            self.assertIsNotNone(subtitle_path)
+            self.assertEqual(subtitle_path, media.with_suffix(".srt"))
+            self.assertTrue(media.with_suffix(".srt").exists())
+            self.assertFalse(en_orig.exists())
+            self.assertFalse(en_srt.exists())
+            self.assertFalse(en_vtt.exists())
+
+    def test_folder_cleanup_removes_existing_en_sidecars_without_new_download(self):
+        import subtitles
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "20260310-Pakistan_and_Afghanistan_are_Still_At_War.mp3"
+            media.write_text("fake", encoding="utf-8")
+
+            srt_main = media.with_suffix('.srt')
+            srt_main.write_text('main', encoding='utf-8')
+            en_orig = media.with_name(f"{media.stem}.en-orig.srt")
+            en_srt = media.with_name(f"{media.stem}.en.srt")
+            en_orig.write_text("orig", encoding="utf-8")
+            en_srt.write_text("en", encoding="utf-8")
+
+            subtitles.cleanup_subtitle_sidecars_for_folder(Path(tmpdir))
+
+            self.assertTrue(srt_main.exists())
+            self.assertFalse(en_orig.exists())
+            self.assertFalse(en_srt.exists())
 
 
 class SubtitleFailureCachingTests(unittest.TestCase):
