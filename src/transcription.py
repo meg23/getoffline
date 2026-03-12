@@ -15,9 +15,9 @@ class TranscriptionError(RuntimeError):
     """Raised when Whisper transcription cannot be completed for a media file."""
 
 
-def transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
+def transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str, language: str = None):
     input_file = Path(input_file).resolve()
-    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name)
+    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name, language)
     with _TRANSCRIPTION_CACHE_LOCK:
         cached = _TRANSCRIPTION_CACHE.get(cache_key)
     if cached is not None:
@@ -36,7 +36,10 @@ def transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
             _WHISPER_MODEL_CACHE[model_name] = model
 
     try:
-        result = model.transcribe(str(input_file), fp16=False)
+        transcribe_kwargs = {"fp16": False}
+        if language:
+            transcribe_kwargs["language"] = language
+        result = model.transcribe(str(input_file), **transcribe_kwargs)
     except Exception as exc:
         raise TranscriptionError(
             f"Transcription failed for {input_file.name} ({model_name}): {exc}"

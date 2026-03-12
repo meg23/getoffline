@@ -5,9 +5,68 @@ from pathlib import Path
 
 from logger import get_logger
 from transcription import transcribe_with_whisper
-from utils import create_audio_visualizer_video
 
 log = get_logger("subtitles")
+
+
+_SUBTITLE_SIDECAR_SUFFIXES = {
+    ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
+}
+
+
+def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
+    stem = media_file.stem
+    parent = media_file.parent
+    keep_subtitle = Path(keep_subtitle).resolve()
+
+    for path in parent.glob(f"{stem}*.*"):
+        suffix = path.suffix.lower()
+        if suffix not in _SUBTITLE_SIDECAR_SUFFIXES:
+            continue
+        if path.resolve() == keep_subtitle:
+            continue
+
+        # Keep only the canonical subtitle sidecar matching the media basename.
+        # Remove downloaded language variants like .en.srt / .en-orig.srt / .en.vtt.
+        if path.name.startswith(f"{stem}."):
+            try:
+                path.unlink(missing_ok=True)
+                log.info("Removed extra subtitle sidecar: %s", path.name)
+            except Exception as cleanup_exc:
+                log.warning("Could not remove subtitle sidecar %s: %s", path, cleanup_exc)
+
+
+def _normalize_existing_sidecars_for_media(media_file: Path):
+    subtitle_path = media_file.with_suffix(".srt")
+    if subtitle_path.exists():
+        _cleanup_subtitle_sidecars(media_file, subtitle_path)
+        return subtitle_path
+
+    candidates = sorted(media_file.parent.glob(f"{media_file.stem}*.en*.srt"))
+    if not candidates:
+        return None
+
+    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(candidates[0]), str(subtitle_path))
+    log.info("Reused downloaded English subtitle: %s -> %s", candidates[0].name, subtitle_path.name)
+    _cleanup_subtitle_sidecars(media_file, subtitle_path)
+    return subtitle_path
+
+
+def cleanup_subtitle_sidecars_for_folder(folder: Path):
+    folder = Path(folder)
+    if not folder.exists():
+        return
+
+    media_exts = {".mp3", ".mp4", ".m4a", ".webm", ".wav", ".flac", ".ogg", ".opus"}
+    for media_file in folder.iterdir():
+        if not media_file.is_file() or media_file.suffix.lower() not in media_exts:
+            continue
+        _normalize_existing_sidecars_for_media(media_file)
+
+
+def _find_existing_english_subtitle(media_file: Path):
+    return _normalize_existing_sidecars_for_media(media_file)
 
 
 def _parse_srt_timestamp(value: str) -> float:
@@ -95,9 +154,10 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
-    log.info("Generating subtitles: %s (%s)", input_file.name, model_name)
+    subtitle_language = settings.get("subtitle_language", "en")
+    log.info("Generating subtitles: %s (%s, language=%s)", input_file.name, model_name, subtitle_language)
     try:
-        result = transcribe_with_whisper(input_file, model_name, "subtitle-generation")
+        result = transcribe_with_whisper(input_file, model_name, "subtitle-generation", language=subtitle_language)
     except Exception as exc:
         error_message = str(exc)
         if "cannot reshape tensor of 0 elements" in error_message:
@@ -140,16 +200,16 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
 
+    _cleanup_subtitle_sidecars(input_file, subtitle_path)
     log.info("Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
     return subtitle_path
 
 
-def create_subtitles_and_optional_visualizer(
+def create_subtitles(
     media_file,
     scrubber_cfg: dict,
     subtitle_offset_seconds,
     entry_subtitles_enabled: bool,
-    entry_visualize_enabled: bool,
     logger,
     context_name: str,
     context_label: str,
@@ -165,25 +225,20 @@ def create_subtitles_and_optional_visualizer(
     if entry_subtitles_enabled and media_file.exists():
         try:
             subtitle_settings = dict(scrubber_cfg)
+            subtitle_settings.setdefault("subtitle_language", "en")
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
-            subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
+
+            subtitle_path = _find_existing_english_subtitle(media_file)
+            if subtitle_path is None:
+                subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
             if subtitle_path is None:
                 return None
             logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)
-
-            if entry_visualize_enabled:
-                try:
-                    visualizer_path = create_audio_visualizer_video(media_file, subtitle_path)
-                    logger.info("Generated %s visualizer: %s", context_label, visualizer_path.name)
-                except Exception as viz_exc:
-                    logger.warning("Visualizer generation failed for %s: %s", media_file, viz_exc)
-
             return subtitle_path
         except Exception as subtitle_exc:
             logger.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
             return None
 
-    if entry_visualize_enabled:
-        logger.info("Visualizer skipped for %s because subtitles are disabled", context_name)
+    logger.info("Subtitles skipped for %s because subtitles are disabled", context_name)
     return None
