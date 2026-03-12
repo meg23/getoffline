@@ -89,12 +89,12 @@ for entry in config.get("youtube", []):
                 }],
             })
 
-        log.info(f"▶️  Downloading YouTube ({download_type}): {name}")
+        log.info(f"Downloading YouTube ({download_type}): {name}")
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
     except Exception as e:
-        log.error(f"❌ Failed to download YouTube: {entry}: {e}")
+        log.error(f"Failed to download YouTube: {entry}: {e}")
 
 for entry in config.get("podcasts", []):
     try:
@@ -130,7 +130,7 @@ for entry in config.get("podcasts", []):
                 "outtmpl": out_path,
             }
 
-            log.info(f"🎙️ Downloading podcast: {name} – {ep_title}")
+            log.info(f"Downloading podcast: {name} – {ep_title}")
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([mp3_url])
 
@@ -140,13 +140,13 @@ for entry in config.get("podcasts", []):
             downloaded_items.append(f"Podcast: {name} – {ep_title}")
 
     except Exception as e:
-        log.error(f"❌ Failed to process podcast {entry}: {e}")
+        log.error(f"Failed to process podcast {entry}: {e}")
 
 # Print summary of what was actually downloaded
 if downloaded_items:
-    print("\n✅ Download Summary:")
+    print("\nDownload Summary:")
     for item in downloaded_items:
         print(f" - {item}")
 else:
-    print("\n📭 Nothing new was downloaded.")
+    print("\nNothing new was downloaded.")
 
