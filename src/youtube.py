@@ -94,7 +94,7 @@ def _build_youtube_payload(
     download_status: str,
     error_message: Optional[str] = None,
 ) -> Dict:
-    path = Path(output_file) if output_file else None
+    path = Path(output_file).expanduser().resolve() if output_file else None
     file_size = path.stat().st_size if path and path.exists() else None
     resolution = None
     width, height = info.get("width"), info.get("height")
@@ -174,6 +174,8 @@ def download_youtube_items(config, downloaded_items):
             should_generate_subtitles = entry_subtitles_enabled and download_type == "audio"
 
             extracted_audio_files: List[Path] = []
+            postprocessed_file_by_key: Dict[str, Path] = {}
+            normalized_path_map: Dict[Path, Path] = {}
             completed_download_ids = set()
             download_progress_markers = {}
             known_download_titles = {}
@@ -182,6 +184,27 @@ def download_youtube_items(config, downloaded_items):
             subtitle_or_aux_exts = {
                 ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
             }
+
+            def _normalized_stem(value: str) -> str:
+                normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
+                return normalized or "item"
+
+            def _resolve_postprocessed_audio_path(candidate_path: Path) -> Path:
+                expected_ext = f".{defaults['audio_format']}"
+                if candidate_path.suffix.lower() == expected_ext and candidate_path.exists():
+                    return candidate_path
+
+                converted = candidate_path.with_suffix(expected_ext)
+                if converted.exists():
+                    return converted
+
+                target_stem = _normalized_stem(candidate_path.stem)
+                siblings = sorted(candidate_path.parent.glob(f"*{expected_ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
+                for sibling in siblings:
+                    if _normalized_stem(sibling.stem) == target_stem:
+                        return sibling
+
+                return converted
 
             def get_download_key(info: dict, fallback: str) -> str:
                 return (
@@ -290,15 +313,19 @@ def download_youtube_items(config, downloaded_items):
                 if not candidate:
                     return
 
+                download_key = get_download_key(info, str(candidate))
+
                 path = Path(candidate)
                 expected_ext = f".{defaults['audio_format']}"
 
                 if path.suffix.lower() != expected_ext and postprocessor == "FFmpegExtractAudio":
-                    path = path.with_suffix(expected_ext)
+                    path = _resolve_postprocessed_audio_path(path)
                 elif path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
                     path = path.with_suffix(expected_ext)
 
-                extracted_audio_files.append(path.resolve())
+                resolved_path = path.resolve()
+                extracted_audio_files.append(resolved_path)
+                postprocessed_file_by_key[download_key] = resolved_path
                 if pp_status:
                     log.info("Post-process %s for %s via %s: %s", pp_status, name, postprocessor, path.name)
                 else:
@@ -360,7 +387,9 @@ def download_youtube_items(config, downloaded_items):
                 for audio_path in new_audio_files:
                     if not audio_path.exists():
                         continue
+                    original_audio = audio_path.resolve()
                     normalized_audio = normalize_media_filename(audio_path)
+                    normalized_path_map[original_audio] = normalized_audio.resolve()
                     if normalized_audio != audio_path:
                         log.info("Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
                     normalized_audio_files.append(normalized_audio)
@@ -409,15 +438,26 @@ def download_youtube_items(config, downloaded_items):
             else:
                 log.info("Subtitles skipped for %s (type=%s)", name, download_type)
 
-            for record in finished_download_info.values():
+            for download_key, record in finished_download_info.items():
                 info = record["info"]
                 out_path = record["output_file"]
                 resolved_file = out_path
                 out_candidate = Path(out_path)
-                if download_type == "audio" and out_candidate.suffix.lower() != f".{defaults['audio_format']}":
-                    audio_candidate = out_candidate.with_suffix(f".{defaults['audio_format']}")
-                    if audio_candidate.exists():
-                        resolved_file = str(audio_candidate)
+
+                if download_type == "audio":
+                    postprocessed_path = postprocessed_file_by_key.get(download_key)
+                    if postprocessed_path and postprocessed_path.exists():
+                        resolved_file = str(postprocessed_path)
+                    else:
+                        audio_candidate = _resolve_postprocessed_audio_path(out_candidate)
+                        if audio_candidate.exists():
+                            resolved_file = str(audio_candidate)
+
+                resolved_path = Path(resolved_file).expanduser().resolve()
+                remapped_path = normalized_path_map.get(resolved_path)
+                if remapped_path is not None:
+                    resolved_file = str(remapped_path)
+
                 upsert_download(
                     db_path,
                     _build_youtube_payload(
