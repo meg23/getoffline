@@ -400,9 +400,14 @@ def _render_index(
       display: grid;
       gap: .35rem;
     }}
-    .status-line {{ color: var(--muted); margin: 0; }}
-    .status-line strong {{ color: var(--text); }}
-    .toolbar {{ display: flex; justify-content: flex-start; margin-bottom: .35rem; }}
+    .toolbar {{ margin-bottom: .35rem; }}
+    .toolbar-actions {{
+      display: flex;
+      gap: .6rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }}
+    .toolbar-form {{ margin: 0; }}
 
     table {{
       width: 100%;
@@ -461,6 +466,8 @@ def _render_index(
       display: inline-block;
       color: #fff;
       background: transparent;
+      min-width: 180px;
+      text-align: center;
     }}
     .btn-link {{ background: var(--accent); }}
     .btn-link:hover {{ background: var(--accent-2); }}
@@ -468,6 +475,18 @@ def _render_index(
     .btn-subtle:hover {{ background: #eef3ff; }}
     .btn-update {{ background: linear-gradient(180deg, #4f7fff, #3f6ff1); }}
     .btn-update:disabled {{ opacity: .5; cursor: not-allowed; }}
+    .btn-icon {{
+      min-width: 2.35rem;
+      width: 2.35rem;
+      height: 2.35rem;
+      padding: 0;
+      border-radius: 999px;
+      font-size: 1.1rem;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }}
 
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
@@ -511,19 +530,15 @@ def _render_index(
     </div>
 
     <div class="panel">
-      <form method="post" action="/update" class="toolbar">
-        <button class="btn btn-update" type="submit" {button_disabled}>Update Downloads</button>
+      <div class="toolbar toolbar-actions">
+      <form method="post" action="/update" class="toolbar-form">
+        <button class="btn btn-update btn-icon" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>↻</button>
       </form>
-      <form method="post" action="/mark-all-played" class="toolbar">
+      <form method="post" action="/mark-all-played" class="toolbar-form">
         <button class="btn btn-subtle" type="submit" {'disabled' if unplayed_items == 0 else ''}>Mark all as played</button>
       </form>
-      <div class="toolbar">
         <a class="btn btn-subtle" href="{toggle_href}">{toggle_label}</a>
       </div>
-      <p class="status-line">Status: <strong>{html.escape(status['last_result'])}</strong> (running: {html.escape(status['is_running'])})</p>
-      <p class="status-line">Last started: {html.escape(status['last_started_at'])} | Last finished: {html.escape(status['last_finished_at'])}</p>
-      <p class="status-line">Items downloaded in last run: {html.escape(status['last_items_count'])}</p>
-      <p class="status-line">Last error: {html.escape(status['last_error'])}</p>
     </div>
 
     <table>

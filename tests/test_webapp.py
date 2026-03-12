@@ -58,7 +58,7 @@ class WebAppHelpersTests(unittest.TestCase):
                     "last_items_count": "0",
                 },
             )
-            self.assertIn("Update Downloads", body)
+            self.assertIn('aria-label="Sync downloads"', body)
             self.assertIn("action=\"/update\"", body)
             self.assertIn("Mark all as played", body)
             self.assertIn("Show played", body)
