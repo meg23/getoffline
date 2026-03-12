@@ -8,7 +8,7 @@ from yt_dlp import YoutubeDL
 
 from logger import get_logger
 from scrubbing import scrub_media_file
-from subtitles import create_subtitles
+from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, normalize_media_filename, sanitize
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
@@ -364,6 +364,8 @@ def download_youtube_items(config, downloaded_items):
                     )
             else:
                 log.info("Ad scrub skipped for %s (type=%s)", name, download_type)
+
+            cleanup_subtitle_sidecars_for_folder(Path(folder))
 
         except Exception as e:
             log.error(f"Failed to download YouTube: {entry}: {e}")

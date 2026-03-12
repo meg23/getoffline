@@ -6,7 +6,7 @@ from yt_dlp import YoutubeDL
 
 from logger import get_logger
 from scrubbing import scrub_media_file
-from subtitles import create_subtitles
+from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, sanitize
 
 
@@ -108,6 +108,8 @@ def download_podcasts(config, downloaded_items):
                     f.write(mp3_url + "\n")
 
                 downloaded_items.append(f"Podcast: {name} – {ep_title}")
+
+            cleanup_subtitle_sidecars_for_folder(Path(folder))
 
         except Exception as e:
             log.error(f"Failed to process podcast {entry}: {e}")
