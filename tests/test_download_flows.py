@@ -171,5 +171,34 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
 
 
+class SubtitleFailureCachingTests(unittest.TestCase):
+    def test_known_empty_audio_transcription_failure_is_cached(self):
+        import subtitles
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "broken.mp3"
+            media.write_text("fake", encoding="utf-8")
+
+            settings = {"subtitle_model": "base"}
+            calls = {"count": 0}
+
+            def _boom(*args, **kwargs):
+                _ = args, kwargs
+                calls["count"] += 1
+                raise RuntimeError(
+                    "Transcription failed for broken.mp3 (base): cannot reshape tensor of 0 elements into shape [1, 0, 8, -1] because the unspecified dimension size -1 can be any value and is ambiguous"
+                )
+
+            with patch("subtitles.transcribe_with_whisper", side_effect=_boom):
+                first = subtitles.generate_whisper_subtitles(media, settings)
+                second = subtitles.generate_whisper_subtitles(media, settings)
+
+            self.assertIsNone(first)
+            self.assertIsNone(second)
+            self.assertEqual(calls["count"], 1)
+            marker = media.with_suffix(".srt.failed")
+            self.assertTrue(marker.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

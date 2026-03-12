@@ -76,10 +76,18 @@ def _shift_srt_timestamps(srt_path: Path, offset_seconds: float):
 def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: Path = None):
     input_file = Path(input_file)
     subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
+    failed_marker_path = subtitle_path.with_suffix(f"{subtitle_path.suffix}.failed")
 
     if subtitle_path.exists() and subtitle_path.stat().st_mtime >= input_file.stat().st_mtime:
         log.info("Subtitle generation skipped (already up to date): %s", subtitle_path.name)
         return subtitle_path
+
+    if failed_marker_path.exists() and failed_marker_path.stat().st_mtime >= input_file.stat().st_mtime:
+        log.info(
+            "Subtitle generation skipped after previous known Whisper failure: %s",
+            failed_marker_path.name,
+        )
+        return None
 
     try:
         from whisper.utils import get_writer
@@ -88,7 +96,23 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     log.info("Generating subtitles: %s (%s)", input_file.name, model_name)
-    result = transcribe_with_whisper(input_file, model_name, "subtitle-generation")
+    try:
+        result = transcribe_with_whisper(input_file, model_name, "subtitle-generation")
+    except Exception as exc:
+        error_message = str(exc)
+        if "cannot reshape tensor of 0 elements" in error_message:
+            failed_marker_path.parent.mkdir(parents=True, exist_ok=True)
+            failed_marker_path.write_text(
+                f"Known Whisper empty-audio failure for {input_file.name}\n{error_message}\n",
+                encoding="utf-8",
+            )
+            log.warning(
+                "Skipping subtitles for %s due to known Whisper empty-audio failure; marker created: %s",
+                input_file,
+                failed_marker_path,
+            )
+            return None
+        raise
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
@@ -109,6 +133,9 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
 
     if not subtitle_path.exists():
         raise RuntimeError(f"Subtitle output file was not created: {subtitle_path}")
+
+    if failed_marker_path.exists():
+        failed_marker_path.unlink()
 
     subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
@@ -141,6 +168,8 @@ def create_subtitles_and_optional_visualizer(
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
             subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
+            if subtitle_path is None:
+                return None
             logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)
 
             if entry_visualize_enabled:
