@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from database import mark_download_played
+
 
 MEDIA_EXTENSIONS = {
     ".mp3",
@@ -35,6 +37,7 @@ class MediaRow:
     file_ext: Optional[str]
     file_size_bytes: Optional[int]
     upload_date: Optional[str]
+    played: bool
 
 
 @dataclass
@@ -104,7 +107,7 @@ def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
         rows = conn.execute(
             """
             SELECT id, source_type, source_name, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0)
             FROM downloads
             WHERE download_status = 'downloaded'
             ORDER BY last_seen_at DESC, id DESC
@@ -121,6 +124,7 @@ def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
             file_ext=row[5],
             file_size_bytes=row[6],
             upload_date=row[7],
+            played=bool(row[8]),
         )
         for row in rows
     ]
@@ -192,6 +196,9 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
         source = html.escape(f"{row.source_type}: {row.source_name}")
         size = html.escape(_human_size(row.file_size_bytes))
         ext = html.escape((row.file_ext or path.suffix.lstrip(".")) or "?")
+        status_label = "played" if row.played else "new"
+        mark_action = "unplay" if row.played else "played"
+        mark_label = "Mark unplayed" if row.played else "Mark played"
         cards.append(
             f"""
             <tr>
@@ -199,18 +206,25 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
                 <td>{source}</td>
                 <td>{ext}</td>
                 <td>{size}</td>
-                <td><a href=\"/play?id={row.row_id}\">Play</a></td>
+                <td>{status_label}</td>
+                <td>
+                  <a href="/play?id={row.row_id}">Play</a>
+                  <form method="post" action="/mark-{mark_action}" style="display:inline;margin-left:.6rem;">
+                    <input type="hidden" name="id" value="{row.row_id}" />
+                    <button type="submit">{mark_label}</button>
+                  </form>
+                </td>
             </tr>
             """
         )
 
-    table_rows = "\n".join(cards) if cards else "<tr><td colspan='5'>No playable media found yet.</td></tr>"
+    table_rows = "\n".join(cards) if cards else "<tr><td colspan='6'>No playable media found yet.</td></tr>"
     button_disabled = "disabled" if status["is_running"] == "yes" else ""
 
     return f"""<!doctype html>
 <html>
 <head>
-  <meta charset=\"utf-8\" />
+  <meta charset="utf-8" />
   <title>GetOffline Media Library</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 2rem; }}
@@ -218,7 +232,7 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
     td, th {{ border-bottom: 1px solid #ddd; padding: .5rem; text-align: left; }}
     a {{ color: #0a58ca; text-decoration: none; }}
     .panel {{ margin: 1rem 0; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; }}
-    button {{ padding: .6rem 1rem; font-size: 1rem; }}
+    button {{ padding: .35rem .6rem; font-size: .95rem; }}
   </style>
 </head>
 <body>
@@ -234,7 +248,7 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
     <p>Last error: {html.escape(status['last_error'])}</p>
   </div>
   <table>
-    <thead><tr><th>Title</th><th>Source</th><th>Type</th><th>Size</th><th>Action</th></tr></thead>
+    <thead><tr><th>Title</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
     <tbody>{table_rows}</tbody>
   </table>
 </body>
@@ -399,6 +413,22 @@ def make_handler(state: AppState):
 
             if path == "/update":
                 trigger_background_update(state)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path in {"/mark-played", "/mark-unplay"}:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                raw_id = (form.get("id") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+
+                played_value = path == "/mark-played"
+                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()

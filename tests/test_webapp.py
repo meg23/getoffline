@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from database import init_database, upsert_download  # noqa: E402
+from database import init_database, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
     _parse_range_header,
@@ -88,6 +88,42 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(rows[0].title, "Episode 1")
             self.assertEqual(Path(rows[0].file_path), media)
 
+
+
+    def test_mark_download_played_updates_row_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "TestPodcast",
+                    "item_uid": "uid-2",
+                    "item_url": "https://cdn.example.com/episode2.mp3",
+                    "media_url": "https://cdn.example.com/episode2.mp3",
+                    "title": "Episode 2",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "subtitle_enabled": True,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"title": "Episode 2"},
+                },
+            )
+
+            before = fetch_downloaded_media_rows(db_path)
+            self.assertFalse(before[0].played)
+
+            updated = mark_download_played(str(db_path), before[0].row_id, played=True)
+            self.assertTrue(updated)
+
+            after = fetch_downloaded_media_rows(db_path)
+            self.assertTrue(after[0].played)
 
 class WebAppUpdateThreadTests(unittest.TestCase):
     def test_trigger_background_update_runs_downloads_once(self):

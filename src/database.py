@@ -95,10 +95,24 @@ def _init_database_sqlite(db_path: str) -> None:
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 completed_at TEXT,
+                played INTEGER NOT NULL DEFAULT 0,
+                played_at TEXT,
                 UNIQUE(source_type, source_name, item_uid)
             )
             """
         )
+        conn.commit()
+
+    _ensure_downloads_columns_sqlite(db_path)
+
+
+def _ensure_downloads_columns_sqlite(db_path: str) -> None:
+    with sqlite3.connect(db_path) as conn:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(downloads)").fetchall()}
+        if "played" not in existing:
+            conn.execute("ALTER TABLE downloads ADD COLUMN played INTEGER NOT NULL DEFAULT 0")
+        if "played_at" not in existing:
+            conn.execute("ALTER TABLE downloads ADD COLUMN played_at TEXT")
         conn.commit()
 
 
@@ -152,6 +166,8 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "first_seen_at": now,
         "last_seen_at": now,
         "completed_at": now if payload.get("download_status", "downloaded") == "downloaded" else None,
+        "played": 1 if payload.get("played", False) else 0,
+        "played_at": payload.get("played_at"),
     }
 
     with sqlite3.connect(db_path) as conn:
@@ -163,14 +179,14 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 upload_date, duration_seconds, file_path, file_ext, file_size_bytes, expected_bytes,
                 format_id, format_note, audio_codec, video_codec, resolution, fps,
                 subtitle_enabled, subtitle_path, download_status, error_message, raw_metadata_json,
-                first_seen_at, last_seen_at, completed_at
+                first_seen_at, last_seen_at, completed_at, played, played_at
             ) VALUES (
                 :source_type, :source_name, :source_url, :item_uid, :item_id, :item_url, :media_url,
                 :title, :description, :uploader, :channel, :extractor, :playlist_id, :playlist_title,
                 :upload_date, :duration_seconds, :file_path, :file_ext, :file_size_bytes, :expected_bytes,
                 :format_id, :format_note, :audio_codec, :video_codec, :resolution, :fps,
                 :subtitle_enabled, :subtitle_path, :download_status, :error_message, :raw_metadata_json,
-                :first_seen_at, :last_seen_at, :completed_at
+                :first_seen_at, :last_seen_at, :completed_at, :played, :played_at
             )
             ON CONFLICT(source_type, source_name, item_uid) DO UPDATE SET
                 source_url=excluded.source_url,
@@ -202,7 +218,9 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 error_message=excluded.error_message,
                 raw_metadata_json=excluded.raw_metadata_json,
                 last_seen_at=excluded.last_seen_at,
-                completed_at=excluded.completed_at
+                completed_at=excluded.completed_at,
+                played=COALESCE(downloads.played, 0),
+                played_at=downloads.played_at
             """,
             values,
         )
@@ -253,6 +271,8 @@ if HAS_SQLALCHEMY:
         first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
         last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
         completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+        played: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+        played_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
     @lru_cache(maxsize=4)
@@ -263,6 +283,7 @@ if HAS_SQLALCHEMY:
 
     def init_database(db_path: str) -> None:
         Base.metadata.create_all(_engine_for(db_path))
+        _ensure_downloads_columns_sqlite(db_path)
 
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
@@ -309,6 +330,19 @@ if HAS_SQLALCHEMY:
                 existing.completed_at = now
             session.commit()
 
+    def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
+        now = _utcnow() if played else None
+        with Session(_engine_for(db_path)) as session:
+            record = session.get(DownloadRecord, int(row_id))
+            if record is None:
+                return False
+            record.played = bool(played)
+            record.played_at = now
+            record.last_seen_at = _utcnow()
+            session.commit()
+            return True
+
+
 else:
     def init_database(db_path: str) -> None:
         _init_database_sqlite(db_path)
@@ -318,3 +352,13 @@ else:
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
         _upsert_download_sqlite(db_path, payload)
+
+    def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
+        now = _utcnow().isoformat() if played else None
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET played = ?, played_at = ?, last_seen_at = ? WHERE id = ?",
+                (1 if played else 0, now, _utcnow().isoformat(), int(row_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
