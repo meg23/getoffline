@@ -150,6 +150,41 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
 
 
+
+    def test_downloads_are_tracked_in_sqlite_database(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config_from_repo_config(tmpdir)
+            config["defaults"]["database_path"] = os.path.join(tmpdir, "downloads.sqlite3")
+
+            mp3_url = "https://cdn.example.com/episode-1.mp3"
+            podcast_title = "Episode 1: A Normal Podcast Title"
+            fake_feed = SimpleNamespace(
+                entries=[SimpleNamespace(title=podcast_title, enclosures=[SimpleNamespace(href=mp3_url)])]
+            )
+
+            downloaded_items = []
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+                youtube.download_youtube_items(config, downloaded_items)
+                podcasts.download_podcasts(config, downloaded_items)
+
+            with sqlite3.connect(config["defaults"]["database_path"]) as conn:
+                rows = conn.execute(
+                    "SELECT source_type, source_name, title, file_path, raw_metadata_json FROM downloads ORDER BY source_type"
+                ).fetchall()
+
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0][0], "podcast")
+            self.assertEqual(rows[1][0], "youtube")
+            self.assertEqual(rows[0][2], podcast_title)
+            self.assertTrue(rows[0][3])
+            self.assertIn(podcasts.sanitize(podcast_title), rows[0][3])
+            self.assertIn("title", rows[0][4])
+            self.assertIn("title", rows[1][4])
+
 class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
