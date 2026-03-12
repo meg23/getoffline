@@ -114,14 +114,6 @@ youtube:
     type: audio
     subtitles: true
 
-  - name: PigeonThief
-    url: https://www.youtube.com/@itspigeonthief
-    type: video
-    subtitles: false
-    
-
-    
-
 podcasts:
 
   - name: StrictlyAnonymous
