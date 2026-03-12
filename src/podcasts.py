@@ -6,7 +6,7 @@ from yt_dlp import YoutubeDL
 
 from logger import get_logger
 from scrubbing import scrub_media_file
-from subtitles import create_subtitles_and_optional_visualizer
+from subtitles import create_subtitles
 from utils import ensure_dir, sanitize
 
 
@@ -21,6 +21,7 @@ class _YoutubeDlQuietLogger:
         if msg:
             log.error("%s", msg)
 
+
 log = get_logger("podcast")
 
 
@@ -34,7 +35,6 @@ def download_podcasts(config, downloaded_items):
             url = entry["url"]
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", True)
-            entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)
             archive = os.path.join(folder, f"{name}_downloaded.txt")
@@ -91,12 +91,11 @@ def download_podcasts(config, downloaded_items):
                         context_label="podcast",
                     )
 
-                subtitle_path = create_subtitles_and_optional_visualizer(
+                subtitle_path = create_subtitles(
                     media_file=playback_audio,
                     scrubber_cfg=scrubber_cfg,
                     subtitle_offset_seconds=subtitle_offset_seconds,
                     entry_subtitles_enabled=entry_subtitles_enabled,
-                    entry_visualize_enabled=entry_visualize_enabled,
                     logger=log,
                     context_name=f"podcast {name}",
                     context_label="podcast",

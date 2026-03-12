@@ -68,14 +68,6 @@ def _fake_subtitle_generator(media_path, subtitle_settings):
     return srt_path
 
 
-def _fake_visualizer_generator(media_path, subtitle_path):
-    _ = subtitle_path
-    media_path = Path(media_path)
-    viz_path = media_path.with_suffix(".visualizer.mp4")
-    viz_path.write_text("fake video", encoding="utf-8")
-    return viz_path
-
-
 def _build_sample_config_from_repo_config(output_root):
     with open("config.yaml", encoding="utf-8") as f:
         source = yaml.safe_load(f)
@@ -83,15 +75,9 @@ def _build_sample_config_from_repo_config(output_root):
     youtube_entry = next(
         item
         for item in source.get("youtube", [])
-        if item.get("type", "audio").lower() == "audio"
-        and item.get("subtitles")
-        and item.get("visualize")
+        if item.get("type", "audio").lower() == "audio" and item.get("subtitles")
     )
-    podcast_entry = next(
-        item
-        for item in source.get("podcasts", [])
-        if item.get("subtitles") and item.get("visualize")
-    )
+    podcast_entry = next(item for item in source.get("podcasts", []) if item.get("subtitles"))
 
     return {
         "defaults": {
@@ -110,14 +96,12 @@ def _build_sample_config_from_repo_config(output_root):
             "type": "audio",
             "scrub": False,
             "subtitles": True,
-            "visualize": True,
         }],
         "podcasts": [{
             "name": podcast_entry["name"],
             "url": podcast_entry["url"],
             "scrub": False,
             "subtitles": True,
-            "visualize": True,
         }],
     }
 
@@ -126,7 +110,7 @@ class DownloadFlowTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
-    def test_sample_config_single_youtube_and_podcast_with_subtitles_and_visualizer(self):
+    def test_sample_config_single_youtube_and_podcast_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config_from_repo_config(tmpdir)
 
@@ -143,9 +127,7 @@ class DownloadFlowTests(unittest.TestCase):
             downloaded_items = []
             with patch("youtube.YoutubeDL", FakeYoutubeDL), patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
                 "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator), patch(
-                "subtitles.create_audio_visualizer_video", side_effect=_fake_visualizer_generator
-            ):
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -162,9 +144,9 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertIsNotNone(podcast_mp3)
 
             self.assertTrue(youtube_mp3.with_suffix(".srt").exists())
-            self.assertTrue(youtube_mp3.with_suffix(".visualizer.mp4").exists())
             self.assertTrue(podcast_mp3.with_suffix(".srt").exists())
-            self.assertTrue(podcast_mp3.with_suffix(".visualizer.mp4").exists())
+            self.assertFalse(any(youtube_folder.glob("*.visualizer.mp4")))
+            self.assertFalse(any(podcast_folder.glob("*.visualizer.mp4")))
 
             self.assertTrue(any(item.startswith("YouTube: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Podcast: ") for item in downloaded_items))
