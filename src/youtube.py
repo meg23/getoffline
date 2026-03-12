@@ -171,6 +171,7 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
+            should_generate_subtitles = entry_subtitles_enabled and download_type == "audio"
 
             extracted_audio_files: List[Path] = []
             completed_download_ids = set()
@@ -317,10 +318,6 @@ def download_youtube_items(config, downloaded_items):
                 "no_warnings": True,
                 "noprogress": True,
                 "logger": _YoutubeDlQuietLogger(),
-                "writesubtitles": True,
-                "writeautomaticsub": True,
-                "subtitleslangs": ["en", "en-US", "en.*"],
-                "subtitlesformat": "srt/best",
             }
 
             if download_type == "video":
@@ -388,7 +385,7 @@ def download_youtube_items(config, downloaded_items):
                             _process_audio_media_file(
                                 mp3,
                                 name,
-                                entry_subtitles_enabled,
+                                should_generate_subtitles,
                                 subtitle_offset_seconds,
                             )
                         )
@@ -399,7 +396,7 @@ def download_youtube_items(config, downloaded_items):
                                 _process_audio_media_file,
                                 mp3,
                                 name,
-                                entry_subtitles_enabled,
+                                should_generate_subtitles,
                                 subtitle_offset_seconds,
                             )
                             for mp3 in new_audio_files
@@ -409,18 +406,6 @@ def download_youtube_items(config, downloaded_items):
                                 downloaded_items.extend(future.result())
                             except Exception as processing_exc:
                                 log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
-            elif entry_subtitles_enabled:
-                for media_file in delta_video:
-                    if not media_file.exists():
-                        continue
-                    create_subtitles(
-                        media_file=media_file,
-                        subtitle_offset_seconds=subtitle_offset_seconds,
-                        entry_subtitles_enabled=entry_subtitles_enabled,
-                        logger=log,
-                        context_name=name,
-                        context_label="YouTube",
-                    )
             else:
                 log.info("Subtitles skipped for %s (type=%s)", name, download_type)
 
@@ -440,7 +425,7 @@ def download_youtube_items(config, downloaded_items):
                         source_url=url,
                         info=info,
                         output_file=resolved_file,
-                        subtitle_enabled=entry_subtitles_enabled,
+                        subtitle_enabled=should_generate_subtitles,
                         download_status="downloaded",
                     ),
                 )

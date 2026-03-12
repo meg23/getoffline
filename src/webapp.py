@@ -553,6 +553,7 @@ def _render_index(
 def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_subtitles: bool) -> str:
     title = html.escape(row.title or media_path.name)
     media_kind = "video" if media_path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"} else "audio"
+    has_subtitles = has_subtitles and media_kind == "audio"
     source = html.escape(f"{row.source_type}: {row.source_name}")
 
     resume_value = max(0.0, float(resume_seconds or 0.0))
