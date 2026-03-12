@@ -61,6 +61,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("Update Downloads", body)
             self.assertIn("action=\"/update\"", body)
             self.assertIn("Mark all as played", body)
+            self.assertIn("Show played", body)
 
 
 class WebAppDatabaseRowsTests(unittest.TestCase):
@@ -244,6 +245,52 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
 
             self.assertIn("New Item", body)
             self.assertNotIn("Played Item", body)
+
+    def test_index_can_show_played_items_with_toggle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row_new = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="New Item",
+                file_path=str(root / "new.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+            )
+            row_played = SimpleNamespace(
+                row_id=2,
+                source_type="podcast",
+                source_name="ShowB",
+                title="Played Item",
+                file_path=str(root / "played.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=True,
+            )
+            (root / "new.mp3").write_text("x", encoding="utf-8")
+            (root / "played.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row_new, row_played],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+                show_played=True,
+            )
+
+            self.assertIn("Played Item", body)
+            self.assertIn("Hide played", body)
 
     def test_player_page_includes_resume_progress_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:

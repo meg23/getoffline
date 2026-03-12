@@ -276,7 +276,13 @@ def trigger_background_update(state: AppState) -> bool:
     return True
 
 
-def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, status: Dict[str, str]) -> str:
+def _render_index(
+    rows: List[MediaRow],
+    output_root: Path,
+    database_path: Path,
+    status: Dict[str, str],
+    show_played: bool = False,
+) -> str:
     cards = []
     visible_rows = []
     for row in rows:
@@ -288,7 +294,7 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
             continue
 
         visible_rows.append(row)
-        if row.played:
+        if row.played and not show_played:
             continue
         title = html.escape(row.title or path.name)
         source = html.escape(f"{row.source_type}: {row.source_name}")
@@ -322,6 +328,9 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
     unplayed_items = max(total_items - played_items, 0)
+    toggle_show_played = not show_played
+    toggle_href = "?show_played=1" if toggle_show_played else "/"
+    toggle_label = "Show played" if toggle_show_played else "Hide played"
 
     return f"""<!doctype html>
 <html>
@@ -508,6 +517,9 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
       <form method="post" action="/mark-all-played" class="toolbar">
         <button class="btn btn-subtle" type="submit" {'disabled' if unplayed_items == 0 else ''}>Mark all as played</button>
       </form>
+      <div class="toolbar">
+        <a class="btn btn-subtle" href="{toggle_href}">{toggle_label}</a>
+      </div>
       <p class="status-line">Status: <strong>{html.escape(status['last_result'])}</strong> (running: {html.escape(status['is_running'])})</p>
       <p class="status-line">Last started: {html.escape(status['last_started_at'])} | Last finished: {html.escape(status['last_finished_at'])}</p>
       <p class="status-line">Items downloaded in last run: {html.escape(status['last_items_count'])}</p>
@@ -831,7 +843,8 @@ def make_handler(state: AppState):
 
             if path == "/":
                 status = _snapshot_status(state.update_status)
-                body = _render_index(rows, state.output_root, state.database_path, status)
+                show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
+                body = _render_index(rows, state.output_root, state.database_path, status, show_played=show_played)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
