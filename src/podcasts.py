@@ -105,13 +105,19 @@ def download_podcasts(config, downloaded_items):
                     continue
 
                 mp3_url = ep.enclosures[0].href
-                ep_title = sanitize(ep.title)
-                item_uid = build_item_uid(item_id=None, item_url=mp3_url, media_url=mp3_url, title=ep_title)
+                episode_title = str(getattr(ep, "title", "")).strip() or "Untitled Episode"
+                safe_episode_title = sanitize(episode_title)
+                item_uid = build_item_uid(
+                    item_id=None,
+                    item_url=mp3_url,
+                    media_url=mp3_url,
+                    title=episode_title,
+                )
 
                 if is_downloaded(db_path, "podcast", name, item_uid):
                     continue
 
-                out_path = f"{folder}/{ep_title}.%(ext)s"
+                out_path = f"{folder}/{safe_episode_title}.%(ext)s"
 
                 ydl_opts = {
                     "extract_audio": True,
@@ -126,7 +132,7 @@ def download_podcasts(config, downloaded_items):
                     "logger": _YoutubeDlQuietLogger(),
                 }
 
-                log.info(f"Downloading podcast: {name} – {ep_title}")
+                log.info(f"Downloading podcast: {name} – {episode_title}")
                 try:
                     with YoutubeDL(ydl_opts) as ydl:
                         ydl.download([mp3_url])
@@ -138,7 +144,7 @@ def download_podcasts(config, downloaded_items):
                             source_name=name,
                             source_url=url,
                             media_url=mp3_url,
-                            title=ep_title,
+                            title=episode_title,
                             description=getattr(ep, "summary", None),
                             file_path=None,
                             subtitle_enabled=entry_subtitles_enabled,
@@ -149,7 +155,7 @@ def download_podcasts(config, downloaded_items):
                     )
                     raise
 
-                final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
+                final_audio = Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}"
                 subtitle_path = create_subtitles(
                     media_file=final_audio,
                     subtitle_offset_seconds=subtitle_offset_seconds,
@@ -168,7 +174,7 @@ def download_podcasts(config, downloaded_items):
                         source_name=name,
                         source_url=url,
                         media_url=mp3_url,
-                        title=ep_title,
+                        title=episode_title,
                         description=getattr(ep, "summary", None),
                         file_path=final_audio,
                         subtitle_enabled=entry_subtitles_enabled,
@@ -177,7 +183,7 @@ def download_podcasts(config, downloaded_items):
                     ),
                 )
 
-                downloaded_items.append(f"Podcast: {name} – {ep_title}")
+                downloaded_items.append(f"Podcast: {name} – {episode_title}")
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
