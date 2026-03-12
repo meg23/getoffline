@@ -485,7 +485,8 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
       const startSeconds = {resume_value:.6f};
       const player = document.getElementById('player');
       const resumeLabel = document.getElementById('resume-label');
-      let lastSentSeconds = -1;
+      let lastSentSeconds = -9999;
+      let hasAppliedInitialSeek = false;
 
       if (!player) return;
 
@@ -494,21 +495,15 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
         resumeLabel.textContent = Number(seconds || 0).toFixed(1) + 's';
       }}
 
-      function sendProgress(seconds) {{
+      function postProgress(seconds, force) {{
         const safe = Math.max(0, Number(seconds || 0));
-        if (Math.abs(safe - lastSentSeconds) < 1.0) return;
+        if (!force && Math.abs(safe - lastSentSeconds) < 1.0) return;
         lastSentSeconds = safe;
         updateLabel(safe);
 
         const body = new URLSearchParams();
         body.set('id', String(rowId));
         body.set('position_seconds', safe.toFixed(3));
-
-        if (navigator.sendBeacon) {{
-          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
-          navigator.sendBeacon('/progress', blob);
-          return;
-        }}
 
         fetch('/progress', {{
           method: 'POST',
@@ -518,31 +513,33 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
         }}).catch(() => {{}});
       }}
 
-      player.addEventListener('loadedmetadata', () => {{
-        if (startSeconds > 0 && Number.isFinite(player.duration) && startSeconds < player.duration - 1) {{
-          player.currentTime = startSeconds;
-        }} else if (startSeconds > 0) {{
-          player.currentTime = startSeconds;
-        }}
-        updateLabel(player.currentTime || startSeconds || 0);
+      function applyInitialSeek() {{
+        if (hasAppliedInitialSeek || startSeconds <= 0) return;
+        const target = Number.isFinite(player.duration) && player.duration > 1
+          ? Math.min(startSeconds, Math.max(player.duration - 1, 0))
+          : startSeconds;
+        try {{
+          player.currentTime = target;
+          hasAppliedInitialSeek = true;
+          updateLabel(target);
+        }} catch (_) {{}}
+      }}
+
+      player.addEventListener('loadedmetadata', applyInitialSeek);
+      player.addEventListener('canplay', applyInitialSeek);
+      player.addEventListener('playing', applyInitialSeek);
+
+      player.addEventListener('timeupdate', () => {{
+        if (!player.paused) postProgress(player.currentTime, false);
       }});
-
-      player.addEventListener('pause', () => sendProgress(player.currentTime));
-      player.addEventListener('ended', () => sendProgress(0));
-
-      let intervalId = setInterval(() => {{
-        if (!player.paused) sendProgress(player.currentTime);
-      }}, 15000);
+      player.addEventListener('pause', () => postProgress(player.currentTime, true));
+      player.addEventListener('ended', () => postProgress(0, true));
 
       document.addEventListener('visibilitychange', () => {{
-        if (document.hidden) sendProgress(player.currentTime);
+        if (document.hidden) postProgress(player.currentTime, true);
       }});
-      window.addEventListener('beforeunload', () => sendProgress(player.currentTime));
-      window.addEventListener('pagehide', () => sendProgress(player.currentTime));
-
-      window.addEventListener('unload', () => {{
-        if (intervalId) clearInterval(intervalId);
-      }});
+      window.addEventListener('beforeunload', () => postProgress(player.currentTime, true));
+      window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
     }})();
   </script>
 </body>
