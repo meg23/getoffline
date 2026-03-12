@@ -77,6 +77,8 @@ python src/main.py serve --host 127.0.0.1 --port 8080
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
+Use the **Update Downloads** button in the web UI to trigger background downloads without running a second process.
+
 To build a standalone executable with Pex:
 
 ```bash

@@ -1,12 +1,13 @@
 import html
 import mimetypes
-import os
 import posixpath
 import sqlite3
-from dataclasses import dataclass
+import threading
+import time
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 
@@ -37,9 +38,31 @@ class MediaRow:
 
 
 @dataclass
+class UpdateStatus:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    is_running: bool = False
+    last_started_at: Optional[float] = None
+    last_finished_at: Optional[float] = None
+    last_result: str = "idle"
+    last_error: Optional[str] = None
+    last_items_count: int = 0
+
+
+@dataclass
 class AppState:
     output_root: Path
     database_path: Path
+    config: Dict
+    update_runner: Callable[[Dict, List[str]], None]
+    update_status: UpdateStatus = field(default_factory=UpdateStatus)
+
+
+def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
+    from podcasts import download_podcasts
+    from youtube import download_youtube_items
+
+    download_youtube_items(config, downloaded_items)
+    download_podcasts(config, downloaded_items)
 
 
 def _human_size(num_bytes: Optional[int]) -> str:
@@ -88,24 +111,74 @@ def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
             """
         ).fetchall()
 
-    result = []
-    for row in rows:
-        result.append(
-            MediaRow(
-                row_id=row[0],
-                source_type=row[1],
-                source_name=row[2],
-                title=row[3],
-                file_path=row[4],
-                file_ext=row[5],
-                file_size_bytes=row[6],
-                upload_date=row[7],
-            )
+    return [
+        MediaRow(
+            row_id=row[0],
+            source_type=row[1],
+            source_name=row[2],
+            title=row[3],
+            file_path=row[4],
+            file_ext=row[5],
+            file_size_bytes=row[6],
+            upload_date=row[7],
         )
-    return result
+        for row in rows
+    ]
 
 
-def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path) -> str:
+def _format_timestamp(ts: Optional[float]) -> str:
+    if ts is None:
+        return "never"
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def _snapshot_status(status: UpdateStatus) -> Dict[str, str]:
+    with status.lock:
+        return {
+            "is_running": "yes" if status.is_running else "no",
+            "last_started_at": _format_timestamp(status.last_started_at),
+            "last_finished_at": _format_timestamp(status.last_finished_at),
+            "last_result": status.last_result,
+            "last_error": status.last_error or "none",
+            "last_items_count": str(status.last_items_count),
+        }
+
+
+def _run_update_job(state: AppState) -> None:
+    downloaded_items: List[str] = []
+    with state.update_status.lock:
+        state.update_status.is_running = True
+        state.update_status.last_started_at = time.time()
+        state.update_status.last_result = "running"
+        state.update_status.last_error = None
+        state.update_status.last_items_count = 0
+
+    try:
+        state.update_runner(state.config, downloaded_items)
+        with state.update_status.lock:
+            state.update_status.last_result = "ok"
+            state.update_status.last_items_count = len(downloaded_items)
+    except Exception as exc:
+        with state.update_status.lock:
+            state.update_status.last_result = "failed"
+            state.update_status.last_error = str(exc)
+    finally:
+        with state.update_status.lock:
+            state.update_status.is_running = False
+            state.update_status.last_finished_at = time.time()
+
+
+def trigger_background_update(state: AppState) -> bool:
+    with state.update_status.lock:
+        if state.update_status.is_running:
+            return False
+
+    thread = threading.Thread(target=_run_update_job, args=(state,), daemon=True)
+    thread.start()
+    return True
+
+
+def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, status: Dict[str, str]) -> str:
     cards = []
     for row in rows:
         path = Path(row.file_path)
@@ -132,6 +205,8 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path) 
         )
 
     table_rows = "\n".join(cards) if cards else "<tr><td colspan='5'>No playable media found yet.</td></tr>"
+    button_disabled = "disabled" if status["is_running"] == "yes" else ""
+
     return f"""<!doctype html>
 <html>
 <head>
@@ -142,11 +217,22 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path) 
     table {{ width: 100%; border-collapse: collapse; }}
     td, th {{ border-bottom: 1px solid #ddd; padding: .5rem; text-align: left; }}
     a {{ color: #0a58ca; text-decoration: none; }}
+    .panel {{ margin: 1rem 0; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; }}
+    button {{ padding: .6rem 1rem; font-size: 1rem; }}
   </style>
 </head>
 <body>
   <h1>GetOffline Media Library</h1>
   <p>Database: <code>{html.escape(str(database_path))}</code></p>
+  <div class="panel">
+    <form method="post" action="/update">
+      <button type="submit" {button_disabled}>Update Downloads</button>
+    </form>
+    <p>Status: <strong>{html.escape(status['last_result'])}</strong> (running: {html.escape(status['is_running'])})</p>
+    <p>Last started: {html.escape(status['last_started_at'])} | Last finished: {html.escape(status['last_finished_at'])}</p>
+    <p>Items downloaded in last run: {html.escape(status['last_items_count'])}</p>
+    <p>Last error: {html.escape(status['last_error'])}</p>
+  </div>
   <table>
     <thead><tr><th>Title</th><th>Source</th><th>Type</th><th>Size</th><th>Action</th></tr></thead>
     <tbody>{table_rows}</tbody>
@@ -266,7 +352,8 @@ def make_handler(state: AppState):
             rows = fetch_downloaded_media_rows(state.database_path)
 
             if path == "/":
-                body = _render_index(rows, state.output_root, state.database_path)
+                status = _snapshot_status(state.update_status)
+                body = _render_index(rows, state.output_root, state.database_path, status)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -306,14 +393,33 @@ def make_handler(state: AppState):
 
             self.send_error(404, "Not found")
 
+        def do_POST(self):  # noqa: N802
+            parsed = urlparse(self.path)
+            path = posixpath.normpath(parsed.path)
+
+            if path == "/update":
+                trigger_background_update(state)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            self.send_error(404, "Not found")
+
         def log_message(self, fmt, *args):
             _ = fmt, args
 
     return _Handler
 
 
-def run_webapp(output_root: str, database_path: str, host: str = "127.0.0.1", port: int = 8080):
-    state = AppState(output_root=Path(output_root), database_path=Path(database_path))
+def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
+    defaults = config["defaults"]
+    state = AppState(
+        output_root=Path(defaults["output_root"]),
+        database_path=Path(defaults["database_path"]),
+        config=config,
+        update_runner=_default_update_runner,
+    )
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
     try:

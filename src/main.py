@@ -23,13 +23,7 @@ def run_downloads():
 
 def run_server(host: str, port: int):
     config = load_config()
-    defaults = config["defaults"]
-    run_webapp(
-        output_root=defaults["output_root"],
-        database_path=defaults["database_path"],
-        host=host,
-        port=port,
-    )
+    run_webapp(config=config, host=host, port=port)
 
 
 def parse_args():

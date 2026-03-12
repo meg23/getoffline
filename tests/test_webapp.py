@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -8,9 +9,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from database import init_database, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
+    AppState,
     _parse_range_header,
+    _render_index,
     _resolve_safe_media_path,
     fetch_downloaded_media_rows,
+    trigger_background_update,
 )
 
 
@@ -31,6 +35,25 @@ class WebAppHelpersTests(unittest.TestCase):
 
             self.assertEqual(_resolve_safe_media_path(root, str(media)), media.resolve())
             self.assertIsNone(_resolve_safe_media_path(root, str(unsafe)))
+
+    def test_index_contains_update_button(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            body = _render_index(
+                rows=[],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+            self.assertIn("Update Downloads", body)
+            self.assertIn("action=\"/update\"", body)
 
 
 class WebAppDatabaseRowsTests(unittest.TestCase):
@@ -64,6 +87,44 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].title, "Episode 1")
             self.assertEqual(Path(rows[0].file_path), media)
+
+
+class WebAppUpdateThreadTests(unittest.TestCase):
+    def test_trigger_background_update_runs_downloads_once(self):
+        calls = []
+
+        def _runner(config, downloaded_items):
+            _ = config
+            calls.append("run")
+            downloaded_items.append("item")
+            time.sleep(0.2)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state = AppState(
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                config={"defaults": {"output_root": str(root), "database_path": str(root / 'downloads.sqlite3')}},
+                update_runner=_runner,
+            )
+
+            started = trigger_background_update(state)
+            self.assertTrue(started)
+
+            started_again = trigger_background_update(state)
+            self.assertFalse(started_again)
+
+            deadline = time.time() + 2
+            while time.time() < deadline:
+                with state.update_status.lock:
+                    if not state.update_status.is_running and state.update_status.last_result == "ok":
+                        break
+                time.sleep(0.05)
+
+            with state.update_status.lock:
+                self.assertEqual(state.update_status.last_result, "ok")
+                self.assertEqual(state.update_status.last_items_count, 1)
+            self.assertEqual(calls, ["run"])
 
 
 if __name__ == "__main__":
