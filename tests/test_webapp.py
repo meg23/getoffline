@@ -13,9 +13,12 @@ from webapp import (  # noqa: E402
     AppState,
     _parse_range_header,
     _render_index,
+    _render_player,
     _resolve_safe_media_path,
     fetch_downloaded_media_rows,
+    get_download_position_seconds,
     trigger_background_update,
+    update_download_position_seconds,
 )
 
 
@@ -161,6 +164,37 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             rows = fetch_downloaded_media_rows(db_path)
             self.assertTrue(all(row.played for row in rows))
 
+    def test_download_position_persists_for_resume(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "TestPodcast",
+                    "item_uid": "uid-pos",
+                    "item_url": "https://cdn.example.com/episode-pos.mp3",
+                    "media_url": "https://cdn.example.com/episode-pos.mp3",
+                    "title": "Episode Position",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "subtitle_enabled": True,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"title": "Episode Position"},
+                },
+            )
+
+            row = fetch_downloaded_media_rows(db_path)[0]
+            ok = update_download_position_seconds(str(db_path), row.row_id, 123.456)
+            self.assertTrue(ok)
+            self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 123.456, places=2)
+
 
 class WebAppRenderVisibilityTests(unittest.TestCase):
     def test_index_hides_played_items_from_table(self):
@@ -207,6 +241,21 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
 
             self.assertIn("New Item", body)
             self.assertNotIn("Played Item", body)
+
+    def test_player_page_includes_resume_progress_script(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "item.mp3"
+            media.write_text("x", encoding="utf-8")
+            row = SimpleNamespace(
+                row_id=11,
+                source_type="podcast",
+                source_name="Show",
+                title="Sample",
+            )
+            body = _render_player(row, media, 42.5)
+            self.assertIn("/progress", body)
+            self.assertIn("startSeconds = 42.500000", body)
 
 class WebAppUpdateThreadTests(unittest.TestCase):
     def test_trigger_background_update_runs_downloads_once(self):
