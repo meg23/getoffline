@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from database import (
     get_download_position_seconds,
+    init_database,
     mark_all_downloads_played,
     mark_download_played,
     update_download_position_seconds,
@@ -105,8 +106,7 @@ def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional
 
 
 def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
-    if not db_path.exists():
-        return []
+    init_database(str(db_path))
 
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
@@ -740,6 +740,7 @@ def make_handler(state: AppState):
 
 def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     defaults = config["defaults"]
+    init_database(str(defaults["database_path"]))
     state = AppState(
         output_root=Path(defaults["output_root"]),
         database_path=Path(defaults["database_path"]),
