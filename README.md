@@ -5,6 +5,7 @@
 ## Features
 
 - Batch download from YouTube playlists/channels and podcast RSS feeds
+- Central SQLite download history using SQLAlchemy (replaces per-source text archives)
 - Automatic audio extraction to MP3
 - Automatic subtitle (`.srt`) generation for new downloads when `subtitles: true`
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
@@ -12,6 +13,7 @@
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
+- Built-in local web app for browsing and playing downloaded audio/video in your browser
 
 ## Requirements
 
@@ -22,6 +24,7 @@
 - `PyYAML`
 - `ffmpeg`/`ffprobe`
 - `openai-whisper`
+- `SQLAlchemy`
 
 Install dependencies:
 
@@ -34,8 +37,10 @@ pip install -r src/requirements.txt
 Edit `config.yaml` to define your YouTube playlists and podcast RSS feeds:
 
 ```yaml
+
 defaults:
   output_root: ./downloads
+  database_path: ./downloads/downloads.sqlite3
   audio_format: mp3
   audio_quality: 0
   max_downloads: 3
@@ -61,8 +66,18 @@ YouTube live streams are skipped automatically and will not be downloaded.
 Run the downloader:
 
 ```bash
-python src/main.py
+python src/main.py download
 ```
+
+Start the local media web app:
+
+```bash
+python src/main.py serve --host 127.0.0.1 --port 8080
+```
+
+Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
+
+Use the **Update Downloads** button in the web UI to trigger background downloads without running a second process, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
 To build a standalone executable with Pex:
 
@@ -79,6 +94,8 @@ Clean up generated files:
 ## Output
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
+
+Download tracking is stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`) with metadata such as source, URLs, title, codecs, resolution, size, subtitle settings, and raw extractor metadata.
 
 For newly downloaded YouTube/podcast media, subtitles are generated with Whisper when `subtitles: true`.
 A per-entry timing adjustment can be set with `subtitle_offset_seconds` to keep SRT timing in sync:

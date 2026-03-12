@@ -2,15 +2,19 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from yt_dlp import YoutubeDL
 
+from database import build_item_uid, init_database, is_downloaded, resolve_database_path, upsert_download
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, normalize_media_filename, sanitize
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
+
+
+log = get_logger("youtube")
 
 
 def _clean_log_title(value: str) -> str:
@@ -60,9 +64,6 @@ class _YoutubeDlQuietLogger:
             log.error("%s", msg)
 
 
-log = get_logger("youtube")
-
-
 def _process_audio_media_file(
     media_file: Path,
     name: str,
@@ -83,9 +84,75 @@ def _process_audio_media_file(
     return downloaded_summary_items
 
 
+def _build_youtube_payload(
+    *,
+    source_name: str,
+    source_url: str,
+    info: Dict,
+    output_file: Optional[str],
+    subtitle_enabled: bool,
+    download_status: str,
+    error_message: Optional[str] = None,
+) -> Dict:
+    path = Path(output_file) if output_file else None
+    file_size = path.stat().st_size if path and path.exists() else None
+    resolution = None
+    width, height = info.get("width"), info.get("height")
+    if width and height:
+        resolution = f"{width}x{height}"
+
+    item_id = str(info.get("id") or "").strip() or None
+    item_url = (
+        str(info.get("webpage_url") or "").strip()
+        or str(info.get("original_url") or "").strip()
+        or str(info.get("url") or "").strip()
+        or None
+    )
+    media_url = str(info.get("requested_url") or "").strip() or None
+    title = str(info.get("title") or "").strip() or None
+
+    return {
+        "source_type": "youtube",
+        "source_name": source_name,
+        "source_url": source_url,
+        "item_uid": build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title),
+        "item_id": item_id,
+        "item_url": item_url,
+        "media_url": media_url,
+        "title": title,
+        "description": info.get("description"),
+        "uploader": info.get("uploader"),
+        "channel": info.get("channel") or info.get("uploader"),
+        "extractor": info.get("extractor_key") or info.get("extractor"),
+        "playlist_id": info.get("playlist_id"),
+        "playlist_title": info.get("playlist_title"),
+        "upload_date": info.get("upload_date"),
+        "duration_seconds": info.get("duration"),
+        "file_path": str(path) if path else None,
+        "file_ext": path.suffix.lstrip(".") if path else info.get("ext"),
+        "file_size_bytes": file_size,
+        "expected_bytes": info.get("filesize") or info.get("filesize_approx"),
+        "format_id": info.get("format_id"),
+        "format_note": info.get("format_note"),
+        "audio_codec": info.get("acodec"),
+        "video_codec": info.get("vcodec"),
+        "resolution": resolution,
+        "fps": info.get("fps"),
+        "subtitle_enabled": subtitle_enabled,
+        "subtitle_path": None,
+        "download_status": download_status,
+        "error_message": error_message,
+        "raw_metadata": info,
+    }
+
+
 def download_youtube_items(config, downloaded_items):
     defaults = config["defaults"]
     cookie_path = defaults["cookie_path"]
+    db_path = defaults.get("database_path") or resolve_database_path(defaults)
+    defaults["database_path"] = db_path
+    init_database(db_path)
+
     def skip_live_streams(info_dict, *, incomplete=False):
         _ = incomplete
         live_status = (info_dict.get("live_status") or "").lower()
@@ -99,7 +166,6 @@ def download_youtube_items(config, downloaded_items):
             name = sanitize(entry["name"])
             url = entry["url"]
             folder = os.path.join(defaults["output_root"], name)
-            archive = os.path.join(folder, f"{name}_downloaded.txt")
             ensure_dir(folder)
 
             download_type = entry.get("type", "audio").lower()
@@ -110,6 +176,7 @@ def download_youtube_items(config, downloaded_items):
             completed_download_ids = set()
             download_progress_markers = {}
             known_download_titles = {}
+            finished_download_info: Dict[str, Dict] = {}
 
             subtitle_or_aux_exts = {
                 ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
@@ -139,6 +206,21 @@ def download_youtube_items(config, downloaded_items):
 
                 file_stem = Path(str(output_file or "")).stem.strip()
                 return file_stem or "unknown title"
+
+            def skip_known_downloads(info_dict, *, incomplete=False):
+                _ = incomplete
+                live_reason = skip_live_streams(info_dict, incomplete=incomplete)
+                if live_reason:
+                    return live_reason
+
+                item_id = str(info_dict.get("id") or "").strip() or None
+                item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
+                media_url = str(info_dict.get("url") or "").strip() or None
+                title = str(info_dict.get("title") or "").strip() or None
+                item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
+                if is_downloaded(db_path, "youtube", name, item_uid):
+                    return f"Skipping already downloaded item in DB: {_clean_log_title(title)}"
+                return None
 
             def record_download_progress(d):
                 status = d.get("status")
@@ -190,6 +272,11 @@ def download_youtube_items(config, downloaded_items):
                     if _is_subtitle_or_aux_download(output_file):
                         return
 
+                    finished_download_info[download_key] = {
+                        "info": info,
+                        "output_file": output_file,
+                    }
+
                     if download_key not in completed_download_ids:
                         completed_download_ids.add(download_key)
                         downloaded_items.append(f"YouTube: {name} – {title}")
@@ -221,11 +308,10 @@ def download_youtube_items(config, downloaded_items):
                 "playlistend": defaults["playlist_end"],
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
-                "download_archive": archive,
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
                 "progress_hooks": [record_download_progress],
                 "postprocessor_hooks": [record_postprocess_file],
-                "match_filter": skip_live_streams,
+                "match_filter": skip_known_downloads,
                 "ignoreerrors": True,
                 "quiet": True,
                 "no_warnings": True,
@@ -257,7 +343,6 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
-            log.info("Archive for %s: %s", name, archive)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
@@ -338,6 +423,27 @@ def download_youtube_items(config, downloaded_items):
                     )
             else:
                 log.info("Subtitles skipped for %s (type=%s)", name, download_type)
+
+            for record in finished_download_info.values():
+                info = record["info"]
+                out_path = record["output_file"]
+                resolved_file = out_path
+                out_candidate = Path(out_path)
+                if download_type == "audio" and out_candidate.suffix.lower() != f".{defaults['audio_format']}":
+                    audio_candidate = out_candidate.with_suffix(f".{defaults['audio_format']}")
+                    if audio_candidate.exists():
+                        resolved_file = str(audio_candidate)
+                upsert_download(
+                    db_path,
+                    _build_youtube_payload(
+                        source_name=name,
+                        source_url=url,
+                        info=info,
+                        output_file=resolved_file,
+                        subtitle_enabled=entry_subtitles_enabled,
+                        download_status="downloaded",
+                    ),
+                )
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
