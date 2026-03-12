@@ -33,7 +33,7 @@ def download_podcasts(config, downloaded_items):
             name = sanitize(entry["name"])
             url = entry["url"]
             entry_scrub_enabled = entry.get("scrub", True)
-            entry_subtitles_enabled = entry.get("subtitles", False)
+            entry_subtitles_enabled = entry.get("subtitles", True)
             entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)

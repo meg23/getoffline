@@ -127,7 +127,7 @@ def download_youtube_items(config, downloaded_items):
 
             download_type = entry.get("type", "audio").lower()
             entry_scrub_enabled = entry.get("scrub", True)
-            entry_subtitles_enabled = entry.get("subtitles", False)
+            entry_subtitles_enabled = entry.get("subtitles", True)
             entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
@@ -245,6 +245,10 @@ def download_youtube_items(config, downloaded_items):
                 "no_warnings": True,
                 "noprogress": True,
                 "logger": _YoutubeDlQuietLogger(),
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": ["en", "en-US", "en.*"],
+                "subtitlesformat": "srt/best",
             }
 
             if download_type == "video":
