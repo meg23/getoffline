@@ -616,9 +616,11 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const player = document.getElementById('player');
       const resumeLabel = document.getElementById('resume-label');
       const transcript = document.getElementById('transcript');
+      const subtitleTrackEl = document.getElementById('subtitle-track');
       let lastSentSeconds = -9999;
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
+      let transcriptReady = false;
 
       if (!player) return;
 
@@ -658,18 +660,15 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function syncTranscriptFromTrack() {{
-        if (!transcript || !player.textTracks || player.textTracks.length === 0) return;
+        if (!transcript || !player.textTracks || player.textTracks.length === 0) return false;
         const track = player.textTracks[0];
-        if (!track || !track.cues) return;
+        if (!track) return false;
 
         track.mode = 'hidden';
-        transcript.textContent = '';
         const cues = Array.from(track.cues || []);
-        if (!cues.length) {{
-          transcript.textContent = 'No subtitle cues available.';
-          return;
-        }}
+        if (!cues.length) return false;
 
+        transcript.textContent = '';
         cues.forEach((cue, idx) => {{
           const btn = document.createElement('button');
           btn.type = 'button';
@@ -700,14 +699,35 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           }});
         }};
 
+        track.removeEventListener('cuechange', onCueChange);
         track.addEventListener('cuechange', onCueChange);
         onCueChange();
+        transcriptReady = true;
+        return true;
+      }}
+
+      function scheduleTranscriptInit() {{
+        if (!transcript || transcriptReady) return;
+        transcript.textContent = 'Loading transcript…';
+
+        let attempts = 0;
+        const maxAttempts = 40;
+        const timer = setInterval(() => {{
+          attempts += 1;
+          if (syncTranscriptFromTrack() || attempts >= maxAttempts) {{
+            clearInterval(timer);
+            if (!transcriptReady) transcript.textContent = 'No subtitle cues available.';
+          }}
+        }}, 150);
       }}
 
       player.addEventListener('loadedmetadata', applyInitialSeek);
       player.addEventListener('canplay', applyInitialSeek);
       player.addEventListener('playing', applyInitialSeek);
-      player.addEventListener('loadeddata', syncTranscriptFromTrack);
+      player.addEventListener('loadeddata', scheduleTranscriptInit);
+      window.addEventListener('pageshow', scheduleTranscriptInit);
+      if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', scheduleTranscriptInit);
+      scheduleTranscriptInit();
 
       player.addEventListener('timeupdate', () => {{
         if (!player.paused) postProgress(player.currentTime, false);
