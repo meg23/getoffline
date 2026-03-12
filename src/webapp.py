@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from database import mark_all_downloads_played, mark_download_played
+from database import (
+    get_download_position_seconds,
+    mark_all_downloads_played,
+    mark_download_played,
+    update_download_position_seconds,
+)
 
 
 MEDIA_EXTENSIONS = {
@@ -429,11 +434,12 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
 </html>"""
 
 
-def _render_player(row: MediaRow, media_path: Path) -> str:
+def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> str:
     title = html.escape(row.title or media_path.name)
     media_kind = "video" if media_path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"} else "audio"
     source = html.escape(f"{row.source_type}: {row.source_name}")
 
+    resume_value = max(0.0, float(resume_seconds or 0.0))
     return f"""<!doctype html>
 <html>
 <head>
@@ -467,11 +473,78 @@ def _render_player(row: MediaRow, media_path: Path) -> str:
     <p><a href="/">← Back to Library</a></p>
     <h2>{title}</h2>
     <p class="meta">{source}</p>
-    <{media_kind} class="player" controls preload="metadata">
+    <{media_kind} id="player" class="player" controls preload="metadata">
       <source src="/media?id={row.row_id}" />
       Your browser does not support this media type.
     </{media_kind}>
+    <p class="meta">Resume position: <span id="resume-label">{resume_value:.1f}s</span></p>
   </div>
+  <script>
+    (function() {{
+      const rowId = {row.row_id};
+      const startSeconds = {resume_value:.6f};
+      const player = document.getElementById('player');
+      const resumeLabel = document.getElementById('resume-label');
+      let lastSentSeconds = -1;
+
+      if (!player) return;
+
+      function updateLabel(seconds) {{
+        if (!resumeLabel) return;
+        resumeLabel.textContent = Number(seconds || 0).toFixed(1) + 's';
+      }}
+
+      function sendProgress(seconds) {{
+        const safe = Math.max(0, Number(seconds || 0));
+        if (Math.abs(safe - lastSentSeconds) < 1.0) return;
+        lastSentSeconds = safe;
+        updateLabel(safe);
+
+        const body = new URLSearchParams();
+        body.set('id', String(rowId));
+        body.set('position_seconds', safe.toFixed(3));
+
+        if (navigator.sendBeacon) {{
+          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+          navigator.sendBeacon('/progress', blob);
+          return;
+        }}
+
+        fetch('/progress', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+          body: body.toString(),
+          keepalive: true,
+        }}).catch(() => {{}});
+      }}
+
+      player.addEventListener('loadedmetadata', () => {{
+        if (startSeconds > 0 && Number.isFinite(player.duration) && startSeconds < player.duration - 1) {{
+          player.currentTime = startSeconds;
+        }} else if (startSeconds > 0) {{
+          player.currentTime = startSeconds;
+        }}
+        updateLabel(player.currentTime || startSeconds || 0);
+      }});
+
+      player.addEventListener('pause', () => sendProgress(player.currentTime));
+      player.addEventListener('ended', () => sendProgress(0));
+
+      let intervalId = setInterval(() => {{
+        if (!player.paused) sendProgress(player.currentTime);
+      }}, 15000);
+
+      document.addEventListener('visibilitychange', () => {{
+        if (document.hidden) sendProgress(player.currentTime);
+      }});
+      window.addEventListener('beforeunload', () => sendProgress(player.currentTime));
+      window.addEventListener('pagehide', () => sendProgress(player.currentTime));
+
+      window.addEventListener('unload', () => {{
+        if (intervalId) clearInterval(intervalId);
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -587,7 +660,8 @@ def make_handler(state: AppState):
                     return
 
                 if path == "/play":
-                    body = _render_player(row, media_path)
+                    resume_seconds = get_download_position_seconds(str(state.database_path), row.row_id)
+                    body = _render_player(row, media_path, resume_seconds)
                     body_bytes = body.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -625,6 +699,27 @@ def make_handler(state: AppState):
                 mark_download_played(str(state.database_path), int(raw_id), played=played_value)
                 self.send_response(303)
                 self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path == "/progress":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                raw_id = (form.get("id") or [None])[0]
+                raw_position = (form.get("position_seconds") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+
+                try:
+                    position_seconds = float(raw_position or 0.0)
+                except (TypeError, ValueError):
+                    self.send_error(400, "Missing or invalid position_seconds")
+                    return
+
+                update_download_position_seconds(str(state.database_path), int(raw_id), position_seconds)
+                self.send_response(204)
                 self.end_headers()
                 return
 

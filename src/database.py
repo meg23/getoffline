@@ -11,6 +11,7 @@ try:
     from sqlalchemy import (
         Boolean,
         DateTime,
+        Float,
         Integer,
         String,
         Text,
@@ -97,6 +98,8 @@ def _init_database_sqlite(db_path: str) -> None:
                 completed_at TEXT,
                 played INTEGER NOT NULL DEFAULT 0,
                 played_at TEXT,
+                last_position_seconds REAL NOT NULL DEFAULT 0,
+                last_position_updated_at TEXT,
                 UNIQUE(source_type, source_name, item_uid)
             )
             """
@@ -113,6 +116,10 @@ def _ensure_downloads_columns_sqlite(db_path: str) -> None:
             conn.execute("ALTER TABLE downloads ADD COLUMN played INTEGER NOT NULL DEFAULT 0")
         if "played_at" not in existing:
             conn.execute("ALTER TABLE downloads ADD COLUMN played_at TEXT")
+        if "last_position_seconds" not in existing:
+            conn.execute("ALTER TABLE downloads ADD COLUMN last_position_seconds REAL NOT NULL DEFAULT 0")
+        if "last_position_updated_at" not in existing:
+            conn.execute("ALTER TABLE downloads ADD COLUMN last_position_updated_at TEXT")
         conn.commit()
 
 
@@ -273,6 +280,8 @@ if HAS_SQLALCHEMY:
         completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
         played: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
         played_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+        last_position_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+        last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
     @lru_cache(maxsize=4)
@@ -356,6 +365,26 @@ if HAS_SQLALCHEMY:
             session.commit()
             return int(updated or 0)
 
+    def get_download_position_seconds(db_path: str, row_id: int) -> float:
+        with Session(_engine_for(db_path)) as session:
+            record = session.get(DownloadRecord, int(row_id))
+            if record is None:
+                return 0.0
+            return float(record.last_position_seconds or 0)
+
+    def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
+        safe_position = max(0.0, float(position_seconds or 0.0))
+        now = _utcnow()
+        with Session(_engine_for(db_path)) as session:
+            record = session.get(DownloadRecord, int(row_id))
+            if record is None:
+                return False
+            record.last_position_seconds = safe_position
+            record.last_position_updated_at = now
+            record.last_seen_at = now
+            session.commit()
+            return True
+
 
 else:
     def init_database(db_path: str) -> None:
@@ -386,3 +415,24 @@ else:
             )
             conn.commit()
             return int(cur.rowcount or 0)
+
+    def get_download_position_seconds(db_path: str, row_id: int) -> float:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT COALESCE(last_position_seconds, 0) FROM downloads WHERE id = ?",
+                (int(row_id),),
+            ).fetchone()
+            if row is None:
+                return 0.0
+            return float(row[0] or 0.0)
+
+    def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
+        safe_position = max(0.0, float(position_seconds or 0.0))
+        now = _utcnow().isoformat()
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET last_position_seconds = ?, last_position_updated_at = ?, last_seen_at = ? WHERE id = ?",
+                (safe_position, now, now, int(row_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
