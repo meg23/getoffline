@@ -143,10 +143,8 @@ class DownloadFlowTests(unittest.TestCase):
             downloaded_items = []
             with patch("youtube.YoutubeDL", FakeYoutubeDL), patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
                 "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("youtube.generate_whisper_subtitles", side_effect=_fake_subtitle_generator), patch(
-                "podcasts.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
-            ), patch("youtube.create_audio_visualizer_video", side_effect=_fake_visualizer_generator), patch(
-                "podcasts.create_audio_visualizer_video", side_effect=_fake_visualizer_generator
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator), patch(
+                "subtitles.create_audio_visualizer_video", side_effect=_fake_visualizer_generator
             ):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
