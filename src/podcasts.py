@@ -4,9 +4,10 @@ from pathlib import Path
 import feedparser
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import TranscriptionError, generate_whisper_subtitles, scrub_audio_file
 from logger import get_logger
-from utils import create_audio_visualizer_video, ensure_dir, sanitize
+from scrubbing import scrub_media_file
+from subtitles import create_subtitles_and_optional_visualizer
+from utils import ensure_dir, sanitize
 
 
 class _YoutubeDlQuietLogger:
@@ -79,43 +80,30 @@ def download_podcasts(config, downloaded_items):
                 playback_audio = final_audio
                 skip_subtitles_after_scrub_failure = False
 
-                if scrubber_cfg.get("enabled", False) and entry_scrub_enabled and final_audio.exists():
-                    try:
-                        scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
-                        if scrubbed_output:
-                            playback_audio = scrubbed_output
-                    except TranscriptionError as scrub_exc:
-                        skip_subtitles_after_scrub_failure = True
-                        log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
-                    except Exception as scrub_exc:
-                        log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
-                elif final_audio.exists() and not entry_scrub_enabled:
-                    log.info("Ad scrub disabled for podcast %s", name)
-
-                if entry_subtitles_enabled and skip_subtitles_after_scrub_failure:
-                    log.warning(
-                        "Skipping subtitle generation for %s because transcription failed during ad scrub",
-                        playback_audio,
+                if final_audio.exists():
+                    playback_audio, skip_subtitles_after_scrub_failure = scrub_media_file(
+                        media_file=final_audio,
+                        scrubber_cfg=scrubber_cfg,
+                        scrubber_enabled=scrubber_cfg.get("enabled", False),
+                        entry_scrub_enabled=entry_scrub_enabled,
+                        logger=log,
+                        context_name=name,
+                        context_label="podcast",
                     )
-                elif entry_subtitles_enabled and playback_audio.exists():
-                    try:
-                        subtitle_settings = dict(scrubber_cfg)
-                        if subtitle_offset_seconds is not None:
-                            subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
-                        subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
-                        downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
-                        log.info("Generated podcast subtitles: %s", subtitle_path.name)
 
-                        if entry_visualize_enabled:
-                            try:
-                                visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
-                                log.info("Generated podcast visualizer: %s", visualizer_path.name)
-                            except Exception as viz_exc:
-                                log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
-                    except Exception as subtitle_exc:
-                        log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
-                elif entry_visualize_enabled:
-                    log.info("Visualizer skipped for podcast %s because subtitles are disabled", name)
+                subtitle_path = create_subtitles_and_optional_visualizer(
+                    media_file=playback_audio,
+                    scrubber_cfg=scrubber_cfg,
+                    subtitle_offset_seconds=subtitle_offset_seconds,
+                    entry_subtitles_enabled=entry_subtitles_enabled,
+                    entry_visualize_enabled=entry_visualize_enabled,
+                    logger=log,
+                    context_name=f"podcast {name}",
+                    context_label="podcast",
+                    skip_subtitles_after_scrub_failure=skip_subtitles_after_scrub_failure,
+                )
+                if subtitle_path:
+                    downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
 
                 with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")

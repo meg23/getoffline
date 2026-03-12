@@ -10,7 +10,7 @@ from logger import get_logger
 log = get_logger("config")
 
 DEFAULT_AD_SCRUBBER = {
-    "enabled": True,
+    "enabled": False,
     "model": "base",
     "min_ad_seconds": 8.0,
     "pre_roll": 2.0,
