@@ -42,15 +42,7 @@ def _normalize_existing_sidecars_for_media(media_file: Path):
         _cleanup_subtitle_sidecars(media_file, subtitle_path)
         return subtitle_path
 
-    candidates = sorted(media_file.parent.glob(f"{media_file.stem}*.en*.srt"))
-    if not candidates:
-        return None
-
-    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(candidates[0]), str(subtitle_path))
-    log.info("Reused downloaded English subtitle: %s -> %s", candidates[0].name, subtitle_path.name)
-    _cleanup_subtitle_sidecars(media_file, subtitle_path)
-    return subtitle_path
+    return None
 
 
 def cleanup_subtitle_sidecars_for_folder(folder: Path):
@@ -65,7 +57,7 @@ def cleanup_subtitle_sidecars_for_folder(folder: Path):
         _normalize_existing_sidecars_for_media(media_file)
 
 
-def _find_existing_english_subtitle(media_file: Path):
+def _find_existing_whisper_subtitle(media_file: Path):
     return _normalize_existing_sidecars_for_media(media_file)
 
 
@@ -219,7 +211,7 @@ def create_subtitles(
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
 
-            subtitle_path = _find_existing_english_subtitle(media_file)
+            subtitle_path = _find_existing_whisper_subtitle(media_file)
             if subtitle_path is None:
                 subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
             if subtitle_path is None:

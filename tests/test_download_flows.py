@@ -185,11 +185,11 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertIn("title", rows[0][4])
             self.assertIn("title", rows[1][4])
 
-class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
+class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
-    def test_youtube_download_configures_english_caption_download(self):
+    def test_youtube_download_does_not_request_youtube_caption_download(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
                 "defaults": {
@@ -214,10 +214,10 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
-            self.assertTrue(opts["writesubtitles"])
-            self.assertTrue(opts["writeautomaticsub"])
-            self.assertEqual(opts["subtitlesformat"], "srt/best")
-            self.assertIn("en", opts["subtitleslangs"])
+            self.assertNotIn("writesubtitles", opts)
+            self.assertNotIn("writeautomaticsub", opts)
+            self.assertNotIn("subtitlesformat", opts)
+            self.assertNotIn("subtitleslangs", opts)
 
 
     def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
@@ -313,7 +313,7 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
 
 
 class SubtitleSidecarCleanupTests(unittest.TestCase):
-    def test_reused_english_sidecars_are_consolidated_to_single_srt(self):
+    def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
         import subtitles
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -327,21 +327,19 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
             en_srt.write_text("en srt", encoding="utf-8")
             en_vtt.write_text("vtt", encoding="utf-8")
 
-            subtitle_path = subtitles.create_subtitles(
-                media_file=media,
-                subtitle_offset_seconds=None,
-                entry_subtitles_enabled=True,
-                logger=youtube.log,
-                context_name="test",
-                context_label="YouTube",
-            )
+            with patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+                subtitle_path = subtitles.create_subtitles(
+                    media_file=media,
+                    subtitle_offset_seconds=None,
+                    entry_subtitles_enabled=True,
+                    logger=youtube.log,
+                    context_name="test",
+                    context_label="YouTube",
+                )
 
             self.assertIsNotNone(subtitle_path)
             self.assertEqual(subtitle_path, media.with_suffix(".srt"))
             self.assertTrue(media.with_suffix(".srt").exists())
-            self.assertFalse(en_orig.exists())
-            self.assertFalse(en_srt.exists())
-            self.assertFalse(en_vtt.exists())
 
     def test_folder_cleanup_removes_existing_en_sidecars_without_new_download(self):
         import subtitles
