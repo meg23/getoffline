@@ -8,11 +8,8 @@ from yt_dlp import YoutubeDL
 
 from logger import get_logger
 from scrubbing import scrub_media_file
-from subtitles import create_subtitles_and_optional_visualizer
-from utils import create_audio_visualizer_video, ensure_dir, normalize_media_filename, sanitize
-
-
-
+from subtitles import create_subtitles
+from utils import ensure_dir, normalize_media_filename, sanitize
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
@@ -50,7 +47,6 @@ class _YoutubeDlQuietLogger:
         if not message:
             return
 
-        # yt-dlp sends normal activity lines to debug(); keep them visible.
         if message.startswith("[debug]"):
             log.debug("%s", message)
         else:
@@ -75,7 +71,6 @@ def _process_audio_media_file(
     scrubber_enabled: bool,
     entry_scrub_enabled: bool,
     entry_subtitles_enabled: bool,
-    entry_visualize_enabled: bool,
     subtitle_offset_seconds,
 ):
     downloaded_summary_items = []
@@ -89,12 +84,11 @@ def _process_audio_media_file(
         context_label="YouTube",
     )
 
-    create_subtitles_and_optional_visualizer(
+    create_subtitles(
         media_file=playback_audio,
         scrubber_cfg=scrubber_cfg,
         subtitle_offset_seconds=subtitle_offset_seconds,
         entry_subtitles_enabled=entry_subtitles_enabled,
-        entry_visualize_enabled=entry_visualize_enabled,
         logger=log,
         context_name=name,
         context_label="YouTube",
@@ -102,6 +96,7 @@ def _process_audio_media_file(
     )
 
     return downloaded_summary_items
+
 
 def download_youtube_items(config, downloaded_items):
     defaults = config["defaults"]
@@ -128,7 +123,6 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", True)
-            entry_visualize_enabled = entry.get("visualize", False)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
             extracted_audio_files: List[Path] = []
@@ -205,8 +199,6 @@ def download_youtube_items(config, downloaded_items):
                 path = Path(candidate)
                 expected_ext = f".{defaults['audio_format']}"
 
-                # For audio extraction hooks, pre-compute the target audio path even if it
-                # does not exist yet at hook time.
                 if path.suffix.lower() != expected_ext and postprocessor == "FFmpegExtractAudio":
                     path = path.with_suffix(expected_ext)
                 elif path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
@@ -214,21 +206,9 @@ def download_youtube_items(config, downloaded_items):
 
                 extracted_audio_files.append(path.resolve())
                 if pp_status:
-                    log.info(
-                        "Post-process %s for %s via %s: %s",
-                        pp_status,
-                        name,
-                        postprocessor,
-                        path.name,
-                    )
+                    log.info("Post-process %s for %s via %s: %s", pp_status, name, postprocessor, path.name)
                 else:
-                    log.info(
-                        "Post-processed for %s via %s: %s",
-                        name,
-                        postprocessor,
-                        path.name,
-                    )
-
+                    log.info("Post-processed for %s via %s: %s", name, postprocessor, path.name)
 
             ydl_opts = {
                 "cookiefile": cookie_path,
@@ -321,7 +301,6 @@ def download_youtube_items(config, downloaded_items):
                                 scrubber_enabled,
                                 entry_scrub_enabled,
                                 entry_subtitles_enabled,
-                                entry_visualize_enabled,
                                 subtitle_offset_seconds,
                             )
                         )
@@ -336,7 +315,6 @@ def download_youtube_items(config, downloaded_items):
                                 scrubber_enabled,
                                 entry_scrub_enabled,
                                 entry_subtitles_enabled,
-                                entry_visualize_enabled,
                                 subtitle_offset_seconds,
                             )
                             for mp3 in new_audio_files
@@ -346,25 +324,21 @@ def download_youtube_items(config, downloaded_items):
                                 downloaded_items.extend(future.result())
                             except Exception as processing_exc:
                                 log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
+            elif entry_subtitles_enabled:
+                for media_file in delta_video:
+                    if not media_file.exists():
+                        continue
+                    create_subtitles(
+                        media_file=media_file,
+                        scrubber_cfg=scrubber_cfg,
+                        subtitle_offset_seconds=subtitle_offset_seconds,
+                        entry_subtitles_enabled=entry_subtitles_enabled,
+                        logger=log,
+                        context_name=name,
+                        context_label="YouTube",
+                    )
             else:
-                if entry_visualize_enabled and not entry_subtitles_enabled:
-                    log.info("Visualizer skipped for %s because subtitles are disabled", name)
-                elif entry_subtitles_enabled:
-                    for media_file in delta_video:
-                        if not media_file.exists():
-                            continue
-                        create_subtitles_and_optional_visualizer(
-                            media_file=media_file,
-                            scrubber_cfg=scrubber_cfg,
-                            subtitle_offset_seconds=subtitle_offset_seconds,
-                            entry_subtitles_enabled=entry_subtitles_enabled,
-                            entry_visualize_enabled=False,
-                            logger=log,
-                            context_name=name,
-                            context_label="YouTube",
-                        )
-                else:
-                    log.info("Ad scrub skipped for %s (type=%s)", name, download_type)
+                log.info("Ad scrub skipped for %s (type=%s)", name, download_type)
 
         except Exception as e:
             log.error(f"Failed to download YouTube: {entry}: {e}")

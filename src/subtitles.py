@@ -5,7 +5,6 @@ from pathlib import Path
 
 from logger import get_logger
 from transcription import transcribe_with_whisper
-from utils import create_audio_visualizer_video
 
 log = get_logger("subtitles")
 
@@ -161,12 +160,11 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     return subtitle_path
 
 
-def create_subtitles_and_optional_visualizer(
+def create_subtitles(
     media_file,
     scrubber_cfg: dict,
     subtitle_offset_seconds,
     entry_subtitles_enabled: bool,
-    entry_visualize_enabled: bool,
     logger,
     context_name: str,
     context_label: str,
@@ -192,19 +190,10 @@ def create_subtitles_and_optional_visualizer(
             if subtitle_path is None:
                 return None
             logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)
-
-            if entry_visualize_enabled:
-                try:
-                    visualizer_path = create_audio_visualizer_video(media_file, subtitle_path)
-                    logger.info("Generated %s visualizer: %s", context_label, visualizer_path.name)
-                except Exception as viz_exc:
-                    logger.warning("Visualizer generation failed for %s: %s", media_file, viz_exc)
-
             return subtitle_path
         except Exception as subtitle_exc:
             logger.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
             return None
 
-    if entry_visualize_enabled:
-        logger.info("Visualizer skipped for %s because subtitles are disabled", context_name)
+    logger.info("Subtitles skipped for %s because subtitles are disabled", context_name)
     return None
