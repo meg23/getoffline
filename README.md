@@ -13,6 +13,7 @@
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
+- Built-in local web app for browsing and playing downloaded audio/video in your browser
 
 ## Requirements
 
@@ -65,8 +66,16 @@ YouTube live streams are skipped automatically and will not be downloaded.
 Run the downloader:
 
 ```bash
-python src/main.py
+python src/main.py download
 ```
+
+Start the local media web app:
+
+```bash
+python src/main.py serve --host 127.0.0.1 --port 8080
+```
+
+Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
 To build a standalone executable with Pex:
 
