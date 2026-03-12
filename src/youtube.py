@@ -1,4 +1,5 @@
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional
@@ -8,6 +9,21 @@ from yt_dlp import YoutubeDL
 from ad_scrubber import TranscriptionError, generate_whisper_subtitles, scrub_audio_file
 from logger import get_logger
 from utils import create_audio_visualizer_video, ensure_dir, normalize_media_filename, sanitize
+
+
+
+
+_EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
+
+
+def _clean_log_title(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "unknown title"
+
+    text = _EMOJI_RE.sub("", text)
+    text = " ".join(text.split())
+    return text or "unknown title"
 
 
 def _human_size(num_bytes: Optional[float]) -> str:
@@ -115,7 +131,7 @@ def download_youtube_items(config, downloaded_items):
         _ = incomplete
         live_status = (info_dict.get("live_status") or "").lower()
         if info_dict.get("is_live") or live_status in {"is_live", "is_upcoming", "was_live", "post_live"}:
-            title = info_dict.get("title", "unknown title")
+            title = _clean_log_title(info_dict.get("title"))
             return f"Skipping live stream: {title}"
         return None
 
