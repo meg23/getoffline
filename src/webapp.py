@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from database import mark_download_played
+from database import mark_all_downloads_played, mark_download_played
 
 
 MEDIA_EXTENSIONS = {
@@ -194,6 +194,8 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
             continue
 
         visible_rows.append(row)
+        if row.played:
+            continue
         title = html.escape(row.title or path.name)
         source = html.escape(f"{row.source_type}: {row.source_name}")
         size = html.escape(_human_size(row.file_size_bytes))
@@ -225,6 +227,7 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
     button_disabled = "disabled" if status["is_running"] == "yes" else ""
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
+    unplayed_items = max(total_items - played_items, 0)
 
     return f"""<!doctype html>
 <html>
@@ -399,7 +402,7 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
         </div>
         <div class="summary-card">
           <div class="summary-label">New</div>
-          <div class="summary-value">{max(total_items - played_items, 0)}</div>
+          <div class="summary-value">{unplayed_items}</div>
         </div>
       </div>
     </div>
@@ -407,6 +410,9 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
     <div class="panel">
       <form method="post" action="/update" class="toolbar">
         <button class="btn btn-update" type="submit" {button_disabled}>Update Downloads</button>
+      </form>
+      <form method="post" action="/mark-all-played" class="toolbar">
+        <button class="btn btn-subtle" type="submit" {'disabled' if unplayed_items == 0 else ''}>Mark all as played</button>
       </form>
       <p class="status-line">Status: <strong>{html.escape(status['last_result'])}</strong> (running: {html.escape(status['is_running'])})</p>
       <p class="status-line">Last started: {html.escape(status['last_started_at'])} | Last finished: {html.escape(status['last_finished_at'])}</p>
@@ -617,6 +623,13 @@ def make_handler(state: AppState):
 
                 played_value = path == "/mark-played"
                 mark_download_played(str(state.database_path), int(raw_id), played=played_value)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path == "/mark-all-played":
+                mark_all_downloads_played(str(state.database_path))
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()

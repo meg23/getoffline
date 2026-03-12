@@ -342,6 +342,20 @@ if HAS_SQLALCHEMY:
             session.commit()
             return True
 
+    def mark_all_downloads_played(db_path: str) -> int:
+        now = _utcnow()
+        with Session(_engine_for(db_path)) as session:
+            updated = session.query(DownloadRecord).filter(DownloadRecord.played.is_(False)).update(
+                {
+                    DownloadRecord.played: True,
+                    DownloadRecord.played_at: now,
+                    DownloadRecord.last_seen_at: now,
+                },
+                synchronize_session=False,
+            )
+            session.commit()
+            return int(updated or 0)
+
 
 else:
     def init_database(db_path: str) -> None:
@@ -362,3 +376,13 @@ else:
             )
             conn.commit()
             return cur.rowcount > 0
+
+    def mark_all_downloads_played(db_path: str) -> int:
+        now = _utcnow().isoformat()
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET played = 1, played_at = ?, last_seen_at = ? WHERE COALESCE(played, 0) = 0",
+                (now, now),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
