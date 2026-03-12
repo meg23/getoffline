@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
+from ad_scrubber import TranscriptionError, generate_whisper_subtitles, scrub_audio_file
 from logger import get_logger
 from utils import create_audio_visualizer_video, ensure_dir, normalize_media_filename, sanitize
 
@@ -63,6 +63,7 @@ def _process_audio_media_file(
 ):
     downloaded_summary_items = []
     playback_audio = media_file
+    skip_subtitles_after_scrub_failure = False
 
     if scrubber_enabled and entry_scrub_enabled:
         log.info("Starting ad scrub for YouTube file: %s", media_file.name)
@@ -73,12 +74,17 @@ def _process_audio_media_file(
                 log.info("Ad scrubbed YouTube file: %s", scrubbed_output.name)
             else:
                 log.info("Ad scrub made no changes for YouTube file: %s", media_file.name)
+        except TranscriptionError as scrub_exc:
+            skip_subtitles_after_scrub_failure = True
+            log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
         except Exception as scrub_exc:
             log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
     else:
         log.info("Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
 
-    if entry_subtitles_enabled and playback_audio.exists():
+    if entry_subtitles_enabled and skip_subtitles_after_scrub_failure:
+        log.warning("Skipping subtitle generation for %s because transcription failed during ad scrub", media_file)
+    elif entry_subtitles_enabled and playback_audio.exists():
         try:
             subtitle_settings = dict(scrubber_cfg)
             if subtitle_offset_seconds is not None:

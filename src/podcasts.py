@@ -4,7 +4,7 @@ from pathlib import Path
 import feedparser
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
+from ad_scrubber import TranscriptionError, generate_whisper_subtitles, scrub_audio_file
 from logger import get_logger
 from utils import create_audio_visualizer_video, ensure_dir, sanitize
 
@@ -77,18 +77,27 @@ def download_podcasts(config, downloaded_items):
 
                 final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
                 playback_audio = final_audio
+                skip_subtitles_after_scrub_failure = False
 
                 if scrubber_cfg.get("enabled", False) and entry_scrub_enabled and final_audio.exists():
                     try:
                         scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
                         if scrubbed_output:
                             playback_audio = scrubbed_output
+                    except TranscriptionError as scrub_exc:
+                        skip_subtitles_after_scrub_failure = True
+                        log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                 elif final_audio.exists() and not entry_scrub_enabled:
                     log.info("Ad scrub disabled for podcast %s", name)
 
-                if entry_subtitles_enabled and playback_audio.exists():
+                if entry_subtitles_enabled and skip_subtitles_after_scrub_failure:
+                    log.warning(
+                        "Skipping subtitle generation for %s because transcription failed during ad scrub",
+                        playback_audio,
+                    )
+                elif entry_subtitles_enabled and playback_audio.exists():
                     try:
                         subtitle_settings = dict(scrubber_cfg)
                         if subtitle_offset_seconds is not None:

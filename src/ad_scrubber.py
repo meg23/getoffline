@@ -175,6 +175,10 @@ _TRANSCRIPTION_CACHE_LOCK = threading.Lock()
 _WHISPER_MODEL_LOCK = threading.Lock()
 
 
+class TranscriptionError(RuntimeError):
+    """Raised when Whisper transcription cannot be completed for a media file."""
+
+
 def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
     input_file = Path(input_file).resolve()
     cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name)
@@ -195,7 +199,13 @@ def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str)
             model = whisper.load_model(model_name)
             _WHISPER_MODEL_CACHE[model_name] = model
 
-    result = model.transcribe(str(input_file), fp16=False)
+    try:
+        result = model.transcribe(str(input_file), fp16=False)
+    except Exception as exc:
+        raise TranscriptionError(
+            f"Transcription failed for {input_file.name} ({model_name}): {exc}"
+        ) from exc
+
     with _TRANSCRIPTION_CACHE_LOCK:
         _TRANSCRIPTION_CACHE[cache_key] = result
     return result
