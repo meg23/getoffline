@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from database import (
     get_download_position_seconds,
+    get_total_listened_seconds,
     init_database,
     mark_all_downloads_played,
     mark_download_played,
@@ -91,6 +92,18 @@ def _human_size(num_bytes: Optional[int]) -> str:
         size /= 1024
     return f"{num_bytes} B"
 
+
+
+
+def _human_duration(total_seconds: float) -> str:
+    seconds = max(0, int(total_seconds or 0))
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+    return " ".join(parts)
 
 def _is_media_file(path: Path) -> bool:
     return path.suffix.lower() in MEDIA_EXTENSIONS
@@ -387,6 +400,8 @@ def _render_index(
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
     unplayed_items = max(total_items - played_items, 0)
+    init_database(str(database_path))
+    total_listened = _human_duration(get_total_listened_seconds(str(database_path)))
     toggle_show_played = not show_played
     toggle_href = "?show_played=1" if toggle_show_played else "/"
     toggle_label = "Show played" if toggle_show_played else "Hide played"
@@ -470,6 +485,7 @@ def _render_index(
 
     table {{
       width: 100%;
+      table-layout: fixed;
       border-collapse: separate;
       border-spacing: 0;
       overflow: hidden;
@@ -499,7 +515,17 @@ def _render_index(
     }}
     tbody tr:nth-child(even) td {{ background: #fbfcff; }}
     tr:last-child td {{ border-bottom: none; }}
-    .title-cell {{ max-width: 520px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.25; }}
+    .title-cell {{ font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }}
+    .col-title {{ width: 44%; }}
+    .col-source {{ width: 21%; }}
+    .col-type {{ width: 8%; }}
+    .col-size {{ width: 10%; }}
+    .col-status {{ width: 8%; }}
+    .col-action {{ width: 9%; }}
+    td[data-label="Type"], td[data-label="Size"], td[data-label="Status"], td[data-label="Action"],
+    thead th:nth-child(3), thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
+      text-align: center;
+    }}
     .pill {{
       display: inline-block;
       padding: .18rem .5rem;
@@ -512,17 +538,15 @@ def _render_index(
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
-    .actions {{ white-space: nowrap; }}
+    .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: center; gap: .55rem; }}
     .action-icon {{
       display: inline-block;
       color: var(--accent);
       text-decoration: none;
       font-size: 1.15rem;
       line-height: 1;
-      margin-right: .55rem;
       font-weight: 700;
     }}
-    .action-icon:last-child {{ margin-right: 0; }}
     .action-icon:hover {{ color: var(--accent-2); }}
 
     .btn {{
@@ -559,8 +583,9 @@ def _render_index(
 
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
-      .actions {{ white-space: normal; }}
-            table, thead, tbody, th, td, tr {{ display: block; }}
+      .actions {{ white-space: normal; justify-content: flex-start; }}
+      table {{ table-layout: auto; }}
+      table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
       tr {{ border-bottom: 1px solid var(--border); padding: .4rem 0; }}
       td {{ border: none; display: flex; gap: .6rem; align-items: center; }}
@@ -593,6 +618,10 @@ def _render_index(
           <div class="summary-label">New</div>
           <div class="summary-value">{unplayed_items}</div>
         </div>
+        <div class="summary-card">
+          <div class="summary-label">Listened</div>
+          <div class="summary-value">{total_listened}</div>
+        </div>
       </div>
     </div>
 
@@ -609,6 +638,14 @@ def _render_index(
     </div>
 
     <table>
+      <colgroup>
+        <col class="col-title" />
+        <col class="col-source" />
+        <col class="col-type" />
+        <col class="col-size" />
+        <col class="col-status" />
+        <col class="col-action" />
+      </colgroup>
       <thead><tr><th>Title</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
