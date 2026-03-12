@@ -324,6 +324,21 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("Loading transcript…", body)
             self.assertIn("pageshow", body)
 
+
+    def test_player_page_ignores_subtitles_for_video(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "item.mp4"
+            media.write_text("x", encoding="utf-8")
+            row = SimpleNamespace(
+                row_id=13,
+                source_type="youtube",
+                source_name="Channel",
+                title="Sample Video",
+            )
+            body = _render_player(row, media, 0, has_subtitles=True)
+            self.assertNotIn('/subtitle?id=13', body)
+
     def test_srt_to_vtt_conversion(self):
         content = "1\n00:00:00,500 --> 00:00:02,000\nHello\n"
         converted = _srt_to_vtt(content)
