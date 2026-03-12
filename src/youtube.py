@@ -94,7 +94,7 @@ def _build_youtube_payload(
     download_status: str,
     error_message: Optional[str] = None,
 ) -> Dict:
-    path = Path(output_file) if output_file else None
+    path = Path(output_file).expanduser().resolve() if output_file else None
     file_size = path.stat().st_size if path and path.exists() else None
     resolution = None
     width, height = info.get("width"), info.get("height")

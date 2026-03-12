@@ -95,20 +95,77 @@ def _is_media_file(path: Path) -> bool:
     return path.suffix.lower() in MEDIA_EXTENSIONS
 
 
+def _normalize_stem(value: str) -> str:
+    normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
+    return normalized or "item"
+
+
 def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional[Path]:
-    candidate = Path(candidate_path).expanduser().resolve()
     root = output_root.expanduser().resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        return None
-    if not candidate.exists() or not candidate.is_file() or not _is_media_file(candidate):
-        return None
-    return candidate
+    raw = Path(candidate_path).expanduser()
+
+    candidates = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        candidates.append(root / raw)
+        candidates.append(raw)
+
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        if not resolved.exists() or not resolved.is_file() or not _is_media_file(resolved):
+            continue
+        return resolved
+    return None
 
 
-def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
+def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
+    root = output_root.expanduser().resolve()
+    with sqlite3.connect(str(db_path)) as conn:
+        stale_rows = conn.execute(
+            """
+            SELECT id, file_path
+            FROM downloads
+            WHERE download_status = 'downloaded' AND COALESCE(file_path, '') != ''
+            """
+        ).fetchall()
+
+        updates = []
+        for row_id, file_path in stale_rows:
+            if _resolve_safe_media_path(root, file_path):
+                continue
+
+            raw = Path(file_path).expanduser()
+            candidate_bases = [raw] if raw.is_absolute() else [root / raw, raw]
+
+            repaired_path = None
+            for base in candidate_bases:
+                normalized_name = f"{_normalize_stem(base.stem)}{base.suffix}"
+                normalized_candidate = base.with_name(normalized_name).resolve()
+                try:
+                    normalized_candidate.relative_to(root)
+                except ValueError:
+                    continue
+                if normalized_candidate.exists() and normalized_candidate.is_file() and _is_media_file(normalized_candidate):
+                    repaired_path = str(normalized_candidate)
+                    break
+
+            if repaired_path:
+                updates.append((repaired_path, int(row_id)))
+
+        if updates:
+            conn.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", updates)
+            conn.commit()
+
+
+def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = None) -> List[MediaRow]:
     init_database(str(db_path))
+    repair_root = output_root or db_path.parent
+    _repair_downloaded_file_paths(db_path, repair_root)
 
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
@@ -852,7 +909,7 @@ def make_handler(state: AppState):
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
-            rows = fetch_downloaded_media_rows(state.database_path)
+            rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
 
             if path == "/":
                 status = _snapshot_status(state.update_status)
