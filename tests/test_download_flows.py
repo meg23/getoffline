@@ -378,6 +378,90 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertTrue(stored_path.endswith("20260312-They_re.FINALLY_Doing_It_-_BIG_Xbox_News.mp3"))
             self.assertTrue(Path(stored_path).exists())
 
+    def test_youtube_database_prefers_postprocessed_audio_path_and_size(self):
+        import sqlite3
+
+        class FakeYoutubeDLWithSeparatePostprocess(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+
+                outtmpl = self.opts.get("outtmpl")
+                webm_path = (
+                    outtmpl.replace("%(upload_date)s", "20260312")
+                    .replace("%(title)s", "They_re_FINALLY_Doing_It_-_BIG_Xbox_News....")
+                    .replace("%(ext)s", "webm")
+                )
+                mp3_path = webm_path.replace("....webm", ".mp3")
+
+                os.makedirs(os.path.dirname(webm_path), exist_ok=True)
+                with open(mp3_path, "w", encoding="utf-8") as f:
+                    f.write("real-audio")
+
+                info_dict = {
+                    "id": "video-postprocessed",
+                    "title": "They_re FINALLY Doing It - BIG Xbox News",
+                    "webpage_url": "https://youtube.com/watch?v=video-postprocessed",
+                    "_filename": webm_path,
+                }
+
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": webm_path,
+                            "total_bytes": 4096,
+                        }
+                    )
+
+                for pp_hook in self.opts.get("postprocessor_hooks", []):
+                    pp_hook(
+                        {
+                            "status": "finished",
+                            "postprocessor": "FFmpegExtractAudio",
+                            "info_dict": info_dict,
+                            "filepath": webm_path,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": db_path,
+                },
+                "youtube": [
+                    {
+                        "name": "MrMattyPlays",
+                        "url": "https://youtube.com/watch?v=video-postprocessed",
+                        "type": "audio",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLWithSeparatePostprocess), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            ):
+                youtube.download_youtube_items(config, [])
+
+            with sqlite3.connect(db_path) as conn:
+                stored_path, stored_ext, stored_size = conn.execute(
+                    "SELECT file_path, file_ext, file_size_bytes FROM downloads WHERE source_type='youtube' LIMIT 1"
+                ).fetchone()
+
+            self.assertTrue(stored_path.endswith(".mp3"))
+            self.assertNotIn(".webm", stored_path)
+            self.assertTrue(Path(stored_path).exists())
+            self.assertEqual(stored_ext, "mp3")
+            self.assertEqual(stored_size, len("real-audio"))
+
 
 class SubtitleSidecarCleanupTests(unittest.TestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
