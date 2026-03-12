@@ -323,6 +323,74 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("Played Item", body)
             self.assertIn("Hide played", body)
 
+    def test_index_uses_icons_and_tooltips_for_item_actions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="New Item",
+                file_path=str(root / "new.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                played_at=None,
+            )
+            (root / "new.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn('aria-label="Play">▶</a>', body)
+            self.assertIn('title="Mark played"', body)
+            self.assertIn('>✓</button>', body)
+
+    def test_index_hides_new_label_for_previously_played_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="Item",
+                file_path=str(root / "item.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                played_at="2026-01-01T00:00:00Z",
+            )
+            (root / "item.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertNotIn('status-new">new</span>', body)
+
     def test_player_page_includes_resume_progress_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
