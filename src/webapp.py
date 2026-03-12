@@ -511,8 +511,7 @@ def _render_index(
 <body>
   <div class="container">
     <div class="hero">
-      <h1>GetOffline Media Library</h1>
-      <p class="meta">Database: <code>{html.escape(str(database_path))}</code></p>
+      <h1>GetOffline</h1>
       <div class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
