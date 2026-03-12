@@ -375,11 +375,8 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Action">
-                  <a class="btn btn-link" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">▶</a>
-                  <form method="post" action="/mark-{mark_action}" class="inline-form">
-                    <input type="hidden" name="id" value="{row.row_id}" />
-                    <button class="btn btn-subtle" type="submit" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</button>
-                  </form>
+                  <a class="action-icon" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">▶</a>
+                  <a class="action-icon" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
                 </td>
             </tr>
             """
@@ -516,7 +513,17 @@ def _render_index(
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
     .actions {{ white-space: nowrap; }}
-    .inline-form {{ display:inline; margin-left:.5rem; }}
+    .action-icon {{
+      display: inline-block;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 1.15rem;
+      line-height: 1;
+      margin-right: .55rem;
+      font-weight: 700;
+    }}
+    .action-icon:last-child {{ margin-right: 0; }}
+    .action-icon:hover {{ color: var(--accent-2); }}
 
     .btn {{
       border: 1px solid transparent;
@@ -553,8 +560,7 @@ def _render_index(
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
       .actions {{ white-space: normal; }}
-      .inline-form {{ margin-left: 0; margin-top: .35rem; display: inline-block; }}
-      table, thead, tbody, th, td, tr {{ display: block; }}
+            table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
       tr {{ border-bottom: 1px solid var(--border); padding: .4rem 0; }}
       td {{ border: none; display: flex; gap: .6rem; align-items: center; }}
@@ -928,6 +934,19 @@ def make_handler(state: AppState):
                 self.wfile.write(body_bytes)
                 return
 
+            if path in {"/mark-played", "/mark-unplay"}:
+                raw_id = (query.get("id") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+
+                played_value = path == "/mark-played"
+                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
             if path in {"/play", "/media", "/subtitle"}:
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
@@ -987,22 +1006,6 @@ def make_handler(state: AppState):
 
             if path == "/update":
                 trigger_background_update(state)
-                self.send_response(303)
-                self.send_header("Location", "/")
-                self.end_headers()
-                return
-
-            if path in {"/mark-played", "/mark-unplay"}:
-                length = int(self.headers.get("Content-Length") or 0)
-                body = self.rfile.read(length).decode("utf-8") if length else ""
-                form = parse_qs(body)
-                raw_id = (form.get("id") or [None])[0]
-                if raw_id is None or not str(raw_id).isdigit():
-                    self.send_error(400, "Missing or invalid id")
-                    return
-
-                played_value = path == "/mark-played"
-                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
