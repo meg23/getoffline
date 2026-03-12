@@ -128,6 +128,11 @@ def download_youtube_items(config, downloaded_items):
             extracted_audio_files: List[Path] = []
             completed_download_ids = set()
             download_progress_markers = {}
+            known_download_titles = {}
+
+            subtitle_or_aux_exts = {
+                ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
+            }
 
             def get_download_key(info: dict, fallback: str) -> str:
                 return (
@@ -137,12 +142,29 @@ def download_youtube_items(config, downloaded_items):
                     or fallback
                 )
 
+            def _is_subtitle_or_aux_download(output_file: str) -> bool:
+                path = Path(str(output_file or ""))
+                return path.suffix.lower() in subtitle_or_aux_exts
+
+            def _get_best_title(info: dict, output_file: str, download_key: str) -> str:
+                title = str(info.get("title") or "").strip()
+                if title:
+                    known_download_titles[download_key] = title
+                    return title
+
+                known_title = known_download_titles.get(download_key)
+                if known_title:
+                    return known_title
+
+                file_stem = Path(str(output_file or "")).stem.strip()
+                return file_stem or "unknown title"
+
             def record_download_progress(d):
                 status = d.get("status")
                 info = d.get("info_dict") or {}
-                title = info.get("title", "unknown title")
                 output_file = d.get("filename") or info.get("_filename") or "unknown file"
                 download_key = get_download_key(info, output_file)
+                title = _get_best_title(info, output_file, download_key)
 
                 if status == "downloading":
                     downloaded_bytes = d.get("downloaded_bytes") or 0
@@ -183,6 +205,9 @@ def download_youtube_items(config, downloaded_items):
                             output_file,
                             _human_size(total_bytes),
                         )
+
+                    if _is_subtitle_or_aux_download(output_file):
+                        return
 
                     if download_key not in completed_download_ids:
                         completed_download_ids.add(download_key)
