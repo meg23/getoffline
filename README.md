@@ -5,6 +5,7 @@
 ## Features
 
 - Batch download from YouTube playlists/channels and podcast RSS feeds
+- Central SQLite download history using SQLAlchemy (replaces per-source text archives)
 - Automatic audio extraction to MP3
 - Automatic subtitle (`.srt`) generation for new downloads when `subtitles: true`
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
@@ -22,6 +23,7 @@
 - `PyYAML`
 - `ffmpeg`/`ffprobe`
 - `openai-whisper`
+- `SQLAlchemy`
 
 Install dependencies:
 
@@ -34,8 +36,10 @@ pip install -r src/requirements.txt
 Edit `config.yaml` to define your YouTube playlists and podcast RSS feeds:
 
 ```yaml
+
 defaults:
   output_root: ./downloads
+  database_path: ./downloads/downloads.sqlite3
   audio_format: mp3
   audio_quality: 0
   max_downloads: 3
@@ -79,6 +83,8 @@ Clean up generated files:
 ## Output
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
+
+Download tracking is stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`) with metadata such as source, URLs, title, codecs, resolution, size, subtitle settings, and raw extractor metadata.
 
 For newly downloaded YouTube/podcast media, subtitles are generated with Whisper when `subtitles: true`.
 A per-entry timing adjustment can be set with `subtitle_offset_seconds` to keep SRT timing in sync:

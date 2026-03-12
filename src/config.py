@@ -4,6 +4,7 @@ import os
 import browser_cookie3
 import yaml
 
+from database import init_database, resolve_database_path
 from logger import get_logger
 
 
@@ -17,6 +18,8 @@ def load_config():
     defaults = config["defaults"]
     defaults["output_root"] = os.path.expanduser(defaults["output_root"])
     defaults["cookie_path"] = os.path.expanduser(defaults["cookie_path"])
+    defaults["database_path"] = resolve_database_path(defaults)
+    init_database(defaults["database_path"])
 
     try:
         cj = browser_cookie3.chrome(domain_name="youtube.com")
