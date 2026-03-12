@@ -189,6 +189,72 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
             self.assertEqual(opts["subtitlesformat"], "srt/best")
             self.assertIn("en", opts["subtitleslangs"])
 
+
+    def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
+        class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                info_main = {
+                    "id": "video-1",
+                    "title": "Main Title",
+                    "webpage_url": "https://youtube.com/watch?v=video-1",
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_main,
+                            "filename": "/tmp/Main Title.mp4",
+                            "total_bytes": 4096,
+                        }
+                    )
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": {"_filename": "/tmp/Main Title.en.vtt"},
+                            "filename": "/tmp/Main Title.en.vtt",
+                            "total_bytes": 512,
+                        }
+                    )
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": {"_filename": "/tmp/Main Title.en.srt"},
+                            "filename": "/tmp/Main Title.en.srt",
+                            "total_bytes": 512,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ad_scrubber": {"enabled": False},
+                },
+                "youtube": [
+                    {
+                        "name": "WarFronts",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "video",
+                        "scrub": False,
+                        "subtitles": True,
+                    }
+                ],
+            }
+
+            downloaded_items = []
+            with patch("youtube.YoutubeDL", FakeYoutubeDLWithSubtitleEvents):
+                youtube.download_youtube_items(config, downloaded_items)
+
+            youtube_items = [item for item in downloaded_items if item.startswith("YouTube: ")]
+            self.assertEqual(youtube_items, ["YouTube: WarFronts – Main Title"])
+
     def test_podcast_subtitles_default_to_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
