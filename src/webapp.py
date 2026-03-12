@@ -451,7 +451,7 @@ def _render_index(
 
     .summary-grid {{
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: .65rem;
       margin: .85rem 0 .2rem;
     }}
@@ -524,7 +524,7 @@ def _render_index(
     .col-action {{ width: 9%; }}
     td[data-label="Type"], td[data-label="Size"], td[data-label="Status"], td[data-label="Action"],
     thead th:nth-child(3), thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
-      text-align: center;
+      text-align: left;
     }}
     .pill {{
       display: inline-block;
@@ -538,7 +538,7 @@ def _render_index(
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
-    .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: center; gap: .55rem; }}
+    .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-start; gap: .55rem; }}
     .action-icon {{
       display: inline-block;
       color: var(--accent);
@@ -579,6 +579,10 @@ def _render_index(
       display: inline-flex;
       align-items: center;
       justify-content: center;
+    }}
+
+    @media (max-width: 1200px) {{
+      .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
 
     @media (max-width: 980px) {{
