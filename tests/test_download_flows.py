@@ -311,6 +311,73 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
 
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
 
+    def test_youtube_database_file_path_tracks_normalized_filename(self):
+        import sqlite3
+
+        class FakeYoutubeDLWithOddDots(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+
+                outtmpl = self.opts.get("outtmpl")
+                output_path = (
+                    outtmpl.replace("%(upload_date)s", "20260312")
+                    .replace("%(title)s", "They_re..FINALLY_Doing_It_-_BIG_Xbox_News")
+                    .replace("%(ext)s", "mp3")
+                )
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write("dummy audio")
+
+                info_dict = {
+                    "id": "video-odd-dots",
+                    "title": "They_re..FINALLY_Doing_It_-_BIG_Xbox_News",
+                    "webpage_url": "https://youtube.com/watch?v=video-odd-dots",
+                    "_filename": output_path,
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": output_path,
+                            "total_bytes": 2048,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": os.path.join(tmpdir, "downloads.sqlite3"),
+                },
+                "youtube": [
+                    {
+                        "name": "Sample",
+                        "url": "https://youtube.com/watch?v=video-odd-dots",
+                        "type": "audio",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLWithOddDots), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            ):
+                youtube.download_youtube_items(config, [])
+
+            with sqlite3.connect(config["defaults"]["database_path"]) as conn:
+                stored_path = conn.execute(
+                    "SELECT file_path FROM downloads WHERE source_type='youtube' LIMIT 1"
+                ).fetchone()[0]
+
+            self.assertTrue(stored_path.endswith("20260312-They_re.FINALLY_Doing_It_-_BIG_Xbox_News.mp3"))
+            self.assertTrue(Path(stored_path).exists())
+
 
 class SubtitleSidecarCleanupTests(unittest.TestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):

@@ -174,6 +174,7 @@ def download_youtube_items(config, downloaded_items):
             should_generate_subtitles = entry_subtitles_enabled and download_type == "audio"
 
             extracted_audio_files: List[Path] = []
+            normalized_path_map: Dict[Path, Path] = {}
             completed_download_ids = set()
             download_progress_markers = {}
             known_download_titles = {}
@@ -360,7 +361,9 @@ def download_youtube_items(config, downloaded_items):
                 for audio_path in new_audio_files:
                     if not audio_path.exists():
                         continue
+                    original_audio = audio_path.resolve()
                     normalized_audio = normalize_media_filename(audio_path)
+                    normalized_path_map[original_audio] = normalized_audio.resolve()
                     if normalized_audio != audio_path:
                         log.info("Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
                     normalized_audio_files.append(normalized_audio)
@@ -418,6 +421,12 @@ def download_youtube_items(config, downloaded_items):
                     audio_candidate = out_candidate.with_suffix(f".{defaults['audio_format']}")
                     if audio_candidate.exists():
                         resolved_file = str(audio_candidate)
+
+                resolved_path = Path(resolved_file).expanduser().resolve()
+                remapped_path = normalized_path_map.get(resolved_path)
+                if remapped_path is not None:
+                    resolved_file = str(remapped_path)
+
                 upsert_download(
                     db_path,
                     _build_youtube_payload(
