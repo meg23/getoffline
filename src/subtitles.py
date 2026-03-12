@@ -36,14 +36,13 @@ def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
                 log.warning("Could not remove subtitle sidecar %s: %s", path, cleanup_exc)
 
 
-def _find_existing_english_subtitle(media_file: Path):
+def _normalize_existing_sidecars_for_media(media_file: Path):
     subtitle_path = media_file.with_suffix(".srt")
     if subtitle_path.exists():
         _cleanup_subtitle_sidecars(media_file, subtitle_path)
         return subtitle_path
 
-    pattern = f"{media_file.stem}*.en*.srt"
-    candidates = sorted(media_file.parent.glob(pattern))
+    candidates = sorted(media_file.parent.glob(f"{media_file.stem}*.en*.srt"))
     if not candidates:
         return None
 
@@ -52,6 +51,22 @@ def _find_existing_english_subtitle(media_file: Path):
     log.info("Reused downloaded English subtitle: %s -> %s", candidates[0].name, subtitle_path.name)
     _cleanup_subtitle_sidecars(media_file, subtitle_path)
     return subtitle_path
+
+
+def cleanup_subtitle_sidecars_for_folder(folder: Path):
+    folder = Path(folder)
+    if not folder.exists():
+        return
+
+    media_exts = {".mp3", ".mp4", ".m4a", ".webm", ".wav", ".flac", ".ogg", ".opus"}
+    for media_file in folder.iterdir():
+        if not media_file.is_file() or media_file.suffix.lower() not in media_exts:
+            continue
+        _normalize_existing_sidecars_for_media(media_file)
+
+
+def _find_existing_english_subtitle(media_file: Path):
+    return _normalize_existing_sidecars_for_media(media_file)
 
 
 def _parse_srt_timestamp(value: str) -> float:

@@ -318,6 +318,26 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
             self.assertFalse(en_srt.exists())
             self.assertFalse(en_vtt.exists())
 
+    def test_folder_cleanup_removes_existing_en_sidecars_without_new_download(self):
+        import subtitles
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "20260310-Pakistan_and_Afghanistan_are_Still_At_War.mp3"
+            media.write_text("fake", encoding="utf-8")
+
+            srt_main = media.with_suffix('.srt')
+            srt_main.write_text('main', encoding='utf-8')
+            en_orig = media.with_name(f"{media.stem}.en-orig.srt")
+            en_srt = media.with_name(f"{media.stem}.en.srt")
+            en_orig.write_text("orig", encoding="utf-8")
+            en_srt.write_text("en", encoding="utf-8")
+
+            subtitles.cleanup_subtitle_sidecars_for_folder(Path(tmpdir))
+
+            self.assertTrue(srt_main.exists())
+            self.assertFalse(en_orig.exists())
+            self.assertFalse(en_srt.exists())
+
 
 class SubtitleFailureCachingTests(unittest.TestCase):
     def test_known_empty_audio_transcription_failure_is_cached(self):
