@@ -1,6 +1,7 @@
 import html
 import mimetypes
 import posixpath
+import re
 import sqlite3
 import threading
 import time
@@ -44,6 +45,7 @@ class MediaRow:
     file_size_bytes: Optional[int]
     upload_date: Optional[str]
     played: bool
+    subtitle_path: Optional[str] = None
 
 
 @dataclass
@@ -112,7 +114,7 @@ def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
         rows = conn.execute(
             """
             SELECT id, source_type, source_name, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0)
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), subtitle_path
             FROM downloads
             WHERE download_status = 'downloaded'
             ORDER BY last_seen_at DESC, id DESC
@@ -130,9 +132,96 @@ def fetch_downloaded_media_rows(db_path: Path) -> List[MediaRow]:
             file_size_bytes=row[6],
             upload_date=row[7],
             played=bool(row[8]),
+            subtitle_path=row[9],
         )
         for row in rows
     ]
+
+
+def _format_vtt_timestamp(value: float) -> str:
+    value = max(0.0, float(value))
+    hours = int(value // 3600)
+    value -= hours * 3600
+    minutes = int(value // 60)
+    value -= minutes * 60
+    seconds = int(value)
+    millis = int(round((value - seconds) * 1000))
+
+    if millis == 1000:
+        millis = 0
+        seconds += 1
+    if seconds == 60:
+        seconds = 0
+        minutes += 1
+    if minutes == 60:
+        minutes = 0
+        hours += 1
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def _parse_srt_timestamp(value: str) -> Optional[float]:
+    parts = value.strip().split(":")
+    if len(parts) != 3:
+        return None
+    sec_parts = parts[2].split(",")
+    if len(sec_parts) != 2:
+        return None
+
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(sec_parts[0])
+        millis = int(sec_parts[1])
+    except ValueError:
+        return None
+
+    return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
+
+
+def _srt_to_vtt(content: str) -> str:
+    lines = content.replace("\ufeff", "").splitlines()
+    timestamp_re = re.compile(
+        r"^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})(.*)$"
+    )
+
+    out_lines = ["WEBVTT", ""]
+    for line in lines:
+        match = timestamp_re.match(line)
+        if not match:
+            if line.strip().isdigit():
+                continue
+            out_lines.append(line)
+            continue
+
+        start_raw, end_raw, tail = match.groups()
+        start = _parse_srt_timestamp(start_raw)
+        end = _parse_srt_timestamp(end_raw)
+        if start is None or end is None:
+            continue
+        out_lines.append(f"{_format_vtt_timestamp(start)} --> {_format_vtt_timestamp(end)}{tail}")
+
+    return "\n".join(out_lines).strip() + "\n"
+
+
+def _resolve_safe_subtitle_path(output_root: Path, row: MediaRow, media_path: Path) -> Optional[Path]:
+    candidate_paths = []
+    if row.subtitle_path:
+        candidate_paths.append(Path(row.subtitle_path))
+    candidate_paths.append(media_path.with_suffix(".srt"))
+    candidate_paths.append(media_path.with_suffix(".vtt"))
+
+    root = output_root.expanduser().resolve()
+    for candidate in candidate_paths:
+        resolved = candidate.expanduser().resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        if not resolved.is_file() or resolved.suffix.lower() not in {".srt", ".vtt"}:
+            continue
+        return resolved
+    return None
 
 
 def _format_timestamp(ts: Optional[float]) -> str:
@@ -434,12 +523,26 @@ def _render_index(rows: List[MediaRow], output_root: Path, database_path: Path, 
 </html>"""
 
 
-def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> str:
+def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_subtitles: bool) -> str:
     title = html.escape(row.title or media_path.name)
     media_kind = "video" if media_path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"} else "audio"
     source = html.escape(f"{row.source_type}: {row.source_name}")
 
     resume_value = max(0.0, float(resume_seconds or 0.0))
+    subtitles_html = (
+        f'<track id="subtitle-track" kind="subtitles" srclang="en" label="English" src="/subtitle?id={row.row_id}" default />'
+        if has_subtitles
+        else ""
+    )
+    transcript_html = ""
+    if media_kind == "audio" and has_subtitles:
+        transcript_html = """
+    <section class="transcript-wrap">
+      <h3>Transcript</h3>
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+    </section>
+"""
+
     return f"""<!doctype html>
 <html>
 <head>
@@ -466,6 +569,31 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
       border-radius: 12px;
       box-shadow: 0 20px 60px rgba(0,0,0,.35);
     }}
+    .transcript-wrap {{ margin-top: 1rem; max-width: 1000px; }}
+    .transcript-wrap h3 {{ margin: 0 0 .45rem 0; font-size: 1rem; color: #b8c4e6; }}
+    .transcript {{
+      max-height: 260px;
+      overflow-y: auto;
+      border: 1px solid #2a3761;
+      border-radius: 10px;
+      background: #0f1730;
+      padding: .6rem;
+    }}
+    .transcript-line {{
+      display: block;
+      width: 100%;
+      text-align: left;
+      color: #c8d4f4;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      margin: 0;
+      padding: .35rem .45rem;
+      cursor: pointer;
+      line-height: 1.35;
+    }}
+    .transcript-line:hover {{ background: #1a2444; }}
+    .transcript-line.active {{ background: #2a427f; color: #f2f6ff; }}
   </style>
 </head>
 <body>
@@ -475,9 +603,11 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
     <p class="meta">{source}</p>
     <{media_kind} id="player" class="player" controls preload="metadata">
       <source src="/media?id={row.row_id}" />
+      {subtitles_html}
       Your browser does not support this media type.
     </{media_kind}>
     <p class="meta">Resume position: <span id="resume-label">{resume_value:.1f}s</span></p>
+    {transcript_html}
   </div>
   <script>
     (function() {{
@@ -485,8 +615,10 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
       const startSeconds = {resume_value:.6f};
       const player = document.getElementById('player');
       const resumeLabel = document.getElementById('resume-label');
+      const transcript = document.getElementById('transcript');
       let lastSentSeconds = -9999;
       let hasAppliedInitialSeek = false;
+      let lastActiveCue = null;
 
       if (!player) return;
 
@@ -525,9 +657,57 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float) -> st
         }} catch (_) {{}}
       }}
 
+      function syncTranscriptFromTrack() {{
+        if (!transcript || !player.textTracks || player.textTracks.length === 0) return;
+        const track = player.textTracks[0];
+        if (!track || !track.cues) return;
+
+        track.mode = 'hidden';
+        transcript.textContent = '';
+        const cues = Array.from(track.cues || []);
+        if (!cues.length) {{
+          transcript.textContent = 'No subtitle cues available.';
+          return;
+        }}
+
+        cues.forEach((cue, idx) => {{
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'transcript-line';
+          btn.dataset.idx = String(idx);
+          btn.textContent = (cue.text || '').replace(/\\s+/g, ' ').trim();
+          btn.addEventListener('click', () => {{
+            player.currentTime = Math.max(0, cue.startTime || 0);
+            player.play().catch(() => {{}});
+          }});
+          transcript.appendChild(btn);
+        }});
+
+        const onCueChange = () => {{
+          const active = track.activeCues && track.activeCues.length ? track.activeCues[0] : null;
+          if (active === lastActiveCue) return;
+          lastActiveCue = active;
+
+          const activeIndex = cues.indexOf(active);
+          const lines = transcript.querySelectorAll('.transcript-line');
+          lines.forEach((line, idx) => {{
+            if (idx === activeIndex) {{
+              line.classList.add('active');
+              line.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});
+            }} else {{
+              line.classList.remove('active');
+            }}
+          }});
+        }};
+
+        track.addEventListener('cuechange', onCueChange);
+        onCueChange();
+      }}
+
       player.addEventListener('loadedmetadata', applyInitialSeek);
       player.addEventListener('canplay', applyInitialSeek);
       player.addEventListener('playing', applyInitialSeek);
+      player.addEventListener('loadeddata', syncTranscriptFromTrack);
 
       player.addEventListener('timeupdate', () => {{
         if (!player.paused) postProgress(player.currentTime, false);
@@ -640,7 +820,7 @@ def make_handler(state: AppState):
                 self.wfile.write(body_bytes)
                 return
 
-            if path in {"/play", "/media"}:
+            if path in {"/play", "/media", "/subtitle"}:
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
@@ -658,10 +838,31 @@ def make_handler(state: AppState):
 
                 if path == "/play":
                     resume_seconds = get_download_position_seconds(str(state.database_path), row.row_id)
-                    body = _render_player(row, media_path, resume_seconds)
+                    subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
+                    body = _render_player(row, media_path, resume_seconds, subtitle_path is not None)
                     body_bytes = body.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body_bytes)))
+                    self.end_headers()
+                    self.wfile.write(body_bytes)
+                    return
+
+                if path == "/subtitle":
+                    subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
+                    if subtitle_path is None:
+                        self.send_error(404, "Subtitle unavailable")
+                        return
+
+                    subtitle_text = subtitle_path.read_text(encoding="utf-8", errors="replace")
+                    if subtitle_path.suffix.lower() == ".srt":
+                        subtitle_text = _srt_to_vtt(subtitle_text)
+                    elif not subtitle_text.lstrip().startswith("WEBVTT"):
+                        subtitle_text = "WEBVTT\n\n" + subtitle_text
+
+                    body_bytes = subtitle_text.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/vtt; charset=utf-8")
                     self.send_header("Content-Length", str(len(body_bytes)))
                     self.end_headers()
                     self.wfile.write(body_bytes)
