@@ -4,8 +4,8 @@ from pathlib import Path
 import feedparser
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
-from logger import log
+from ad_scrubber import TranscriptionError, generate_whisper_subtitles, scrub_audio_file
+from logger import get_logger
 from utils import create_audio_visualizer_video, ensure_dir, sanitize
 
 
@@ -18,7 +18,9 @@ class _YoutubeDlQuietLogger:
 
     def error(self, msg):
         if msg:
-            log.error("yt-dlp: %s", msg)
+            log.error("%s", msg)
+
+log = get_logger("podcast")
 
 
 def download_podcasts(config, downloaded_items):
@@ -69,42 +71,51 @@ def download_podcasts(config, downloaded_items):
                     "logger": _YoutubeDlQuietLogger(),
                 }
 
-                log.info(f"🎙️ Downloading podcast: {name} – {ep_title}")
+                log.info(f"Downloading podcast: {name} – {ep_title}")
                 with YoutubeDL(ydl_opts) as ydl:
                     ydl.download([mp3_url])
 
                 final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
                 playback_audio = final_audio
+                skip_subtitles_after_scrub_failure = False
 
                 if scrubber_cfg.get("enabled", False) and entry_scrub_enabled and final_audio.exists():
                     try:
                         scrubbed_output = scrub_audio_file(final_audio, scrubber_cfg)
                         if scrubbed_output:
                             playback_audio = scrubbed_output
+                    except TranscriptionError as scrub_exc:
+                        skip_subtitles_after_scrub_failure = True
+                        log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                     except Exception as scrub_exc:
                         log.warning(f"Ad scrub failed for {final_audio}: {scrub_exc}")
                 elif final_audio.exists() and not entry_scrub_enabled:
-                    log.info("⏩ Ad scrub disabled for podcast %s", name)
+                    log.info("Ad scrub disabled for podcast %s", name)
 
-                if entry_subtitles_enabled and playback_audio.exists():
+                if entry_subtitles_enabled and skip_subtitles_after_scrub_failure:
+                    log.warning(
+                        "Skipping subtitle generation for %s because transcription failed during ad scrub",
+                        playback_audio,
+                    )
+                elif entry_subtitles_enabled and playback_audio.exists():
                     try:
                         subtitle_settings = dict(scrubber_cfg)
                         if subtitle_offset_seconds is not None:
                             subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
                         subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
                         downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
-                        log.info("✅ Generated podcast subtitles: %s", subtitle_path.name)
+                        log.info("Generated podcast subtitles: %s", subtitle_path.name)
 
                         if entry_visualize_enabled:
                             try:
                                 visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
-                                log.info("🎬 Generated podcast visualizer: %s", visualizer_path.name)
+                                log.info("Generated podcast visualizer: %s", visualizer_path.name)
                             except Exception as viz_exc:
                                 log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
                     except Exception as subtitle_exc:
                         log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
                 elif entry_visualize_enabled:
-                    log.info("⏩ Visualizer skipped for podcast %s because subtitles are disabled", name)
+                    log.info("Visualizer skipped for podcast %s because subtitles are disabled", name)
 
                 with open(archive, "a", encoding="utf-8") as f:
                     f.write(mp3_url + "\n")
@@ -112,4 +123,4 @@ def download_podcasts(config, downloaded_items):
                 downloaded_items.append(f"Podcast: {name} – {ep_title}")
 
         except Exception as e:
-            log.error(f"❌ Failed to process podcast {entry}: {e}")
+            log.error(f"Failed to process podcast {entry}: {e}")
