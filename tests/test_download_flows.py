@@ -286,6 +286,39 @@ class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
 
 
+class SubtitleSidecarCleanupTests(unittest.TestCase):
+    def test_reused_english_sidecars_are_consolidated_to_single_srt(self):
+        import subtitles
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "20260311-Cuba_is_Next.mp3"
+            media.write_text("fake", encoding="utf-8")
+
+            en_orig = media.with_name(f"{media.stem}.en-orig.srt")
+            en_srt = media.with_name(f"{media.stem}.en.srt")
+            en_vtt = media.with_name(f"{media.stem}.en.vtt")
+            en_orig.write_text("orig", encoding="utf-8")
+            en_srt.write_text("en srt", encoding="utf-8")
+            en_vtt.write_text("vtt", encoding="utf-8")
+
+            subtitle_path = subtitles.create_subtitles(
+                media_file=media,
+                scrubber_cfg={"enabled": False},
+                subtitle_offset_seconds=None,
+                entry_subtitles_enabled=True,
+                logger=youtube.log,
+                context_name="test",
+                context_label="YouTube",
+            )
+
+            self.assertIsNotNone(subtitle_path)
+            self.assertEqual(subtitle_path, media.with_suffix(".srt"))
+            self.assertTrue(media.with_suffix(".srt").exists())
+            self.assertFalse(en_orig.exists())
+            self.assertFalse(en_srt.exists())
+            self.assertFalse(en_vtt.exists())
+
+
 class SubtitleFailureCachingTests(unittest.TestCase):
     def test_known_empty_audio_transcription_failure_is_cached(self):
         import subtitles

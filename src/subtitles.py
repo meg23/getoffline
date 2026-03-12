@@ -9,9 +9,37 @@ from transcription import transcribe_with_whisper
 log = get_logger("subtitles")
 
 
+_SUBTITLE_SIDECAR_SUFFIXES = {
+    ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
+}
+
+
+def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
+    stem = media_file.stem
+    parent = media_file.parent
+    keep_subtitle = Path(keep_subtitle).resolve()
+
+    for path in parent.glob(f"{stem}*.*"):
+        suffix = path.suffix.lower()
+        if suffix not in _SUBTITLE_SIDECAR_SUFFIXES:
+            continue
+        if path.resolve() == keep_subtitle:
+            continue
+
+        # Keep only the canonical subtitle sidecar matching the media basename.
+        # Remove downloaded language variants like .en.srt / .en-orig.srt / .en.vtt.
+        if path.name.startswith(f"{stem}."):
+            try:
+                path.unlink(missing_ok=True)
+                log.info("Removed extra subtitle sidecar: %s", path.name)
+            except Exception as cleanup_exc:
+                log.warning("Could not remove subtitle sidecar %s: %s", path, cleanup_exc)
+
+
 def _find_existing_english_subtitle(media_file: Path):
     subtitle_path = media_file.with_suffix(".srt")
     if subtitle_path.exists():
+        _cleanup_subtitle_sidecars(media_file, subtitle_path)
         return subtitle_path
 
     pattern = f"{media_file.stem}*.en*.srt"
@@ -20,8 +48,9 @@ def _find_existing_english_subtitle(media_file: Path):
         return None
 
     subtitle_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(candidates[0], subtitle_path)
+    shutil.move(str(candidates[0]), str(subtitle_path))
     log.info("Reused downloaded English subtitle: %s -> %s", candidates[0].name, subtitle_path.name)
+    _cleanup_subtitle_sidecars(media_file, subtitle_path)
     return subtitle_path
 
 
@@ -156,6 +185,7 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
 
+    _cleanup_subtitle_sidecars(input_file, subtitle_path)
     log.info("Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
     return subtitle_path
 
