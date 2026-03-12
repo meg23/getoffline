@@ -1,4 +1,4 @@
-.PHONY: build run clean
+.PHONY: build run test clean
 
 BUILD_DIR := target
 BUILD_OUTPUT := $(BUILD_DIR)/getoffline
@@ -18,6 +18,11 @@ build:
 run: build
 	@echo "Running $(BUILD_OUTPUT)..."
 	./$(BUILD_OUTPUT)
+
+
+test:
+	@echo "Running unit tests..."
+	PYTHONPATH=$(SRC_DIR) python -m unittest discover -s tests -p "test_*.py" -v
 
 clean:
 	@echo "Removing generated target directory and Python bytecode..."
