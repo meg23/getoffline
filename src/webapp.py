@@ -45,6 +45,7 @@ class MediaRow:
     file_size_bytes: Optional[int]
     upload_date: Optional[str]
     played: bool
+    played_at: Optional[str] = None
     subtitle_path: Optional[str] = None
 
 
@@ -171,7 +172,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         rows = conn.execute(
             """
             SELECT id, source_type, source_name, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), subtitle_path
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), played_at, subtitle_path
             FROM downloads
             WHERE download_status = 'downloaded'
             ORDER BY last_seen_at DESC, id DESC
@@ -189,7 +190,8 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             file_size_bytes=row[6],
             upload_date=row[7],
             played=bool(row[8]),
-            subtitle_path=row[9],
+            played_at=row[9],
+            subtitle_path=row[10],
         )
         for row in rows
     ]
@@ -357,23 +359,26 @@ def _render_index(
         source = html.escape(f"{row.source_type}: {row.source_name}")
         size = html.escape(_human_size(row.file_size_bytes))
         ext = html.escape((row.file_ext or path.suffix.lstrip(".")) or "?")
-        status_label = "played" if row.played else "new"
+        ever_played = bool(row.played or getattr(row, "played_at", None))
+        status_label = "played" if row.played else ("" if ever_played else "new")
         status_class = "status-played" if row.played else "status-new"
+        status_title = "Already played" if row.played else ("Played previously" if ever_played else "Not played yet")
         mark_action = "unplay" if row.played else "played"
         mark_label = "Mark unplayed" if row.played else "Mark played"
+        mark_symbol = "↺" if row.played else "✓"
         cards.append(
             f"""
             <tr>
-                <td class="title-cell" data-label="Title">{title}</td>
+                <td class="title-cell" data-label="Title" title="{title}">{title}</td>
                 <td data-label="Source">{source}</td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
-                <td data-label="Status"><span class="pill {status_class}">{status_label}</span></td>
+                <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Action">
-                  <a class="btn btn-link" href="/play?id={row.row_id}">Play</a>
+                  <a class="btn btn-link" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">▶</a>
                   <form method="post" action="/mark-{mark_action}" class="inline-form">
                     <input type="hidden" name="id" value="{row.row_id}" />
-                    <button class="btn btn-subtle" type="submit">{mark_label}</button>
+                    <button class="btn btn-subtle" type="submit" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</button>
                   </form>
                 </td>
             </tr>
