@@ -5,7 +5,6 @@ import feedparser
 from yt_dlp import YoutubeDL
 
 from logger import get_logger
-from scrubbing import scrub_media_file
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, sanitize
 
@@ -27,13 +26,10 @@ log = get_logger("podcast")
 
 def download_podcasts(config, downloaded_items):
     defaults = config["defaults"]
-    scrubber_cfg = defaults.get("ad_scrubber", {})
-
     for entry in config.get("podcasts", []):
         try:
             name = sanitize(entry["name"])
             url = entry["url"]
-            entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)
@@ -77,29 +73,13 @@ def download_podcasts(config, downloaded_items):
                     ydl.download([mp3_url])
 
                 final_audio = Path(folder) / f"{ep_title}.{defaults['audio_format']}"
-                playback_audio = final_audio
-                skip_subtitles_after_scrub_failure = False
-
-                if final_audio.exists():
-                    playback_audio, skip_subtitles_after_scrub_failure = scrub_media_file(
-                        media_file=final_audio,
-                        scrubber_cfg=scrubber_cfg,
-                        scrubber_enabled=scrubber_cfg.get("enabled", False),
-                        entry_scrub_enabled=entry_scrub_enabled,
-                        logger=log,
-                        context_name=name,
-                        context_label="podcast",
-                    )
-
                 subtitle_path = create_subtitles(
-                    media_file=playback_audio,
-                    scrubber_cfg=scrubber_cfg,
+                    media_file=final_audio,
                     subtitle_offset_seconds=subtitle_offset_seconds,
                     entry_subtitles_enabled=entry_subtitles_enabled,
                     logger=log,
                     context_name=f"podcast {name}",
                     context_label="podcast",
-                    skip_subtitles_after_scrub_failure=skip_subtitles_after_scrub_failure,
                 )
                 if subtitle_path:
                     downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
