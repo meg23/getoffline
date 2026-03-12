@@ -207,25 +207,15 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
 
 def create_subtitles(
     media_file,
-    scrubber_cfg: dict,
     subtitle_offset_seconds,
     entry_subtitles_enabled: bool,
     logger,
     context_name: str,
     context_label: str,
-    skip_subtitles_after_scrub_failure: bool = False,
 ):
-    if entry_subtitles_enabled and skip_subtitles_after_scrub_failure:
-        logger.warning(
-            "Skipping subtitle generation for %s because transcription failed during ad scrub",
-            media_file,
-        )
-        return None
-
     if entry_subtitles_enabled and media_file.exists():
         try:
-            subtitle_settings = dict(scrubber_cfg)
-            subtitle_settings.setdefault("subtitle_language", "en")
+            subtitle_settings = {"subtitle_language": "en"}
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
 
