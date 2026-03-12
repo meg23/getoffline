@@ -159,8 +159,9 @@ class DownloadFlowTests(unittest.TestCase):
             config["defaults"]["database_path"] = os.path.join(tmpdir, "downloads.sqlite3")
 
             mp3_url = "https://cdn.example.com/episode-1.mp3"
+            podcast_title = "Episode 1: A Normal Podcast Title"
             fake_feed = SimpleNamespace(
-                entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)])]
+                entries=[SimpleNamespace(title=podcast_title, enclosures=[SimpleNamespace(href=mp3_url)])]
             )
 
             downloaded_items = []
@@ -178,7 +179,9 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0][0], "podcast")
             self.assertEqual(rows[1][0], "youtube")
+            self.assertEqual(rows[0][2], podcast_title)
             self.assertTrue(rows[0][3])
+            self.assertIn(podcasts.sanitize(podcast_title), rows[0][3])
             self.assertIn("title", rows[0][4])
             self.assertIn("title", rows[1][4])
 
