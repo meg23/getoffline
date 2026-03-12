@@ -12,8 +12,10 @@ from database import init_database, mark_all_downloads_played, mark_download_pla
 from webapp import (  # noqa: E402
     AppState,
     _parse_range_header,
+    _resolve_safe_subtitle_path,
     _render_index,
     _render_player,
+    _srt_to_vtt,
     _resolve_safe_media_path,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
@@ -59,6 +61,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("Update Downloads", body)
             self.assertIn("action=\"/update\"", body)
             self.assertIn("Mark all as played", body)
+            self.assertIn("Show played", body)
 
 
 class WebAppDatabaseRowsTests(unittest.TestCase):
@@ -92,6 +95,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].title, "Episode 1")
             self.assertEqual(Path(rows[0].file_path), media)
+            self.assertIsNone(rows[0].subtitle_path)
 
 
 
@@ -242,6 +246,52 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("New Item", body)
             self.assertNotIn("Played Item", body)
 
+    def test_index_can_show_played_items_with_toggle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row_new = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="New Item",
+                file_path=str(root / "new.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+            )
+            row_played = SimpleNamespace(
+                row_id=2,
+                source_type="podcast",
+                source_name="ShowB",
+                title="Played Item",
+                file_path=str(root / "played.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=True,
+            )
+            (root / "new.mp3").write_text("x", encoding="utf-8")
+            (root / "played.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row_new, row_played],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+                show_played=True,
+            )
+
+            self.assertIn("Played Item", body)
+            self.assertIn("Hide played", body)
+
     def test_player_page_includes_resume_progress_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -253,9 +303,44 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 source_name="Show",
                 title="Sample",
             )
-            body = _render_player(row, media, 42.5)
+            body = _render_player(row, media, 42.5, has_subtitles=False)
             self.assertIn("/progress", body)
             self.assertIn("startSeconds = 42.500000", body)
+
+    def test_player_page_includes_transcript_for_audio_with_subtitles(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "item.mp3"
+            media.write_text("x", encoding="utf-8")
+            row = SimpleNamespace(
+                row_id=12,
+                source_type="podcast",
+                source_name="Show",
+                title="Sample",
+            )
+            body = _render_player(row, media, 0, has_subtitles=True)
+            self.assertIn("/subtitle?id=12", body)
+            self.assertIn("Transcript", body)
+            self.assertIn("Loading transcript…", body)
+            self.assertIn("pageshow", body)
+
+    def test_srt_to_vtt_conversion(self):
+        content = "1\n00:00:00,500 --> 00:00:02,000\nHello\n"
+        converted = _srt_to_vtt(content)
+        self.assertTrue(converted.startswith("WEBVTT"))
+        self.assertIn("00:00:00.500 --> 00:00:02.000", converted)
+
+    def test_resolve_safe_subtitle_path_prefers_row_subtitle_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            subtitle = root / "episode.custom.srt"
+            subtitle.write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+
+            row = SimpleNamespace(subtitle_path=str(subtitle))
+            resolved = _resolve_safe_subtitle_path(root, row, media)
+            self.assertEqual(resolved, subtitle.resolve())
 
 class WebAppUpdateThreadTests(unittest.TestCase):
     def test_trigger_background_update_runs_downloads_once(self):
