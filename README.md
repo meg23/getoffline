@@ -1,13 +1,13 @@
 # Listens: Automated Media Downloader
 
-**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes using a simple YAML configuration. It supports cookies for YouTube downloads, automatic audio extraction using `yt-dlp`, and optional subtitle generation for downloaded media.
+**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes using a simple YAML configuration. It supports cookies for YouTube downloads, automatic audio extraction using `yt-dlp`, and optional Whisper subtitle generation for downloaded audio media.
 
 ## Features
 
 - Batch download from YouTube playlists/channels and podcast RSS feeds
 - Central SQLite download history using SQLAlchemy (replaces per-source text archives)
 - Automatic audio extraction to MP3
-- Automatic subtitle (`.srt`) generation for new downloads when `subtitles: true`
+- Automatic Whisper subtitle (`.srt`) generation for new audio downloads when `subtitles: true`
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams
@@ -97,7 +97,7 @@ Downloaded files are stored under the `output_root` directory, sorted by source 
 
 Download tracking is stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`) with metadata such as source, URLs, title, codecs, resolution, size, subtitle settings, and raw extractor metadata.
 
-For newly downloaded YouTube/podcast media, subtitles are generated with Whisper when `subtitles: true`.
+For newly downloaded YouTube/podcast audio media, subtitles are generated with Whisper when `subtitles: true` (YouTube-provided captions are not downloaded, and video items do not get subtitles).
 A per-entry timing adjustment can be set with `subtitle_offset_seconds` to keep SRT timing in sync:
 
 - `<playback_media>.srt`
