@@ -97,6 +97,37 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(Path(rows[0].file_path), media)
             self.assertIsNone(rows[0].subtitle_path)
 
+    def test_fetch_downloaded_media_rows_repairs_normalized_file_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            stale_media_path = root / "20260312-They_re..FINALLY_Doing_It_-_BIG_Xbox_News.mp3"
+            normalized_media_path = root / "20260312-They_re.FINALLY_Doing_It_-_BIG_Xbox_News.mp3"
+            normalized_media_path.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "youtube",
+                    "source_name": "XboxReady",
+                    "item_uid": "uid-repair-1",
+                    "item_url": "https://youtube.com/watch?v=uid-repair-1",
+                    "media_url": "https://youtube.com/watch?v=uid-repair-1",
+                    "title": "Repair test",
+                    "file_path": str(stale_media_path),
+                    "file_ext": "mp3",
+                    "file_size_bytes": normalized_media_path.stat().st_size,
+                    "subtitle_enabled": True,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"title": "Repair test"},
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path, root)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(Path(rows[0].file_path), normalized_media_path)
+
 
 
     def test_mark_download_played_updates_row_state(self):

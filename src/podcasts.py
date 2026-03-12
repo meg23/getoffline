@@ -39,7 +39,7 @@ def _episode_payload(
     download_status,
     error_message=None,
 ):
-    file_value = Path(file_path) if file_path else None
+    file_value = Path(file_path).expanduser().resolve() if file_path else None
     file_size = file_value.stat().st_size if file_value and file_value.exists() else None
 
     return {
@@ -70,7 +70,7 @@ def _episode_payload(
         "resolution": "audio-only",
         "fps": None,
         "subtitle_enabled": subtitle_enabled,
-        "subtitle_path": str(subtitle_path) if subtitle_path else None,
+        "subtitle_path": str(Path(subtitle_path).expanduser().resolve()) if subtitle_path else None,
         "download_status": download_status,
         "error_message": error_message,
         "raw_metadata": {
