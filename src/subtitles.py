@@ -10,6 +10,22 @@ from utils import create_audio_visualizer_video
 log = get_logger("subtitles")
 
 
+def _find_existing_english_subtitle(media_file: Path):
+    subtitle_path = media_file.with_suffix(".srt")
+    if subtitle_path.exists():
+        return subtitle_path
+
+    pattern = f"{media_file.stem}*.en*.srt"
+    candidates = sorted(media_file.parent.glob(pattern))
+    if not candidates:
+        return None
+
+    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(candidates[0], subtitle_path)
+    log.info("Reused downloaded English subtitle: %s -> %s", candidates[0].name, subtitle_path.name)
+    return subtitle_path
+
+
 def _parse_srt_timestamp(value: str) -> float:
     hours, minutes, seconds_millis = value.split(":")
     seconds, millis = seconds_millis.split(",")
@@ -95,9 +111,10 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
-    log.info("Generating subtitles: %s (%s)", input_file.name, model_name)
+    subtitle_language = settings.get("subtitle_language", "en")
+    log.info("Generating subtitles: %s (%s, language=%s)", input_file.name, model_name, subtitle_language)
     try:
-        result = transcribe_with_whisper(input_file, model_name, "subtitle-generation")
+        result = transcribe_with_whisper(input_file, model_name, "subtitle-generation", language=subtitle_language)
     except Exception as exc:
         error_message = str(exc)
         if "cannot reshape tensor of 0 elements" in error_message:
@@ -165,9 +182,13 @@ def create_subtitles_and_optional_visualizer(
     if entry_subtitles_enabled and media_file.exists():
         try:
             subtitle_settings = dict(scrubber_cfg)
+            subtitle_settings.setdefault("subtitle_language", "en")
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
-            subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
+
+            subtitle_path = _find_existing_english_subtitle(media_file)
+            if subtitle_path is None:
+                subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
             if subtitle_path is None:
                 return None
             logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)

@@ -171,6 +171,73 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
 
 
+class SubtitleDefaultsAndYoutubeCaptionTests(unittest.TestCase):
+    def setUp(self):
+        FakeYoutubeDL.instances = []
+
+    def test_youtube_download_configures_english_caption_download(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ad_scrubber": {"enabled": False},
+                },
+                "youtube": [{
+                    "name": "Sample",
+                    "url": "https://youtube.com/watch?v=video-1",
+                    "type": "audio",
+                    "scrub": False,
+                }],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            ):
+                youtube.download_youtube_items(config, [])
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertTrue(opts["writesubtitles"])
+            self.assertTrue(opts["writeautomaticsub"])
+            self.assertEqual(opts["subtitlesformat"], "srt/best")
+            self.assertIn("en", opts["subtitleslangs"])
+
+    def test_podcast_subtitles_default_to_enabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ad_scrubber": {"enabled": False},
+                },
+                "podcasts": [{
+                    "name": "PodcastA",
+                    "url": "https://example.com/rss",
+                    "scrub": False,
+                }],
+            }
+            mp3_url = "https://cdn.example.com/episode-1.mp3"
+            fake_feed = SimpleNamespace(entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)])])
+
+            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+                downloaded_items = []
+                podcasts.download_podcasts(config, downloaded_items)
+
+            self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+
+
 class SubtitleFailureCachingTests(unittest.TestCase):
     def test_known_empty_audio_transcription_failure_is_cached(self):
         import subtitles
