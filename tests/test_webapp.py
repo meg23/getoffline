@@ -274,6 +274,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             body = _render_player(row, media, 0, has_subtitles=True)
             self.assertIn("/subtitle?id=12", body)
             self.assertIn("Transcript", body)
+            self.assertIn("Loading transcript…", body)
+            self.assertIn("pageshow", body)
 
     def test_srt_to_vtt_conversion(self):
         content = "1\n00:00:00,500 --> 00:00:02,000\nHello\n"
