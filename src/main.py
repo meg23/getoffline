@@ -11,11 +11,11 @@ def main():
     download_podcasts(config, downloaded_items)
 
     if downloaded_items:
-        print("\n✅ Download Summary:")
+        print("\nDownload Summary:")
         for item in downloaded_items:
             print(f" - {item}")
     else:
-        print("\n📭 Nothing new was downloaded.")
+        print("\nNothing new was downloaded.")
 
 
 if __name__ == "__main__":
