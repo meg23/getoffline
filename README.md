@@ -1,8 +1,8 @@
-# 🎧 Listens: Automated Media Downloader
+# Listens: Automated Media Downloader
 
 **Listens** is a Python-based tool to batch download YouTube videos and podcast episodes using a simple YAML configuration. It supports cookies for YouTube downloads, automatic audio extraction using `yt-dlp`, and optional ad scrubbing for downloaded audio.
 
-## 🚀 Features
+## Features
 
 - Batch download from YouTube playlists/channels and podcast RSS feeds
 - Automatic audio extraction to MP3
@@ -17,7 +17,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Easy YAML configuration
 
-## 📦 Requirements
+## Requirements
 
 - Python 3.8+
 - `yt-dlp`
@@ -33,7 +33,7 @@ Install dependencies:
 pip install -r src/requirements.txt
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 Edit `config.yaml` to define your YouTube playlists and podcast RSS feeds:
 
@@ -72,7 +72,7 @@ Ad scrubbing is enabled by default (`defaults.ad_scrubber.enabled: true`). Set i
 
 YouTube live streams are skipped automatically and will not be downloaded.
 
-## 🛠 Usage
+## Usage
 
 Run the downloader:
 
@@ -92,7 +92,7 @@ Clean up generated files:
 ./scripts/clean.sh
 ```
 
-## 📁 Output
+## Output
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
 When ad scrubbing is enabled and ads are detected, the original downloaded audio is preserved and a new ad-removed file is created:
@@ -111,7 +111,7 @@ A global timing adjustment can be set with `defaults.ad_scrubber.subtitle_time_o
 
 VLC auto-loads these subtitles when the `.srt` basename matches the media file in the same folder.
 
-## 📝 Logging
+## Logging
 
 Logs are written to:
 

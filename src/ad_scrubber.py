@@ -7,7 +7,9 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from logger import log
+from logger import get_logger
+
+log = get_logger("ad_scrubber")
 
 AD_PATTERNS = [
     r"\bwe(?:'|’)ll be right back\b",
@@ -173,13 +175,17 @@ _TRANSCRIPTION_CACHE_LOCK = threading.Lock()
 _WHISPER_MODEL_LOCK = threading.Lock()
 
 
+class TranscriptionError(RuntimeError):
+    """Raised when Whisper transcription cannot be completed for a media file."""
+
+
 def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str):
     input_file = Path(input_file).resolve()
     cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name)
     with _TRANSCRIPTION_CACHE_LOCK:
         cached = _TRANSCRIPTION_CACHE.get(cache_key)
     if cached is not None:
-        log.info("⏩ Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
+        log.info("Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
         return cached
 
     try:
@@ -193,7 +199,13 @@ def _transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str)
             model = whisper.load_model(model_name)
             _WHISPER_MODEL_CACHE[model_name] = model
 
-    result = model.transcribe(str(input_file), fp16=False)
+    try:
+        result = model.transcribe(str(input_file), fp16=False)
+    except Exception as exc:
+        raise TranscriptionError(
+            f"Transcription failed for {input_file.name} ({model_name}): {exc}"
+        ) from exc
+
     with _TRANSCRIPTION_CACHE_LOCK:
         _TRANSCRIPTION_CACHE[cache_key] = result
     return result
@@ -342,7 +354,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     removed_text_report = output_file.with_suffix(f"{output_file.suffix}.removed_text.txt")
 
     if marker.exists() and output_file.exists() and output_file.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("⏩ Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
+        log.info("Ad scrub skipped (already processed): %s -> %s", input_file.name, output_file.name)
         return output_file
 
     model_name = settings.get("model", "base")
@@ -350,7 +362,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     post_roll = float(settings.get("post_roll", 2.0))
     min_hits = int(settings.get("min_hits", 1))
 
-    log.info("🧠 Transcribing for ad-scrub: %s (%s)", input_file.name, model_name)
+    log.info("Transcribing for ad-scrub: %s (%s)", input_file.name, model_name)
     result = _transcribe_with_whisper(input_file, model_name, "ad-scrub")
 
     cut_ranges, raw_hits = detect_ad_segments(
@@ -365,7 +377,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
     cut_ranges = clamp_ranges(cut_ranges, total_duration, min_len=min_ad_seconds)
 
     log.info(
-        "🔎 Ad scrub analysis for %s: %d matched transcript segments, %d cut range(s) after filtering",
+        "Ad scrub analysis for %s: %d matched transcript segments, %d cut range(s) after filtering",
         input_file.name,
         len(raw_hits),
         len(cut_ranges),
@@ -385,7 +397,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
             ),
             encoding="utf-8",
         )
-        log.info("✅ No ad ranges removed for %s (0.00s removed)", input_file.name)
+        log.info("No ad ranges removed for %s (0.00s removed)", input_file.name)
         return None
 
     keep_ranges = invert_ranges(total_duration, cut_ranges)
@@ -396,7 +408,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
 
     for idx, (start, end) in enumerate(cut_ranges, start=1):
         log.info(
-            "✂️ Cut range %d/%d for %s: %.2fs -> %.2fs (%.2fs)",
+            "Cut range %d/%d for %s: %.2fs -> %.2fs (%.2fs)",
             idx,
             len(cut_ranges),
             input_file.name,
@@ -464,7 +476,7 @@ def scrub_audio_file(input_file: Path, settings: dict):
             report_file.write("- No transcript segments overlapped removed ranges.\n")
 
     log.info(
-        "✅ Ad scrub complete for %s -> %s: removed %.2fs (%.2f%%) across %d range(s)",
+        "Ad scrub complete for %s -> %s: removed %.2fs (%.2f%%) across %d range(s)",
         input_file.name,
         output_file.name,
         removed_seconds,
@@ -543,7 +555,7 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     subtitle_path = Path(subtitle_path) if subtitle_path else input_file.with_suffix(".srt")
 
     if subtitle_path.exists() and subtitle_path.stat().st_mtime >= input_file.stat().st_mtime:
-        log.info("⏩ Subtitle generation skipped (already up to date): %s", subtitle_path.name)
+        log.info("Subtitle generation skipped (already up to date): %s", subtitle_path.name)
         return subtitle_path
 
     try:
@@ -552,7 +564,7 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
-    log.info("📝 Generating subtitles: %s (%s)", input_file.name, model_name)
+    log.info("Generating subtitles: %s (%s)", input_file.name, model_name)
     result = _transcribe_with_whisper(input_file, model_name, "subtitle-generation")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -578,5 +590,5 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     subtitle_offset = float(settings.get("subtitle_time_offset_seconds", 0.0))
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
 
-    log.info("✅ Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
+    log.info("Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
     return subtitle_path

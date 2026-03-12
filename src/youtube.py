@@ -1,13 +1,29 @@
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional
 
 from yt_dlp import YoutubeDL
 
-from ad_scrubber import generate_whisper_subtitles, scrub_audio_file
-from logger import log
+from ad_scrubber import TranscriptionError, generate_whisper_subtitles, scrub_audio_file
+from logger import get_logger
 from utils import create_audio_visualizer_video, ensure_dir, normalize_media_filename, sanitize
+
+
+
+
+_EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
+
+
+def _clean_log_title(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "unknown title"
+
+    text = _EMOJI_RE.sub("", text)
+    text = " ".join(text.split())
+    return text or "unknown title"
 
 
 def _human_size(num_bytes: Optional[float]) -> str:
@@ -35,18 +51,20 @@ class _YoutubeDlQuietLogger:
 
         # yt-dlp sends normal activity lines to debug(); keep them visible.
         if message.startswith("[debug]"):
-            log.debug("yt-dlp: %s", message)
+            log.debug("%s", message)
         else:
-            log.info("yt-dlp: %s", message)
+            log.info("%s", message)
 
     def warning(self, msg):
         if msg:
-            log.warning("yt-dlp: %s", msg)
+            log.warning("%s", msg)
 
     def error(self, msg):
         if msg:
-            log.error("yt-dlp: %s", msg)
+            log.error("%s", msg)
 
+
+log = get_logger("youtube")
 
 
 def _process_audio_media_file(
@@ -61,39 +79,45 @@ def _process_audio_media_file(
 ):
     downloaded_summary_items = []
     playback_audio = media_file
+    skip_subtitles_after_scrub_failure = False
 
     if scrubber_enabled and entry_scrub_enabled:
-        log.info("🧼 Starting ad scrub for YouTube file: %s", media_file.name)
+        log.info("Starting ad scrub for YouTube file: %s", media_file.name)
         try:
             scrubbed_output = scrub_audio_file(media_file, scrubber_cfg)
             if scrubbed_output:
                 playback_audio = scrubbed_output
-                log.info("✅ Ad scrubbed YouTube file: %s", scrubbed_output.name)
+                log.info("Ad scrubbed YouTube file: %s", scrubbed_output.name)
             else:
-                log.info("ℹ️  Ad scrub made no changes for YouTube file: %s", media_file.name)
+                log.info("Ad scrub made no changes for YouTube file: %s", media_file.name)
+        except TranscriptionError as scrub_exc:
+            skip_subtitles_after_scrub_failure = True
+            log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
         except Exception as scrub_exc:
             log.warning("Ad scrub failed for %s: %s", media_file, scrub_exc)
     else:
-        log.info("⏩ Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
+        log.info("Ad scrub disabled for %s (global=%s entry=%s)", name, scrubber_enabled, entry_scrub_enabled)
 
-    if entry_subtitles_enabled and playback_audio.exists():
+    if entry_subtitles_enabled and skip_subtitles_after_scrub_failure:
+        log.warning("Skipping subtitle generation for %s because transcription failed during ad scrub", media_file)
+    elif entry_subtitles_enabled and playback_audio.exists():
         try:
             subtitle_settings = dict(scrubber_cfg)
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
             subtitle_path = generate_whisper_subtitles(playback_audio, subtitle_settings)
-            log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+            log.info("Generated YouTube subtitles: %s", subtitle_path.name)
 
             if entry_visualize_enabled:
                 try:
                     visualizer_path = create_audio_visualizer_video(playback_audio, subtitle_path)
-                    log.info("🎬 Generated YouTube visualizer: %s", visualizer_path.name)
+                    log.info("Generated YouTube visualizer: %s", visualizer_path.name)
                 except Exception as viz_exc:
                     log.warning("Visualizer generation failed for %s: %s", playback_audio, viz_exc)
         except Exception as subtitle_exc:
             log.warning("Subtitle generation failed for %s: %s", playback_audio, subtitle_exc)
     elif entry_visualize_enabled:
-        log.info("⏩ Visualizer skipped for %s because subtitles are disabled", name)
+        log.info("Visualizer skipped for %s because subtitles are disabled", name)
 
     return downloaded_summary_items
 
@@ -107,7 +131,7 @@ def download_youtube_items(config, downloaded_items):
         _ = incomplete
         live_status = (info_dict.get("live_status") or "").lower()
         if info_dict.get("is_live") or live_status in {"is_live", "is_upcoming", "was_live", "post_live"}:
-            title = info_dict.get("title", "unknown title")
+            title = _clean_log_title(info_dict.get("title"))
             return f"Skipping live stream: {title}"
         return None
 
@@ -154,7 +178,7 @@ def download_youtube_items(config, downloaded_items):
                         if step >= previous_step + 10:
                             download_progress_markers[download_key] = step
                             log.info(
-                                "⬇️ yt-dlp downloading %s: %s%% (%s/%s)",
+                                "Download progress for %s: %s%% (%s/%s)",
                                 name,
                                 min(step, 100),
                                 _human_size(downloaded_bytes),
@@ -162,7 +186,7 @@ def download_youtube_items(config, downloaded_items):
                             )
                     elif download_key not in download_progress_markers:
                         download_progress_markers[download_key] = 0
-                        log.info("⬇️ yt-dlp downloading %s: %s (size unknown)", name, output_file)
+                        log.info("Download progress for %s: %s (size unknown)", name, output_file)
 
                 if status == "finished":
                     total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
@@ -170,7 +194,7 @@ def download_youtube_items(config, downloaded_items):
 
                     if elapsed:
                         log.info(
-                            "⬇️ yt-dlp finished download for %s: %s (%s in %.1fs)",
+                            "Finished download for %s: %s (%s in %.1fs)",
                             name,
                             output_file,
                             _human_size(total_bytes),
@@ -178,7 +202,7 @@ def download_youtube_items(config, downloaded_items):
                         )
                     else:
                         log.info(
-                            "⬇️ yt-dlp finished download for %s: %s (%s)",
+                            "Finished download for %s: %s (%s)",
                             name,
                             output_file,
                             _human_size(total_bytes),
@@ -209,7 +233,7 @@ def download_youtube_items(config, downloaded_items):
                 extracted_audio_files.append(path.resolve())
                 if pp_status:
                     log.info(
-                        "⚙️ yt-dlp post-process %s for %s via %s: %s",
+                        "Post-process %s for %s via %s: %s",
                         pp_status,
                         name,
                         postprocessor,
@@ -217,7 +241,7 @@ def download_youtube_items(config, downloaded_items):
                     )
                 else:
                     log.info(
-                        "⚙️ yt-dlp post-processed for %s via %s: %s",
+                        "Post-processed for %s via %s: %s",
                         name,
                         postprocessor,
                         path.name,
@@ -261,7 +285,7 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
-            log.info("yt-dlp archive for %s: %s", name, archive)
+            log.info("Archive for %s: %s", name, archive)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
@@ -284,12 +308,12 @@ def download_youtube_items(config, downloaded_items):
                         continue
                     normalized_audio = normalize_media_filename(audio_path)
                     if normalized_audio != audio_path:
-                        log.info("🧹 Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
+                        log.info("Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
                     normalized_audio_files.append(normalized_audio)
                 new_audio_files = sorted(set(normalized_audio_files))
 
             log.info(
-                "📦 YouTube files for %s: new_audio=%d new_video=%d postprocess_candidates=%d",
+                "YouTube files for %s: new_audio=%d new_video=%d postprocess_candidates=%d",
                 name,
                 len(new_audio_files),
                 len(delta_video),
@@ -299,7 +323,7 @@ def download_youtube_items(config, downloaded_items):
             if download_type == "audio":
                 worker_count = int(defaults.get("processing_workers", 2))
                 worker_count = max(1, min(worker_count, len(new_audio_files) or 1))
-                log.info("⚙️  Running YouTube post-processing with %d worker(s) for %s", worker_count, name)
+                log.info("Running YouTube post-processing with %d worker(s) for %s", worker_count, name)
 
                 if worker_count == 1:
                     for mp3 in new_audio_files:
@@ -338,7 +362,7 @@ def download_youtube_items(config, downloaded_items):
                                 log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
             else:
                 if entry_visualize_enabled and not entry_subtitles_enabled:
-                    log.info("⏩ Visualizer skipped for %s because subtitles are disabled", name)
+                    log.info("Visualizer skipped for %s because subtitles are disabled", name)
                 elif entry_subtitles_enabled:
                     for media_file in delta_video:
                         if not media_file.exists():
@@ -348,11 +372,11 @@ def download_youtube_items(config, downloaded_items):
                             if subtitle_offset_seconds is not None:
                                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
                             subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
-                            log.info("✅ Generated YouTube subtitles: %s", subtitle_path.name)
+                            log.info("Generated YouTube subtitles: %s", subtitle_path.name)
                         except Exception as subtitle_exc:
                             log.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
                 else:
-                    log.info("⏩ Ad scrub skipped for %s (type=%s)", name, download_type)
+                    log.info("Ad scrub skipped for %s (type=%s)", name, download_type)
 
         except Exception as e:
-            log.error(f"❌ Failed to download YouTube: {entry}: {e}")
+            log.error(f"Failed to download YouTube: {entry}: {e}")

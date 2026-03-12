@@ -4,8 +4,10 @@ import os
 import browser_cookie3
 import yaml
 
-from logger import log
+from logger import get_logger
 
+
+log = get_logger("config")
 
 DEFAULT_AD_SCRUBBER = {
     "enabled": True,
