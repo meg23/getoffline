@@ -20,9 +20,10 @@ run: build
 	./$(BUILD_OUTPUT)
 
 
-test:
+test: clean build
 	@echo "Running unit tests..."
 	PYTHONPATH=$(SRC_DIR) python -m unittest discover -s tests -p "test_*.py" -v
+	./$(BUILD_DIR)/getoffline
 
 clean:
 	@echo "Removing generated target directory and Python bytecode..."
