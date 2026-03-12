@@ -7,7 +7,6 @@ from typing import List, Optional
 from yt_dlp import YoutubeDL
 
 from logger import get_logger
-from scrubbing import scrub_media_file
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, normalize_media_filename, sanitize
 
@@ -67,32 +66,18 @@ log = get_logger("youtube")
 def _process_audio_media_file(
     media_file: Path,
     name: str,
-    scrubber_cfg: dict,
-    scrubber_enabled: bool,
-    entry_scrub_enabled: bool,
     entry_subtitles_enabled: bool,
     subtitle_offset_seconds,
 ):
     downloaded_summary_items = []
-    playback_audio, skip_subtitles_after_scrub_failure = scrub_media_file(
-        media_file=media_file,
-        scrubber_cfg=scrubber_cfg,
-        scrubber_enabled=scrubber_enabled,
-        entry_scrub_enabled=entry_scrub_enabled,
-        logger=log,
-        context_name=name,
-        context_label="YouTube",
-    )
 
     create_subtitles(
-        media_file=playback_audio,
-        scrubber_cfg=scrubber_cfg,
+        media_file=media_file,
         subtitle_offset_seconds=subtitle_offset_seconds,
         entry_subtitles_enabled=entry_subtitles_enabled,
         logger=log,
         context_name=name,
         context_label="YouTube",
-        skip_subtitles_after_scrub_failure=skip_subtitles_after_scrub_failure,
     )
 
     return downloaded_summary_items
@@ -101,9 +86,6 @@ def _process_audio_media_file(
 def download_youtube_items(config, downloaded_items):
     defaults = config["defaults"]
     cookie_path = defaults["cookie_path"]
-    scrubber_cfg = defaults.get("ad_scrubber", {})
-    scrubber_enabled = scrubber_cfg.get("enabled", False)
-
     def skip_live_streams(info_dict, *, incomplete=False):
         _ = incomplete
         live_status = (info_dict.get("live_status") or "").lower()
@@ -121,7 +103,6 @@ def download_youtube_items(config, downloaded_items):
             ensure_dir(folder)
 
             download_type = entry.get("type", "audio").lower()
-            entry_scrub_enabled = entry.get("scrub", True)
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
 
@@ -322,9 +303,6 @@ def download_youtube_items(config, downloaded_items):
                             _process_audio_media_file(
                                 mp3,
                                 name,
-                                scrubber_cfg,
-                                scrubber_enabled,
-                                entry_scrub_enabled,
                                 entry_subtitles_enabled,
                                 subtitle_offset_seconds,
                             )
@@ -336,9 +314,6 @@ def download_youtube_items(config, downloaded_items):
                                 _process_audio_media_file,
                                 mp3,
                                 name,
-                                scrubber_cfg,
-                                scrubber_enabled,
-                                entry_scrub_enabled,
                                 entry_subtitles_enabled,
                                 subtitle_offset_seconds,
                             )
@@ -355,7 +330,6 @@ def download_youtube_items(config, downloaded_items):
                         continue
                     create_subtitles(
                         media_file=media_file,
-                        scrubber_cfg=scrubber_cfg,
                         subtitle_offset_seconds=subtitle_offset_seconds,
                         entry_subtitles_enabled=entry_subtitles_enabled,
                         logger=log,
@@ -363,7 +337,7 @@ def download_youtube_items(config, downloaded_items):
                         context_label="YouTube",
                     )
             else:
-                log.info("Ad scrub skipped for %s (type=%s)", name, download_type)
+                log.info("Subtitles skipped for %s (type=%s)", name, download_type)
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
