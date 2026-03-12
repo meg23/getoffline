@@ -550,7 +550,6 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     if media_kind == "audio" and has_subtitles:
         transcript_html = """
     <section class="transcript-wrap">
-      <h3>Transcript</h3>
       <div id="transcript" class="transcript" aria-live="polite"></div>
     </section>
 """
@@ -618,7 +617,6 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       {subtitles_html}
       Your browser does not support this media type.
     </{media_kind}>
-    <p class="meta">Resume position: <span id="resume-label">{resume_value:.1f}s</span></p>
     {transcript_html}
   </div>
   <script>
