@@ -983,6 +983,26 @@ def _render_index(
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
 
+      function postMiniProgress(state, seconds, force) {{
+        if (!state || !state.rowId) return;
+        const safe = Math.max(0, Number(seconds || 0));
+        const body = new URLSearchParams();
+        body.set('id', String(state.rowId));
+        body.set('position_seconds', safe.toFixed(3));
+
+        if (force && navigator.sendBeacon) {{
+          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+          if (navigator.sendBeacon('/progress', blob)) return;
+        }}
+
+        fetch('/progress', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+          body: body.toString(),
+          keepalive: true,
+        }}).catch(() => {{}});
+      }}
+
       function clearMiniMedia() {{
         [miniAudio, miniVideo].forEach((el) => {{
           if (!el) return;
@@ -1022,11 +1042,13 @@ def _render_index(
         active.load();
 
         const persist = () => {{
-          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
+          const nextState = {{
             ...state,
             currentTime: active.currentTime || 0,
             paused: active.paused,
-          }}));
+          }};
+          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(nextState));
+          postMiniProgress(nextState, nextState.currentTime, active.paused);
         }};
         active.addEventListener('timeupdate', persist);
         active.addEventListener('pause', persist);
@@ -1039,6 +1061,15 @@ def _render_index(
       }}
 
       function closeMiniPlayer() {{
+        const raw = localStorage.getItem('getofflineMiniPlayerState');
+        if (raw) {{
+          try {{
+            const state = JSON.parse(raw);
+            const active = state && state.kind === 'video' ? miniVideo : miniAudio;
+            const currentTime = active && active.style.display !== 'none' ? (active.currentTime || 0) : Number(state?.currentTime || 0);
+            postMiniProgress(state, currentTime, true);
+          }} catch (_) {{}}
+        }}
         localStorage.removeItem('getofflineMiniPlayerState');
         clearMiniMedia();
         if (miniPlayer) miniPlayer.classList.remove('is-visible');
