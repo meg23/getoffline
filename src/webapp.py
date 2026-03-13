@@ -768,9 +768,9 @@ def _render_index(
 
     .mini-player {{
       position: fixed;
-      left: 1rem;
       right: 1rem;
       bottom: 1rem;
+      width: min(360px, calc(100vw - 2rem));
       z-index: 40;
       border: 1px solid #cbd6ee;
       border-radius: 12px;
@@ -778,18 +778,33 @@ def _render_index(
       box-shadow: 0 12px 30px rgba(15, 34, 74, 0.2);
       padding: .7rem;
       display: none;
-      gap: .6rem;
+      gap: .55rem;
     }}
     .mini-player.is-visible {{ display: grid; }}
     .mini-player-header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: .5rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: start;
+      gap: .35rem .5rem;
     }}
     .mini-player-title {{ font-weight: 700; color: #17213a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .mini-player-source {{ color: #5d6780; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .mini-player-media {{ width: 100%; max-height: 200px; border-radius: 10px; background: #000; }}
+    .mini-player-open {{
+      grid-row: 1 / span 2;
+      grid-column: 2;
+      align-self: center;
+      justify-self: end;
+      font-size: .82rem;
+      color: #2f62f2;
+      text-decoration: none;
+      border: 1px solid #cbd6ee;
+      border-radius: 999px;
+      padding: .25rem .65rem;
+      background: #f4f7ff;
+    }}
+    .mini-player-open:hover {{ background: #e9efff; text-decoration: none; }}
+    .mini-player-media {{ width: 100%; border-radius: 10px; background: #000; }}
+    #mini-player-video {{ aspect-ratio: 16 / 9; max-height: 203px; }}
 
     @keyframes spin {{
       from {{ transform: rotate(0deg); }}
@@ -803,7 +818,7 @@ def _render_index(
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
-      .mini-player {{ left: .5rem; right: .5rem; bottom: .5rem; }}
+      .mini-player {{ right: .5rem; left: .5rem; bottom: .5rem; width: auto; }}
       table {{ table-layout: auto; }}
       table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
@@ -906,6 +921,7 @@ def _render_index(
       <div class="mini-player-header">
         <div class="mini-player-title" id="mini-player-title"></div>
         <div class="mini-player-source" id="mini-player-source"></div>
+        <a id="mini-player-open" class="mini-player-open" href="/" aria-label="Open in dedicated player">Open</a>
       </div>
       <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
       <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
@@ -930,6 +946,7 @@ def _render_index(
       const miniSource = document.getElementById('mini-player-source');
       const miniAudio = document.getElementById('mini-player-audio');
       const miniVideo = document.getElementById('mini-player-video');
+      const miniOpen = document.getElementById('mini-player-open');
 
       function clearMiniMedia() {{
         [miniAudio, miniVideo].forEach((el) => {{
@@ -948,6 +965,7 @@ def _render_index(
         let state = null;
         try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
         if (!state || !state.rowId || !state.src || !state.kind) return;
+        if (miniOpen) miniOpen.href = state.playUrl || ('/play?id=' + state.rowId);
 
         clearMiniMedia();
         if (miniTitle) miniTitle.textContent = state.title || 'Now playing';
@@ -993,6 +1011,7 @@ def _render_index(
             source: link.dataset.source || '',
             kind: link.dataset.kind || 'audio',
             src: '/media?id=' + rowId,
+            playUrl: '/play?id=' + rowId,
             currentTime: 0,
             paused: false,
           }}));
@@ -1162,6 +1181,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           source: {json.dumps(row.source_name or '')},
           kind: {json.dumps(media_kind)},
           src: '/media?id=' + rowId,
+          playUrl: '/play?id=' + rowId,
           currentTime: player.currentTime || 0,
           paused: player.paused,
         }}));
