@@ -85,6 +85,24 @@ def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
     download_podcasts(config, downloaded_items)
 
 
+def _icon_sprite() -> str:
+    return """
+    <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" focusable="false">
+      <symbol id="bi-play-fill" viewBox="0 0 16 16"><path d="M11.596 8.697 6.233 11.86c-.54.318-1.233-.066-1.233-.697V4.837c0-.63.692-1.015 1.233-.697l5.363 3.163c.535.315.535 1.079 0 1.394z"/></symbol>
+      <symbol id="bi-check2-circle" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm3.354-8.646a.5.5 0 0 0-.708-.708L7.5 8.793 6.354 7.646a.5.5 0 1 0-.708.708l1.5 1.5a.5.5 0 0 0 .708 0l3.5-3.5z"/></symbol>
+      <symbol id="bi-arrow-counterclockwise" viewBox="0 0 16 16"><path d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 1 1 .908.418A4 4 0 1 0 8 4h-.5a.5.5 0 0 1 0-1H8z"/><path d="M8 1.5a.5.5 0 0 1 .5.5v2.5H6a.5.5 0 0 1 0-1h1.793A5.5 5.5 0 1 0 13.5 9a.5.5 0 0 1 1 0A6.5 6.5 0 1 1 8 2V2a.5.5 0 0 1 .5-.5z"/></symbol>
+      <symbol id="bi-arrow-clockwise" viewBox="0 0 16 16"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 0-.908.418A4 4 0 1 1 8 4h.5a.5.5 0 0 0 0-1H8z"/><path d="M8 1.5a.5.5 0 0 0-.5.5v2.5H10a.5.5 0 0 0 0-1H8.207A5.5 5.5 0 1 1 2.5 9a.5.5 0 0 0-1 0A6.5 6.5 0 1 0 8 2V2a.5.5 0 0 0-.5-.5z"/></symbol>
+      <symbol id="bi-eye" viewBox="0 0 16 16"><path d="M16 8s-3-5-8-5-8 5-8 5 3 5 8 5 8-5 8-5zM1.173 8a13.133 13.133 0 0 1 1.66-1.995C4.12 4.724 5.88 4 8 4s3.879.724 5.168 2.005A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.707C11.879 11.276 10.12 12 8 12s-3.879-.724-5.168-2.005A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5z"/></symbol>
+      <symbol id="bi-eye-slash" viewBox="0 0 16 16"><path d="M13.359 11.238C12.124 12.33 10.384 13 8 13c-5 0-8-5-8-5a16.79 16.79 0 0 1 3.168-3.646L1.146 2.354a.5.5 0 1 1 .708-.708l13 13a.5.5 0 0 1-.708.708l-.787-.787z"/><path d="M11.297 9.176 6.824 4.703A3 3 0 0 1 11.297 9.176z"/><path d="M5.34 7.218 8.782 10.66A3 3 0 0 1 5.34 7.218z"/><path d="M7.646 3.007C7.764 3.002 7.882 3 8 3c5 0 8 5 8 5a17.362 17.362 0 0 1-2.363 2.955l-.723-.723A16.74 16.74 0 0 0 14.828 8c-.058-.087-.122-.183-.195-.288-.335-.48-.83-1.12-1.465-1.707C11.879 4.724 10.12 4 8 4c-.076 0-.152.001-.227.003l-.127-.996z"/></symbol>
+      <symbol id="bi-gear" viewBox="0 0 16 16"><path d="M9.605 1.05c-.413-1.4-2.397-1.4-2.81 0l-.094.319a1.464 1.464 0 0 1-2.105.872l-.29-.17c-1.257-.736-2.66.667-1.924 1.924l.17.29c.446.764.003 1.74-.872 2.105l-.319.094c-1.4.413-1.4 2.397 0 2.81l.319.094c.875.365 1.318 1.34.872 2.105l-.17.29c-.736 1.257.667 2.66 1.924 1.924l.29-.17c.764-.446 1.74-.003 2.105.872l.094.319c.413 1.4 2.397 1.4 2.81 0l.094-.319c.365-.875 1.34-1.318 2.105-.872l.29.17c1.257.736 2.66-.667 1.924-1.924l-.17-.29a1.464 1.464 0 0 1 .872-2.105l.319-.094c1.4-.413 1.4-2.397 0-2.81l-.319-.094a1.464 1.464 0 0 1-.872-2.105l.17-.29c.736-1.257-.667-2.66-1.924-1.924l-.29.17a1.464 1.464 0 0 1-2.105-.872l-.094-.319zM8 10.5A2.5 2.5 0 1 1 8 5.5a2.5 2.5 0 0 1 0 5z"/></symbol>
+    </svg>
+    """
+
+
+def _icon_use(icon_id: str) -> str:
+    return f'<svg class="bi" aria-hidden="true" focusable="false"><use href="#{icon_id}"></use></svg>'
+
+
 def _human_size(num_bytes: Optional[int]) -> str:
     if not num_bytes:
         return "unknown"
@@ -386,8 +404,8 @@ def _render_index(
         status_title = "Already played" if row.played else ("Played previously" if ever_played else "Not played yet")
         mark_action = "unplay" if row.played else "played"
         mark_label = "Mark unplayed" if row.played else "Mark played"
-        mark_symbol = "⟲" if row.played else "☑"
-        play_symbol = "⏵"
+        mark_icon = "bi-arrow-counterclockwise" if row.played else "bi-check2-circle"
+        play_icon = "bi-play-fill"
         cards.append(
             f"""
             <tr>
@@ -398,8 +416,8 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Actions">
-                  <a class="icon-button" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">{play_symbol}</a>
-                  <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
+                  <a class="icon-button" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">{_icon_use(play_icon)}</a>
+                  <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{_icon_use(mark_icon)}</a>
                 </td>
             </tr>
             """
@@ -415,7 +433,7 @@ def _render_index(
     toggle_show_played = not show_played
     toggle_href = "?show_played=1" if toggle_show_played else "/"
     toggle_label = "Show played" if toggle_show_played else "Hide played"
-    toggle_symbol = "👁" if toggle_show_played else "🙈"
+    toggle_icon = "bi-eye" if toggle_show_played else "bi-eye-slash"
 
     return f"""<!doctype html>
 <html>
@@ -574,6 +592,7 @@ def _render_index(
     }}
     .icon-button:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
     .icon-button:disabled {{ opacity: .5; cursor: not-allowed; }}
+    .icon-button .bi {{ width: 1.1rem; height: 1.1rem; fill: currentColor; }}
     .icon-button-primary {{
       color: #fff;
       border-color: #3f6ff1;
@@ -610,6 +629,7 @@ def _render_index(
   </style>
 </head>
 <body>
+  {_icon_sprite()}
   <div class="container">
     <div class="hero">
       <h1>GetOffline</h1>
@@ -636,13 +656,13 @@ def _render_index(
     <div class="panel">
       <div class="toolbar toolbar-actions">
       <form method="post" action="/update" class="toolbar-form">
-        <button class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>⟲</button>
+        <button class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>{_icon_use("bi-arrow-clockwise")}</button>
       </form>
       <form method="post" action="/mark-all-played" class="toolbar-form">
-        <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>☑</button>
+        <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>{_icon_use("bi-check2-circle")}</button>
       </form>
-        <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{toggle_symbol}</a>
-        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">🛠</a>
+        <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
+        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
       </div>
     </div>
 
