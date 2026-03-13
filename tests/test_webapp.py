@@ -565,6 +565,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             body = _render_player(row, media, 42.5, has_subtitles=False)
             self.assertIn("/progress", body)
             self.assertIn("startSeconds = 42.500000", body)
+            self.assertIn("shouldAutoPlay", body)
+            self.assertIn("get('autoplay') === '1'", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
