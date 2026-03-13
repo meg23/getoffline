@@ -95,6 +95,7 @@ def _icon_sprite() -> str:
       <symbol id="bi-play-fill" viewBox="0 0 16 16"><path d="M11.596 8.697 6.233 11.86c-.54.318-1.233-.066-1.233-.697V4.837c0-.63.692-1.015 1.233-.697l5.363 3.163c.535.315.535 1.079 0 1.394z"/></symbol>
       <symbol id="bi-check2-circle" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm3.354-8.646a.5.5 0 0 0-.708-.708L7.5 8.793 6.354 7.646a.5.5 0 1 0-.708.708l1.5 1.5a.5.5 0 0 0 .708 0l3.5-3.5z"/></symbol>
       <symbol id="bi-arrow-counterclockwise" viewBox="0 0 16 16"><path d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 1 1 .908.418A4 4 0 1 0 8 4h-.5a.5.5 0 0 1 0-1H8z"/><path d="M8 1.5a.5.5 0 0 1 .5.5v2.5H6a.5.5 0 0 1 0-1h1.793A5.5 5.5 0 1 0 13.5 9a.5.5 0 0 1 1 0A6.5 6.5 0 1 1 8 2V2a.5.5 0 0 1 .5-.5z"/></symbol>
+      <symbol id="bi-arrow-repeat" viewBox="0 0 16 16"><path d="M2 2.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1H3.707A5.5 5.5 0 0 1 13 6a.5.5 0 0 1-1 0 4.5 4.5 0 0 0-7.795-3.089L5.5 4.207a.5.5 0 0 1-.708.708l-2-2A.5.5 0 0 1 2 2.5z"/><path d="M14 13.5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h.793A5.5 5.5 0 0 1 3 10a.5.5 0 0 1 1 0 4.5 4.5 0 0 0 7.795 3.089l-1.295-1.296a.5.5 0 1 1 .708-.707l2 2a.5.5 0 0 1 .146.414z"/></symbol>
       <symbol id="bi-download" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.6a.5.5 0 0 1 1 0v2.6a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.6a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></symbol>
       <symbol id="bi-eye" viewBox="0 0 16 16"><path d="M16 8s-3-5-8-5-8 5-8 5 3 5 8 5 8-5 8-5zM1.173 8a13.133 13.133 0 0 1 1.66-1.995C4.12 4.724 5.88 4 8 4s3.879.724 5.168 2.005A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.707C11.879 11.276 10.12 12 8 12s-3.879-.724-5.168-2.005A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5z"/></symbol>
       <symbol id="bi-eye-slash" viewBox="0 0 16 16"><path d="M13.359 11.238C12.124 12.33 10.384 13 8 13c-5 0-8-5-8-5a16.79 16.79 0 0 1 3.168-3.646L1.146 2.354a.5.5 0 1 1 .708-.708l13 13a.5.5 0 0 1-.708.708l-.787-.787z"/><path d="M11.297 9.176 6.824 4.703A3 3 0 0 1 11.297 9.176z"/><path d="M5.34 7.218 8.782 10.66A3 3 0 0 1 5.34 7.218z"/><path d="M7.646 3.007C7.764 3.002 7.882 3 8 3c5 0 8 5 8 5a17.362 17.362 0 0 1-2.363 2.955l-.723-.723A16.74 16.74 0 0 0 14.828 8c-.058-.087-.122-.183-.195-.288-.335-.48-.83-1.12-1.465-1.707C11.879 4.724 10.12 4 8 4c-.076 0-.152.001-.227.003l-.127-.996z"/></symbol>
@@ -511,7 +512,7 @@ def _render_index(
     sync_running = status["is_running"] == "yes"
     button_disabled = "disabled" if sync_running else ""
     sync_icon_class = " is-spinning" if sync_running else ""
-    sync_icon_href = "#bi-arrow-counterclockwise" if sync_running else "#bi-download"
+    sync_icon_href = "#bi-arrow-repeat" if sync_running else "#bi-download"
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
     favorite_items = sum(1 for item in visible_rows if bool(getattr(item, "favorite", False)))
@@ -864,7 +865,7 @@ def _render_index(
           const icon = syncButton.querySelector('.bi');
           const iconUse = syncButton.querySelector('use');
           if (icon) icon.classList.add('is-spinning');
-          if (iconUse) iconUse.setAttribute('href', '#bi-arrow-counterclockwise');
+          if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
         }});
       }}
 
