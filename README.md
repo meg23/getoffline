@@ -34,7 +34,7 @@ pip install -r src/requirements.txt
 
 ## Configuration
 
-Edit `config.yaml` to define your YouTube playlists and podcast RSS feeds:
+`config.yaml` now only needs default runtime values and database location. Manage YouTube playlists/channels, podcast feeds, and cookie text from the web UI at `/settings`.
 
 ```yaml
 
@@ -46,16 +46,6 @@ defaults:
   max_downloads: 3
   playlist_end: 3
 
-youtube:
-  - name: ACG
-    url: https://www.youtube.com/playlist?list=...
-    type: audio
-    subtitles: true
-
-podcasts:
-  - name: TheTimDillonShow
-    url: https://audioboom.com/channels/...
-    subtitles: true
 ```
 
 YouTube live streams are skipped automatically and will not be downloaded.
