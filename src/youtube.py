@@ -6,7 +6,16 @@ from typing import Dict, List, Optional
 
 from yt_dlp import YoutubeDL
 
-from database import build_item_uid, init_database, is_downloaded, resolve_database_path, upsert_download
+from database import (
+    build_item_uid,
+    ensure_config_seeded,
+    get_stored_config,
+    init_database,
+    is_downloaded,
+    materialize_youtube_cookie_file,
+    resolve_database_path,
+    upsert_download,
+)
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, normalize_media_filename, sanitize
@@ -148,10 +157,14 @@ def _build_youtube_payload(
 
 def download_youtube_items(config, downloaded_items):
     defaults = config["defaults"]
-    cookie_path = defaults["cookie_path"]
     db_path = defaults.get("database_path") or resolve_database_path(defaults)
-    defaults["database_path"] = db_path
     init_database(db_path)
+    ensure_config_seeded(db_path, defaults)
+    stored_config = get_stored_config(db_path)
+    defaults = stored_config["defaults"]
+    config["defaults"] = defaults
+    config["download_settings"] = stored_config["download_settings"]
+    cookie_path = materialize_youtube_cookie_file(db_path)
 
     def skip_live_streams(info_dict, *, incomplete=False):
         _ = incomplete
@@ -162,6 +175,8 @@ def download_youtube_items(config, downloaded_items):
         return None
 
     for entry in config.get("youtube", []):
+        if not entry.get("enabled", True):
+            continue
         try:
             name = sanitize(entry["name"])
             url = entry["url"]
@@ -332,7 +347,6 @@ def download_youtube_items(config, downloaded_items):
                     log.info("Post-processed for %s via %s: %s", name, postprocessor, path.name)
 
             ydl_opts = {
-                "cookiefile": cookie_path,
                 "playlistend": defaults["playlist_end"],
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
@@ -346,6 +360,8 @@ def download_youtube_items(config, downloaded_items):
                 "noprogress": True,
                 "logger": _YoutubeDlQuietLogger(),
             }
+            if cookie_path:
+                ydl_opts["cookiefile"] = cookie_path
 
             if download_type == "video":
                 ydl_opts["format"] = "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]"
