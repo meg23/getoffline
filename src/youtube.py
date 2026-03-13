@@ -371,14 +371,19 @@ def download_youtube_items(config, downloaded_items):
                 path = Path(candidate)
                 expected_ext = f".{defaults['audio_format']}"
 
-                if path.suffix.lower() != expected_ext and postprocessor == "FFmpegExtractAudio":
-                    path = _resolve_postprocessed_audio_path(path)
-                elif path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
-                    path = path.with_suffix(expected_ext)
+                if download_type == "audio":
+                    if path.suffix.lower() != expected_ext and postprocessor == "FFmpegExtractAudio":
+                        path = _resolve_postprocessed_audio_path(path)
+                    elif path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
+                        path = path.with_suffix(expected_ext)
 
-                resolved_path = path.resolve()
-                extracted_audio_files.append(resolved_path)
-                postprocessed_file_by_key[download_key] = resolved_path
+                    resolved_path = path.resolve()
+                    extracted_audio_files.append(resolved_path)
+                    postprocessed_file_by_key[download_key] = resolved_path
+                else:
+                    resolved_path = path.resolve()
+                    postprocessed_file_by_key[download_key] = resolved_path
+
                 if pp_status:
                     log.info("Post-process %s for %s via %s: %s", pp_status, name, postprocessor, path.name)
                 else:
@@ -498,14 +503,13 @@ def download_youtube_items(config, downloaded_items):
                 resolved_file = out_path
                 out_candidate = Path(out_path)
 
-                if download_type == "audio":
-                    postprocessed_path = postprocessed_file_by_key.get(download_key)
-                    if postprocessed_path and postprocessed_path.exists():
-                        resolved_file = str(postprocessed_path)
-                    else:
-                        audio_candidate = _resolve_postprocessed_audio_path(out_candidate)
-                        if audio_candidate.exists():
-                            resolved_file = str(audio_candidate)
+                postprocessed_path = postprocessed_file_by_key.get(download_key)
+                if postprocessed_path and postprocessed_path.exists():
+                    resolved_file = str(postprocessed_path)
+                elif download_type == "audio":
+                    audio_candidate = _resolve_postprocessed_audio_path(out_candidate)
+                    if audio_candidate.exists():
+                        resolved_file = str(audio_candidate)
 
                 resolved_path = Path(resolved_file).expanduser().resolve()
                 remapped_path = normalized_path_map.get(resolved_path)
