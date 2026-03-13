@@ -983,14 +983,14 @@ def _render_index(
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
 
-      function postMiniProgress(state, seconds, force) {{
+      function postMiniProgress(state, seconds, force, preferBeacon) {{
         if (!state || !state.rowId) return;
         const safe = Math.max(0, Number(seconds || 0));
         const body = new URLSearchParams();
         body.set('id', String(state.rowId));
         body.set('position_seconds', safe.toFixed(3));
 
-        if (force && navigator.sendBeacon) {{
+        if (preferBeacon && force && navigator.sendBeacon) {{
           const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
           if (navigator.sendBeacon('/progress', blob)) return;
         }}
@@ -1048,7 +1048,7 @@ def _render_index(
             paused: active.paused,
           }};
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(nextState));
-          postMiniProgress(nextState, nextState.currentTime, active.paused);
+          postMiniProgress(nextState, nextState.currentTime, active.paused, false);
         }};
         active.addEventListener('timeupdate', persist);
         active.addEventListener('pause', persist);
@@ -1067,7 +1067,7 @@ def _render_index(
             const state = JSON.parse(raw);
             const active = state && state.kind === 'video' ? miniVideo : miniAudio;
             const currentTime = active && active.style.display !== 'none' ? (active.currentTime || 0) : Number(state?.currentTime || 0);
-            postMiniProgress(state, currentTime, true);
+            postMiniProgress(state, currentTime, true, false);
           }} catch (_) {{}}
         }}
         localStorage.removeItem('getofflineMiniPlayerState');

@@ -79,7 +79,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr));", body)
             self.assertIn('persistedMiniPlayerState.paused === false', body)
             self.assertIn("navigator.sendBeacon('/progress'", body)
-            self.assertIn('postMiniProgress(state, currentTime, true);', body)
+            self.assertIn('postMiniProgress(state, currentTime, true, false);', body)
 
 
     def test_index_play_link_includes_resume_seconds(self):
