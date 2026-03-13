@@ -411,9 +411,11 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             row = fetch_downloaded_media_rows(db_path)[0]
             self.assertTrue(update_download_position_seconds(str(db_path), row.row_id, 120.0))
             self.assertTrue(update_download_position_seconds(str(db_path), row.row_id, 90.0))
+            self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 120.0, places=2)
             self.assertTrue(update_download_position_seconds(str(db_path), row.row_id, 150.0))
 
-            self.assertAlmostEqual(get_total_listened_seconds(str(db_path)), 180.0, places=2)
+            self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 150.0, places=2)
+            self.assertAlmostEqual(get_total_listened_seconds(str(db_path)), 150.0, places=2)
 
 
 class WebAppRenderVisibilityTests(unittest.TestCase):

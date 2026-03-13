@@ -832,8 +832,9 @@ if HAS_SQLALCHEMY:
             if record is None:
                 return False
             previous = max(0.0, float(record.last_position_seconds or 0.0))
-            listened_delta = max(0.0, safe_position - previous)
-            record.last_position_seconds = safe_position
+            effective_position = max(previous, safe_position)
+            listened_delta = max(0.0, effective_position - previous)
+            record.last_position_seconds = effective_position
             record.total_listened_seconds = max(0.0, float(record.total_listened_seconds or 0.0)) + listened_delta
             record.last_position_updated_at = now
             record.last_seen_at = now
@@ -914,10 +915,11 @@ else:
                 return False
             previous = max(0.0, float(row[0] or 0.0))
             total = max(0.0, float(row[1] or 0.0))
-            listened_delta = max(0.0, safe_position - previous)
+            effective_position = max(previous, safe_position)
+            listened_delta = max(0.0, effective_position - previous)
             cur = conn.execute(
                 "UPDATE downloads SET last_position_seconds = ?, total_listened_seconds = ?, last_position_updated_at = ?, last_seen_at = ? WHERE id = ?",
-                (safe_position, total + listened_delta, now, now, int(row_id)),
+                (effective_position, total + listened_delta, now, now, int(row_id)),
             )
             conn.commit()
             return cur.rowcount > 0
