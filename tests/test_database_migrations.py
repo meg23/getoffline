@@ -35,6 +35,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0002_add_playback_columns",
                     "0003_add_config_tables",
                     "0004_add_source_configs",
+                    "0005_add_source_enabled",
                 ],
             )
             self.assertIn("played", columns)
@@ -51,7 +52,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
-            self.assertEqual(count, 4)
+            self.assertEqual(count, 5)
 
     def test_config_settings_round_trip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -95,6 +96,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             replaced = get_stored_config(db_path)
             self.assertEqual(replaced["youtube"][0]["name"], "YT 2")
             self.assertEqual(replaced["youtube"][0]["type"], "video")
+            self.assertTrue(replaced["youtube"][0]["enabled"])
             self.assertEqual(replaced["podcasts"], [])
 
 
