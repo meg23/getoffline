@@ -525,9 +525,12 @@ def _render_index(
     .col-size {{ width: 10%; }}
     .col-status {{ width: 8%; }}
     .col-actions {{ width: 14%; }}
-    td[data-label="Type"], td[data-label="Size"], td[data-label="Status"], td[data-label="Actions"],
-    thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6), thead th:nth-child(7) {{
+    td[data-label="Type"], td[data-label="Size"], td[data-label="Status"],
+    thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
       text-align: left;
+    }}
+    td[data-label="Actions"], thead th:nth-child(7) {{
+      text-align: right;
     }}
     .pill {{
       display: inline-block;
@@ -541,16 +544,23 @@ def _render_index(
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
-    .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-start; gap: .55rem; }}
+    .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
     .action-icon {{
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.4rem;
+      height: 2.4rem;
+      border-radius: 999px;
+      border: 1px solid #c9d5ef;
+      background: #eef3ff;
       color: var(--accent);
       text-decoration: none;
-      font-size: 1.15rem;
+      font-size: 1.3rem;
       line-height: 1;
       font-weight: 700;
     }}
-    .action-icon:hover {{ color: var(--accent-2); }}
+    .action-icon:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
 
     .btn {{
       border: 1px solid transparent;
