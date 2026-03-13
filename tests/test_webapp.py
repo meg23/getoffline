@@ -439,13 +439,16 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn('aria-label="Play">⏵</a>', body)
+            self.assertIn('aria-label="Play">', body)
+            self.assertIn('href="#bi-play-fill"', body)
             self.assertIn('title="Mark played"', body)
-            self.assertIn('aria-label="Mark played">☑</a>', body)
+            self.assertIn('aria-label="Mark played">', body)
+            self.assertIn('href="#bi-check2-circle"', body)
             self.assertIn('aria-label="Mark all as played"', body)
-            self.assertIn('>☑</button>', body)
-            self.assertIn('aria-label="Show played">👁</a>', body)
-            self.assertIn('aria-label="Settings">🛠</a>', body)
+            self.assertIn('aria-label="Show played">', body)
+            self.assertIn('href="#bi-eye"', body)
+            self.assertIn('aria-label="Settings">', body)
+            self.assertIn('href="#bi-gear"', body)
 
     def test_index_hides_new_label_for_previously_played_item(self):
         with tempfile.TemporaryDirectory() as tmpdir:
