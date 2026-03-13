@@ -398,8 +398,8 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Actions">
-                  <a class="action-icon" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">{play_symbol}</a>
-                  <a class="action-icon" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
+                  <a class="icon-button" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">{play_symbol}</a>
+                  <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
                 </td>
             </tr>
             """
@@ -554,7 +554,7 @@ def _render_index(
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
     .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
-    .action-icon {{
+    .icon-button {{
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -563,38 +563,27 @@ def _render_index(
       border-radius: 999px;
       border: 1px solid #c9d5ef;
       background: #eef3ff;
-      color: var(--accent);
+      color: #2c3e74;
       text-decoration: none;
-      font-size: 1.3rem;
+      font-size: 1.15rem;
       line-height: 1;
       font-weight: 700;
-    }}
-    .action-icon:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
-
-    .btn {{
-      border: 1px solid transparent;
-      border-radius: 999px;
-      padding: .38rem .7rem;
-      font-size: .88rem;
+      padding: 0;
       cursor: pointer;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      background: transparent;
-      min-width: 2.35rem;
-      width: 2.35rem;
-      height: 2.35rem;
-      text-align: center;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
     }}
-    .btn-link {{ background: var(--accent); }}
-    .btn-link:hover {{ background: var(--accent-2); }}
-    .btn-subtle {{ border-color: #c9d5ef; color: #2c3e74; }}
-    .btn-subtle:hover {{ background: #eef3ff; }}
-    .btn-update {{ background: linear-gradient(180deg, #4f7fff, #3f6ff1); }}
-    .btn-update:disabled {{ opacity: .5; cursor: not-allowed; }}
-    .btn-icon {{ padding: 0; font-size: 1.1rem; line-height: 1; }}
+    .icon-button:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
+    .icon-button:disabled {{ opacity: .5; cursor: not-allowed; }}
+    .icon-button-primary {{
+      color: #fff;
+      border-color: #3f6ff1;
+      background: linear-gradient(180deg, #4f7fff, #3f6ff1);
+    }}
+    .icon-button-primary:hover {{
+      color: #fff;
+      border-color: #2f62f2;
+      background: linear-gradient(180deg, #4675f4, #2f62f2);
+    }}
 
     @media (max-width: 1200px) {{
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -647,13 +636,13 @@ def _render_index(
     <div class="panel">
       <div class="toolbar toolbar-actions">
       <form method="post" action="/update" class="toolbar-form">
-        <button class="btn btn-update btn-icon" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>↻</button>
+        <button class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>↻</button>
       </form>
       <form method="post" action="/mark-all-played" class="toolbar-form">
-        <button class="btn btn-subtle btn-icon" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>✓</button>
+        <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>✓</button>
       </form>
-        <a class="btn btn-subtle btn-icon" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{toggle_symbol}</a>
-        <a class="btn btn-subtle btn-icon" href="/settings" title="Settings" aria-label="Settings">⚙</a>
+        <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{toggle_symbol}</a>
+        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">⚙</a>
       </div>
     </div>
 
