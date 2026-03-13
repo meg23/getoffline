@@ -79,16 +79,19 @@ class WebAppHelpersTests(unittest.TestCase):
                     "max_downloads": 3,
                     "playlist_end": 3,
                     "processing_workers": 2,
-                    "cookie_path": "/tmp/cookies.txt",
                 },
                 "download_settings": {
                     "youtube_cookie_text": "# Netscape HTTP Cookie File\n.youtube.com\tTRUE",
                 },
+                "youtube": [{"name": "YT", "url": "https://youtube.com/@yt", "type": "audio", "subtitles": True}],
+                "podcasts": [{"name": "Pod", "url": "https://example.com/rss", "subtitles": True}],
             }
         )
         self.assertIn("YouTube cookies.txt content", body)
         self.assertIn("/settings", body)
         self.assertIn("youtube_cookie_text", body)
+        self.assertIn("YouTube sources (JSON)", body)
+        self.assertIn("Podcast sources (JSON)", body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
