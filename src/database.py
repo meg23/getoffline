@@ -201,6 +201,7 @@ DEFAULT_APP_CONFIG = {
     "max_downloads": "3",
     "playlist_end": "3",
     "processing_workers": "2",
+    "auto_update_minutes": "20",
 }
 
 
@@ -350,6 +351,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "max_downloads": _coerce_int(defaults["max_downloads"], 3),
             "playlist_end": _coerce_int(defaults["playlist_end"], 3),
             "processing_workers": _coerce_int(defaults.get("processing_workers"), 2),
+            "auto_update_minutes": _coerce_int(defaults.get("auto_update_minutes"), 20),
             "database_path": db_path,
         },
         "download_settings": {
