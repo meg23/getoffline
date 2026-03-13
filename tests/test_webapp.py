@@ -23,6 +23,7 @@ from webapp import (  # noqa: E402
     get_total_listened_seconds,
     trigger_background_update,
     update_download_position_seconds,
+    trigger_single_youtube_download,
 )
 
 
@@ -68,6 +69,53 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("<th>Episode</th>", body)
             self.assertIn("<th>Actions</th>", body)
             self.assertIn("/settings", body)
+            self.assertIn("/quick-add-youtube", body)
+            self.assertIn("Add single YouTube link", body)
+            self.assertIn('id="quick-add-open"', body)
+            self.assertIn('id="quick-add-backdrop"', body)
+            self.assertIn('id="quick-add-url"', body)
+
+    def test_trigger_single_youtube_download_uses_single_entry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+
+            captured = {}
+
+            def _fake_download(config, downloaded_items):
+                captured["config"] = config
+                downloaded_items.append("one")
+
+            with unittest.mock.patch("youtube.resolve_youtube_source_name", return_value="MyChannel"), unittest.mock.patch(
+                "youtube.download_youtube_items", side_effect=_fake_download
+            ):
+                started = trigger_single_youtube_download(
+                    state,
+                    url="https://www.youtube.com/watch?v=abc123",
+                    media_type="audio",
+                )
+                self.assertTrue(started)
+
+                deadline = time.time() + 2
+                while time.time() < deadline:
+                    with state.update_status.lock:
+                        if not state.update_status.is_running and state.update_status.last_result == "ok":
+                            break
+                    time.sleep(0.05)
+
+            cfg = captured["config"]
+            self.assertEqual(cfg["podcasts"], [])
+            self.assertEqual(len(cfg["youtube"]), 1)
+            self.assertEqual(cfg["youtube"][0]["name"], "MyChannel")
+            self.assertEqual(cfg["youtube"][0]["url"], "https://www.youtube.com/watch?v=abc123")
+            self.assertEqual(cfg["youtube"][0]["type"], "audio")
 
     def test_render_settings_contains_cookie_field(self):
         body = _render_settings(
