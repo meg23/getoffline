@@ -114,6 +114,11 @@ youtube:
     type: audio
     subtitles: true
 
+  - name: NFKRZ
+    url: https://www.youtube.com/watch?v=JUi7qa1yy8c
+    type: audio
+    subtitles: true
+
 podcasts:
 
   - name: StrictlyAnonymous
