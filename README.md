@@ -1,6 +1,6 @@
 # Listens: Automated Media Downloader
 
-**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes using a simple YAML configuration. It supports cookies for YouTube downloads, automatic audio extraction using `yt-dlp`, and optional Whisper subtitle generation for downloaded audio media.
+**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes. Source lists still come from `config.yaml`, while runtime defaults and download settings (including full `cookies.txt` content) are now persisted in SQLite and editable in the web UI.
 
 ## Features
 
@@ -77,6 +77,8 @@ python src/main.py serve --host 127.0.0.1 --port 8080
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
+Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.) and store the full YouTube `cookies.txt` payload directly in the database.
+
 Use the **Update Downloads** button in the web UI to trigger background downloads without running a second process, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
 To build a standalone executable with Pex:
@@ -95,7 +97,7 @@ Clean up generated files:
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
 
-Download tracking is stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`) with metadata such as source, URLs, title, codecs, resolution, size, subtitle settings, and raw extractor metadata.
+Download tracking and app settings are stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`). This includes media metadata plus key/value defaults and a dedicated download-settings row for persisted YouTube cookie text.
 
 For newly downloaded YouTube/podcast audio media, subtitles are generated with Whisper when `subtitles: true` (YouTube-provided captions are not downloaded, and video items do not get subtitles).
 A per-entry timing adjustment can be set with `subtitle_offset_seconds` to keep SRT timing in sync:

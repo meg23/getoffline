@@ -163,7 +163,47 @@ def _migration_0002_add_playback_columns(db_path: str) -> None:
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
+    (
+        "0003_add_config_tables",
+        lambda db_path: _migration_0003_add_config_tables(db_path),
+    ),
 ]
+
+
+DEFAULT_APP_CONFIG = {
+    "output_root": "./downloads",
+    "audio_format": "mp3",
+    "audio_quality": "0",
+    "max_downloads": "3",
+    "playlist_end": "3",
+    "processing_workers": "2",
+    "cookie_path": "/tmp/cookies.txt",
+}
+
+
+def _migration_0003_add_config_tables(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS download_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                youtube_cookie_text TEXT,
+                cookie_updated_at TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
 
 
 def apply_migrations(db_path: str) -> None:
@@ -173,6 +213,128 @@ def apply_migrations(db_path: str) -> None:
             continue
         migrate(db_path)
         _record_revision(db_path, revision)
+
+
+def _coerce_int(value: Any, fallback: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+
+
+def ensure_config_seeded(db_path: str, defaults: Optional[Dict[str, Any]] = None) -> None:
+    init_database(db_path)
+    now = _utcnow().isoformat()
+    seed = dict(DEFAULT_APP_CONFIG)
+    if defaults:
+        for key in DEFAULT_APP_CONFIG:
+            if key in defaults and defaults.get(key) is not None:
+                seed[key] = str(defaults[key])
+
+    with sqlite3.connect(db_path) as conn:
+        for key, value in seed.items():
+            conn.execute(
+                """
+                INSERT INTO app_config (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO NOTHING
+                """,
+                (key, str(value), now),
+            )
+
+        conn.execute(
+            """
+            INSERT INTO download_settings (id, youtube_cookie_text, cookie_updated_at, updated_at)
+            VALUES (1, NULL, NULL, ?)
+            ON CONFLICT(id) DO NOTHING
+            """,
+            (now,),
+        )
+        conn.commit()
+
+
+def get_stored_config(db_path: str) -> Dict[str, Any]:
+    ensure_config_seeded(db_path)
+
+    defaults = dict(DEFAULT_APP_CONFIG)
+    with sqlite3.connect(db_path) as conn:
+        for key, value in conn.execute("SELECT key, value FROM app_config"):
+            defaults[key] = value
+
+        row = conn.execute(
+            "SELECT youtube_cookie_text FROM download_settings WHERE id = 1"
+        ).fetchone()
+
+    return {
+        "defaults": {
+            "output_root": os.path.expanduser(defaults["output_root"]),
+            "audio_format": defaults["audio_format"],
+            "audio_quality": _coerce_int(defaults["audio_quality"], 0),
+            "max_downloads": _coerce_int(defaults["max_downloads"], 3),
+            "playlist_end": _coerce_int(defaults["playlist_end"], 3),
+            "processing_workers": _coerce_int(defaults.get("processing_workers"), 2),
+            "cookie_path": os.path.expanduser(defaults["cookie_path"]),
+            "database_path": db_path,
+        },
+        "download_settings": {
+            "youtube_cookie_text": row[0] if row else None,
+        },
+    }
+
+
+def update_stored_defaults(db_path: str, updates: Dict[str, Any]) -> None:
+    if not updates:
+        return
+    ensure_config_seeded(db_path)
+    now = _utcnow().isoformat()
+    with sqlite3.connect(db_path) as conn:
+        for key, value in updates.items():
+            if key not in DEFAULT_APP_CONFIG or value is None:
+                continue
+            conn.execute(
+                """
+                INSERT INTO app_config (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, str(value), now),
+            )
+        conn.commit()
+
+
+def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -> None:
+    ensure_config_seeded(db_path)
+    now = _utcnow().isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO download_settings (id, youtube_cookie_text, cookie_updated_at, updated_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                youtube_cookie_text = excluded.youtube_cookie_text,
+                cookie_updated_at = excluded.cookie_updated_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                youtube_cookie_text,
+                now if youtube_cookie_text else None,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = None) -> Optional[str]:
+    stored = get_stored_config(db_path)
+    cookie_text = stored["download_settings"].get("youtube_cookie_text")
+    target = cookie_path or stored["defaults"]["cookie_path"]
+    if not cookie_text:
+        return None
+
+    target_path = Path(str(target)).expanduser()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(cookie_text, encoding="utf-8")
+    return str(target_path)
 
 
 def _init_database_sqlite(db_path: str) -> None:
