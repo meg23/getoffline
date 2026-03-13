@@ -55,7 +55,43 @@ def _coerce_json(value: Any) -> Optional[str]:
         return json.dumps(str(value), ensure_ascii=False)
 
 
-def _init_database_sqlite(db_path: str) -> None:
+def _table_columns_sqlite(db_path: str, table_name: str) -> set[str]:
+    with sqlite3.connect(db_path) as conn:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _ensure_schema_migrations_table(db_path: str) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                revision TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def _is_revision_applied(db_path: str, revision: str) -> bool:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE revision = ? LIMIT 1",
+            (revision,),
+        ).fetchone()
+        return row is not None
+
+
+def _record_revision(db_path: str, revision: str) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO schema_migrations (revision, applied_at) VALUES (?, ?)",
+            (revision, _utcnow().isoformat()),
+        )
+        conn.commit()
+
+
+def _migration_0001_create_downloads(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -107,23 +143,44 @@ def _init_database_sqlite(db_path: str) -> None:
         )
         conn.commit()
 
-    _ensure_downloads_columns_sqlite(db_path)
+
+def _migration_0002_add_playback_columns(db_path: str) -> None:
+    expected_columns = {
+        "played": "ALTER TABLE downloads ADD COLUMN played INTEGER NOT NULL DEFAULT 0",
+        "played_at": "ALTER TABLE downloads ADD COLUMN played_at TEXT",
+        "last_position_seconds": "ALTER TABLE downloads ADD COLUMN last_position_seconds REAL NOT NULL DEFAULT 0",
+        "total_listened_seconds": "ALTER TABLE downloads ADD COLUMN total_listened_seconds REAL NOT NULL DEFAULT 0",
+        "last_position_updated_at": "ALTER TABLE downloads ADD COLUMN last_position_updated_at TEXT",
+    }
+    columns = _table_columns_sqlite(db_path, "downloads")
+    with sqlite3.connect(db_path) as conn:
+        for name, ddl in expected_columns.items():
+            if name not in columns:
+                conn.execute(ddl)
+        conn.commit()
+
+
+MIGRATIONS = [
+    ("0001_create_downloads", _migration_0001_create_downloads),
+    ("0002_add_playback_columns", _migration_0002_add_playback_columns),
+]
+
+
+def apply_migrations(db_path: str) -> None:
+    _ensure_schema_migrations_table(db_path)
+    for revision, migrate in MIGRATIONS:
+        if _is_revision_applied(db_path, revision):
+            continue
+        migrate(db_path)
+        _record_revision(db_path, revision)
+
+
+def _init_database_sqlite(db_path: str) -> None:
+    apply_migrations(db_path)
 
 
 def _ensure_downloads_columns_sqlite(db_path: str) -> None:
-    with sqlite3.connect(db_path) as conn:
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(downloads)").fetchall()}
-        if "played" not in existing:
-            conn.execute("ALTER TABLE downloads ADD COLUMN played INTEGER NOT NULL DEFAULT 0")
-        if "played_at" not in existing:
-            conn.execute("ALTER TABLE downloads ADD COLUMN played_at TEXT")
-        if "last_position_seconds" not in existing:
-            conn.execute("ALTER TABLE downloads ADD COLUMN last_position_seconds REAL NOT NULL DEFAULT 0")
-        if "total_listened_seconds" not in existing:
-            conn.execute("ALTER TABLE downloads ADD COLUMN total_listened_seconds REAL NOT NULL DEFAULT 0")
-        if "last_position_updated_at" not in existing:
-            conn.execute("ALTER TABLE downloads ADD COLUMN last_position_updated_at TEXT")
-        conn.commit()
+    _migration_0002_add_playback_columns(db_path)
 
 
 def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
@@ -295,8 +352,8 @@ if HAS_SQLALCHEMY:
 
 
     def init_database(db_path: str) -> None:
+        apply_migrations(db_path)
         Base.metadata.create_all(_engine_for(db_path))
-        _ensure_downloads_columns_sqlite(db_path)
 
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
