@@ -386,8 +386,8 @@ def _render_index(
         status_title = "Already played" if row.played else ("Played previously" if ever_played else "Not played yet")
         mark_action = "unplay" if row.played else "played"
         mark_label = "Mark unplayed" if row.played else "Mark played"
-        mark_symbol = "↺" if row.played else "✓"
-        play_symbol = "▸"
+        mark_symbol = "⟲" if row.played else "☑"
+        play_symbol = "⏵"
         cards.append(
             f"""
             <tr>
@@ -415,7 +415,7 @@ def _render_index(
     toggle_show_played = not show_played
     toggle_href = "?show_played=1" if toggle_show_played else "/"
     toggle_label = "Show played" if toggle_show_played else "Hide played"
-    toggle_symbol = "◉" if toggle_show_played else "◌"
+    toggle_symbol = "👁" if toggle_show_played else "🙈"
 
     return f"""<!doctype html>
 <html>
@@ -636,13 +636,13 @@ def _render_index(
     <div class="panel">
       <div class="toolbar toolbar-actions">
       <form method="post" action="/update" class="toolbar-form">
-        <button class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>↻</button>
+        <button class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>⟲</button>
       </form>
       <form method="post" action="/mark-all-played" class="toolbar-form">
-        <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>✓</button>
+        <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>☑</button>
       </form>
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{toggle_symbol}</a>
-        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">⚙</a>
+        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">🛠</a>
       </div>
     </div>
 
