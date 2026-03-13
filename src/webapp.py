@@ -783,14 +783,14 @@ def _render_index(
     .mini-player.is-visible {{ display: grid; }}
     .mini-player-header {{
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr auto auto;
       align-items: start;
       gap: .35rem .5rem;
     }}
-    .mini-player-title {{ font-weight: 700; color: #17213a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .mini-player-source {{ color: #5d6780; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .mini-player-title {{ grid-column: 1; font-weight: 700; color: #17213a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .mini-player-source {{ grid-column: 1; color: #5d6780; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .mini-player-open {{
-      grid-row: 1 / span 2;
+      grid-row: 1;
       grid-column: 2;
       align-self: center;
       justify-self: end;
@@ -803,6 +803,25 @@ def _render_index(
       background: #f4f7ff;
     }}
     .mini-player-open:hover {{ background: #e9efff; text-decoration: none; }}
+    .mini-player-close {{
+      grid-row: 1;
+      grid-column: 3;
+      justify-self: end;
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 999px;
+      border: 1px solid #cbd6ee;
+      background: #f4f7ff;
+      color: #2c3e74;
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }}
+    .mini-player-close:hover {{ background: #e9efff; }}
     .mini-player-media {{ width: 100%; border-radius: 10px; background: transparent; }}
     #mini-player-video {{ aspect-ratio: 16 / 9; max-height: 203px; background: #000; }}
     #mini-player-audio {{ border-radius: 999px; }}
@@ -922,6 +941,7 @@ def _render_index(
       <div class="mini-player-header">
         <div class="mini-player-title" id="mini-player-title"></div>
         <div class="mini-player-source" id="mini-player-source"></div>
+        <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close mini player">&times;</button>
         <a id="mini-player-open" class="mini-player-open" href="/" aria-label="Open in dedicated player">Open</a>
       </div>
       <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
@@ -948,6 +968,7 @@ def _render_index(
       const miniAudio = document.getElementById('mini-player-audio');
       const miniVideo = document.getElementById('mini-player-video');
       const miniOpen = document.getElementById('mini-player-open');
+      const miniClose = document.getElementById('mini-player-close');
 
       function clearMiniMedia() {{
         [miniAudio, miniVideo].forEach((el) => {{
@@ -998,11 +1019,16 @@ def _render_index(
         active.addEventListener('pause', persist);
         active.addEventListener('play', persist);
         active.addEventListener('ended', () => {{
-          localStorage.removeItem('getofflineMiniPlayerState');
-          miniPlayer.classList.remove('is-visible');
+          closeMiniPlayer();
         }});
 
         miniPlayer.classList.add('is-visible');
+      }}
+
+      function closeMiniPlayer() {{
+        localStorage.removeItem('getofflineMiniPlayerState');
+        clearMiniMedia();
+        if (miniPlayer) miniPlayer.classList.remove('is-visible');
       }}
 
       document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
@@ -1044,6 +1070,12 @@ def _render_index(
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
           const targetUrl = state.playUrl + (state.paused ? '' : '&autoplay=1');
           window.location.assign(targetUrl);
+        }});
+      }}
+
+      if (miniClose) {{
+        miniClose.addEventListener('click', () => {{
+          closeMiniPlayer();
         }});
       }}
 
