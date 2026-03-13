@@ -567,6 +567,26 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("startSeconds = 42.500000", body)
             self.assertIn("shouldAutoPlay", body)
             self.assertIn("get('autoplay') === '1'", body)
+            self.assertIn("navigator.sendBeacon('/progress'", body)
+
+    def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            body = _render_index(
+                rows=[],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+            self.assertIn("const fallbackUrl = miniOpen.href || '/'", body)
+            self.assertIn("window.location.assign(fallbackUrl)", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
