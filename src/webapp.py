@@ -960,11 +960,14 @@ def _render_index(
         }});
       }}
 
-      function renderMiniPlayer() {{
-        const raw = localStorage.getItem('getofflineMiniPlayerState');
-        if (!raw || !miniPlayer || !miniAudio || !miniVideo) return;
-        let state = null;
-        try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
+      function renderMiniPlayer(stateInput) {{
+        if (!miniPlayer || !miniAudio || !miniVideo) return;
+        let state = stateInput || null;
+        if (!state) {{
+          const raw = localStorage.getItem('getofflineMiniPlayerState');
+          if (!raw) return;
+          try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
+        }}
         if (!state || !state.rowId || !state.src || !state.kind) return;
         if (miniOpen) miniOpen.href = state.playUrl || ('/play?id=' + state.rowId);
 
@@ -1003,10 +1006,12 @@ def _render_index(
       }}
 
       document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
-        link.addEventListener('click', () => {{
+        link.addEventListener('click', (event) => {{
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
           const rowId = Number(link.dataset.rowId || 0);
           if (!rowId) return;
-          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
+          const state = {{
             rowId,
             title: link.dataset.title || '',
             source: link.dataset.source || '',
@@ -1015,12 +1020,15 @@ def _render_index(
             playUrl: '/play?id=' + rowId,
             currentTime: 0,
             paused: false,
-          }}));
+          }};
+          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
+          renderMiniPlayer(state);
         }});
       }});
 
       if (miniOpen) {{
         miniOpen.addEventListener('click', (event) => {{
+          event.preventDefault();
           const raw = localStorage.getItem('getofflineMiniPlayerState');
           if (!raw) return;
           let state = null;
@@ -1034,7 +1042,8 @@ def _render_index(
           }}
           state.playUrl = '/play?id=' + state.rowId;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
-          event.currentTarget.href = state.playUrl + '&autoplay=1';
+          const targetUrl = state.playUrl + (state.paused ? '' : '&autoplay=1');
+          window.location.assign(targetUrl);
         }});
       }}
 
@@ -1177,6 +1186,19 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         resumeLabel.textContent = Number(seconds || 0).toFixed(1) + 's';
       }}
 
+      function getMiniPlayerResumeSeconds() {{
+        const raw = localStorage.getItem('getofflineMiniPlayerState');
+        if (!raw) return null;
+        try {{
+          const state = JSON.parse(raw);
+          if (!state || Number(state.rowId || 0) !== rowId) return null;
+          const candidate = Number(state.currentTime || 0);
+          return Number.isFinite(candidate) && candidate > 0 ? candidate : null;
+        }} catch (_) {{
+          return null;
+        }}
+      }}
+
       function postProgress(seconds, force) {{
         const safe = Math.max(0, Number(seconds || 0));
         if (!force && Math.abs(safe - lastSentSeconds) < 1.0) return;
@@ -1209,10 +1231,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function applyInitialSeek() {{
-        if (hasAppliedInitialSeek || startSeconds <= 0) return;
+        if (hasAppliedInitialSeek) return;
+        const initialSeconds = getMiniPlayerResumeSeconds() ?? startSeconds;
+        if (initialSeconds <= 0) return;
         const target = Number.isFinite(player.duration) && player.duration > 1
-          ? Math.min(startSeconds, Math.max(player.duration - 1, 0))
-          : startSeconds;
+          ? Math.min(initialSeconds, Math.max(player.duration - 1, 0))
+          : initialSeconds;
         try {{
           player.currentTime = target;
           hasAppliedInitialSeek = true;
