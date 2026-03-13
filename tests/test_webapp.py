@@ -19,6 +19,7 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
+    _stream_media,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -45,6 +46,21 @@ class WebAppHelpersTests(unittest.TestCase):
 
             self.assertEqual(_resolve_safe_media_path(root, str(media)), media.resolve())
             self.assertIsNone(_resolve_safe_media_path(root, str(unsafe)))
+
+    def test_stream_media_ignores_client_disconnect(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_bytes(b"a" * 4096)
+
+            handler = SimpleNamespace(
+                headers={"Range": "bytes=0-1023"},
+                send_response=mock.Mock(),
+                send_header=mock.Mock(),
+                end_headers=mock.Mock(),
+                wfile=SimpleNamespace(write=mock.Mock(side_effect=ConnectionResetError("peer reset"))),
+            )
+
+            _stream_media(handler, media)
 
     def test_index_contains_update_button(self):
         with tempfile.TemporaryDirectory() as tmpdir:

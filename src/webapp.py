@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from logger import get_logger
 from database import (
     add_source_config,
     delete_source_config,
@@ -45,6 +46,8 @@ MEDIA_EXTENSIONS = {
 }
 
 DEFAULT_AUTO_UPDATE_MINUTES = 20
+
+log = get_logger("webapp")
 
 
 @dataclass
@@ -1666,7 +1669,10 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
         handler.end_headers()
 
         with media_path.open("rb") as f:
-            handler.wfile.write(f.read())
+            try:
+                handler.wfile.write(f.read())
+            except (BrokenPipeError, ConnectionResetError):
+                log.info("Client disconnected while streaming media: %s", media_path.name)
         return
 
     start = parsed["start"]
@@ -1687,7 +1693,11 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
             chunk = f.read(min(1024 * 1024, remaining))
             if not chunk:
                 break
-            handler.wfile.write(chunk)
+            try:
+                handler.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                log.info("Client disconnected while streaming media: %s", media_path.name)
+                break
             remaining -= len(chunk)
 
 
