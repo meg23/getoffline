@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from database import (
     get_download_position_seconds,
+    get_total_listened_seconds,
     init_database,
     mark_all_downloads_played,
     mark_download_played,
@@ -45,6 +46,7 @@ class MediaRow:
     file_size_bytes: Optional[int]
     upload_date: Optional[str]
     played: bool
+    played_at: Optional[str] = None
     subtitle_path: Optional[str] = None
 
 
@@ -90,6 +92,18 @@ def _human_size(num_bytes: Optional[int]) -> str:
         size /= 1024
     return f"{num_bytes} B"
 
+
+
+
+def _human_duration(total_seconds: float) -> str:
+    seconds = max(0, int(total_seconds or 0))
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+    return " ".join(parts)
 
 def _is_media_file(path: Path) -> bool:
     return path.suffix.lower() in MEDIA_EXTENSIONS
@@ -171,7 +185,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         rows = conn.execute(
             """
             SELECT id, source_type, source_name, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), subtitle_path
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), played_at, subtitle_path
             FROM downloads
             WHERE download_status = 'downloaded'
             ORDER BY last_seen_at DESC, id DESC
@@ -189,7 +203,8 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             file_size_bytes=row[6],
             upload_date=row[7],
             played=bool(row[8]),
-            subtitle_path=row[9],
+            played_at=row[9],
+            subtitle_path=row[10],
         )
         for row in rows
     ]
@@ -354,37 +369,41 @@ def _render_index(
         if row.played and not show_played:
             continue
         title = html.escape(row.title or path.name)
-        source = html.escape(f"{row.source_type}: {row.source_name}")
+        channel = html.escape(row.source_name or "?")
+        source_kind = html.escape((row.source_type or "?").strip())
         size = html.escape(_human_size(row.file_size_bytes))
         ext = html.escape((row.file_ext or path.suffix.lstrip(".")) or "?")
-        status_label = "played" if row.played else "new"
+        ever_played = bool(row.played or getattr(row, "played_at", None))
+        status_label = "played" if row.played else ("" if ever_played else "new")
         status_class = "status-played" if row.played else "status-new"
+        status_title = "Already played" if row.played else ("Played previously" if ever_played else "Not played yet")
         mark_action = "unplay" if row.played else "played"
         mark_label = "Mark unplayed" if row.played else "Mark played"
+        mark_symbol = "↺" if row.played else "✓"
         cards.append(
             f"""
             <tr>
-                <td class="title-cell" data-label="Title">{title}</td>
-                <td data-label="Source">{source}</td>
+                <td data-label="Channel" title="{channel}">{channel}</td>
+                <td class="title-cell" data-label="Episode" title="{title}">{title}</td>
+                <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
-                <td data-label="Status"><span class="pill {status_class}">{status_label}</span></td>
-                <td class="actions" data-label="Action">
-                  <a class="btn btn-link" href="/play?id={row.row_id}">Play</a>
-                  <form method="post" action="/mark-{mark_action}" class="inline-form">
-                    <input type="hidden" name="id" value="{row.row_id}" />
-                    <button class="btn btn-subtle" type="submit">{mark_label}</button>
-                  </form>
+                <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
+                <td class="actions" data-label="Actions">
+                  <a class="action-icon" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">▶</a>
+                  <a class="action-icon" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
                 </td>
             </tr>
             """
         )
 
-    table_rows = "\n".join(cards) if cards else "<tr><td colspan='6'>No playable media found yet.</td></tr>"
+    table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No playable media found yet.</td></tr>"
     button_disabled = "disabled" if status["is_running"] == "yes" else ""
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
     unplayed_items = max(total_items - played_items, 0)
+    init_database(str(database_path))
+    total_listened = _human_duration(get_total_listened_seconds(str(database_path)))
     toggle_show_played = not show_played
     toggle_href = "?show_played=1" if toggle_show_played else "/"
     toggle_label = "Show played" if toggle_show_played else "Hide played"
@@ -434,7 +453,7 @@ def _render_index(
 
     .summary-grid {{
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: .65rem;
       margin: .85rem 0 .2rem;
     }}
@@ -468,6 +487,7 @@ def _render_index(
 
     table {{
       width: 100%;
+      table-layout: fixed;
       border-collapse: separate;
       border-spacing: 0;
       overflow: hidden;
@@ -497,7 +517,21 @@ def _render_index(
     }}
     tbody tr:nth-child(even) td {{ background: #fbfcff; }}
     tr:last-child td {{ border-bottom: none; }}
-    .title-cell {{ max-width: 520px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.25; }}
+    .title-cell {{ font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }}
+    .col-channel {{ width: 16%; }}
+    .col-episode {{ width: 34%; }}
+    .col-source {{ width: 10%; }}
+    .col-type {{ width: 8%; }}
+    .col-size {{ width: 10%; }}
+    .col-status {{ width: 8%; }}
+    .col-actions {{ width: 14%; }}
+    td[data-label="Type"], td[data-label="Size"], td[data-label="Status"],
+    thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
+      text-align: left;
+    }}
+    td[data-label="Actions"], thead th:nth-child(7) {{
+      text-align: right;
+    }}
     .pill {{
       display: inline-block;
       padding: .18rem .5rem;
@@ -510,8 +544,23 @@ def _render_index(
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
-    .actions {{ white-space: nowrap; }}
-    .inline-form {{ display:inline; margin-left:.5rem; }}
+    .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
+    .action-icon {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.4rem;
+      height: 2.4rem;
+      border-radius: 999px;
+      border: 1px solid #c9d5ef;
+      background: #eef3ff;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 1.3rem;
+      line-height: 1;
+      font-weight: 700;
+    }}
+    .action-icon:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
 
     .btn {{
       border: 1px solid transparent;
@@ -545,10 +594,14 @@ def _render_index(
       justify-content: center;
     }}
 
+    @media (max-width: 1200px) {{
+      .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    }}
+
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
-      .actions {{ white-space: normal; }}
-      .inline-form {{ margin-left: 0; margin-top: .35rem; display: inline-block; }}
+      .actions {{ white-space: normal; justify-content: flex-start; }}
+      table {{ table-layout: auto; }}
       table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
       tr {{ border-bottom: 1px solid var(--border); padding: .4rem 0; }}
@@ -582,6 +635,10 @@ def _render_index(
           <div class="summary-label">New</div>
           <div class="summary-value">{unplayed_items}</div>
         </div>
+        <div class="summary-card">
+          <div class="summary-label">Listened</div>
+          <div class="summary-value">{total_listened}</div>
+        </div>
       </div>
     </div>
 
@@ -598,7 +655,16 @@ def _render_index(
     </div>
 
     <table>
-      <thead><tr><th>Title</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
+      <colgroup>
+        <col class="col-channel" />
+        <col class="col-episode" />
+        <col class="col-source" />
+        <col class="col-type" />
+        <col class="col-size" />
+        <col class="col-status" />
+        <col class="col-actions" />
+      </colgroup>
+      <thead><tr><th>Channel</th><th>Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
   </div>
@@ -923,6 +989,19 @@ def make_handler(state: AppState):
                 self.wfile.write(body_bytes)
                 return
 
+            if path in {"/mark-played", "/mark-unplay"}:
+                raw_id = (query.get("id") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+
+                played_value = path == "/mark-played"
+                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
             if path in {"/play", "/media", "/subtitle"}:
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
@@ -982,22 +1061,6 @@ def make_handler(state: AppState):
 
             if path == "/update":
                 trigger_background_update(state)
-                self.send_response(303)
-                self.send_header("Location", "/")
-                self.end_headers()
-                return
-
-            if path in {"/mark-played", "/mark-unplay"}:
-                length = int(self.headers.get("Content-Length") or 0)
-                body = self.rfile.read(length).decode("utf-8") if length else ""
-                form = parse_qs(body)
-                raw_id = (form.get("id") or [None])[0]
-                if raw_id is None or not str(raw_id).isdigit():
-                    self.send_error(400, "Missing or invalid id")
-                    return
-
-                played_value = path == "/mark-played"
-                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()

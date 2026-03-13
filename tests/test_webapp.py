@@ -19,6 +19,7 @@ from webapp import (  # noqa: E402
     _resolve_safe_media_path,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
+    get_total_listened_seconds,
     trigger_background_update,
     update_download_position_seconds,
 )
@@ -62,6 +63,30 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("action=\"/update\"", body)
             self.assertIn("Mark all as played", body)
             self.assertIn("Show played", body)
+            self.assertIn("<th>Channel</th>", body)
+            self.assertIn("<th>Episode</th>", body)
+            self.assertIn("<th>Actions</th>", body)
+
+    def test_index_includes_listened_summary_panel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            body = _render_index(
+                rows=[],
+                output_root=root,
+                database_path=db_path,
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+            self.assertIn("Listened", body)
+            self.assertIn("0m", body)
 
 
 class WebAppDatabaseRowsTests(unittest.TestCase):
@@ -230,6 +255,39 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 123.456, places=2)
 
+    def test_total_listened_seconds_accumulates_positive_progress(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "TestPodcast",
+                    "item_uid": "uid-pos-total",
+                    "item_url": "https://cdn.example.com/episode-pos-total.mp3",
+                    "media_url": "https://cdn.example.com/episode-pos-total.mp3",
+                    "title": "Episode Position Total",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "subtitle_enabled": True,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"title": "Episode Position Total"},
+                },
+            )
+
+            row = fetch_downloaded_media_rows(db_path)[0]
+            self.assertTrue(update_download_position_seconds(str(db_path), row.row_id, 120.0))
+            self.assertTrue(update_download_position_seconds(str(db_path), row.row_id, 90.0))
+            self.assertTrue(update_download_position_seconds(str(db_path), row.row_id, 150.0))
+
+            self.assertAlmostEqual(get_total_listened_seconds(str(db_path)), 180.0, places=2)
+
 
 class WebAppRenderVisibilityTests(unittest.TestCase):
     def test_index_hides_played_items_from_table(self):
@@ -322,6 +380,74 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
 
             self.assertIn("Played Item", body)
             self.assertIn("Hide played", body)
+
+    def test_index_uses_icons_and_tooltips_for_item_actions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="New Item",
+                file_path=str(root / "new.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                played_at=None,
+            )
+            (root / "new.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn('aria-label="Play">▶</a>', body)
+            self.assertIn('title="Mark played"', body)
+            self.assertIn('aria-label="Mark played">✓</a>', body)
+
+    def test_index_hides_new_label_for_previously_played_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="Item",
+                file_path=str(root / "item.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                played_at="2026-01-01T00:00:00Z",
+            )
+            (root / "item.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertNotIn('status-new">new</span>', body)
 
     def test_player_page_includes_resume_progress_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:

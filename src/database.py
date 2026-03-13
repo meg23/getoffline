@@ -99,6 +99,7 @@ def _init_database_sqlite(db_path: str) -> None:
                 played INTEGER NOT NULL DEFAULT 0,
                 played_at TEXT,
                 last_position_seconds REAL NOT NULL DEFAULT 0,
+                total_listened_seconds REAL NOT NULL DEFAULT 0,
                 last_position_updated_at TEXT,
                 UNIQUE(source_type, source_name, item_uid)
             )
@@ -118,6 +119,8 @@ def _ensure_downloads_columns_sqlite(db_path: str) -> None:
             conn.execute("ALTER TABLE downloads ADD COLUMN played_at TEXT")
         if "last_position_seconds" not in existing:
             conn.execute("ALTER TABLE downloads ADD COLUMN last_position_seconds REAL NOT NULL DEFAULT 0")
+        if "total_listened_seconds" not in existing:
+            conn.execute("ALTER TABLE downloads ADD COLUMN total_listened_seconds REAL NOT NULL DEFAULT 0")
         if "last_position_updated_at" not in existing:
             conn.execute("ALTER TABLE downloads ADD COLUMN last_position_updated_at TEXT")
         conn.commit()
@@ -281,6 +284,7 @@ if HAS_SQLALCHEMY:
         played: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
         played_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
         last_position_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+        total_listened_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
         last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -379,11 +383,20 @@ if HAS_SQLALCHEMY:
             record = session.get(DownloadRecord, int(row_id))
             if record is None:
                 return False
+            previous = max(0.0, float(record.last_position_seconds or 0.0))
+            listened_delta = max(0.0, safe_position - previous)
             record.last_position_seconds = safe_position
+            record.total_listened_seconds = max(0.0, float(record.total_listened_seconds or 0.0)) + listened_delta
             record.last_position_updated_at = now
             record.last_seen_at = now
             session.commit()
             return True
+
+    def get_total_listened_seconds(db_path: str) -> float:
+        with Session(_engine_for(db_path)) as session:
+            stmt = select(DownloadRecord.total_listened_seconds)
+            values = session.execute(stmt).scalars().all()
+            return float(sum(float(value or 0.0) for value in values))
 
 
 else:
@@ -430,9 +443,25 @@ else:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow().isoformat()
         with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT COALESCE(last_position_seconds, 0), COALESCE(total_listened_seconds, 0) FROM downloads WHERE id = ?",
+                (int(row_id),),
+            ).fetchone()
+            if row is None:
+                return False
+            previous = max(0.0, float(row[0] or 0.0))
+            total = max(0.0, float(row[1] or 0.0))
+            listened_delta = max(0.0, safe_position - previous)
             cur = conn.execute(
-                "UPDATE downloads SET last_position_seconds = ?, last_position_updated_at = ?, last_seen_at = ? WHERE id = ?",
-                (safe_position, now, now, int(row_id)),
+                "UPDATE downloads SET last_position_seconds = ?, total_listened_seconds = ?, last_position_updated_at = ?, last_seen_at = ? WHERE id = ?",
+                (safe_position, total + listened_delta, now, now, int(row_id)),
             )
             conn.commit()
             return cur.rowcount > 0
+
+    def get_total_listened_seconds(db_path: str) -> float:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_listened_seconds), 0) FROM downloads"
+            ).fetchone()
+            return float((row[0] if row else 0.0) or 0.0)
