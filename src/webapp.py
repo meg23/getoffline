@@ -255,6 +255,40 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     ]
 
 
+def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
+    init_database(str(db_path))
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+            FROM downloads
+            WHERE id = ? AND download_status = 'downloaded'
+            LIMIT 1
+            """,
+            (int(row_id),),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return MediaRow(
+        row_id=row[0],
+        source_type=row[1],
+        source_name=row[2],
+        item_url=row[3],
+        title=row[4],
+        file_path=row[5],
+        file_ext=row[6],
+        file_size_bytes=row[7],
+        upload_date=row[8],
+        played=bool(row[9]),
+        favorite=bool(row[10]),
+        played_at=row[11],
+        subtitle_path=row[12],
+    )
+
+
 def _format_vtt_timestamp(value: float) -> str:
     value = max(0.0, float(value))
     hours = int(value // 3600)
@@ -1622,13 +1656,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 </html>"""
 
 
-def _find_row_by_id(rows: List[MediaRow], row_id: int) -> Optional[MediaRow]:
-    for row in rows:
-        if row.row_id == row_id:
-            return row
-    return None
-
-
 def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str, int]]:
     if not range_header or not range_header.startswith("bytes="):
         return None
@@ -1722,13 +1749,19 @@ def make_handler(state: AppState):
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
-            rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
+            rows_cache: Optional[List[MediaRow]] = None
+
+            def _rows() -> List[MediaRow]:
+                nonlocal rows_cache
+                if rows_cache is None:
+                    rows_cache = fetch_downloaded_media_rows(state.database_path, state.output_root)
+                return rows_cache
 
             if path == "/":
                 status = _snapshot_status(state.update_status)
                 show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
                 favorites_only = (query.get('favorites') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
-                body = _render_index(rows, state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
+                body = _render_index(_rows(), state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1779,7 +1812,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = _find_row_by_id(rows, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -1798,7 +1831,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = _find_row_by_id(rows, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -1821,7 +1854,7 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid id")
                     return
 
-                row = _find_row_by_id(rows, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
