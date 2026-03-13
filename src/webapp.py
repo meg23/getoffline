@@ -723,8 +723,8 @@ def _render_index(
     td[data-label="Actions"], thead th:nth-child(7) {{
       text-align: right;
     }}
-    th.channel-col, td.channel-col {{ padding-right: .4rem; }}
-    th.episode-col, td.episode-col {{ padding-left: .4rem; }}
+    th.channel-col, td.channel-col {{ padding-right: .2rem; }}
+    th.episode-col, td.episode-col {{ padding-left: .2rem; }}
     .pill {{
       display: inline-block;
       padding: .18rem .5rem;
