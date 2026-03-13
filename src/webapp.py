@@ -1055,11 +1055,21 @@ def _render_index(
       if (miniOpen) {{
         miniOpen.addEventListener('click', (event) => {{
           event.preventDefault();
+          const fallbackUrl = miniOpen.href || '/';
           const raw = localStorage.getItem('getofflineMiniPlayerState');
-          if (!raw) return;
+          if (!raw) {{
+            window.location.assign(fallbackUrl);
+            return;
+          }}
           let state = null;
-          try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
-          if (!state || !state.rowId) return;
+          try {{ state = JSON.parse(raw); }} catch (_) {{
+            window.location.assign(fallbackUrl);
+            return;
+          }}
+          if (!state || !state.rowId) {{
+            window.location.assign(fallbackUrl);
+            return;
+          }}
 
           const active = state.kind === 'video' ? miniVideo : miniAudio;
           if (active && active.style.display !== 'none') {{
@@ -1240,6 +1250,11 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         const body = new URLSearchParams();
         body.set('id', String(rowId));
         body.set('position_seconds', safe.toFixed(3));
+
+        if (force && navigator.sendBeacon) {{
+          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+          if (navigator.sendBeacon('/progress', blob)) return;
+        }}
 
         fetch('/progress', {{
           method: 'POST',
