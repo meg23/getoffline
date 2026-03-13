@@ -514,6 +514,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('id="mini-player"', body)
             self.assertIn('id="mini-player-audio"', body)
             self.assertIn('id="mini-player-video"', body)
+            self.assertIn('id="mini-player-open"', body)
             self.assertIn('data-play-link="1"', body)
 
     def test_index_hides_new_label_for_previously_played_item(self):
