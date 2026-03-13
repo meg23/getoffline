@@ -28,6 +28,7 @@ def run_server(host: str, port: int):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="GetOffline media downloader and browser player")
+    parser.set_defaults(host="127.0.0.1", port=8080)
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("download", help="Run YouTube and podcast downloads")
@@ -41,11 +42,11 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.command in (None, "download"):
+    if args.command == "download":
         run_downloads()
         return
 
-    if args.command == "serve":
+    if args.command in (None, "serve"):
         run_server(host=args.host, port=args.port)
 
 
