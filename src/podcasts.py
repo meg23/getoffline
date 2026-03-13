@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import feedparser
@@ -8,6 +9,9 @@ from database import build_item_uid, ensure_config_seeded, get_stored_config, in
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, sanitize
+
+
+PODCAST_DOWNLOAD_RETRIES = 3
 
 
 class _YoutubeDlQuietLogger:
@@ -131,6 +135,14 @@ def download_podcasts(config, downloaded_items):
                     "restrictfilenames": True,
                     "outtmpl_na_placeholder": "NA",
                     "outtmpl": out_path,
+                    "continuedl": True,
+                    "retries": 10,
+                    "file_access_retries": 3,
+                    "fragment_retries": 10,
+                    "retry_sleep_functions": {
+                        "http": lambda n: min(2**n, 10),
+                    },
+                    "socket_timeout": 30,
                     "quiet": True,
                     "no_warnings": True,
                     "noprogress": True,
@@ -138,10 +150,29 @@ def download_podcasts(config, downloaded_items):
                 }
 
                 log.info(f"Downloading podcast: {name} – {episode_title}")
-                try:
-                    with YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([mp3_url])
-                except Exception as download_exc:
+                last_download_error = None
+                for attempt in range(1, PODCAST_DOWNLOAD_RETRIES + 1):
+                    try:
+                        with YoutubeDL(ydl_opts) as ydl:
+                            ydl.download([mp3_url])
+                        last_download_error = None
+                        break
+                    except Exception as download_exc:
+                        last_download_error = download_exc
+                        if attempt < PODCAST_DOWNLOAD_RETRIES:
+                            backoff_seconds = attempt * 2
+                            log.warning(
+                                "Retrying podcast download (%s/%s) for %s – %s in %ss: %s",
+                                attempt,
+                                PODCAST_DOWNLOAD_RETRIES,
+                                name,
+                                episode_title,
+                                backoff_seconds,
+                                download_exc,
+                            )
+                            time.sleep(backoff_seconds)
+
+                if last_download_error is not None:
                     upsert_download(
                         db_path,
                         _episode_payload(
@@ -155,10 +186,17 @@ def download_podcasts(config, downloaded_items):
                             subtitle_enabled=entry_subtitles_enabled,
                             subtitle_path=None,
                             download_status="failed",
-                            error_message=str(download_exc),
+                            error_message=str(last_download_error),
                         ),
                     )
-                    raise
+                    log.error(
+                        "Failed to download podcast episode after %s attempts: %s – %s (%s)",
+                        PODCAST_DOWNLOAD_RETRIES,
+                        name,
+                        episode_title,
+                        last_download_error,
+                    )
+                    continue
 
                 final_audio = Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}"
                 subtitle_path = create_subtitles(
