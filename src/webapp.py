@@ -43,6 +43,8 @@ MEDIA_EXTENSIONS = {
     ".mov",
 }
 
+DEFAULT_AUTO_UPDATE_MINUTES = 20
+
 
 @dataclass
 class MediaRow:
@@ -382,6 +384,22 @@ def trigger_background_update(state: AppState) -> bool:
     thread = threading.Thread(target=_run_update_job, args=(state,), daemon=True)
     thread.start()
     return True
+
+
+def _auto_update_interval_seconds(state: AppState) -> int:
+    defaults = state.config.get("defaults") or {}
+    try:
+        minutes = int(defaults.get("auto_update_minutes") or DEFAULT_AUTO_UPDATE_MINUTES)
+    except (TypeError, ValueError):
+        minutes = DEFAULT_AUTO_UPDATE_MINUTES
+    return max(1, minutes) * 60
+
+
+def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        if stop_event.wait(_auto_update_interval_seconds(state)):
+            break
+        trigger_background_update(state)
 
 
 def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
@@ -1130,6 +1148,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     max_downloads = html.escape(str(defaults.get("max_downloads") or "3"))
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
+    auto_update_minutes = html.escape(str(defaults.get("auto_update_minutes") or str(DEFAULT_AUTO_UPDATE_MINUTES)))
     cookie_value = html.escape(cookie_text)
 
     youtube_rows = []
@@ -1240,6 +1259,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
         <label for="processing_workers">Processing workers</label>
         <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
+
+        <label for="auto_update_minutes">Auto update interval (minutes)</label>
+        <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
 
         <div class="actions">
           <button type="submit" class="primary">Save defaults</button>
@@ -1620,6 +1642,7 @@ def make_handler(state: AppState):
                         "max_downloads": (form.get("max_downloads") or [""])[0],
                         "playlist_end": (form.get("playlist_end") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
+                        "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
                     }
                     sanitized_updates = {k: str(v).strip() for k, v in updates.items() if str(v).strip()}
                     update_stored_defaults(str(state.database_path), sanitized_updates)
@@ -1705,11 +1728,20 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
+    auto_update_stop_event = threading.Event()
+    auto_update_thread = threading.Thread(
+        target=_auto_update_loop,
+        args=(state, auto_update_stop_event),
+        daemon=True,
+    )
+    auto_update_thread.start()
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
+    print("Automatic download checks are enabled. Adjust the interval in Settings (minutes).")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        auto_update_stop_event.set()
         server.server_close()
