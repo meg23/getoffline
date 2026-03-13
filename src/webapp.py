@@ -12,11 +12,15 @@ from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from database import (
+    get_stored_config,
     get_download_position_seconds,
     get_total_listened_seconds,
     init_database,
+    materialize_youtube_cookie_file,
     mark_all_downloads_played,
     mark_download_played,
+    update_download_settings,
+    update_stored_defaults,
     update_download_position_seconds,
 )
 
@@ -651,6 +655,7 @@ def _render_index(
         <button class="btn btn-subtle" type="submit" {'disabled' if unplayed_items == 0 else ''}>Mark all as played</button>
       </form>
         <a class="btn btn-subtle" href="{toggle_href}">{toggle_label}</a>
+        <a class="btn btn-subtle" href="/settings">Settings</a>
       </div>
     </div>
 
@@ -894,6 +899,74 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 </html>"""
 
 
+def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
+    defaults = config.get("defaults", {})
+    cookie_text = str((config.get("download_settings") or {}).get("youtube_cookie_text") or "")
+    output_root = html.escape(str(defaults.get("output_root") or ""))
+    audio_format = html.escape(str(defaults.get("audio_format") or "mp3"))
+    audio_quality = html.escape(str(defaults.get("audio_quality") or "0"))
+    max_downloads = html.escape(str(defaults.get("max_downloads") or "3"))
+    playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
+    processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
+    cookie_path = html.escape(str(defaults.get("cookie_path") or ""))
+    cookie_value = html.escape(cookie_text)
+
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GetOffline Settings</title>
+  <style>
+    body {{ font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 1rem; background: #f5f7fb; color: #17213a; }}
+    .wrap {{ max-width: 900px; margin: 0 auto; background: #fff; border: 1px solid #dbe3f3; border-radius: 12px; padding: 1rem; }}
+    h1 {{ margin-top: 0; }}
+    label {{ display: block; margin: .7rem 0 .2rem; font-weight: 600; }}
+    input, textarea {{ width: 100%; padding: .55rem; border: 1px solid #cbd6ee; border-radius: 8px; font: inherit; }}
+    textarea {{ min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; }}
+    button, a {{ border-radius: 8px; border: 1px solid #cbd6ee; padding: .55rem .8rem; text-decoration: none; color: inherit; background: #fff; }}
+    button {{ background: #2f62f2; color: #fff; border-color: #2f62f2; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Settings</h1>
+    <form method="post" action="/settings">
+      <label for="output_root">Output root</label>
+      <input id="output_root" name="output_root" value="{output_root}" required />
+
+      <label for="audio_format">Audio format</label>
+      <input id="audio_format" name="audio_format" value="{audio_format}" required />
+
+      <label for="audio_quality">Audio quality</label>
+      <input id="audio_quality" name="audio_quality" value="{audio_quality}" required />
+
+      <label for="max_downloads">Max downloads</label>
+      <input id="max_downloads" name="max_downloads" value="{max_downloads}" required />
+
+      <label for="playlist_end">Playlist end</label>
+      <input id="playlist_end" name="playlist_end" value="{playlist_end}" required />
+
+      <label for="processing_workers">Processing workers</label>
+      <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
+
+      <label for="cookie_path">Cookie materialization path</label>
+      <input id="cookie_path" name="cookie_path" value="{cookie_path}" required />
+
+      <label for="youtube_cookie_text">YouTube cookies.txt content</label>
+      <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
+
+      <div class="actions">
+        <button type="submit">Save settings</button>
+        <a href="/">Back to library</a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>"""
+
+
 def _find_row_by_id(rows: List[MediaRow], row_id: int) -> Optional[MediaRow]:
     for row in rows:
         if row.row_id == row_id:
@@ -981,6 +1054,17 @@ def make_handler(state: AppState):
                 status = _snapshot_status(state.update_status)
                 show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
                 body = _render_index(rows, state.output_root, state.database_path, status, show_played=show_played)
+                body_bytes = body.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            if path == "/settings":
+                stored = get_stored_config(str(state.database_path))
+                body = _render_settings(stored)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1094,6 +1178,41 @@ def make_handler(state: AppState):
                 self.end_headers()
                 return
 
+            if path == "/settings":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+
+                updates = {
+                    "output_root": (form.get("output_root") or [""])[0],
+                    "audio_format": (form.get("audio_format") or [""])[0],
+                    "audio_quality": (form.get("audio_quality") or [""])[0],
+                    "max_downloads": (form.get("max_downloads") or [""])[0],
+                    "playlist_end": (form.get("playlist_end") or [""])[0],
+                    "processing_workers": (form.get("processing_workers") or [""])[0],
+                    "cookie_path": (form.get("cookie_path") or [""])[0],
+                }
+                sanitized_updates = {k: str(v).strip() for k, v in updates.items() if str(v).strip()}
+                update_stored_defaults(str(state.database_path), sanitized_updates)
+
+                raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
+                cookie_text = str(raw_cookie).strip()
+                update_download_settings(str(state.database_path), cookie_text or None)
+
+                stored = get_stored_config(str(state.database_path))
+                state.config["defaults"] = stored["defaults"]
+                state.config["download_settings"] = stored["download_settings"]
+                state.output_root = Path(stored["defaults"]["output_root"])
+                materialize_youtube_cookie_file(
+                    str(state.database_path),
+                    stored["defaults"]["cookie_path"],
+                )
+
+                self.send_response(303)
+                self.send_header("Location", "/settings")
+                self.end_headers()
+                return
+
             self.send_error(404, "Not found")
 
         def log_message(self, fmt, *args):
@@ -1105,8 +1224,12 @@ def make_handler(state: AppState):
 def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     defaults = config["defaults"]
     init_database(str(defaults["database_path"]))
+    stored = get_stored_config(str(defaults["database_path"]))
+    config["defaults"] = stored["defaults"]
+    config["download_settings"] = stored["download_settings"]
+    materialize_youtube_cookie_file(str(defaults["database_path"]), stored["defaults"]["cookie_path"])
     state = AppState(
-        output_root=Path(defaults["output_root"]),
+        output_root=Path(config["defaults"]["output_root"]),
         database_path=Path(defaults["database_path"]),
         config=config,
         update_runner=_default_update_runner,

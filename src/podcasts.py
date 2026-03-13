@@ -4,7 +4,7 @@ from pathlib import Path
 import feedparser
 from yt_dlp import YoutubeDL
 
-from database import build_item_uid, init_database, is_downloaded, resolve_database_path, upsert_download
+from database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from utils import ensure_dir, sanitize
@@ -85,8 +85,11 @@ def _episode_payload(
 def download_podcasts(config, downloaded_items):
     defaults = config["defaults"]
     db_path = defaults.get("database_path") or resolve_database_path(defaults)
-    defaults["database_path"] = db_path
     init_database(db_path)
+    ensure_config_seeded(db_path, defaults)
+    stored_config = get_stored_config(db_path)
+    defaults = stored_config["defaults"]
+    config["defaults"] = defaults
 
     for entry in config.get("podcasts", []):
         try:
