@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from database import init_database, mark_all_downloads_played, mark_download_played, upsert_download  # noqa: E402
+from database import get_stored_config, init_database, mark_all_downloads_played, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
     _parse_range_header,
@@ -23,6 +23,7 @@ from webapp import (  # noqa: E402
     get_total_listened_seconds,
     trigger_background_update,
     update_download_position_seconds,
+    add_single_youtube_link,
 )
 
 
@@ -68,6 +69,38 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("<th>Episode</th>", body)
             self.assertIn("<th>Actions</th>", body)
             self.assertIn("/settings", body)
+            self.assertIn("/quick-add-youtube", body)
+            self.assertIn("Add single YouTube link", body)
+            self.assertIn('id="quick-add-open"', body)
+            self.assertIn('id="quick-add-backdrop"', body)
+            self.assertIn('id="quick-add-url"', body)
+
+    def test_add_single_youtube_link_uses_resolved_channel_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+
+            with unittest.mock.patch("youtube.resolve_youtube_source_name", return_value="MyChannel"):
+                add_single_youtube_link(
+                    state,
+                    url="https://www.youtube.com/watch?v=abc123",
+                    media_type="audio",
+                    subtitles=True,
+                    subtitle_offset_seconds=None,
+                )
+
+            stored = get_stored_config(str(db_path))
+            self.assertEqual(len(stored["youtube"]), 1)
+            self.assertEqual(stored["youtube"][0]["name"], "MyChannel")
+            self.assertEqual(stored["youtube"][0]["url"], "https://www.youtube.com/watch?v=abc123")
+            self.assertEqual(stored["youtube"][0]["type"], "audio")
 
     def test_render_settings_contains_cookie_field(self):
         body = _render_settings(

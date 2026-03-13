@@ -95,6 +95,7 @@ def _icon_sprite() -> str:
       <symbol id="bi-eye" viewBox="0 0 16 16"><path d="M16 8s-3-5-8-5-8 5-8 5 3 5 8 5 8-5 8-5zM1.173 8a13.133 13.133 0 0 1 1.66-1.995C4.12 4.724 5.88 4 8 4s3.879.724 5.168 2.005A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.707C11.879 11.276 10.12 12 8 12s-3.879-.724-5.168-2.005A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5z"/></symbol>
       <symbol id="bi-eye-slash" viewBox="0 0 16 16"><path d="M13.359 11.238C12.124 12.33 10.384 13 8 13c-5 0-8-5-8-5a16.79 16.79 0 0 1 3.168-3.646L1.146 2.354a.5.5 0 1 1 .708-.708l13 13a.5.5 0 0 1-.708.708l-.787-.787z"/><path d="M11.297 9.176 6.824 4.703A3 3 0 0 1 11.297 9.176z"/><path d="M5.34 7.218 8.782 10.66A3 3 0 0 1 5.34 7.218z"/><path d="M7.646 3.007C7.764 3.002 7.882 3 8 3c5 0 8 5 8 5a17.362 17.362 0 0 1-2.363 2.955l-.723-.723A16.74 16.74 0 0 0 14.828 8c-.058-.087-.122-.183-.195-.288-.335-.48-.83-1.12-1.465-1.707C11.879 4.724 10.12 4 8 4c-.076 0-.152.001-.227.003l-.127-.996z"/></symbol>
       <symbol id="bi-gear" viewBox="0 0 16 16"><path d="M9.605 1.05c-.413-1.4-2.397-1.4-2.81 0l-.094.319a1.464 1.464 0 0 1-2.105.872l-.29-.17c-1.257-.736-2.66.667-1.924 1.924l.17.29c.446.764.003 1.74-.872 2.105l-.319.094c-1.4.413-1.4 2.397 0 2.81l.319.094c.875.365 1.318 1.34.872 2.105l-.17.29c-.736 1.257.667 2.66 1.924 1.924l.29-.17c.764-.446 1.74-.003 2.105.872l.094.319c.413 1.4 2.397 1.4 2.81 0l.094-.319c.365-.875 1.34-1.318 2.105-.872l.29.17c1.257.736 2.66-.667 1.924-1.924l-.17-.29a1.464 1.464 0 0 1 .872-2.105l.319-.094c1.4-.413 1.4-2.397 0-2.81l-.319-.094a1.464 1.464 0 0 1-.872-2.105l.17-.29c.736-1.257-.667-2.66-1.924-1.924l-.29.17a1.464 1.464 0 0 1-2.105-.872l-.094-.319zM8 10.5A2.5 2.5 0 1 1 8 5.5a2.5 2.5 0 0 1 0 5z"/></symbol>
+      <symbol id="bi-plus-lg" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 2.5a.5.5 0 0 1 .5.5v4.5H13a.5.5 0 0 1 0 1H8.5V13a.5.5 0 0 1-1 0V8.5H3a.5.5 0 0 1 0-1h4.5V3a.5.5 0 0 1 .5-.5"/></symbol>
     </svg>
     """
 
@@ -373,6 +374,30 @@ def trigger_background_update(state: AppState) -> bool:
     return True
 
 
+def add_single_youtube_link(
+    state: AppState,
+    *,
+    url: str,
+    media_type: str,
+    subtitles: bool,
+    subtitle_offset_seconds: Optional[float],
+) -> None:
+    from youtube import resolve_youtube_source_name
+
+    cookie_path = materialize_youtube_cookie_file(str(state.database_path))
+    source_name = resolve_youtube_source_name(url, cookie_path)
+    add_source_config(
+        str(state.database_path),
+        source_type="youtube",
+        name=source_name,
+        url=url,
+        media_type=media_type,
+        subtitles=subtitles,
+        subtitle_offset_seconds=subtitle_offset_seconds,
+        enabled=True,
+    )
+
+
 def _render_index(
     rows: List[MediaRow],
     output_root: Path,
@@ -511,6 +536,40 @@ def _render_index(
       flex-wrap: wrap;
     }}
     .toolbar-form {{ margin: 0; }}
+    .quick-add-backdrop {{
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 10, 24, .62);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+      padding: 1rem;
+    }}
+    .quick-add-backdrop.is-open {{ display: flex; }}
+    .quick-add-modal {{
+      width: min(520px, 100%);
+      background: #fff;
+      border: 1px solid #dbe3f3;
+      border-radius: 14px;
+      box-shadow: 0 24px 70px rgba(12, 22, 52, .3);
+      padding: 1rem;
+    }}
+    .quick-add-modal h2 {{ margin: 0 0 .75rem 0; font-size: 1.1rem; color: #1d2b52; }}
+    .quick-add-form {{ display: grid; gap: .7rem; }}
+    .quick-add-form label {{ font-size: .9rem; color: #2f3f66; font-weight: 600; }}
+    .quick-add-input, .quick-add-select {{
+      width: 100%;
+      border: 1px solid #c9d5ef;
+      border-radius: 10px;
+      padding: .55rem .75rem;
+      font: inherit;
+      background: #fff;
+      color: #243251;
+      box-sizing: border-box;
+    }}
+    .quick-add-actions {{ display: flex; justify-content: flex-end; gap: .5rem; margin-top: .2rem; }}
+
 
     table {{
       width: 100%;
@@ -661,8 +720,32 @@ def _render_index(
       <form method="post" action="/mark-all-played" class="toolbar-form">
         <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>{_icon_use("bi-check2-circle")}</button>
       </form>
+      <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
+      </div>
+    </div>
+
+    <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
+      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
+        <h2 id="quick-add-title">Add single YouTube link</h2>
+        <form method="post" action="/quick-add-youtube" class="quick-add-form">
+          <div>
+            <label for="quick-add-url">YouTube URL</label>
+            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          </div>
+          <div>
+            <label for="quick-add-media-type">Download type</label>
+            <select id="quick-add-media-type" class="quick-add-select" name="media_type">
+              <option value="audio">audio</option>
+              <option value="video">video</option>
+            </select>
+          </div>
+          <div class="quick-add-actions">
+            <button id="quick-add-cancel" type="button">Cancel</button>
+            <button type="submit" class="primary">Add</button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -680,6 +763,34 @@ def _render_index(
       <tbody>{table_rows}</tbody>
     </table>
   </div>
+  <script>
+    (() => {{
+      const openBtn = document.getElementById('quick-add-open');
+      const backdrop = document.getElementById('quick-add-backdrop');
+      const cancelBtn = document.getElementById('quick-add-cancel');
+      const urlInput = document.getElementById('quick-add-url');
+      if (!openBtn || !backdrop) return;
+
+      const closeModal = () => {{
+        backdrop.classList.remove('is-open');
+        backdrop.setAttribute('aria-hidden', 'true');
+      }};
+
+      openBtn.addEventListener('click', () => {{
+        backdrop.classList.add('is-open');
+        backdrop.setAttribute('aria-hidden', 'false');
+        if (urlInput) urlInput.focus();
+      }});
+
+      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+      backdrop.addEventListener('click', (event) => {{
+        if (event.target === backdrop) closeModal();
+      }});
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -902,6 +1013,34 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
     }})();
   </script>
+  <script>
+    (() => {{
+      const openBtn = document.getElementById('quick-add-open');
+      const backdrop = document.getElementById('quick-add-backdrop');
+      const cancelBtn = document.getElementById('quick-add-cancel');
+      const urlInput = document.getElementById('quick-add-url');
+      if (!openBtn || !backdrop) return;
+
+      const closeModal = () => {{
+        backdrop.classList.remove('is-open');
+        backdrop.setAttribute('aria-hidden', 'true');
+      }};
+
+      openBtn.addEventListener('click', () => {{
+        backdrop.classList.add('is-open');
+        backdrop.setAttribute('aria-hidden', 'false');
+        if (urlInput) urlInput.focus();
+      }});
+
+      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+      backdrop.addEventListener('click', (event) => {{
+        if (event.target === backdrop) closeModal();
+      }});
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -1046,7 +1185,30 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>YouTube sources</h2>
-      <table>
+      <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
+      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
+        <h2 id="quick-add-title">Add single YouTube link</h2>
+        <form method="post" action="/quick-add-youtube" class="quick-add-form">
+          <div>
+            <label for="quick-add-url">YouTube URL</label>
+            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          </div>
+          <div>
+            <label for="quick-add-media-type">Download type</label>
+            <select id="quick-add-media-type" class="quick-add-select" name="media_type">
+              <option value="audio">audio</option>
+              <option value="video">video</option>
+            </select>
+          </div>
+          <div class="quick-add-actions">
+            <button id="quick-add-cancel" type="button">Cancel</button>
+            <button type="submit" class="primary">Add</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <table>
         <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{youtube_table}</tbody>
       </table>
@@ -1075,7 +1237,30 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>Podcast sources</h2>
-      <table>
+      <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
+      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
+        <h2 id="quick-add-title">Add single YouTube link</h2>
+        <form method="post" action="/quick-add-youtube" class="quick-add-form">
+          <div>
+            <label for="quick-add-url">YouTube URL</label>
+            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          </div>
+          <div>
+            <label for="quick-add-media-type">Download type</label>
+            <select id="quick-add-media-type" class="quick-add-select" name="media_type">
+              <option value="audio">audio</option>
+              <option value="video">video</option>
+            </select>
+          </div>
+          <div class="quick-add-actions">
+            <button id="quick-add-cancel" type="button">Cancel</button>
+            <button type="submit" class="primary">Add</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <table>
         <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{podcast_table}</tbody>
       </table>
@@ -1099,6 +1284,34 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="actions"><a href="/">Back to library</a></div>
   </div>
+  <script>
+    (() => {{
+      const openBtn = document.getElementById('quick-add-open');
+      const backdrop = document.getElementById('quick-add-backdrop');
+      const cancelBtn = document.getElementById('quick-add-cancel');
+      const urlInput = document.getElementById('quick-add-url');
+      if (!openBtn || !backdrop) return;
+
+      const closeModal = () => {{
+        backdrop.classList.remove('is-open');
+        backdrop.setAttribute('aria-hidden', 'true');
+      }};
+
+      openBtn.addEventListener('click', () => {{
+        backdrop.classList.add('is-open');
+        backdrop.setAttribute('aria-hidden', 'false');
+        if (urlInput) urlInput.focus();
+      }});
+
+      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+      backdrop.addEventListener('click', (event) => {{
+        if (event.target === backdrop) closeModal();
+      }});
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -1309,6 +1522,33 @@ def make_handler(state: AppState):
 
             if path == "/mark-all-played":
                 mark_all_downloads_played(str(state.database_path))
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path == "/quick-add-youtube":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                url = str((form.get("url") or [""])[0]).strip()
+                media_type = str((form.get("media_type") or ["audio"])[0]).strip().lower()
+                if media_type not in {"audio", "video"}:
+                    self.send_error(400, "Invalid media_type")
+                    return
+                if not url:
+                    self.send_error(400, "Missing url")
+                    return
+                add_single_youtube_link(
+                    state,
+                    url=url,
+                    media_type=media_type,
+                    subtitles=(media_type == "audio"),
+                    subtitle_offset_seconds=None,
+                )
+                stored = get_stored_config(str(state.database_path))
+                state.config["youtube"] = stored["youtube"]
+                trigger_background_update(state)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()

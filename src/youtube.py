@@ -51,6 +51,44 @@ def _human_size(num_bytes: Optional[float]) -> str:
     return f"{num_bytes:.0f} B"
 
 
+def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> str:
+    source_url = str(url or "").strip()
+    if not source_url:
+        raise ValueError("Missing YouTube URL")
+
+    ydl_opts = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "logger": _YoutubeDlQuietLogger(),
+    }
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
+
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(source_url, download=False)
+
+    if info and isinstance(info, dict):
+        if info.get("_type") == "playlist":
+            entries = info.get("entries") or []
+            for entry in entries:
+                if isinstance(entry, dict):
+                    info = entry
+                    break
+
+        for key in ("channel", "uploader", "uploader_id"):
+            value = str(info.get(key) or "").strip()
+            if value:
+                return sanitize(value)
+
+        title = str(info.get("title") or "").strip()
+        if title:
+            return sanitize(title)
+
+    return "youtube-single"
+
+
 class _YoutubeDlQuietLogger:
     def debug(self, msg):
         if not msg:
