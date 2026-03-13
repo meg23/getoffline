@@ -803,8 +803,9 @@ def _render_index(
       background: #f4f7ff;
     }}
     .mini-player-open:hover {{ background: #e9efff; text-decoration: none; }}
-    .mini-player-media {{ width: 100%; border-radius: 10px; background: #000; }}
-    #mini-player-video {{ aspect-ratio: 16 / 9; max-height: 203px; }}
+    .mini-player-media {{ width: 100%; border-radius: 10px; background: transparent; }}
+    #mini-player-video {{ aspect-ratio: 16 / 9; max-height: 203px; background: #000; }}
+    #mini-player-audio {{ border-radius: 999px; }}
 
     @keyframes spin {{
       from {{ transform: rotate(0deg); }}
@@ -1018,6 +1019,25 @@ def _render_index(
         }});
       }});
 
+      if (miniOpen) {{
+        miniOpen.addEventListener('click', (event) => {{
+          const raw = localStorage.getItem('getofflineMiniPlayerState');
+          if (!raw) return;
+          let state = null;
+          try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
+          if (!state || !state.rowId) return;
+
+          const active = state.kind === 'video' ? miniVideo : miniAudio;
+          if (active && active.style.display !== 'none') {{
+            state.currentTime = active.currentTime || 0;
+            state.paused = active.paused;
+          }}
+          state.playUrl = '/play?id=' + state.rowId;
+          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
+          event.currentTarget.href = state.playUrl + '&autoplay=1';
+        }});
+      }}
+
       renderMiniPlayer();
 
       const openBtn = document.getElementById('quick-add-open');
@@ -1141,6 +1161,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const startSeconds = {resume_value:.6f};
       const player = document.getElementById('player');
       const backToLibrary = document.getElementById('back-to-library');
+      const shouldAutoPlay = new URLSearchParams(window.location.search).get('autoplay') === '1';
       const resumeLabel = document.getElementById('resume-label');
       const transcript = document.getElementById('transcript');
       const subtitleTrackEl = document.getElementById('subtitle-track');
@@ -1263,6 +1284,9 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
       player.addEventListener('loadedmetadata', applyInitialSeek);
       player.addEventListener('canplay', applyInitialSeek);
+      player.addEventListener('canplay', () => {{
+        if (shouldAutoPlay) player.play().catch(() => {{}});
+      }});
       player.addEventListener('playing', applyInitialSeek);
       player.addEventListener('loadeddata', scheduleTranscriptInit);
       window.addEventListener('pageshow', scheduleTranscriptInit);
