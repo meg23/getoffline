@@ -519,8 +519,8 @@ def _render_index(
         cards.append(
             f"""
             <tr>
-                <td data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell" data-label="Episode" title="{title}">{title}</td>
+                <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
+                <td class="title-cell episode-col" data-label="Episode" title="{title}">{title}</td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
@@ -709,8 +709,8 @@ def _render_index(
     tbody tr:nth-child(even) td {{ background: #fbfcff; }}
     tr:last-child td {{ border-bottom: none; }}
     .title-cell {{ font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }}
-    .col-channel {{ width: 16%; }}
-    .col-episode {{ width: 34%; }}
+    .col-channel {{ width: 14%; }}
+    .col-episode {{ width: 36%; }}
     .col-source {{ width: 10%; }}
     .col-type {{ width: 8%; }}
     .col-size {{ width: 10%; }}
@@ -723,6 +723,8 @@ def _render_index(
     td[data-label="Actions"], thead th:nth-child(7) {{
       text-align: right;
     }}
+    th.channel-col, td.channel-col {{ padding-right: .4rem; }}
+    th.episode-col, td.episode-col {{ padding-left: .4rem; }}
     .pill {{
       display: inline-block;
       padding: .18rem .5rem;
@@ -944,7 +946,7 @@ def _render_index(
         <col class="col-status" />
         <col class="col-actions" />
       </colgroup>
-      <thead><tr><th>Channel</th><th>Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th aria-label="Actions"></th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
 
