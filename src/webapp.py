@@ -1,4 +1,5 @@
 import html
+import json
 import mimetypes
 import posixpath
 import re
@@ -20,6 +21,7 @@ from database import (
     mark_all_downloads_played,
     mark_download_played,
     update_download_settings,
+    replace_sources,
     update_stored_defaults,
     update_download_position_seconds,
 )
@@ -908,8 +910,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     max_downloads = html.escape(str(defaults.get("max_downloads") or "3"))
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
-    cookie_path = html.escape(str(defaults.get("cookie_path") or ""))
     cookie_value = html.escape(cookie_text)
+    youtube_json = html.escape(json.dumps(config.get("youtube") or [], indent=2, ensure_ascii=False))
+    podcast_json = html.escape(json.dumps(config.get("podcasts") or [], indent=2, ensure_ascii=False))
 
     return f"""<!doctype html>
 <html>
@@ -923,7 +926,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     h1 {{ margin-top: 0; }}
     label {{ display: block; margin: .7rem 0 .2rem; font-weight: 600; }}
     input, textarea {{ width: 100%; padding: .55rem; border: 1px solid #cbd6ee; border-radius: 8px; font: inherit; }}
-    textarea {{ min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    textarea {{ min-height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
     .actions {{ margin-top: 1rem; display: flex; gap: .5rem; }}
     button, a {{ border-radius: 8px; border: 1px solid #cbd6ee; padding: .55rem .8rem; text-decoration: none; color: inherit; background: #fff; }}
     button {{ background: #2f62f2; color: #fff; border-color: #2f62f2; }}
@@ -951,11 +954,14 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       <label for="processing_workers">Processing workers</label>
       <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
 
-      <label for="cookie_path">Cookie materialization path</label>
-      <input id="cookie_path" name="cookie_path" value="{cookie_path}" required />
-
       <label for="youtube_cookie_text">YouTube cookies.txt content</label>
       <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
+
+      <label for="youtube_json">YouTube sources (JSON)</label>
+      <textarea id="youtube_json" name="youtube_json">{youtube_json}</textarea>
+
+      <label for="podcast_json">Podcast sources (JSON)</label>
+      <textarea id="podcast_json" name="podcast_json">{podcast_json}</textarea>
 
       <div class="actions">
         <button type="submit">Save settings</button>
@@ -1190,7 +1196,6 @@ def make_handler(state: AppState):
                     "max_downloads": (form.get("max_downloads") or [""])[0],
                     "playlist_end": (form.get("playlist_end") or [""])[0],
                     "processing_workers": (form.get("processing_workers") or [""])[0],
-                    "cookie_path": (form.get("cookie_path") or [""])[0],
                 }
                 sanitized_updates = {k: str(v).strip() for k, v in updates.items() if str(v).strip()}
                 update_stored_defaults(str(state.database_path), sanitized_updates)
@@ -1199,14 +1204,25 @@ def make_handler(state: AppState):
                 cookie_text = str(raw_cookie).strip()
                 update_download_settings(str(state.database_path), cookie_text or None)
 
+                try:
+                    youtube_sources = json.loads((form.get("youtube_json") or ["[]"])[0] or "[]")
+                    podcast_sources = json.loads((form.get("podcast_json") or ["[]"])[0] or "[]")
+                except json.JSONDecodeError:
+                    self.send_error(400, "Invalid JSON in source configuration")
+                    return
+
+                if not isinstance(youtube_sources, list) or not isinstance(podcast_sources, list):
+                    self.send_error(400, "Source configuration must be JSON arrays")
+                    return
+                replace_sources(str(state.database_path), youtube_sources, podcast_sources)
+
                 stored = get_stored_config(str(state.database_path))
                 state.config["defaults"] = stored["defaults"]
                 state.config["download_settings"] = stored["download_settings"]
+                state.config["youtube"] = stored["youtube"]
+                state.config["podcasts"] = stored["podcasts"]
                 state.output_root = Path(stored["defaults"]["output_root"])
-                materialize_youtube_cookie_file(
-                    str(state.database_path),
-                    stored["defaults"]["cookie_path"],
-                )
+                materialize_youtube_cookie_file(str(state.database_path))
 
                 self.send_response(303)
                 self.send_header("Location", "/settings")
@@ -1227,7 +1243,9 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     stored = get_stored_config(str(defaults["database_path"]))
     config["defaults"] = stored["defaults"]
     config["download_settings"] = stored["download_settings"]
-    materialize_youtube_cookie_file(str(defaults["database_path"]), stored["defaults"]["cookie_path"])
+    config["youtube"] = stored["youtube"]
+    config["podcasts"] = stored["podcasts"]
+    materialize_youtube_cookie_file(str(defaults["database_path"]))
     state = AppState(
         output_root=Path(config["defaults"]["output_root"]),
         database_path=Path(defaults["database_path"]),

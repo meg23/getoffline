@@ -164,7 +164,7 @@ def download_youtube_items(config, downloaded_items):
     defaults = stored_config["defaults"]
     config["defaults"] = defaults
     config["download_settings"] = stored_config["download_settings"]
-    cookie_path = materialize_youtube_cookie_file(db_path, defaults["cookie_path"])
+    cookie_path = materialize_youtube_cookie_file(db_path)
 
     def skip_live_streams(info_dict, *, incomplete=False):
         _ = incomplete

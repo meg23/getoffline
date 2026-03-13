@@ -2,10 +2,11 @@ import hashlib
 import json
 import os
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from sqlalchemy import (
@@ -61,6 +62,7 @@ def _table_columns_sqlite(db_path: str, table_name: str) -> set[str]:
 
 
 def _ensure_schema_migrations_table(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -167,6 +169,10 @@ MIGRATIONS = [
         "0003_add_config_tables",
         lambda db_path: _migration_0003_add_config_tables(db_path),
     ),
+    (
+        "0004_add_source_configs",
+        lambda db_path: _migration_0004_add_source_configs(db_path),
+    ),
 ]
 
 
@@ -177,7 +183,6 @@ DEFAULT_APP_CONFIG = {
     "max_downloads": "3",
     "playlist_end": "3",
     "processing_workers": "2",
-    "cookie_path": "/tmp/cookies.txt",
 }
 
 
@@ -199,6 +204,27 @@ def _migration_0003_add_config_tables(db_path: str) -> None:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 youtube_cookie_text TEXT,
                 cookie_updated_at TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def _migration_0004_add_source_configs(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                media_type TEXT,
+                subtitles INTEGER NOT NULL DEFAULT 1,
+                subtitle_offset_seconds REAL,
                 updated_at TEXT NOT NULL
             )
             """
@@ -261,9 +287,30 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         for key, value in conn.execute("SELECT key, value FROM app_config"):
             defaults[key] = value
 
-        row = conn.execute(
-            "SELECT youtube_cookie_text FROM download_settings WHERE id = 1"
-        ).fetchone()
+        row = conn.execute("SELECT youtube_cookie_text FROM download_settings WHERE id = 1").fetchone()
+        source_rows = conn.execute(
+            """
+            SELECT source_type, name, url, media_type, subtitles, subtitle_offset_seconds
+            FROM source_configs
+            ORDER BY source_type, position, id
+            """
+        ).fetchall()
+
+    youtube = []
+    podcasts = []
+    for source_type, name, url, media_type, subtitles, subtitle_offset in source_rows:
+        payload = {
+            "name": name,
+            "url": url,
+            "subtitles": bool(subtitles),
+        }
+        if subtitle_offset is not None:
+            payload["subtitle_offset_seconds"] = subtitle_offset
+        if source_type == "youtube":
+            payload["type"] = media_type or "audio"
+            youtube.append(payload)
+        elif source_type == "podcast":
+            podcasts.append(payload)
 
     return {
         "defaults": {
@@ -273,12 +320,13 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "max_downloads": _coerce_int(defaults["max_downloads"], 3),
             "playlist_end": _coerce_int(defaults["playlist_end"], 3),
             "processing_workers": _coerce_int(defaults.get("processing_workers"), 2),
-            "cookie_path": os.path.expanduser(defaults["cookie_path"]),
             "database_path": db_path,
         },
         "download_settings": {
             "youtube_cookie_text": row[0] if row else None,
         },
+        "youtube": youtube,
+        "podcasts": podcasts,
     }
 
 
@@ -327,14 +375,72 @@ def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -
 def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = None) -> Optional[str]:
     stored = get_stored_config(db_path)
     cookie_text = stored["download_settings"].get("youtube_cookie_text")
-    target = cookie_path or stored["defaults"]["cookie_path"]
     if not cookie_text:
         return None
 
-    target_path = Path(str(target)).expanduser()
+    if cookie_path:
+        target_path = Path(str(cookie_path)).expanduser()
+    else:
+        target_path = Path(tempfile.gettempdir()) / f"getoffline-yt-dlp-cookies-{Path(db_path).name}.txt"
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(cookie_text, encoding="utf-8")
     return str(target_path)
+
+
+def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[Dict[str, Any]]) -> None:
+    ensure_config_seeded(db_path)
+    now = _utcnow().isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM source_configs")
+
+        for idx, item in enumerate(youtube):
+            conn.execute(
+                """
+                INSERT INTO source_configs (
+                    source_type, position, name, url, media_type, subtitles, subtitle_offset_seconds, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "youtube",
+                    idx,
+                    str(item.get("name") or "").strip(),
+                    str(item.get("url") or "").strip(),
+                    str(item.get("type") or "audio").strip().lower(),
+                    1 if bool(item.get("subtitles", True)) else 0,
+                    item.get("subtitle_offset_seconds"),
+                    now,
+                ),
+            )
+
+        for idx, item in enumerate(podcasts):
+            conn.execute(
+                """
+                INSERT INTO source_configs (
+                    source_type, position, name, url, media_type, subtitles, subtitle_offset_seconds, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "podcast",
+                    idx,
+                    str(item.get("name") or "").strip(),
+                    str(item.get("url") or "").strip(),
+                    None,
+                    1 if bool(item.get("subtitles", True)) else 0,
+                    item.get("subtitle_offset_seconds"),
+                    now,
+                ),
+            )
+
+        conn.commit()
+
+
+def seed_sources_from_config(db_path: str, config: Dict[str, Any]) -> None:
+    ensure_config_seeded(db_path, config.get("defaults"))
+    with sqlite3.connect(db_path) as conn:
+        existing = conn.execute("SELECT COUNT(*) FROM source_configs").fetchone()[0]
+    if existing:
+        return
+    replace_sources(db_path, config.get("youtube", []), config.get("podcasts", []))
 
 
 def _init_database_sqlite(db_path: str) -> None:
