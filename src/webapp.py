@@ -369,7 +369,8 @@ def _render_index(
         if row.played and not show_played:
             continue
         title = html.escape(row.title or path.name)
-        source = html.escape(f"{row.source_type}: {row.source_name}")
+        channel = html.escape(row.source_name or "?")
+        source_kind = html.escape((row.source_type or "?").strip())
         size = html.escape(_human_size(row.file_size_bytes))
         ext = html.escape((row.file_ext or path.suffix.lstrip(".")) or "?")
         ever_played = bool(row.played or getattr(row, "played_at", None))
@@ -382,12 +383,13 @@ def _render_index(
         cards.append(
             f"""
             <tr>
-                <td class="title-cell" data-label="Title" title="{title}">{title}</td>
-                <td data-label="Source">{source}</td>
+                <td data-label="Channel" title="{channel}">{channel}</td>
+                <td class="title-cell" data-label="Episode" title="{title}">{title}</td>
+                <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
-                <td class="actions" data-label="Action">
+                <td class="actions" data-label="Actions">
                   <a class="action-icon" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">▶</a>
                   <a class="action-icon" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
                 </td>
@@ -395,7 +397,7 @@ def _render_index(
             """
         )
 
-    table_rows = "\n".join(cards) if cards else "<tr><td colspan='6'>No playable media found yet.</td></tr>"
+    table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No playable media found yet.</td></tr>"
     button_disabled = "disabled" if status["is_running"] == "yes" else ""
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
@@ -516,14 +518,15 @@ def _render_index(
     tbody tr:nth-child(even) td {{ background: #fbfcff; }}
     tr:last-child td {{ border-bottom: none; }}
     .title-cell {{ font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }}
-    .col-title {{ width: 44%; }}
-    .col-source {{ width: 21%; }}
+    .col-channel {{ width: 16%; }}
+    .col-episode {{ width: 34%; }}
+    .col-source {{ width: 10%; }}
     .col-type {{ width: 8%; }}
     .col-size {{ width: 10%; }}
     .col-status {{ width: 8%; }}
-    .col-action {{ width: 9%; }}
-    td[data-label="Type"], td[data-label="Size"], td[data-label="Status"], td[data-label="Action"],
-    thead th:nth-child(3), thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
+    .col-actions {{ width: 14%; }}
+    td[data-label="Type"], td[data-label="Size"], td[data-label="Status"], td[data-label="Actions"],
+    thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6), thead th:nth-child(7) {{
       text-align: left;
     }}
     .pill {{
@@ -643,14 +646,15 @@ def _render_index(
 
     <table>
       <colgroup>
-        <col class="col-title" />
+        <col class="col-channel" />
+        <col class="col-episode" />
         <col class="col-source" />
         <col class="col-type" />
         <col class="col-size" />
         <col class="col-status" />
-        <col class="col-action" />
+        <col class="col-actions" />
       </colgroup>
-      <thead><tr><th>Title</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
+      <thead><tr><th>Channel</th><th>Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
   </div>

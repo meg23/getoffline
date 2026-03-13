@@ -63,6 +63,9 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("action=\"/update\"", body)
             self.assertIn("Mark all as played", body)
             self.assertIn("Show played", body)
+            self.assertIn("<th>Channel</th>", body)
+            self.assertIn("<th>Episode</th>", body)
+            self.assertIn("<th>Actions</th>", body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
