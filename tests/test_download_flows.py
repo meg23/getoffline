@@ -462,6 +462,83 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertEqual(stored_ext, "mp3")
             self.assertEqual(stored_size, len("real-audio"))
 
+    def test_video_download_tracks_merged_file_in_database(self):
+        import sqlite3
+
+        class FakeYoutubeDLVideoMerge(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                outtmpl = self.opts.get("outtmpl")
+                base = (
+                    outtmpl.replace("%(upload_date)s", "20260101")
+                    .replace("%(title)s", "Merged Video")
+                    .replace("%(ext)s", "mp4")
+                )
+                video_part = base.replace(".mp4", ".f398.mp4")
+                audio_part = base.replace(".mp4", ".f140.m4a")
+                merged = base
+                os.makedirs(os.path.dirname(base), exist_ok=True)
+                with open(video_part, "w", encoding="utf-8") as f:
+                    f.write("video")
+                with open(audio_part, "w", encoding="utf-8") as f:
+                    f.write("audio")
+
+                info_dict = {
+                    "id": "video-merge-1",
+                    "title": "Merged Video",
+                    "webpage_url": "https://youtube.com/watch?v=video-merge-1",
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook({"status": "finished", "info_dict": info_dict, "filename": video_part, "total_bytes": 4096})
+                    hook({"status": "finished", "info_dict": info_dict, "filename": audio_part, "total_bytes": 2048})
+
+                with open(merged, "w", encoding="utf-8") as f:
+                    f.write("merged")
+
+                for hook in self.opts.get("postprocessor_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "postprocessor": "Merger",
+                            "info_dict": info_dict,
+                            "filepath": merged,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": os.path.join(tmpdir, "downloads.sqlite3"),
+                },
+                "youtube": [{
+                    "name": "MergeChannel",
+                    "url": "https://youtube.com/watch?v=video-merge-1",
+                    "type": "video",
+                }],
+                "podcasts": [],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLVideoMerge):
+                youtube.download_youtube_items(config, [])
+
+            with sqlite3.connect(config["defaults"]["database_path"]) as conn:
+                row = conn.execute(
+                    "SELECT file_path FROM downloads WHERE source_type = 'youtube' AND source_name = ? LIMIT 1",
+                    ("MergeChannel",),
+                ).fetchone()
+
+            self.assertIsNotNone(row)
+            self.assertTrue(row[0].endswith("20260101-Merged Video.mp4"))
+            self.assertNotIn(".f398.mp4", row[0])
+            self.assertNotIn(".f140.m4a", row[0])
+
 
 class SubtitleSidecarCleanupTests(unittest.TestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
@@ -540,6 +617,31 @@ class SubtitleFailureCachingTests(unittest.TestCase):
             self.assertEqual(calls["count"], 1)
             marker = media.with_suffix(".srt.failed")
             self.assertTrue(marker.exists())
+
+
+class YoutubeSourceResolverTests(unittest.TestCase):
+    def test_resolve_youtube_source_name_prefers_channel(self):
+        class FakeYoutubeDLForMetadata(FakeYoutubeDL):
+            def extract_info(self, url, download=False):
+                self.urls.append(url)
+                self.download_called = download
+                return {"channel": "Channel_Name", "uploader": "Uploader", "title": "Video Title"}
+
+        with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
+            source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
+
+        self.assertEqual(source_name, "Channel_Name")
+
+    def test_resolve_youtube_source_name_falls_back_to_title(self):
+        class FakeYoutubeDLForMetadata(FakeYoutubeDL):
+            def extract_info(self, url, download=False):
+                _ = url, download
+                return {"title": "A_Title_Only"}
+
+        with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
+            source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
+
+        self.assertEqual(source_name, "A_Title_Only")
 
 
 if __name__ == "__main__":
