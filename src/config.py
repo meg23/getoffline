@@ -1,14 +1,13 @@
-import http.cookiejar
 import os
 
-import browser_cookie3
 import yaml
 
-from database import init_database, resolve_database_path
-from logger import get_logger
-
-
-log = get_logger("config")
+from database import (
+    ensure_config_seeded,
+    get_stored_config,
+    materialize_youtube_cookie_file,
+    resolve_database_path,
+)
 
 
 def load_config():
@@ -17,17 +16,14 @@ def load_config():
 
     defaults = config["defaults"]
     defaults["output_root"] = os.path.expanduser(defaults["output_root"])
-    defaults["cookie_path"] = os.path.expanduser(defaults["cookie_path"])
     defaults["database_path"] = resolve_database_path(defaults)
-    init_database(defaults["database_path"])
+    ensure_config_seeded(defaults["database_path"], defaults)
 
-    try:
-        cj = browser_cookie3.chrome(domain_name="youtube.com")
-        cookie_jar = http.cookiejar.MozillaCookieJar(defaults["cookie_path"])
-        for cookie in cj:
-            cookie_jar.set_cookie(cookie)
-        cookie_jar.save(ignore_discard=True, ignore_expires=True)
-    except Exception as exc:
-        log.warning(f"Could not export Chrome cookies: {exc}")
-
-    return config
+    materialize_youtube_cookie_file(defaults["database_path"])
+    persisted = get_stored_config(defaults["database_path"])
+    return {
+        "defaults": persisted["defaults"],
+        "download_settings": persisted["download_settings"],
+        "youtube": persisted["youtube"],
+        "podcasts": persisted["podcasts"],
+    }

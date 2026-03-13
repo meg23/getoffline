@@ -14,6 +14,7 @@ from webapp import (  # noqa: E402
     _parse_range_header,
     _resolve_safe_subtitle_path,
     _render_index,
+    _render_settings,
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
@@ -66,6 +67,32 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("<th>Channel</th>", body)
             self.assertIn("<th>Episode</th>", body)
             self.assertIn("<th>Actions</th>", body)
+            self.assertIn("/settings", body)
+
+    def test_render_settings_contains_cookie_field(self):
+        body = _render_settings(
+            {
+                "defaults": {
+                    "output_root": "/tmp/downloads",
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "max_downloads": 3,
+                    "playlist_end": 3,
+                    "processing_workers": 2,
+                },
+                "download_settings": {
+                    "youtube_cookie_text": "# Netscape HTTP Cookie File\n.youtube.com\tTRUE",
+                },
+                "youtube": [{"name": "YT", "url": "https://youtube.com/@yt", "type": "audio", "subtitles": True}],
+                "podcasts": [{"name": "Pod", "url": "https://example.com/rss", "subtitles": True}],
+            }
+        )
+        self.assertIn("YouTube cookie text", body)
+        self.assertIn("/settings", body)
+        self.assertIn("youtube_cookie_text", body)
+        self.assertIn("Add YouTube source", body)
+        self.assertIn("Add podcast source", body)
+        self.assertIn("Disable", body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
