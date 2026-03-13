@@ -387,6 +387,7 @@ def _render_index(
         mark_action = "unplay" if row.played else "played"
         mark_label = "Mark unplayed" if row.played else "Mark played"
         mark_symbol = "↺" if row.played else "✓"
+        play_symbol = "▸"
         cards.append(
             f"""
             <tr>
@@ -397,7 +398,7 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Actions">
-                  <a class="action-icon" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">▶</a>
+                  <a class="action-icon" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">{play_symbol}</a>
                   <a class="action-icon" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{mark_symbol}</a>
                 </td>
             </tr>
@@ -414,6 +415,7 @@ def _render_index(
     toggle_show_played = not show_played
     toggle_href = "?show_played=1" if toggle_show_played else "/"
     toggle_label = "Show played" if toggle_show_played else "Hide played"
+    toggle_symbol = "◉" if toggle_show_played else "◌"
 
     return f"""<!doctype html>
 <html>
@@ -571,15 +573,19 @@ def _render_index(
 
     .btn {{
       border: 1px solid transparent;
-      border-radius: 9px;
+      border-radius: 999px;
       padding: .38rem .7rem;
       font-size: .88rem;
       cursor: pointer;
       text-decoration: none;
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: #fff;
       background: transparent;
-      min-width: 180px;
+      min-width: 2.35rem;
+      width: 2.35rem;
+      height: 2.35rem;
       text-align: center;
     }}
     .btn-link {{ background: var(--accent); }}
@@ -588,18 +594,7 @@ def _render_index(
     .btn-subtle:hover {{ background: #eef3ff; }}
     .btn-update {{ background: linear-gradient(180deg, #4f7fff, #3f6ff1); }}
     .btn-update:disabled {{ opacity: .5; cursor: not-allowed; }}
-    .btn-icon {{
-      min-width: 2.35rem;
-      width: 2.35rem;
-      height: 2.35rem;
-      padding: 0;
-      border-radius: 999px;
-      font-size: 1.1rem;
-      line-height: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }}
+    .btn-icon {{ padding: 0; font-size: 1.1rem; line-height: 1; }}
 
     @media (max-width: 1200px) {{
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -655,10 +650,10 @@ def _render_index(
         <button class="btn btn-update btn-icon" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>↻</button>
       </form>
       <form method="post" action="/mark-all-played" class="toolbar-form">
-        <button class="btn btn-subtle" type="submit" {'disabled' if unplayed_items == 0 else ''}>Mark all as played</button>
+        <button class="btn btn-subtle btn-icon" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>✓</button>
       </form>
-        <a class="btn btn-subtle" href="{toggle_href}">{toggle_label}</a>
-        <a class="btn btn-subtle" href="/settings">Settings</a>
+        <a class="btn btn-subtle btn-icon" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{toggle_symbol}</a>
+        <a class="btn btn-subtle btn-icon" href="/settings" title="Settings" aria-label="Settings">⚙</a>
       </div>
     </div>
 
