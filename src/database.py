@@ -160,10 +160,138 @@ def _migration_0002_add_playback_columns(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0003_create_config_tables(db_path: str) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS config_defaults (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS config_downloads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                download_type TEXT,
+                subtitles INTEGER NOT NULL DEFAULT 1,
+                subtitle_offset_seconds REAL,
+                UNIQUE(source_type, position)
+            )
+            """
+        )
+        conn.commit()
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
+    ("0003_create_config_tables", _migration_0003_create_config_tables),
 ]
+
+
+def _json_value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _parse_json_value(value: str) -> Any:
+    return json.loads(value)
+
+
+def store_runtime_config(db_path: str, config: Dict[str, Any]) -> None:
+    defaults = dict(config.get("defaults") or {})
+    youtube_entries = list(config.get("youtube") or [])
+    podcast_entries = list(config.get("podcasts") or [])
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM config_defaults")
+        for key, value in defaults.items():
+            conn.execute(
+                "INSERT INTO config_defaults (key, value_json) VALUES (?, ?)",
+                (str(key), _json_value(value)),
+            )
+
+        conn.execute("DELETE FROM config_downloads")
+        for index, entry in enumerate(youtube_entries):
+            conn.execute(
+                """
+                INSERT INTO config_downloads
+                    (source_type, position, name, url, download_type, subtitles, subtitle_offset_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "youtube",
+                    index,
+                    str(entry.get("name") or ""),
+                    str(entry.get("url") or ""),
+                    str(entry.get("type") or "audio"),
+                    1 if bool(entry.get("subtitles", True)) else 0,
+                    entry.get("subtitle_offset_seconds"),
+                ),
+            )
+
+        for index, entry in enumerate(podcast_entries):
+            conn.execute(
+                """
+                INSERT INTO config_downloads
+                    (source_type, position, name, url, download_type, subtitles, subtitle_offset_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "podcast",
+                    index,
+                    str(entry.get("name") or ""),
+                    str(entry.get("url") or ""),
+                    None,
+                    1 if bool(entry.get("subtitles", True)) else 0,
+                    entry.get("subtitle_offset_seconds"),
+                ),
+            )
+
+        conn.commit()
+
+
+def load_runtime_config(db_path: str) -> Dict[str, Any]:
+    with sqlite3.connect(db_path) as conn:
+        defaults_rows = conn.execute(
+            "SELECT key, value_json FROM config_defaults ORDER BY key"
+        ).fetchall()
+        download_rows = conn.execute(
+            """
+            SELECT source_type, position, name, url, download_type, subtitles, subtitle_offset_seconds
+            FROM config_downloads
+            ORDER BY source_type, position
+            """
+        ).fetchall()
+
+    defaults = {key: _parse_json_value(value_json) for key, value_json in defaults_rows}
+    youtube = []
+    podcasts = []
+    for source_type, _, name, url, download_type, subtitles, subtitle_offset_seconds in download_rows:
+        entry = {
+            "name": name,
+            "url": url,
+            "subtitles": bool(subtitles),
+        }
+        if subtitle_offset_seconds is not None:
+            entry["subtitle_offset_seconds"] = subtitle_offset_seconds
+
+        if source_type == "youtube":
+            entry["type"] = download_type or "audio"
+            youtube.append(entry)
+        elif source_type == "podcast":
+            podcasts.append(entry)
+
+    return {
+        "defaults": defaults,
+        "youtube": youtube,
+        "podcasts": podcasts,
+    }
 
 
 def apply_migrations(db_path: str) -> None:

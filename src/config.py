@@ -4,7 +4,7 @@ import os
 import browser_cookie3
 import yaml
 
-from database import init_database, resolve_database_path
+from database import init_database, load_runtime_config, resolve_database_path, store_runtime_config
 from logger import get_logger
 
 
@@ -30,4 +30,7 @@ def load_config():
     except Exception as exc:
         log.warning(f"Could not export Chrome cookies: {exc}")
 
-    return config
+    store_runtime_config(defaults["database_path"], config)
+    db_config = load_runtime_config(defaults["database_path"])
+
+    return db_config
