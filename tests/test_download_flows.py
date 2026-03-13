@@ -644,5 +644,58 @@ class YoutubeSourceResolverTests(unittest.TestCase):
         self.assertEqual(source_name, "A_Title_Only")
 
 
+class PodcastRetryTests(unittest.TestCase):
+    def setUp(self):
+        FakeYoutubeDL.instances = []
+
+    def test_podcast_download_retries_then_succeeds(self):
+        class FlakyPodcastYoutubeDL(FakeYoutubeDL):
+            attempts = 0
+
+            def download(self, urls):
+                FlakyPodcastYoutubeDL.attempts += 1
+                if FlakyPodcastYoutubeDL.attempts < 3:
+                    raise Exception("incomplete read")
+                return super().download(urls)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "podcasts": [{
+                    "name": "RetryCast",
+                    "url": "https://example.com/feed.rss",
+                    "subtitles": False,
+                }],
+            }
+
+            mp3_url = "https://cdn.example.com/retry-episode.mp3"
+            fake_feed = SimpleNamespace(
+                entries=[SimpleNamespace(title="Retry Episode", enclosures=[SimpleNamespace(href=mp3_url)])]
+            )
+
+            with patch("podcasts.YoutubeDL", FlakyPodcastYoutubeDL), patch(
+                "podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("podcasts.time.sleep", return_value=None):
+                downloaded_items = []
+                podcasts.download_podcasts(config, downloaded_items)
+
+            self.assertEqual(FlakyPodcastYoutubeDL.attempts, 3)
+            self.assertTrue(any(item.startswith("Podcast: RetryCast") for item in downloaded_items))
+
+            opts = FlakyPodcastYoutubeDL.instances[0].opts
+            self.assertTrue(opts["continuedl"])
+            self.assertEqual(opts["retries"], 10)
+            self.assertEqual(opts["fragment_retries"], 10)
+            self.assertEqual(opts["socket_timeout"], 30)
+
+
 if __name__ == "__main__":
     unittest.main()
