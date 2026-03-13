@@ -806,6 +806,15 @@ if HAS_SQLALCHEMY:
             session.commit()
             return True
 
+    def delete_download_entry(db_path: str, row_id: int) -> bool:
+        with Session(_engine_for(db_path)) as session:
+            record = session.get(DownloadRecord, int(row_id))
+            if record is None:
+                return False
+            session.delete(record)
+            session.commit()
+            return True
+
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
         with Session(_engine_for(db_path)) as session:
             record = session.get(DownloadRecord, int(row_id))
@@ -872,6 +881,12 @@ else:
                 "UPDATE downloads SET favorite = ?, last_seen_at = ? WHERE id = ?",
                 (1 if favorite else 0, _utcnow().isoformat(), int(row_id)),
             )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_download_entry(db_path: str, row_id: int) -> bool:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute("DELETE FROM downloads WHERE id = ?", (int(row_id),))
             conn.commit()
             return cur.rowcount > 0
 

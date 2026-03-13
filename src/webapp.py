@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from database import (
     add_source_config,
     delete_source_config,
+    delete_download_entry,
     get_stored_config,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -48,6 +49,7 @@ class MediaRow:
     row_id: int
     source_type: str
     source_name: str
+    item_url: Optional[str]
     title: str
     file_path: str
     file_ext: Optional[str]
@@ -215,7 +217,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
             """
-            SELECT id, source_type, source_name, COALESCE(title, ''), COALESCE(file_path, ''),
+            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
                    file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
             FROM downloads
             WHERE download_status = 'downloaded'
@@ -228,15 +230,16 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             row_id=row[0],
             source_type=row[1],
             source_name=row[2],
-            title=row[3],
-            file_path=row[4],
-            file_ext=row[5],
-            file_size_bytes=row[6],
-            upload_date=row[7],
-            played=bool(row[8]),
-            favorite=bool(row[9]),
-            played_at=row[10],
-            subtitle_path=row[11],
+            item_url=row[3],
+            title=row[4],
+            file_path=row[5],
+            file_ext=row[6],
+            file_size_bytes=row[7],
+            upload_date=row[8],
+            played=bool(row[9]),
+            favorite=bool(row[10]),
+            played_at=row[11],
+            subtitle_path=row[12],
         )
         for row in rows
     ]
@@ -482,9 +485,8 @@ def _render_index(
         play_or_download_href = f"/play?id={row.row_id}" if file_exists else f"/redownload?id={row.row_id}"
         play_or_download_label = "Play this item" if file_exists else "Redownload this item"
         play_or_download_icon = "bi-play-fill" if file_exists else "bi-download"
-        missing_action = ""
-        if file_exists:
-            missing_action = f'<a class="icon-button" href="/delete-file?id={row.row_id}" title="Delete local file" aria-label="Delete local file">{_icon_use("bi-trash")}</a>'
+        delete_label = "Delete local file" if file_exists else "Delete this item from library"
+        missing_action = f'<a class="icon-button" href="/delete-file?id={row.row_id}" title="{delete_label}" aria-label="{delete_label}">{_icon_use("bi-trash")}</a>'
 
         cards.append(
             f"""
@@ -577,7 +579,7 @@ def _render_index(
 
     .summary-grid {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: .65rem;
       margin: .85rem 0 .2rem;
     }}
@@ -1439,6 +1441,8 @@ def make_handler(state: AppState):
                 media_path = _resolve_safe_media_path(state.output_root, row.file_path)
                 if media_path is not None and media_path.exists():
                     media_path.unlink(missing_ok=True)
+                else:
+                    delete_download_entry(str(state.database_path), int(raw_id))
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -1454,7 +1458,11 @@ def make_handler(state: AppState):
                     self.send_error(404, "Item not found")
                     return
                 if row.source_type == "youtube" and row.item_url:
-                    trigger_single_youtube_download(state, url=row.item_url, media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio")
+                    trigger_single_youtube_download(
+                        state,
+                        url=row.item_url,
+                        media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio",
+                    )
                 elif row.source_type == "podcast":
                     trigger_background_update(state)
                 self.send_response(303)
