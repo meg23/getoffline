@@ -45,6 +45,7 @@ defaults:
   audio_quality: 0
   max_downloads: 3
   playlist_end: 3
+  auto_update_minutes: 20
 
 ```
 
@@ -68,7 +69,9 @@ Then open `http://127.0.0.1:8080` in your browser to play audio/video files from
 
 Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls.
 
-Use the **Update Downloads** button in the web UI to trigger background downloads without running a second process, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
+Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
+
+Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
 
 To build a standalone executable with Pex:
 
