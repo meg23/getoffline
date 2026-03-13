@@ -511,6 +511,7 @@ def _render_index(
     sync_running = status["is_running"] == "yes"
     button_disabled = "disabled" if sync_running else ""
     sync_icon_class = " is-spinning" if sync_running else ""
+    sync_icon_href = "#bi-arrow-counterclockwise" if sync_running else "#bi-download"
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
     favorite_items = sum(1 for item in visible_rows if bool(getattr(item, "favorite", False)))
@@ -804,7 +805,7 @@ def _render_index(
     <div class="panel">
       <div class="toolbar toolbar-actions">
       <form id="sync-form" method="post" action="/update" class="toolbar-form">
-        <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="#bi-download"></use></svg></button>
+        <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg></button>
       </form>
       <form method="post" action="/mark-all-played" class="toolbar-form">
         <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>{_icon_use("bi-check2-circle")}</button>
@@ -861,7 +862,9 @@ def _render_index(
         syncForm.addEventListener('submit', () => {{
           syncButton.disabled = true;
           const icon = syncButton.querySelector('.bi');
+          const iconUse = syncButton.querySelector('use');
           if (icon) icon.classList.add('is-spinning');
+          if (iconUse) iconUse.setAttribute('href', '#bi-arrow-counterclockwise');
         }});
       }}
 
