@@ -21,6 +21,7 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
+    fetch_downloaded_media_row_by_id,
     _stream_media,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
@@ -66,6 +67,35 @@ class WebAppHelpersTests(unittest.TestCase):
             )
 
             _stream_media(handler, media)
+
+    def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "SingleRowTest",
+                    "item_uid": "uid-single-row",
+                    "item_url": "https://example.com/episode.mp3",
+                    "title": "Single Row Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path)
+            row = fetch_downloaded_media_row_by_id(db_path, rows[0].row_id)
+            self.assertIsNotNone(row)
+            self.assertEqual(row.row_id, rows[0].row_id)
+            self.assertEqual(row.title, "Single Row Episode")
 
     def test_stream_disconnect_logging_is_throttled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
