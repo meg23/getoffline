@@ -508,7 +508,9 @@ def _render_index(
         )
 
     table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No media items found yet.</td></tr>"
-    button_disabled = "disabled" if status["is_running"] == "yes" else ""
+    sync_running = status["is_running"] == "yes"
+    button_disabled = "disabled" if sync_running else ""
+    sync_icon_class = " is-spinning" if sync_running else ""
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
     favorite_items = sum(1 for item in visible_rows if bool(getattr(item, "favorite", False)))
@@ -727,6 +729,7 @@ def _render_index(
     .icon-button:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
     .icon-button:disabled {{ opacity: .5; cursor: not-allowed; }}
     .icon-button .bi {{ width: 1.1rem; height: 1.1rem; fill: currentColor; }}
+    .icon-button .is-spinning {{ animation: spin 1s linear infinite; transform-origin: center; }}
     .icon-button-primary {{
       color: #fff;
       border-color: #3f6ff1;
@@ -739,6 +742,11 @@ def _render_index(
     }}
     .icon-button-active {{ color: #fff; background: #df3f6b; border-color: #df3f6b; }}
     .icon-button-active:hover {{ color: #fff; background: #c53057; border-color: #c53057; }}
+
+    @keyframes spin {{
+      from {{ transform: rotate(0deg); }}
+      to {{ transform: rotate(360deg); }}
+    }}
 
     @media (max-width: 1200px) {{
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -795,8 +803,8 @@ def _render_index(
 
     <div class="panel">
       <div class="toolbar toolbar-actions">
-      <form method="post" action="/update" class="toolbar-form">
-        <button class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}>{_icon_use("bi-download")}</button>
+      <form id="sync-form" method="post" action="/update" class="toolbar-form">
+        <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="#bi-download"></use></svg></button>
       </form>
       <form method="post" action="/mark-all-played" class="toolbar-form">
         <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>{_icon_use("bi-check2-circle")}</button>
@@ -847,6 +855,16 @@ def _render_index(
   </div>
   <script>
     (() => {{
+      const syncForm = document.getElementById('sync-form');
+      const syncButton = document.getElementById('sync-button');
+      if (syncForm && syncButton && !syncButton.disabled) {{
+        syncForm.addEventListener('submit', () => {{
+          syncButton.disabled = true;
+          const icon = syncButton.querySelector('.bi');
+          if (icon) icon.classList.add('is-spinning');
+        }});
+      }}
+
       const openBtn = document.getElementById('quick-add-open');
       const backdrop = document.getElementById('quick-add-backdrop');
       const cancelBtn = document.getElementById('quick-add-cancel');
