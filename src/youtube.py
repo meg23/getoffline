@@ -175,6 +175,8 @@ def download_youtube_items(config, downloaded_items):
         return None
 
     for entry in config.get("youtube", []):
+        if not entry.get("enabled", True):
+            continue
         try:
             name = sanitize(entry["name"])
             url = entry["url"]

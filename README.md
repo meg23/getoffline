@@ -1,6 +1,6 @@
 # Listens: Automated Media Downloader
 
-**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes. Source lists still come from `config.yaml`, while runtime defaults and download settings (including full `cookies.txt` content) are now persisted in SQLite and editable in the web UI.
+**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes. Runtime defaults, source lists, and download settings (including full `cookies.txt` content) are persisted in SQLite and editable in the web UI.
 
 ## Features
 
@@ -66,7 +66,7 @@ python src/main.py serve --host 127.0.0.1 --port 8080
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
-Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and edit your YouTube + podcast source lists.
+Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls.
 
 Use the **Update Downloads** button in the web UI to trigger background downloads without running a second process, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 

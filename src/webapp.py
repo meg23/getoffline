@@ -1,5 +1,4 @@
 import html
-import json
 import mimetypes
 import posixpath
 import re
@@ -13,6 +12,8 @@ from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from database import (
+    add_source_config,
+    delete_source_config,
     get_stored_config,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -20,8 +21,8 @@ from database import (
     materialize_youtube_cookie_file,
     mark_all_downloads_played,
     mark_download_played,
+    set_source_enabled,
     update_download_settings,
-    replace_sources,
     update_stored_defaults,
     update_download_position_seconds,
 )
@@ -911,8 +912,57 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
     cookie_value = html.escape(cookie_text)
-    youtube_json = html.escape(json.dumps(config.get("youtube") or [], indent=2, ensure_ascii=False))
-    podcast_json = html.escape(json.dumps(config.get("podcasts") or [], indent=2, ensure_ascii=False))
+
+    youtube_rows = []
+    for item in config.get("youtube") or []:
+        row_id = int(item.get("id") or 0)
+        name = html.escape(str(item.get("name") or ""))
+        url = html.escape(str(item.get("url") or ""))
+        media_type = html.escape(str(item.get("type") or "audio"))
+        subtitles = "yes" if item.get("subtitles", True) else "no"
+        enabled = bool(item.get("enabled", True))
+        status = "enabled" if enabled else "disabled"
+        toggle_to = "0" if enabled else "1"
+        toggle_label = "Disable" if enabled else "Enable"
+        youtube_rows.append(
+            f"""
+            <tr>
+              <td>{name}</td>
+              <td><a href="{url}" target="_blank" rel="noreferrer">{url}</a></td>
+              <td>{media_type}</td>
+              <td>{subtitles}</td>
+              <td>{status}</td>
+              <td class="row-actions">                <form method="post" action="/settings">                  <input type="hidden" name="source_action" value="toggle" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <input type="hidden" name="enabled" value="{toggle_to}" />                  <button type="submit">{toggle_label}</button>                </form>                <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">                  <input type="hidden" name="source_action" value="delete" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <button type="submit" class="danger">Delete</button>                </form>
+              </td>
+            </tr>
+            """
+        )
+
+    podcast_rows = []
+    for item in config.get("podcasts") or []:
+        row_id = int(item.get("id") or 0)
+        name = html.escape(str(item.get("name") or ""))
+        url = html.escape(str(item.get("url") or ""))
+        subtitles = "yes" if item.get("subtitles", True) else "no"
+        enabled = bool(item.get("enabled", True))
+        status = "enabled" if enabled else "disabled"
+        toggle_to = "0" if enabled else "1"
+        toggle_label = "Disable" if enabled else "Enable"
+        podcast_rows.append(
+            f"""
+            <tr>
+              <td>{name}</td>
+              <td><a href="{url}" target="_blank" rel="noreferrer">{url}</a></td>
+              <td>{subtitles}</td>
+              <td>{status}</td>
+              <td class="row-actions">                <form method="post" action="/settings">                  <input type="hidden" name="source_action" value="toggle" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <input type="hidden" name="enabled" value="{toggle_to}" />                  <button type="submit">{toggle_label}</button>                </form>                <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">                  <input type="hidden" name="source_action" value="delete" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <button type="submit" class="danger">Delete</button>                </form>
+              </td>
+            </tr>
+            """
+        )
+
+    youtube_table = "".join(youtube_rows) or "<tr><td colspan='6'>No YouTube sources configured.</td></tr>"
+    podcast_table = "".join(podcast_rows) or "<tr><td colspan='5'>No podcast sources configured.</td></tr>"
 
     return f"""<!doctype html>
 <html>
@@ -922,52 +972,128 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
   <title>GetOffline Settings</title>
   <style>
     body {{ font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 1rem; background: #f5f7fb; color: #17213a; }}
-    .wrap {{ max-width: 900px; margin: 0 auto; background: #fff; border: 1px solid #dbe3f3; border-radius: 12px; padding: 1rem; }}
-    h1 {{ margin-top: 0; }}
+    .wrap {{ max-width: 1100px; margin: 0 auto; background: #fff; border: 1px solid #dbe3f3; border-radius: 12px; padding: 1rem; }}
+    h1, h2, h3 {{ margin-top: 0; }}
     label {{ display: block; margin: .7rem 0 .2rem; font-weight: 600; }}
-    input, textarea {{ width: 100%; padding: .55rem; border: 1px solid #cbd6ee; border-radius: 8px; font: inherit; }}
-    textarea {{ min-height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    input, select, textarea {{ width: 100%; padding: .55rem; border: 1px solid #cbd6ee; border-radius: 8px; font: inherit; }}
+    textarea {{ min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
     .actions {{ margin-top: 1rem; display: flex; gap: .5rem; }}
-    button, a {{ border-radius: 8px; border: 1px solid #cbd6ee; padding: .55rem .8rem; text-decoration: none; color: inherit; background: #fff; }}
-    button {{ background: #2f62f2; color: #fff; border-color: #2f62f2; }}
+    button, a {{ border-radius: 8px; border: 1px solid #cbd6ee; padding: .45rem .8rem; text-decoration: none; color: inherit; background: #fff; cursor: pointer; }}
+    button.primary {{ background: #2f62f2; color: #fff; border-color: #2f62f2; }}
+    button.danger {{ border-color: #d66; color: #a22; }}
+    .section {{ border: 1px solid #e2e8f8; border-radius: 10px; padding: .9rem; margin-top: 1rem; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: .6rem; }}
+    th, td {{ border-bottom: 1px solid #e9eef9; padding: .45rem; text-align: left; vertical-align: top; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; }}
+    .row-actions form {{ margin: 0; }}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Settings</h1>
-    <form method="post" action="/settings">
-      <label for="output_root">Output root</label>
-      <input id="output_root" name="output_root" value="{output_root}" required />
 
-      <label for="audio_format">Audio format</label>
-      <input id="audio_format" name="audio_format" value="{audio_format}" required />
+    <div class="section">
+      <h2>Defaults</h2>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_defaults" />
+        <label for="output_root">Output root</label>
+        <input id="output_root" name="output_root" value="{output_root}" required />
 
-      <label for="audio_quality">Audio quality</label>
-      <input id="audio_quality" name="audio_quality" value="{audio_quality}" required />
+        <div class="grid">
+          <div>
+            <label for="audio_format">Audio format</label>
+            <input id="audio_format" name="audio_format" value="{audio_format}" required />
+          </div>
+          <div>
+            <label for="audio_quality">Audio quality</label>
+            <input id="audio_quality" name="audio_quality" value="{audio_quality}" required />
+          </div>
+          <div>
+            <label for="max_downloads">Max downloads</label>
+            <input id="max_downloads" name="max_downloads" value="{max_downloads}" required />
+          </div>
+          <div>
+            <label for="playlist_end">Playlist end</label>
+            <input id="playlist_end" name="playlist_end" value="{playlist_end}" required />
+          </div>
+        </div>
 
-      <label for="max_downloads">Max downloads</label>
-      <input id="max_downloads" name="max_downloads" value="{max_downloads}" required />
+        <label for="processing_workers">Processing workers</label>
+        <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
 
-      <label for="playlist_end">Playlist end</label>
-      <input id="playlist_end" name="playlist_end" value="{playlist_end}" required />
+        <div class="actions">
+          <button type="submit" class="primary">Save defaults</button>
+        </div>
+      </form>
+    </div>
 
-      <label for="processing_workers">Processing workers</label>
-      <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
+    <div class="section">
+      <h2>YouTube cookie text</h2>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_cookie" />
+        <label for="youtube_cookie_text">cookies.txt content</label>
+        <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
+        <div class="actions">
+          <button type="submit" class="primary">Save cookie</button>
+        </div>
+      </form>
+    </div>
 
-      <label for="youtube_cookie_text">YouTube cookies.txt content</label>
-      <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
+    <div class="section">
+      <h2>YouTube sources</h2>
+      <table>
+        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>{youtube_table}</tbody>
+      </table>
 
-      <label for="youtube_json">YouTube sources (JSON)</label>
-      <textarea id="youtube_json" name="youtube_json">{youtube_json}</textarea>
+      <h3>Add YouTube source</h3>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="add_source" />
+        <input type="hidden" name="source_type" value="youtube" />
+        <div class="grid">
+          <div><label>Name</label><input name="name" required /></div>
+          <div><label>URL</label><input name="url" required /></div>
+          <div>
+            <label>Download type</label>
+            <select name="media_type"><option value="audio">audio</option><option value="video">video</option></select>
+          </div>
+          <div>
+            <label>Subtitles enabled</label>
+            <select name="subtitles"><option value="1">yes</option><option value="0">no</option></select>
+          </div>
+        </div>
+        <label>Subtitle offset seconds (optional)</label>
+        <input name="subtitle_offset_seconds" />
+        <div class="actions"><button type="submit" class="primary">Add YouTube source</button></div>
+      </form>
+    </div>
 
-      <label for="podcast_json">Podcast sources (JSON)</label>
-      <textarea id="podcast_json" name="podcast_json">{podcast_json}</textarea>
+    <div class="section">
+      <h2>Podcast sources</h2>
+      <table>
+        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>{podcast_table}</tbody>
+      </table>
 
-      <div class="actions">
-        <button type="submit">Save settings</button>
-        <a href="/">Back to library</a>
-      </div>
-    </form>
+      <h3>Add podcast source</h3>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="add_source" />
+        <input type="hidden" name="source_type" value="podcast" />
+        <div class="grid">
+          <div><label>Name</label><input name="name" required /></div>
+          <div><label>URL</label><input name="url" required /></div>
+          <div>
+            <label>Subtitles enabled</label>
+            <select name="subtitles"><option value="1">yes</option><option value="0">no</option></select>
+          </div>
+          <div><label>Subtitle offset seconds (optional)</label><input name="subtitle_offset_seconds" /></div>
+        </div>
+        <div class="actions"><button type="submit" class="primary">Add podcast source</button></div>
+      </form>
+    </div>
+
+    <div class="actions"><a href="/">Back to library</a></div>
   </div>
 </body>
 </html>"""
@@ -1188,33 +1314,64 @@ def make_handler(state: AppState):
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length).decode("utf-8") if length else ""
                 form = parse_qs(body)
+                settings_action = (form.get("settings_action") or [""])[0]
 
-                updates = {
-                    "output_root": (form.get("output_root") or [""])[0],
-                    "audio_format": (form.get("audio_format") or [""])[0],
-                    "audio_quality": (form.get("audio_quality") or [""])[0],
-                    "max_downloads": (form.get("max_downloads") or [""])[0],
-                    "playlist_end": (form.get("playlist_end") or [""])[0],
-                    "processing_workers": (form.get("processing_workers") or [""])[0],
-                }
-                sanitized_updates = {k: str(v).strip() for k, v in updates.items() if str(v).strip()}
-                update_stored_defaults(str(state.database_path), sanitized_updates)
+                if settings_action == "update_defaults":
+                    updates = {
+                        "output_root": (form.get("output_root") or [""])[0],
+                        "audio_format": (form.get("audio_format") or [""])[0],
+                        "audio_quality": (form.get("audio_quality") or [""])[0],
+                        "max_downloads": (form.get("max_downloads") or [""])[0],
+                        "playlist_end": (form.get("playlist_end") or [""])[0],
+                        "processing_workers": (form.get("processing_workers") or [""])[0],
+                    }
+                    sanitized_updates = {k: str(v).strip() for k, v in updates.items() if str(v).strip()}
+                    update_stored_defaults(str(state.database_path), sanitized_updates)
 
-                raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
-                cookie_text = str(raw_cookie).strip()
-                update_download_settings(str(state.database_path), cookie_text or None)
+                elif settings_action == "update_cookie":
+                    raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
+                    cookie_text = str(raw_cookie).strip()
+                    update_download_settings(str(state.database_path), cookie_text or None)
 
-                try:
-                    youtube_sources = json.loads((form.get("youtube_json") or ["[]"])[0] or "[]")
-                    podcast_sources = json.loads((form.get("podcast_json") or ["[]"])[0] or "[]")
-                except json.JSONDecodeError:
-                    self.send_error(400, "Invalid JSON in source configuration")
-                    return
+                elif settings_action == "add_source":
+                    source_type = str((form.get("source_type") or [""])[0]).strip().lower()
+                    if source_type not in {"youtube", "podcast"}:
+                        self.send_error(400, "Invalid source_type")
+                        return
+                    name = str((form.get("name") or [""])[0]).strip()
+                    url = str((form.get("url") or [""])[0]).strip()
+                    if not name or not url:
+                        self.send_error(400, "Missing source name/url")
+                        return
+                    media_type = (form.get("media_type") or [None])[0] if source_type == "youtube" else None
+                    subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                    raw_offset = str((form.get("subtitle_offset_seconds") or [""])[0]).strip()
+                    try:
+                        subtitle_offset = float(raw_offset) if raw_offset else None
+                    except ValueError:
+                        self.send_error(400, "Invalid subtitle_offset_seconds")
+                        return
+                    add_source_config(
+                        str(state.database_path),
+                        source_type=source_type,
+                        name=name,
+                        url=url,
+                        media_type=media_type,
+                        subtitles=subtitles,
+                        subtitle_offset_seconds=subtitle_offset,
+                        enabled=True,
+                    )
 
-                if not isinstance(youtube_sources, list) or not isinstance(podcast_sources, list):
-                    self.send_error(400, "Source configuration must be JSON arrays")
-                    return
-                replace_sources(str(state.database_path), youtube_sources, podcast_sources)
+                else:
+                    source_action = (form.get("source_action") or [""])[0]
+                    source_id_raw = (form.get("source_id") or [""])[0]
+                    if source_action and source_id_raw.isdigit():
+                        source_id = int(source_id_raw)
+                        if source_action == "delete":
+                            delete_source_config(str(state.database_path), source_id)
+                        elif source_action == "toggle":
+                            enabled = (form.get("enabled") or ["1"])[0] in {"1", "true", "yes", "on"}
+                            set_source_enabled(str(state.database_path), source_id, enabled)
 
                 stored = get_stored_config(str(state.database_path))
                 state.config["defaults"] = stored["defaults"]

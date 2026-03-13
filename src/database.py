@@ -173,6 +173,10 @@ MIGRATIONS = [
         "0004_add_source_configs",
         lambda db_path: _migration_0004_add_source_configs(db_path),
     ),
+    (
+        "0005_add_source_enabled",
+        lambda db_path: _migration_0005_add_source_enabled(db_path),
+    ),
 ]
 
 
@@ -223,12 +227,22 @@ def _migration_0004_add_source_configs(db_path: str) -> None:
                 name TEXT NOT NULL,
                 url TEXT NOT NULL,
                 media_type TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
                 subtitles INTEGER NOT NULL DEFAULT 1,
                 subtitle_offset_seconds REAL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        conn.commit()
+
+
+def _migration_0005_add_source_enabled(db_path: str) -> None:
+    columns = _table_columns_sqlite(db_path, "source_configs")
+    if "enabled" in columns:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
         conn.commit()
 
 
@@ -290,7 +304,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         row = conn.execute("SELECT youtube_cookie_text FROM download_settings WHERE id = 1").fetchone()
         source_rows = conn.execute(
             """
-            SELECT source_type, name, url, media_type, subtitles, subtitle_offset_seconds
+            SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds
             FROM source_configs
             ORDER BY source_type, position, id
             """
@@ -298,10 +312,12 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
 
     youtube = []
     podcasts = []
-    for source_type, name, url, media_type, subtitles, subtitle_offset in source_rows:
+    for row_id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset in source_rows:
         payload = {
+            "id": int(row_id),
             "name": name,
             "url": url,
+            "enabled": bool(enabled),
             "subtitles": bool(subtitles),
         }
         if subtitle_offset is not None:
@@ -397,8 +413,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
             conn.execute(
                 """
                 INSERT INTO source_configs (
-                    source_type, position, name, url, media_type, subtitles, subtitle_offset_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "youtube",
@@ -406,6 +422,7 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                     str(item.get("name") or "").strip(),
                     str(item.get("url") or "").strip(),
                     str(item.get("type") or "audio").strip().lower(),
+                    1 if bool(item.get("enabled", True)) else 0,
                     1 if bool(item.get("subtitles", True)) else 0,
                     item.get("subtitle_offset_seconds"),
                     now,
@@ -416,8 +433,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
             conn.execute(
                 """
                 INSERT INTO source_configs (
-                    source_type, position, name, url, media_type, subtitles, subtitle_offset_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "podcast",
@@ -425,6 +442,7 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                     str(item.get("name") or "").strip(),
                     str(item.get("url") or "").strip(),
                     None,
+                    1 if bool(item.get("enabled", True)) else 0,
                     1 if bool(item.get("subtitles", True)) else 0,
                     item.get("subtitle_offset_seconds"),
                     now,
@@ -441,6 +459,64 @@ def seed_sources_from_config(db_path: str, config: Dict[str, Any]) -> None:
     if existing:
         return
     replace_sources(db_path, config.get("youtube", []), config.get("podcasts", []))
+
+
+def add_source_config(
+    db_path: str,
+    *,
+    source_type: str,
+    name: str,
+    url: str,
+    media_type: Optional[str],
+    subtitles: bool,
+    subtitle_offset_seconds: Optional[float],
+    enabled: bool = True,
+) -> None:
+    ensure_config_seeded(db_path)
+    now = _utcnow().isoformat()
+    with sqlite3.connect(db_path) as conn:
+        current_position = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM source_configs WHERE source_type = ?",
+            (source_type,),
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO source_configs (
+                source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source_type,
+                int(current_position or 0),
+                str(name or "").strip(),
+                str(url or "").strip(),
+                (str(media_type).strip().lower() if media_type is not None else None),
+                1 if enabled else 0,
+                1 if subtitles else 0,
+                subtitle_offset_seconds,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def delete_source_config(db_path: str, row_id: int) -> bool:
+    ensure_config_seeded(db_path)
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.execute("DELETE FROM source_configs WHERE id = ?", (int(row_id),))
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+
+
+def set_source_enabled(db_path: str, row_id: int, enabled: bool) -> bool:
+    ensure_config_seeded(db_path)
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE source_configs SET enabled = ?, updated_at = ? WHERE id = ?",
+            (1 if enabled else 0, _utcnow().isoformat(), int(row_id)),
+        )
+        conn.commit()
+        return (cur.rowcount or 0) > 0
 
 
 def _init_database_sqlite(db_path: str) -> None:

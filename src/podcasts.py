@@ -92,6 +92,8 @@ def download_podcasts(config, downloaded_items):
     config["defaults"] = defaults
 
     for entry in config.get("podcasts", []):
+        if not entry.get("enabled", True):
+            continue
         try:
             name = sanitize(entry["name"])
             url = entry["url"]

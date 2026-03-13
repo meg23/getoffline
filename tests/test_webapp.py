@@ -87,11 +87,12 @@ class WebAppHelpersTests(unittest.TestCase):
                 "podcasts": [{"name": "Pod", "url": "https://example.com/rss", "subtitles": True}],
             }
         )
-        self.assertIn("YouTube cookies.txt content", body)
+        self.assertIn("YouTube cookie text", body)
         self.assertIn("/settings", body)
         self.assertIn("youtube_cookie_text", body)
-        self.assertIn("YouTube sources (JSON)", body)
-        self.assertIn("Podcast sources (JSON)", body)
+        self.assertIn("Add YouTube source", body)
+        self.assertIn("Add podcast source", body)
+        self.assertIn("Disable", body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
