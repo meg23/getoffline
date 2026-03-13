@@ -77,6 +77,52 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="quick-add-backdrop"', body)
             self.assertIn('id="quick-add-url"', body)
             self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr));", body)
+            self.assertIn('persistedMiniPlayerState.paused === false', body)
+
+
+    def test_index_play_link_includes_resume_seconds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "TestPodcast",
+                    "item_uid": "uid-resume-1",
+                    "item_url": "https://cdn.example.com/episode.mp3",
+                    "media_url": "https://cdn.example.com/episode.mp3",
+                    "title": "Episode Resume",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "subtitle_enabled": True,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"title": "Episode Resume"},
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path)
+            update_download_position_seconds(str(db_path), rows[0].row_id, 97.25)
+
+            body = _render_index(
+                rows=rows,
+                output_root=root,
+                database_path=db_path,
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+            self.assertIn('data-resume-seconds="97.250"', body)
 
     def test_trigger_single_youtube_download_uses_single_entry(self):
         with tempfile.TemporaryDirectory() as tmpdir:
