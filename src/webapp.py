@@ -46,8 +46,11 @@ MEDIA_EXTENSIONS = {
 }
 
 DEFAULT_AUTO_UPDATE_MINUTES = 20
+DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 
 log = get_logger("webapp")
+_DISCONNECT_LOG_LOCK = threading.Lock()
+_LAST_DISCONNECT_LOGGED_AT: Dict[str, float] = {}
 
 
 @dataclass
@@ -1672,7 +1675,7 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
             try:
                 handler.wfile.write(f.read())
             except (BrokenPipeError, ConnectionResetError):
-                log.info("Client disconnected while streaming media: %s", media_path.name)
+                _log_stream_disconnect(media_path)
         return
 
     start = parsed["start"]
@@ -1696,9 +1699,21 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
             try:
                 handler.wfile.write(chunk)
             except (BrokenPipeError, ConnectionResetError):
-                log.info("Client disconnected while streaming media: %s", media_path.name)
+                _log_stream_disconnect(media_path)
                 break
             remaining -= len(chunk)
+
+
+def _log_stream_disconnect(media_path: Path) -> None:
+    media_key = str(media_path)
+    now = time.monotonic()
+    with _DISCONNECT_LOG_LOCK:
+        last_logged = _LAST_DISCONNECT_LOGGED_AT.get(media_key)
+        if last_logged is not None and (now - last_logged) < DISCONNECT_LOG_WINDOW_SECONDS:
+            return
+        _LAST_DISCONNECT_LOGGED_AT[media_key] = now
+
+    log.info("Client disconnected while streaming media: %s", media_path.name)
 
 
 def make_handler(state: AppState):

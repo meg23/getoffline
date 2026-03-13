@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from database import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
+    _LAST_DISCONNECT_LOGGED_AT,
+    _log_stream_disconnect,
     _parse_range_header,
     _resolve_safe_subtitle_path,
     _render_index,
@@ -30,6 +32,9 @@ from webapp import (  # noqa: E402
 
 
 class WebAppHelpersTests(unittest.TestCase):
+    def setUp(self):
+        _LAST_DISCONNECT_LOGGED_AT.clear()
+
     def test_parse_range_header(self):
         self.assertEqual(_parse_range_header("bytes=0-99", 1000), {"start": 0, "end": 99})
         self.assertEqual(_parse_range_header("bytes=100-", 1000), {"start": 100, "end": 999})
@@ -61,6 +66,19 @@ class WebAppHelpersTests(unittest.TestCase):
             )
 
             _stream_media(handler, media)
+
+    def test_stream_disconnect_logging_is_throttled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_bytes(b"a")
+
+            with mock.patch("webapp.log.info") as info_mock:
+                with mock.patch("webapp.time.monotonic", side_effect=[100.0, 101.0, 132.0]):
+                    _log_stream_disconnect(media)
+                    _log_stream_disconnect(media)
+                    _log_stream_disconnect(media)
+
+            self.assertEqual(info_mock.call_count, 2)
 
     def test_index_contains_update_button(self):
         with tempfile.TemporaryDirectory() as tmpdir:
