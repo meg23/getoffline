@@ -1,4 +1,5 @@
 import html
+import json
 import mimetypes
 import posixpath
 import re
@@ -485,7 +486,9 @@ def _render_index(
         channel = html.escape(row.source_name or "?")
         source_kind = html.escape((row.source_type or "?").strip())
         size = html.escape(_human_size(row.file_size_bytes))
-        ext = html.escape((row.file_ext or path.suffix.lstrip(".")) or "?")
+        raw_ext = (row.file_ext or path.suffix.lstrip(".")) or "?"
+        ext = html.escape(raw_ext)
+        media_kind = "video" if str(raw_ext).lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
         ever_played = bool(row.played or getattr(row, "played_at", None))
         status_label = "played" if row.played else ("" if ever_played else "new")
         status_class = "status-played" if row.played else "status-new"
@@ -517,7 +520,7 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Actions">
-                  <a class="icon-button" href="{play_or_download_href}" title="{play_or_download_label}" aria-label="{play_or_download_label}">{_icon_use(play_or_download_icon)}</a>
+                  <a class="icon-button" href="{play_or_download_href}" title="{play_or_download_label}" aria-label="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}">{_icon_use(play_or_download_icon)}</a>
                   <a class="icon-button{favorite_class}" href="/{favorite_action}?id={row.row_id}" title="{favorite_label}" aria-label="{favorite_label}">{_icon_use(favorite_icon)}</a>
                   <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{_icon_use(mark_icon)}</a>
                   {missing_action}
@@ -763,6 +766,47 @@ def _render_index(
     .icon-button-active {{ color: #fff; background: #df3f6b; border-color: #df3f6b; }}
     .icon-button-active:hover {{ color: #fff; background: #c53057; border-color: #c53057; }}
 
+    .mini-player {{
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      width: min(360px, calc(100vw - 2rem));
+      z-index: 40;
+      border: 1px solid #cbd6ee;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 12px 30px rgba(15, 34, 74, 0.2);
+      padding: .7rem;
+      display: none;
+      gap: .55rem;
+    }}
+    .mini-player.is-visible {{ display: grid; }}
+    .mini-player-header {{
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: start;
+      gap: .35rem .5rem;
+    }}
+    .mini-player-title {{ font-weight: 700; color: #17213a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .mini-player-source {{ color: #5d6780; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .mini-player-open {{
+      grid-row: 1 / span 2;
+      grid-column: 2;
+      align-self: center;
+      justify-self: end;
+      font-size: .82rem;
+      color: #2f62f2;
+      text-decoration: none;
+      border: 1px solid #cbd6ee;
+      border-radius: 999px;
+      padding: .25rem .65rem;
+      background: #f4f7ff;
+    }}
+    .mini-player-open:hover {{ background: #e9efff; text-decoration: none; }}
+    .mini-player-media {{ width: 100%; border-radius: 10px; background: transparent; }}
+    #mini-player-video {{ aspect-ratio: 16 / 9; max-height: 203px; background: #000; }}
+    #mini-player-audio {{ border-radius: 999px; }}
+
     @keyframes spin {{
       from {{ transform: rotate(0deg); }}
       to {{ transform: rotate(360deg); }}
@@ -775,6 +819,7 @@ def _render_index(
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
+      .mini-player {{ right: .5rem; left: .5rem; bottom: .5rem; width: auto; }}
       table {{ table-layout: auto; }}
       table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
@@ -872,6 +917,16 @@ def _render_index(
       <thead><tr><th>Channel</th><th>Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
+
+    <section id="mini-player" class="mini-player" aria-live="polite">
+      <div class="mini-player-header">
+        <div class="mini-player-title" id="mini-player-title"></div>
+        <div class="mini-player-source" id="mini-player-source"></div>
+        <a id="mini-player-open" class="mini-player-open" href="/" aria-label="Open in dedicated player">Open</a>
+      </div>
+      <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
+      <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
+    </section>
   </div>
   <script>
     (() => {{
@@ -886,6 +941,104 @@ def _render_index(
           if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
         }});
       }}
+
+      const miniPlayer = document.getElementById('mini-player');
+      const miniTitle = document.getElementById('mini-player-title');
+      const miniSource = document.getElementById('mini-player-source');
+      const miniAudio = document.getElementById('mini-player-audio');
+      const miniVideo = document.getElementById('mini-player-video');
+      const miniOpen = document.getElementById('mini-player-open');
+
+      function clearMiniMedia() {{
+        [miniAudio, miniVideo].forEach((el) => {{
+          if (!el) return;
+          try {{ el.pause(); }} catch (_) {{}}
+          el.removeAttribute('src');
+          while (el.firstChild) el.removeChild(el.firstChild);
+          el.load();
+          el.style.display = 'none';
+        }});
+      }}
+
+      function renderMiniPlayer() {{
+        const raw = localStorage.getItem('getofflineMiniPlayerState');
+        if (!raw || !miniPlayer || !miniAudio || !miniVideo) return;
+        let state = null;
+        try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
+        if (!state || !state.rowId || !state.src || !state.kind) return;
+        if (miniOpen) miniOpen.href = state.playUrl || ('/play?id=' + state.rowId);
+
+        clearMiniMedia();
+        if (miniTitle) miniTitle.textContent = state.title || 'Now playing';
+        if (miniSource) miniSource.textContent = state.source || '';
+
+        const active = state.kind === 'video' ? miniVideo : miniAudio;
+        active.style.display = 'block';
+        const source = document.createElement('source');
+        source.src = state.src;
+        active.appendChild(source);
+
+        active.addEventListener('loadedmetadata', () => {{
+          active.currentTime = Math.max(0, Number(state.currentTime || 0));
+          if (!state.paused) active.play().catch(() => {{}});
+        }}, {{ once: true }});
+        active.load();
+
+        const persist = () => {{
+          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
+            ...state,
+            currentTime: active.currentTime || 0,
+            paused: active.paused,
+          }}));
+        }};
+        active.addEventListener('timeupdate', persist);
+        active.addEventListener('pause', persist);
+        active.addEventListener('play', persist);
+        active.addEventListener('ended', () => {{
+          localStorage.removeItem('getofflineMiniPlayerState');
+          miniPlayer.classList.remove('is-visible');
+        }});
+
+        miniPlayer.classList.add('is-visible');
+      }}
+
+      document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
+        link.addEventListener('click', () => {{
+          const rowId = Number(link.dataset.rowId || 0);
+          if (!rowId) return;
+          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
+            rowId,
+            title: link.dataset.title || '',
+            source: link.dataset.source || '',
+            kind: link.dataset.kind || 'audio',
+            src: '/media?id=' + rowId,
+            playUrl: '/play?id=' + rowId,
+            currentTime: 0,
+            paused: false,
+          }}));
+        }});
+      }});
+
+      if (miniOpen) {{
+        miniOpen.addEventListener('click', (event) => {{
+          const raw = localStorage.getItem('getofflineMiniPlayerState');
+          if (!raw) return;
+          let state = null;
+          try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
+          if (!state || !state.rowId) return;
+
+          const active = state.kind === 'video' ? miniVideo : miniAudio;
+          if (active && active.style.display !== 'none') {{
+            state.currentTime = active.currentTime || 0;
+            state.paused = active.paused;
+          }}
+          state.playUrl = '/play?id=' + state.rowId;
+          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
+          event.currentTarget.href = state.playUrl + '&autoplay=1';
+        }});
+      }}
+
+      renderMiniPlayer();
 
       const openBtn = document.getElementById('quick-add-open');
       const backdrop = document.getElementById('quick-add-backdrop');
@@ -992,7 +1145,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 </head>
 <body>
   <div class="wrap">
-    <p><a href="/">← Back to Library</a></p>
+    <p><a id="back-to-library" href="/">← Back to Library</a></p>
     <h2>{title}</h2>
     <p class="meta">{source}</p>
     <{media_kind} id="player" class="player" controls preload="metadata">
@@ -1007,6 +1160,8 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const rowId = {row.row_id};
       const startSeconds = {resume_value:.6f};
       const player = document.getElementById('player');
+      const backToLibrary = document.getElementById('back-to-library');
+      const shouldAutoPlay = new URLSearchParams(window.location.search).get('autoplay') === '1';
       const resumeLabel = document.getElementById('resume-label');
       const transcript = document.getElementById('transcript');
       const subtitleTrackEl = document.getElementById('subtitle-track');
@@ -1038,6 +1193,19 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           body: body.toString(),
           keepalive: true,
         }}).catch(() => {{}});
+      }}
+
+      function persistMiniPlayerState() {{
+        localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
+          rowId,
+          title: {json.dumps(row.title or media_path.name)},
+          source: {json.dumps(row.source_name or '')},
+          kind: {json.dumps(media_kind)},
+          src: '/media?id=' + rowId,
+          playUrl: '/play?id=' + rowId,
+          currentTime: player.currentTime || 0,
+          paused: player.paused,
+        }}));
       }}
 
       function applyInitialSeek() {{
@@ -1116,6 +1284,9 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
       player.addEventListener('loadedmetadata', applyInitialSeek);
       player.addEventListener('canplay', applyInitialSeek);
+      player.addEventListener('canplay', () => {{
+        if (shouldAutoPlay) player.play().catch(() => {{}});
+      }});
       player.addEventListener('playing', applyInitialSeek);
       player.addEventListener('loadeddata', scheduleTranscriptInit);
       window.addEventListener('pageshow', scheduleTranscriptInit);
@@ -1123,10 +1294,24 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       scheduleTranscriptInit();
 
       player.addEventListener('timeupdate', () => {{
+        persistMiniPlayerState();
         if (!player.paused) postProgress(player.currentTime, false);
       }});
-      player.addEventListener('pause', () => postProgress(player.currentTime, true));
-      player.addEventListener('ended', () => postProgress(0, true));
+      player.addEventListener('pause', () => {{
+        persistMiniPlayerState();
+        postProgress(player.currentTime, true);
+      }});
+      player.addEventListener('play', persistMiniPlayerState);
+      player.addEventListener('ended', () => {{
+        localStorage.removeItem('getofflineMiniPlayerState');
+        postProgress(0, true);
+      }});
+
+      if (backToLibrary) {{
+        backToLibrary.addEventListener('click', () => {{
+          persistMiniPlayerState();
+        }});
+      }}
 
       document.addEventListener('visibilitychange', () => {{
         if (document.hidden) postProgress(player.currentTime, true);

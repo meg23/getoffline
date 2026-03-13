@@ -495,22 +495,27 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn('aria-label="Play this item">', body)
+            self.assertIn('aria-label="Play this item"', body)
             self.assertIn('title="Play this item"', body)
             self.assertIn('href="#bi-play-fill"', body)
             self.assertIn('title="Mark played"', body)
-            self.assertIn('aria-label="Mark played">', body)
+            self.assertIn('aria-label="Mark played"', body)
             self.assertIn('href="#bi-check2-circle"', body)
             self.assertIn('title="Sync downloads"', body)
             self.assertIn('href="#bi-download"', body)
             self.assertIn('title="Mark all as played"', body)
             self.assertIn('aria-label="Mark all as played"', body)
             self.assertIn('title="Show played"', body)
-            self.assertIn('aria-label="Show played">', body)
+            self.assertIn('aria-label="Show played"', body)
             self.assertIn('href="#bi-eye"', body)
             self.assertIn('title="Settings"', body)
-            self.assertIn('aria-label="Settings">', body)
+            self.assertIn('aria-label="Settings"', body)
             self.assertIn('href="#bi-gear"', body)
+            self.assertIn('id="mini-player"', body)
+            self.assertIn('id="mini-player-audio"', body)
+            self.assertIn('id="mini-player-video"', body)
+            self.assertIn('id="mini-player-open"', body)
+            self.assertIn('data-play-link="1"', body)
 
     def test_index_hides_new_label_for_previously_played_item(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -560,6 +565,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             body = _render_player(row, media, 42.5, has_subtitles=False)
             self.assertIn("/progress", body)
             self.assertIn("startSeconds = 42.500000", body)
+            self.assertIn("shouldAutoPlay", body)
+            self.assertIn("get('autoplay') === '1'", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
