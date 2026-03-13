@@ -446,7 +446,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('aria-label="Mark played">', body)
             self.assertIn('href="#bi-check2-circle"', body)
             self.assertIn('title="Sync downloads"', body)
-            self.assertIn('href="#bi-arrow-down-circle-fill"', body)
+            self.assertIn('href="#bi-download"', body)
             self.assertIn('title="Mark all as played"', body)
             self.assertIn('aria-label="Mark all as played"', body)
             self.assertIn('title="Show played"', body)
