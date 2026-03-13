@@ -76,6 +76,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="quick-add-open"', body)
             self.assertIn('id="quick-add-backdrop"', body)
             self.assertIn('id="quick-add-url"', body)
+            self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr));", body)
 
     def test_trigger_single_youtube_download_uses_single_entry(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -196,6 +197,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             rows = fetch_downloaded_media_rows(db_path)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].title, "Episode 1")
+            self.assertEqual(rows[0].item_url, "https://cdn.example.com/episode.mp3")
             self.assertEqual(Path(rows[0].file_path), media)
             self.assertIsNone(rows[0].subtitle_path)
 
@@ -641,6 +643,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
             self.assertIn('>missing</span>', body)
             self.assertIn('/redownload?id=1', body)
+            self.assertIn('/delete-file?id=1', body)
 
     def test_mark_download_favorite_updates_row_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
