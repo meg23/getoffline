@@ -542,5 +542,30 @@ class SubtitleFailureCachingTests(unittest.TestCase):
             self.assertTrue(marker.exists())
 
 
+class YoutubeSourceResolverTests(unittest.TestCase):
+    def test_resolve_youtube_source_name_prefers_channel(self):
+        class FakeYoutubeDLForMetadata(FakeYoutubeDL):
+            def extract_info(self, url, download=False):
+                self.urls.append(url)
+                self.download_called = download
+                return {"channel": "Channel_Name", "uploader": "Uploader", "title": "Video Title"}
+
+        with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
+            source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
+
+        self.assertEqual(source_name, "Channel_Name")
+
+    def test_resolve_youtube_source_name_falls_back_to_title(self):
+        class FakeYoutubeDLForMetadata(FakeYoutubeDL):
+            def extract_info(self, url, download=False):
+                _ = url, download
+                return {"title": "A_Title_Only"}
+
+        with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
+            source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
+
+        self.assertEqual(source_name, "A_Title_Only")
+
+
 if __name__ == "__main__":
     unittest.main()
