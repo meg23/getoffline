@@ -741,8 +741,13 @@ def _render_index(
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      flex: 0 0 2.4rem;
       width: 2.4rem;
+      min-width: 2.4rem;
       height: 2.4rem;
+      min-height: 2.4rem;
+      aspect-ratio: 1 / 1;
+      box-sizing: border-box;
       border-radius: 999px;
       border: 1px solid #c9d5ef;
       background: #eef3ff;
