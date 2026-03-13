@@ -3,12 +3,13 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from database import init_database, mark_all_downloads_played, mark_download_played, upsert_download  # noqa: E402
+from database import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
     _parse_range_header,
@@ -65,6 +66,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("action=\"/update\"", body)
             self.assertIn("Mark all as played", body)
             self.assertIn("Show played", body)
+            self.assertIn("Show favorites", body)
             self.assertIn("<th>Channel</th>", body)
             self.assertIn("<th>Episode</th>", body)
             self.assertIn("<th>Actions</th>", body)
@@ -74,6 +76,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="quick-add-open"', body)
             self.assertIn('id="quick-add-backdrop"', body)
             self.assertIn('id="quick-add-url"', body)
+            self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr));", body)
 
     def test_trigger_single_youtube_download_uses_single_entry(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -93,7 +96,7 @@ class WebAppHelpersTests(unittest.TestCase):
                 captured["config"] = config
                 downloaded_items.append("one")
 
-            with unittest.mock.patch("youtube.resolve_youtube_source_name", return_value="MyChannel"), unittest.mock.patch(
+            with mock.patch("youtube.resolve_youtube_source_name", return_value="MyChannel"), mock.patch(
                 "youtube.download_youtube_items", side_effect=_fake_download
             ):
                 started = trigger_single_youtube_download(
@@ -194,6 +197,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             rows = fetch_downloaded_media_rows(db_path)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].title, "Episode 1")
+            self.assertEqual(rows[0].item_url, "https://cdn.example.com/episode.mp3")
             self.assertEqual(Path(rows[0].file_path), media)
             self.assertIsNone(rows[0].subtitle_path)
 
@@ -378,6 +382,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 file_size_bytes=100,
                 upload_date=None,
                 played=False,
+                favorite=False,
             )
             row_played = SimpleNamespace(
                 row_id=2,
@@ -389,6 +394,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 file_size_bytes=100,
                 upload_date=None,
                 played=True,
+                favorite=False,
             )
             (root / "new.mp3").write_text("x", encoding="utf-8")
             (root / "played.mp3").write_text("x", encoding="utf-8")
@@ -423,6 +429,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 file_size_bytes=100,
                 upload_date=None,
                 played=False,
+                favorite=False,
             )
             row_played = SimpleNamespace(
                 row_id=2,
@@ -434,6 +441,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 file_size_bytes=100,
                 upload_date=None,
                 played=True,
+                favorite=False,
             )
             (root / "new.mp3").write_text("x", encoding="utf-8")
             (root / "played.mp3").write_text("x", encoding="utf-8")
@@ -487,7 +495,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn('aria-label="Play">', body)
+            self.assertIn('aria-label="Play this item">', body)
             self.assertIn('title="Play this item"', body)
             self.assertIn('href="#bi-play-fill"', body)
             self.assertIn('title="Mark played"', body)
@@ -517,6 +525,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 file_size_bytes=100,
                 upload_date=None,
                 played=False,
+                favorite=False,
                 played_at="2026-01-01T00:00:00Z",
             )
             (root / "item.mp3").write_text("x", encoding="utf-8")
@@ -601,6 +610,71 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             row = SimpleNamespace(subtitle_path=str(subtitle))
             resolved = _resolve_safe_subtitle_path(root, row, media)
             self.assertEqual(resolved, subtitle.resolve())
+
+
+    def test_index_shows_missing_file_with_redownload_action(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="Missing Item",
+                file_path=str(root / "missing.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=False,
+            )
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+            self.assertIn('>missing</span>', body)
+            self.assertIn('/redownload?id=1', body)
+            self.assertIn('/delete-file?id=1', body)
+
+    def test_mark_download_favorite_updates_row_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "TestPodcast",
+                    "item_uid": "uid-fav",
+                    "item_url": "https://cdn.example.com/episode-fav.mp3",
+                    "media_url": "https://cdn.example.com/episode-fav.mp3",
+                    "title": "Episode Fav",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "subtitle_enabled": True,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"title": "Episode Fav"},
+                },
+            )
+
+            row = fetch_downloaded_media_rows(db_path)[0]
+            self.assertTrue(mark_download_favorite(str(db_path), row.row_id, favorite=True))
+            favorited = fetch_downloaded_media_rows(db_path)[0]
+            self.assertTrue(favorited.favorite)
 
 class WebAppUpdateThreadTests(unittest.TestCase):
     def test_trigger_background_update_runs_downloads_once(self):

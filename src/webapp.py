@@ -14,12 +14,14 @@ from urllib.parse import parse_qs, urlparse
 from database import (
     add_source_config,
     delete_source_config,
+    delete_download_entry,
     get_stored_config,
     get_download_position_seconds,
     get_total_listened_seconds,
     init_database,
     materialize_youtube_cookie_file,
     mark_all_downloads_played,
+    mark_download_favorite,
     mark_download_played,
     set_source_enabled,
     update_download_settings,
@@ -47,12 +49,14 @@ class MediaRow:
     row_id: int
     source_type: str
     source_name: str
+    item_url: Optional[str]
     title: str
     file_path: str
     file_ext: Optional[str]
     file_size_bytes: Optional[int]
     upload_date: Optional[str]
     played: bool
+    favorite: bool = False
     played_at: Optional[str] = None
     subtitle_path: Optional[str] = None
 
@@ -96,6 +100,9 @@ def _icon_sprite() -> str:
       <symbol id="bi-eye-slash" viewBox="0 0 16 16"><path d="M13.359 11.238C12.124 12.33 10.384 13 8 13c-5 0-8-5-8-5a16.79 16.79 0 0 1 3.168-3.646L1.146 2.354a.5.5 0 1 1 .708-.708l13 13a.5.5 0 0 1-.708.708l-.787-.787z"/><path d="M11.297 9.176 6.824 4.703A3 3 0 0 1 11.297 9.176z"/><path d="M5.34 7.218 8.782 10.66A3 3 0 0 1 5.34 7.218z"/><path d="M7.646 3.007C7.764 3.002 7.882 3 8 3c5 0 8 5 8 5a17.362 17.362 0 0 1-2.363 2.955l-.723-.723A16.74 16.74 0 0 0 14.828 8c-.058-.087-.122-.183-.195-.288-.335-.48-.83-1.12-1.465-1.707C11.879 4.724 10.12 4 8 4c-.076 0-.152.001-.227.003l-.127-.996z"/></symbol>
       <symbol id="bi-gear" viewBox="0 0 16 16"><path d="M9.605 1.05c-.413-1.4-2.397-1.4-2.81 0l-.094.319a1.464 1.464 0 0 1-2.105.872l-.29-.17c-1.257-.736-2.66.667-1.924 1.924l.17.29c.446.764.003 1.74-.872 2.105l-.319.094c-1.4.413-1.4 2.397 0 2.81l.319.094c.875.365 1.318 1.34.872 2.105l-.17.29c-.736 1.257.667 2.66 1.924 1.924l.29-.17c.764-.446 1.74-.003 2.105.872l.094.319c.413 1.4 2.397 1.4 2.81 0l.094-.319c.365-.875 1.34-1.318 2.105-.872l.29.17c1.257.736 2.66-.667 1.924-1.924l-.17-.29a1.464 1.464 0 0 1 .872-2.105l.319-.094c1.4-.413 1.4-2.397 0-2.81l-.319-.094a1.464 1.464 0 0 1-.872-2.105l.17-.29c.736-1.257-.667-2.66-1.924-1.924l-.29.17a1.464 1.464 0 0 1-2.105-.872l-.094-.319zM8 10.5A2.5 2.5 0 1 1 8 5.5a2.5 2.5 0 0 1 0 5z"/></symbol>
       <symbol id="bi-plus-lg" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 2.5a.5.5 0 0 1 .5.5v4.5H13a.5.5 0 0 1 0 1H8.5V13a.5.5 0 0 1-1 0V8.5H3a.5.5 0 0 1 0-1h4.5V3a.5.5 0 0 1 .5-.5"/></symbol>
+      <symbol id="bi-heart" viewBox="0 0 16 16"><path d="m8 2.748-.717-.737C5.6.281 2.514.878 1.4 3.053c-.523 1.023-.641 2.5.314 4.385.92 1.815 2.834 3.989 6.286 6.357 3.452-2.368 5.365-4.542 6.286-6.357.955-1.886.838-3.362.314-4.385C13.486.878 10.4.28 8.717 2.01z"/></symbol>
+      <symbol id="bi-heart-fill" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 1.314C12.438-3.248 23.534 4.735 8 15-7.534 4.736 3.562-3.248 8 1.314"/></symbol>
+      <symbol id="bi-trash" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11z"/></symbol>
     </svg>
     """
 
@@ -210,8 +217,8 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
             """
-            SELECT id, source_type, source_name, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), played_at, subtitle_path
+            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
             FROM downloads
             WHERE download_status = 'downloaded'
             ORDER BY last_seen_at DESC, id DESC
@@ -223,14 +230,16 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             row_id=row[0],
             source_type=row[1],
             source_name=row[2],
-            title=row[3],
-            file_path=row[4],
-            file_ext=row[5],
-            file_size_bytes=row[6],
-            upload_date=row[7],
-            played=bool(row[8]),
-            played_at=row[9],
-            subtitle_path=row[10],
+            item_url=row[3],
+            title=row[4],
+            file_path=row[5],
+            file_ext=row[6],
+            file_size_bytes=row[7],
+            upload_date=row[8],
+            played=bool(row[9]),
+            favorite=bool(row[10]),
+            played_at=row[11],
+            subtitle_path=row[12],
         )
         for row in rows
     ]
@@ -436,21 +445,24 @@ def _render_index(
     database_path: Path,
     status: Dict[str, str],
     show_played: bool = False,
+    favorites_only: bool = False,
 ) -> str:
     cards = []
     visible_rows = []
     for row in rows:
         path = Path(row.file_path)
-        if not row.file_path:
-            continue
-        safe = _resolve_safe_media_path(output_root, row.file_path)
-        if not safe:
+        safe = _resolve_safe_media_path(output_root, row.file_path) if row.file_path else None
+        file_exists = safe is not None
+
+        row_is_favorite = bool(getattr(row, "favorite", False))
+        if favorites_only and not row_is_favorite:
             continue
 
         visible_rows.append(row)
         if row.played and not show_played:
             continue
-        title = html.escape(row.title or path.name)
+
+        title = html.escape(row.title or path.name or "Unknown title")
         channel = html.escape(row.source_name or "?")
         source_kind = html.escape((row.source_type or "?").strip())
         size = html.escape(_human_size(row.file_size_bytes))
@@ -459,10 +471,23 @@ def _render_index(
         status_label = "played" if row.played else ("" if ever_played else "new")
         status_class = "status-played" if row.played else "status-new"
         status_title = "Already played" if row.played else ("Played previously" if ever_played else "Not played yet")
+        if not file_exists:
+            status_label = "missing"
+            status_class = "status-missing"
+            status_title = "File missing locally"
         mark_action = "unplay" if row.played else "played"
         mark_label = "Mark unplayed" if row.played else "Mark played"
         mark_icon = "bi-arrow-counterclockwise" if row.played else "bi-check2-circle"
-        play_icon = "bi-play-fill"
+        favorite_action = "unfavorite" if row_is_favorite else "favorite"
+        favorite_label = "Remove favorite" if row_is_favorite else "Add favorite"
+        favorite_icon = "bi-heart-fill" if row_is_favorite else "bi-heart"
+        favorite_class = " icon-button-active" if row_is_favorite else ""
+        play_or_download_href = f"/play?id={row.row_id}" if file_exists else f"/redownload?id={row.row_id}"
+        play_or_download_label = "Play this item" if file_exists else "Redownload this item"
+        play_or_download_icon = "bi-play-fill" if file_exists else "bi-download"
+        delete_label = "Delete local file" if file_exists else "Delete this item from library"
+        missing_action = f'<a class="icon-button" href="/delete-file?id={row.row_id}" title="{delete_label}" aria-label="{delete_label}">{_icon_use("bi-trash")}</a>'
+
         cards.append(
             f"""
             <tr>
@@ -473,24 +498,41 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Actions">
-                  <a class="icon-button" href="/play?id={row.row_id}" title="Play this item" aria-label="Play">{_icon_use(play_icon)}</a>
+                  <a class="icon-button" href="{play_or_download_href}" title="{play_or_download_label}" aria-label="{play_or_download_label}">{_icon_use(play_or_download_icon)}</a>
+                  <a class="icon-button{favorite_class}" href="/{favorite_action}?id={row.row_id}" title="{favorite_label}" aria-label="{favorite_label}">{_icon_use(favorite_icon)}</a>
                   <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{_icon_use(mark_icon)}</a>
+                  {missing_action}
                 </td>
             </tr>
             """
         )
 
-    table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No playable media found yet.</td></tr>"
+    table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No media items found yet.</td></tr>"
     button_disabled = "disabled" if status["is_running"] == "yes" else ""
     total_items = len(visible_rows)
     played_items = sum(1 for item in visible_rows if item.played)
+    favorite_items = sum(1 for item in visible_rows if bool(getattr(item, "favorite", False)))
     unplayed_items = max(total_items - played_items, 0)
     init_database(str(database_path))
     total_listened = _human_duration(get_total_listened_seconds(str(database_path)))
     toggle_show_played = not show_played
-    toggle_href = "?show_played=1" if toggle_show_played else "/"
+    query_bits = []
+    if toggle_show_played:
+        query_bits.append("show_played=1")
+    if favorites_only:
+        query_bits.append("favorites=1")
+    toggle_href = "/" + ("?" + "&".join(query_bits) if query_bits else "")
     toggle_label = "Show played" if toggle_show_played else "Hide played"
     toggle_icon = "bi-eye" if toggle_show_played else "bi-eye-slash"
+    toggle_favorites_only = not favorites_only
+    fav_query_bits = []
+    if show_played:
+        fav_query_bits.append("show_played=1")
+    if toggle_favorites_only:
+        fav_query_bits.append("favorites=1")
+    favorites_href = "/" + ("?" + "&".join(fav_query_bits) if fav_query_bits else "")
+    favorites_label = "Show favorites" if toggle_favorites_only else "Show all"
+    favorites_icon = "bi-heart" if toggle_favorites_only else "bi-heart-fill"
 
     return f"""<!doctype html>
 <html>
@@ -537,7 +579,7 @@ def _render_index(
 
     .summary-grid {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: .65rem;
       margin: .85rem 0 .2rem;
     }}
@@ -662,6 +704,7 @@ def _render_index(
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
+    .status-missing {{ background: #fde7e9; color: #96253b; }}
     .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
     .icon-button {{
       display: inline-flex;
@@ -694,6 +737,8 @@ def _render_index(
       border-color: #2f62f2;
       background: linear-gradient(180deg, #4675f4, #2f62f2);
     }}
+    .icon-button-active {{ color: #fff; background: #df3f6b; border-color: #df3f6b; }}
+    .icon-button-active:hover {{ color: #fff; background: #c53057; border-color: #c53057; }}
 
     @media (max-width: 1200px) {{
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -738,6 +783,10 @@ def _render_index(
           <div class="summary-value">{unplayed_items}</div>
         </div>
         <div class="summary-card">
+          <div class="summary-label">Favorites</div>
+          <div class="summary-value">{favorite_items}</div>
+        </div>
+        <div class="summary-card">
           <div class="summary-label">Listened</div>
           <div class="summary-value">{total_listened}</div>
         </div>
@@ -754,6 +803,7 @@ def _render_index(
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
+        <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
       </div>
     </div>
@@ -1332,7 +1382,8 @@ def make_handler(state: AppState):
             if path == "/":
                 status = _snapshot_status(state.update_status)
                 show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
-                body = _render_index(rows, state.output_root, state.database_path, status, show_played=show_played)
+                favorites_only = (query.get('favorites') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
+                body = _render_index(rows, state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1360,6 +1411,60 @@ def make_handler(state: AppState):
 
                 played_value = path == "/mark-played"
                 mark_download_played(str(state.database_path), int(raw_id), played=played_value)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path in {"/favorite", "/unfavorite"}:
+                raw_id = (query.get("id") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+
+                favorite_value = path == "/favorite"
+                mark_download_favorite(str(state.database_path), int(raw_id), favorite=favorite_value)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path == "/delete-file":
+                raw_id = (query.get("id") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+                row = _find_row_by_id(rows, int(raw_id))
+                if row is None:
+                    self.send_error(404, "Item not found")
+                    return
+                media_path = _resolve_safe_media_path(state.output_root, row.file_path)
+                if media_path is not None and media_path.exists():
+                    media_path.unlink(missing_ok=True)
+                else:
+                    delete_download_entry(str(state.database_path), int(raw_id))
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path == "/redownload":
+                raw_id = (query.get("id") or [None])[0]
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+                row = _find_row_by_id(rows, int(raw_id))
+                if row is None:
+                    self.send_error(404, "Item not found")
+                    return
+                if row.source_type == "youtube" and row.item_url:
+                    trigger_single_youtube_download(
+                        state,
+                        url=row.item_url,
+                        media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio",
+                    )
+                elif row.source_type == "podcast":
+                    trigger_background_update(state)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()

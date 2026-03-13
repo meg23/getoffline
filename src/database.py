@@ -135,6 +135,7 @@ def _migration_0001_create_downloads(db_path: str) -> None:
                 last_seen_at TEXT NOT NULL,
                 completed_at TEXT,
                 played INTEGER NOT NULL DEFAULT 0,
+                favorite INTEGER NOT NULL DEFAULT 0,
                 played_at TEXT,
                 last_position_seconds REAL NOT NULL DEFAULT 0,
                 total_listened_seconds REAL NOT NULL DEFAULT 0,
@@ -162,6 +163,15 @@ def _migration_0002_add_playback_columns(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0006_add_favorite_column(db_path: str) -> None:
+    columns = _table_columns_sqlite(db_path, "downloads")
+    if "favorite" in columns:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE downloads ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
@@ -176,6 +186,10 @@ MIGRATIONS = [
     (
         "0005_add_source_enabled",
         lambda db_path: _migration_0005_add_source_enabled(db_path),
+    ),
+    (
+        "0006_add_favorite_column",
+        lambda db_path: _migration_0006_add_favorite_column(db_path),
     ),
 ]
 
@@ -525,19 +539,25 @@ def _init_database_sqlite(db_path: str) -> None:
 
 def _ensure_downloads_columns_sqlite(db_path: str) -> None:
     _migration_0002_add_playback_columns(db_path)
+    _migration_0006_add_favorite_column(db_path)
 
 
 def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
     with sqlite3.connect(db_path) as conn:
-        cur = conn.execute(
+        row = conn.execute(
             """
-            SELECT id FROM downloads
+            SELECT COALESCE(file_path, '') FROM downloads
             WHERE source_type = ? AND source_name = ? AND item_uid = ? AND download_status = 'downloaded'
             LIMIT 1
             """,
             (source_type, source_name, item_uid),
-        )
-        return cur.fetchone() is not None
+        ).fetchone()
+        if row is None:
+            return False
+        file_path = str(row[0] or "").strip()
+        if not file_path:
+            return False
+        return Path(file_path).expanduser().is_file()
 
 
 def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
@@ -578,6 +598,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "last_seen_at": now,
         "completed_at": now if payload.get("download_status", "downloaded") == "downloaded" else None,
         "played": 1 if payload.get("played", False) else 0,
+        "favorite": 1 if payload.get("favorite", False) else 0,
         "played_at": payload.get("played_at"),
     }
 
@@ -590,14 +611,14 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 upload_date, duration_seconds, file_path, file_ext, file_size_bytes, expected_bytes,
                 format_id, format_note, audio_codec, video_codec, resolution, fps,
                 subtitle_enabled, subtitle_path, download_status, error_message, raw_metadata_json,
-                first_seen_at, last_seen_at, completed_at, played, played_at
+                first_seen_at, last_seen_at, completed_at, played, favorite, played_at
             ) VALUES (
                 :source_type, :source_name, :source_url, :item_uid, :item_id, :item_url, :media_url,
                 :title, :description, :uploader, :channel, :extractor, :playlist_id, :playlist_title,
                 :upload_date, :duration_seconds, :file_path, :file_ext, :file_size_bytes, :expected_bytes,
                 :format_id, :format_note, :audio_codec, :video_codec, :resolution, :fps,
                 :subtitle_enabled, :subtitle_path, :download_status, :error_message, :raw_metadata_json,
-                :first_seen_at, :last_seen_at, :completed_at, :played, :played_at
+                :first_seen_at, :last_seen_at, :completed_at, :played, :favorite, :played_at
             )
             ON CONFLICT(source_type, source_name, item_uid) DO UPDATE SET
                 source_url=excluded.source_url,
@@ -631,6 +652,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 last_seen_at=excluded.last_seen_at,
                 completed_at=excluded.completed_at,
                 played=COALESCE(downloads.played, 0),
+                favorite=COALESCE(downloads.favorite, 0),
                 played_at=downloads.played_at
             """,
             values,
@@ -683,6 +705,7 @@ if HAS_SQLALCHEMY:
         last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
         completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
         played: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+        favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
         played_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
         last_position_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
         total_listened_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -702,13 +725,16 @@ if HAS_SQLALCHEMY:
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
         with Session(_engine_for(db_path)) as session:
-            stmt = select(DownloadRecord.id).where(
+            stmt = select(DownloadRecord.file_path).where(
                 DownloadRecord.source_type == source_type,
                 DownloadRecord.source_name == source_name,
                 DownloadRecord.item_uid == item_uid,
                 DownloadRecord.download_status == "downloaded",
             )
-            return session.execute(stmt).first() is not None
+            file_path = session.execute(stmt).scalar_one_or_none()
+            if not file_path:
+                return False
+            return Path(str(file_path)).expanduser().is_file()
 
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
@@ -770,6 +796,25 @@ if HAS_SQLALCHEMY:
             session.commit()
             return int(updated or 0)
 
+    def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
+        with Session(_engine_for(db_path)) as session:
+            record = session.get(DownloadRecord, int(row_id))
+            if record is None:
+                return False
+            record.favorite = bool(favorite)
+            record.last_seen_at = _utcnow()
+            session.commit()
+            return True
+
+    def delete_download_entry(db_path: str, row_id: int) -> bool:
+        with Session(_engine_for(db_path)) as session:
+            record = session.get(DownloadRecord, int(row_id))
+            if record is None:
+                return False
+            session.delete(record)
+            session.commit()
+            return True
+
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
         with Session(_engine_for(db_path)) as session:
             record = session.get(DownloadRecord, int(row_id))
@@ -829,6 +874,21 @@ else:
             )
             conn.commit()
             return int(cur.rowcount or 0)
+
+    def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET favorite = ?, last_seen_at = ? WHERE id = ?",
+                (1 if favorite else 0, _utcnow().isoformat(), int(row_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_download_entry(db_path: str, row_id: int) -> bool:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute("DELETE FROM downloads WHERE id = ?", (int(row_id),))
+            conn.commit()
+            return cur.rowcount > 0
 
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
         with sqlite3.connect(db_path) as conn:

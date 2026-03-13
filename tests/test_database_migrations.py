@@ -36,11 +36,13 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0003_add_config_tables",
                     "0004_add_source_configs",
                     "0005_add_source_enabled",
+                    "0006_add_favorite_column",
                 ],
             )
             self.assertIn("played", columns)
             self.assertIn("last_position_seconds", columns)
             self.assertIn("total_listened_seconds", columns)
+            self.assertIn("favorite", columns)
 
     def test_apply_migrations_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -52,7 +54,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
-            self.assertEqual(count, 5)
+            self.assertEqual(count, 6)
 
     def test_config_settings_round_trip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
