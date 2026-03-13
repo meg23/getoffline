@@ -507,6 +507,12 @@ def _render_index(
         play_or_download_href = f"/play?id={row.row_id}" if file_exists else f"/redownload?id={row.row_id}"
         play_or_download_label = "Play this item" if file_exists else "Redownload this item"
         play_or_download_icon = "bi-play-fill" if file_exists else "bi-download"
+        resume_seconds = 0.0
+        if file_exists:
+            try:
+                resume_seconds = get_download_position_seconds(str(database_path), row.row_id)
+            except Exception:
+                resume_seconds = 0.0
         delete_label = "Delete local file" if file_exists else "Delete this item from library"
         missing_action = f'<a class="icon-button" href="/delete-file?id={row.row_id}" title="{delete_label}" aria-label="{delete_label}">{_icon_use("bi-trash")}</a>'
 
@@ -520,7 +526,7 @@ def _render_index(
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
                 <td class="actions" data-label="Actions">
-                  <a class="icon-button" href="{play_or_download_href}" title="{play_or_download_label}" aria-label="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}">{_icon_use(play_or_download_icon)}</a>
+                  <a class="icon-button" href="{play_or_download_href}" title="{play_or_download_label}" aria-label="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{_icon_use(play_or_download_icon)}</a>
                   <a class="icon-button{favorite_class}" href="/{favorite_action}?id={row.row_id}" title="{favorite_label}" aria-label="{favorite_label}">{_icon_use(favorite_icon)}</a>
                   <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{_icon_use(mark_icon)}</a>
                   {missing_action}
@@ -1037,6 +1043,7 @@ def _render_index(
           event.preventDefault();
           const rowId = Number(link.dataset.rowId || 0);
           if (!rowId) return;
+          const resumeSeconds = Math.max(0, Number(link.dataset.resumeSeconds || 0));
           const state = {{
             rowId,
             title: link.dataset.title || '',
@@ -1044,7 +1051,7 @@ def _render_index(
             kind: link.dataset.kind || 'audio',
             src: '/media?id=' + rowId,
             playUrl: '/play?id=' + rowId,
-            currentTime: 0,
+            currentTime: resumeSeconds,
             paused: false,
           }};
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
@@ -1089,7 +1096,13 @@ def _render_index(
         }});
       }}
 
-      renderMiniPlayer();
+      const persistedMiniPlayerRaw = localStorage.getItem('getofflineMiniPlayerState');
+      if (persistedMiniPlayerRaw) {{
+        try {{
+          const persistedMiniPlayerState = JSON.parse(persistedMiniPlayerRaw);
+          if (persistedMiniPlayerState && persistedMiniPlayerState.paused === false) renderMiniPlayer(persistedMiniPlayerState);
+        }} catch (_) {{}}
+      }}
 
       const openBtn = document.getElementById('quick-add-open');
       const backdrop = document.getElementById('quick-add-backdrop');
