@@ -374,28 +374,60 @@ def trigger_background_update(state: AppState) -> bool:
     return True
 
 
-def add_single_youtube_link(
-    state: AppState,
-    *,
-    url: str,
-    media_type: str,
-    subtitles: bool,
-    subtitle_offset_seconds: Optional[float],
-) -> None:
+def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
+    from youtube import download_youtube_items
+
+    downloaded_items: List[str] = []
+    with state.update_status.lock:
+        state.update_status.is_running = True
+        state.update_status.last_started_at = time.time()
+        state.update_status.last_result = "running"
+        state.update_status.last_error = None
+        state.update_status.last_items_count = 0
+
+    try:
+        download_youtube_items(single_config, downloaded_items)
+        with state.update_status.lock:
+            state.update_status.last_result = "ok"
+            state.update_status.last_items_count = len(downloaded_items)
+    except Exception as exc:
+        with state.update_status.lock:
+            state.update_status.last_result = "failed"
+            state.update_status.last_error = str(exc)
+    finally:
+        with state.update_status.lock:
+            state.update_status.is_running = False
+            state.update_status.last_finished_at = time.time()
+
+
+def trigger_single_youtube_download(state: AppState, *, url: str, media_type: str) -> bool:
     from youtube import resolve_youtube_source_name
+
+    with state.update_status.lock:
+        if state.update_status.is_running:
+            return False
 
     cookie_path = materialize_youtube_cookie_file(str(state.database_path))
     source_name = resolve_youtube_source_name(url, cookie_path)
-    add_source_config(
-        str(state.database_path),
-        source_type="youtube",
-        name=source_name,
-        url=url,
-        media_type=media_type,
-        subtitles=subtitles,
-        subtitle_offset_seconds=subtitle_offset_seconds,
-        enabled=True,
-    )
+    stored = get_stored_config(str(state.database_path))
+    single_config = {
+        "defaults": dict(stored["defaults"]),
+        "download_settings": dict(stored["download_settings"]),
+        "youtube": [
+            {
+                "name": source_name,
+                "url": url,
+                "type": media_type,
+                "enabled": True,
+                "subtitles": media_type == "audio",
+            }
+        ],
+        "podcasts": [],
+    }
+
+    thread = threading.Thread(target=_run_single_youtube_download, args=(state, single_config), daemon=True)
+    thread.start()
+    return True
 
 
 def _render_index(
@@ -1013,34 +1045,6 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
     }})();
   </script>
-  <script>
-    (() => {{
-      const openBtn = document.getElementById('quick-add-open');
-      const backdrop = document.getElementById('quick-add-backdrop');
-      const cancelBtn = document.getElementById('quick-add-cancel');
-      const urlInput = document.getElementById('quick-add-url');
-      if (!openBtn || !backdrop) return;
-
-      const closeModal = () => {{
-        backdrop.classList.remove('is-open');
-        backdrop.setAttribute('aria-hidden', 'true');
-      }};
-
-      openBtn.addEventListener('click', () => {{
-        backdrop.classList.add('is-open');
-        backdrop.setAttribute('aria-hidden', 'false');
-        if (urlInput) urlInput.focus();
-      }});
-
-      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-      backdrop.addEventListener('click', (event) => {{
-        if (event.target === backdrop) closeModal();
-      }});
-      document.addEventListener('keydown', (event) => {{
-        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-      }});
-    }})();
-  </script>
 </body>
 </html>"""
 
@@ -1185,29 +1189,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>YouTube sources</h2>
-      <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
-      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
-        <h2 id="quick-add-title">Add single YouTube link</h2>
-        <form method="post" action="/quick-add-youtube" class="quick-add-form">
-          <div>
-            <label for="quick-add-url">YouTube URL</label>
-            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
-          </div>
-          <div>
-            <label for="quick-add-media-type">Download type</label>
-            <select id="quick-add-media-type" class="quick-add-select" name="media_type">
-              <option value="audio">audio</option>
-              <option value="video">video</option>
-            </select>
-          </div>
-          <div class="quick-add-actions">
-            <button id="quick-add-cancel" type="button">Cancel</button>
-            <button type="submit" class="primary">Add</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
     <table>
         <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{youtube_table}</tbody>
@@ -1237,29 +1218,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>Podcast sources</h2>
-      <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
-      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
-        <h2 id="quick-add-title">Add single YouTube link</h2>
-        <form method="post" action="/quick-add-youtube" class="quick-add-form">
-          <div>
-            <label for="quick-add-url">YouTube URL</label>
-            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
-          </div>
-          <div>
-            <label for="quick-add-media-type">Download type</label>
-            <select id="quick-add-media-type" class="quick-add-select" name="media_type">
-              <option value="audio">audio</option>
-              <option value="video">video</option>
-            </select>
-          </div>
-          <div class="quick-add-actions">
-            <button id="quick-add-cancel" type="button">Cancel</button>
-            <button type="submit" class="primary">Add</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
     <table>
         <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{podcast_table}</tbody>
@@ -1284,34 +1242,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="actions"><a href="/">Back to library</a></div>
   </div>
-  <script>
-    (() => {{
-      const openBtn = document.getElementById('quick-add-open');
-      const backdrop = document.getElementById('quick-add-backdrop');
-      const cancelBtn = document.getElementById('quick-add-cancel');
-      const urlInput = document.getElementById('quick-add-url');
-      if (!openBtn || !backdrop) return;
-
-      const closeModal = () => {{
-        backdrop.classList.remove('is-open');
-        backdrop.setAttribute('aria-hidden', 'true');
-      }};
-
-      openBtn.addEventListener('click', () => {{
-        backdrop.classList.add('is-open');
-        backdrop.setAttribute('aria-hidden', 'false');
-        if (urlInput) urlInput.focus();
-      }});
-
-      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-      backdrop.addEventListener('click', (event) => {{
-        if (event.target === backdrop) closeModal();
-      }});
-      document.addEventListener('keydown', (event) => {{
-        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-      }});
-    }})();
-  </script>
 </body>
 </html>"""
 
@@ -1539,16 +1469,11 @@ def make_handler(state: AppState):
                 if not url:
                     self.send_error(400, "Missing url")
                     return
-                add_single_youtube_link(
+                trigger_single_youtube_download(
                     state,
                     url=url,
                     media_type=media_type,
-                    subtitles=(media_type == "audio"),
-                    subtitle_offset_seconds=None,
                 )
-                stored = get_stored_config(str(state.database_path))
-                state.config["youtube"] = stored["youtube"]
-                trigger_background_update(state)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
