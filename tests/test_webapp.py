@@ -228,6 +228,8 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn("/settings", body)
             self.assertIn("/quick-add-youtube", body)
+            self.assertIn('id="quick-add-form"', body)
+            self.assertIn("fetch('/quick-add-youtube', {", body)
             self.assertIn("Add single YouTube link", body)
             self.assertIn('id="quick-add-open"', body)
             self.assertIn('id="quick-add-backdrop"', body)

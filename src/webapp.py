@@ -1156,7 +1156,7 @@ def _render_index(
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
         <h2 id="quick-add-title">Add single YouTube link</h2>
-        <form method="post" action="/quick-add-youtube" class="quick-add-form">
+        <form id="quick-add-form" method="post" action="/quick-add-youtube" class="quick-add-form">
           <div>
             <label for="quick-add-url">YouTube URL</label>
             <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
@@ -1681,26 +1681,52 @@ def _render_index(
       const backdrop = document.getElementById('quick-add-backdrop');
       const cancelBtn = document.getElementById('quick-add-cancel');
       const urlInput = document.getElementById('quick-add-url');
-      if (!openBtn || !backdrop) return;
+      const quickAddForm = document.getElementById('quick-add-form');
 
       const closeModal = () => {{
+        if (!backdrop) return;
         backdrop.classList.remove('is-open');
         backdrop.setAttribute('aria-hidden', 'true');
       }};
 
-      openBtn.addEventListener('click', () => {{
-        backdrop.classList.add('is-open');
-        backdrop.setAttribute('aria-hidden', 'false');
-        if (urlInput) urlInput.focus();
-      }});
+      if (openBtn && backdrop) {{
+        openBtn.addEventListener('click', () => {{
+          backdrop.classList.add('is-open');
+          backdrop.setAttribute('aria-hidden', 'false');
+          if (urlInput) urlInput.focus();
+        }});
 
-      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-      backdrop.addEventListener('click', (event) => {{
-        if (event.target === backdrop) closeModal();
-      }});
-      document.addEventListener('keydown', (event) => {{
-        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-      }});
+        if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', (event) => {{
+          if (event.target === backdrop) closeModal();
+        }});
+        document.addEventListener('keydown', (event) => {{
+          if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
+        }});
+      }}
+
+      if (quickAddForm) {{
+        let quickAddRequestInFlight = false;
+        quickAddForm.addEventListener('submit', (event) => {{
+          event.preventDefault();
+          if (quickAddRequestInFlight) return;
+          quickAddRequestInFlight = true;
+
+          const formData = new window.FormData(quickAddForm);
+          closeModal();
+          fetch('/quick-add-youtube', {{
+            method: 'POST',
+            body: new window.URLSearchParams(formData),
+            keepalive: true,
+            headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
+          }})
+            .catch(() => {{}})
+            .finally(() => {{
+              quickAddRequestInFlight = false;
+              pollSyncStatusUntilFinished();
+            }});
+        }});
+      }}
     }})();
   </script>
 </body>
