@@ -92,6 +92,10 @@ class AppState:
     pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
     pending_progress: Dict[int, float] = field(default_factory=dict)
     pending_progress_event: threading.Event = field(default_factory=threading.Event)
+    progress_metrics_lock: threading.Lock = field(default_factory=threading.Lock)
+    progress_received_count: int = 0
+    progress_flush_count: int = 0
+    progress_last_log_at: float = 0.0
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -459,9 +463,28 @@ def trigger_background_update(state: AppState) -> bool:
 
 
 def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float) -> None:
+    safe_seconds = max(0.0, float(position_seconds or 0.0))
     with state.pending_progress_lock:
-        state.pending_progress[int(row_id)] = max(0.0, float(position_seconds or 0.0))
+        state.pending_progress[int(row_id)] = safe_seconds
+        queue_size = len(state.pending_progress)
         state.pending_progress_event.set()
+
+    now = time.monotonic()
+    with state.progress_metrics_lock:
+        state.progress_received_count += 1
+        received_count = state.progress_received_count
+        should_log = (now - state.progress_last_log_at) >= 2.0
+        if should_log:
+            state.progress_last_log_at = now
+
+    if should_log:
+        log.info(
+            "Progress enqueue stats: received=%s queue_size=%s latest_id=%s latest_seconds=%.3f",
+            received_count,
+            queue_size,
+            int(row_id),
+            safe_seconds,
+        )
 
 
 def _flush_pending_progress_updates(state: AppState) -> int:
@@ -480,6 +503,17 @@ def _flush_pending_progress_updates(state: AppState) -> int:
             log.warning("Progress update skipped for id=%s (db busy or row missing)", row_id)
         else:
             updated_count += 1
+
+    with state.progress_metrics_lock:
+        state.progress_flush_count += 1
+        flush_count = state.progress_flush_count
+
+    log.info(
+        "Progress flush #%s: attempted=%s updated=%s",
+        flush_count,
+        len(pending),
+        updated_count,
+    )
     return updated_count
 
 
@@ -1945,6 +1979,7 @@ def make_handler(state: AppState):
             if path in {"/mark-played", "/mark-unplay"}:
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
+                    log.warning("POST /progress missing/invalid id payload=%s", body)
                     self.send_error(400, "Missing or invalid id")
                     return
 
@@ -2010,6 +2045,7 @@ def make_handler(state: AppState):
                 return
 
             if path in {"/play", "/media", "/subtitle"}:
+                request_started_at = time.monotonic()
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
@@ -2030,6 +2066,14 @@ def make_handler(state: AppState):
                     subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
                     body = _render_player(row, media_path, resume_seconds, subtitle_path is not None)
                     body_bytes = body.encode("utf-8")
+                    elapsed_ms = (time.monotonic() - request_started_at) * 1000.0
+                    log.info(
+                        "GET /play id=%s resume_seconds=%.3f subtitle=%s render_ms=%.1f",
+                        row.row_id,
+                        resume_seconds,
+                        "yes" if subtitle_path is not None else "no",
+                        elapsed_ms,
+                    )
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(body_bytes)))
@@ -2067,7 +2111,8 @@ def make_handler(state: AppState):
             path = posixpath.normpath(parsed.path)
 
             if path == "/update":
-                trigger_background_update(state)
+                started = trigger_background_update(state)
+                log.info("Manual update requested (started=%s)", "yes" if started else "no")
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -2080,12 +2125,14 @@ def make_handler(state: AppState):
                 raw_id = (form.get("id") or [None])[0]
                 raw_position = (form.get("position_seconds") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
+                    log.warning("POST /progress missing/invalid id payload=%s", body)
                     self.send_error(400, "Missing or invalid id")
                     return
 
                 try:
                     position_seconds = float(raw_position or 0.0)
                 except (TypeError, ValueError):
+                    log.warning("POST /progress invalid position_seconds payload=%s", body)
                     self.send_error(400, "Missing or invalid position_seconds")
                     return
 
