@@ -48,6 +48,8 @@ MEDIA_EXTENSIONS = {
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
+PROGRESS_FLUSH_COALESCE_SECONDS = 0.35
+PROGRESS_FLUSH_POLL_SECONDS = 0.5
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -496,6 +498,7 @@ def _flush_pending_progress_updates(state: AppState) -> int:
     if not pending:
         return 0
 
+    flush_started_at = time.monotonic()
     updated_count = 0
     for row_id, seconds in pending.items():
         updated = update_download_position_seconds(str(state.database_path), int(row_id), float(seconds))
@@ -508,20 +511,30 @@ def _flush_pending_progress_updates(state: AppState) -> int:
         state.progress_flush_count += 1
         flush_count = state.progress_flush_count
 
+    elapsed_ms = (time.monotonic() - flush_started_at) * 1000.0
     log.info(
-        "Progress flush #%s: attempted=%s updated=%s",
+        "Progress flush #%s: attempted=%s updated=%s flush_ms=%.1f",
         flush_count,
         len(pending),
         updated_count,
+        elapsed_ms,
     )
     return updated_count
 
 
 def _progress_flush_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
-        state.pending_progress_event.wait(0.4)
+        has_pending = state.pending_progress_event.wait(PROGRESS_FLUSH_POLL_SECONDS)
         if stop_event.is_set():
             break
+        if not has_pending:
+            continue
+
+        # Coalesce frequent /progress events to reduce write churn.
+        time.sleep(PROGRESS_FLUSH_COALESCE_SECONDS)
+        if stop_event.is_set():
+            break
+
         try:
             _flush_pending_progress_updates(state)
         except Exception as exc:
@@ -2047,17 +2060,21 @@ def make_handler(state: AppState):
             if path in {"/play", "/media", "/subtitle"}:
                 request_started_at = time.monotonic()
                 raw_id = (query.get("id") or [None])[0]
+                log.info("GET %s requested id=%s", path, raw_id)
                 if raw_id is None or not str(raw_id).isdigit():
+                    log.warning("GET %s invalid id=%s", path, raw_id)
                     self.send_error(400, "Missing or invalid id")
                     return
 
                 row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
+                    log.warning("GET %s missing row id=%s", path, raw_id)
                     self.send_error(404, "Item not found")
                     return
 
                 media_path = _resolve_safe_media_path(state.output_root, row.file_path)
                 if media_path is None:
+                    log.warning("GET %s media unavailable id=%s path=%s", path, raw_id, row.file_path)
                     self.send_error(404, "Media file unavailable")
                     return
 
