@@ -764,6 +764,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("body.set('reason'", body)
             self.assertIn("body.set('forced'", body)
             self.assertIn("reason === 'page-exit'", body)
+            self.assertIn("reason === 'back-link'", body)
+            self.assertIn("reason === 'pause'", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
