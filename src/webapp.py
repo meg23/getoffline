@@ -47,6 +47,7 @@ MEDIA_EXTENSIONS = {
 
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
+SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -157,6 +158,16 @@ def _normalize_stem(value: str) -> str:
     return normalized or "item"
 
 
+def _is_sqlite_lock_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "database is locked" in text or "database table is locked" in text
+
+
+def _log_sqlite_lock(operation: str, exc: Exception) -> None:
+    if _is_sqlite_lock_error(exc):
+        log.warning("SQLite lock while %s: %s", operation, exc)
+
+
 def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional[Path]:
     root = output_root.expanduser().resolve()
     raw = Path(candidate_path).expanduser()
@@ -182,41 +193,46 @@ def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional
 
 def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
     root = output_root.expanduser().resolve()
-    with sqlite3.connect(str(db_path)) as conn:
-        stale_rows = conn.execute(
-            """
-            SELECT id, file_path
-            FROM downloads
-            WHERE download_status = 'downloaded' AND COALESCE(file_path, '') != ''
-            """
-        ).fetchall()
+    try:
+        with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+            stale_rows = conn.execute(
+                """
+                SELECT id, file_path
+                FROM downloads
+                WHERE download_status = 'downloaded' AND COALESCE(file_path, '') != ''
+                """
+            ).fetchall()
 
-        updates = []
-        for row_id, file_path in stale_rows:
-            if _resolve_safe_media_path(root, file_path):
-                continue
-
-            raw = Path(file_path).expanduser()
-            candidate_bases = [raw] if raw.is_absolute() else [root / raw, raw]
-
-            repaired_path = None
-            for base in candidate_bases:
-                normalized_name = f"{_normalize_stem(base.stem)}{base.suffix}"
-                normalized_candidate = base.with_name(normalized_name).resolve()
-                try:
-                    normalized_candidate.relative_to(root)
-                except ValueError:
+            updates = []
+            for row_id, file_path in stale_rows:
+                if _resolve_safe_media_path(root, file_path):
                     continue
-                if normalized_candidate.exists() and normalized_candidate.is_file() and _is_media_file(normalized_candidate):
-                    repaired_path = str(normalized_candidate)
-                    break
 
-            if repaired_path:
-                updates.append((repaired_path, int(row_id)))
+                raw = Path(file_path).expanduser()
+                candidate_bases = [raw] if raw.is_absolute() else [root / raw, raw]
 
-        if updates:
-            conn.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", updates)
-            conn.commit()
+                repaired_path = None
+                for base in candidate_bases:
+                    normalized_name = f"{_normalize_stem(base.stem)}{base.suffix}"
+                    normalized_candidate = base.with_name(normalized_name).resolve()
+                    try:
+                        normalized_candidate.relative_to(root)
+                    except ValueError:
+                        continue
+                    if normalized_candidate.exists() and normalized_candidate.is_file() and _is_media_file(normalized_candidate):
+                        repaired_path = str(normalized_candidate)
+                        break
+
+                if repaired_path:
+                    updates.append((repaired_path, int(row_id)))
+
+            if updates:
+                conn.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", updates)
+                conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock("repairing downloaded file paths", exc)
+        if not _is_sqlite_lock_error(exc):
+            raise
 
 
 def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = None) -> List[MediaRow]:
@@ -224,16 +240,22 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     repair_root = output_root or db_path.parent
     _repair_downloaded_file_paths(db_path, repair_root)
 
-    with sqlite3.connect(str(db_path)) as conn:
-        rows = conn.execute(
-            """
-            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
-            FROM downloads
-            WHERE download_status = 'downloaded'
-            ORDER BY last_seen_at DESC, id DESC
-            """
-        ).fetchall()
+    try:
+        with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+                FROM downloads
+                WHERE download_status = 'downloaded'
+                ORDER BY last_seen_at DESC, id DESC
+                """
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock("reading downloaded media rows", exc)
+        if _is_sqlite_lock_error(exc):
+            return []
+        raise
 
     return [
         MediaRow(
@@ -257,17 +279,23 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
 
 def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
     init_database(str(db_path))
-    with sqlite3.connect(str(db_path)) as conn:
-        row = conn.execute(
-            """
-            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
-            FROM downloads
-            WHERE id = ? AND download_status = 'downloaded'
-            LIMIT 1
-            """,
-            (int(row_id),),
-        ).fetchone()
+    try:
+        with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+            row = conn.execute(
+                """
+                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+                FROM downloads
+                WHERE id = ? AND download_status = 'downloaded'
+                LIMIT 1
+                """,
+                (int(row_id),),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock("reading downloaded media row by id", exc)
+        if _is_sqlite_lock_error(exc):
+            return None
+        raise
 
     if row is None:
         return None
