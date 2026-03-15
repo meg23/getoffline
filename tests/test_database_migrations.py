@@ -8,10 +8,13 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from database import (  # noqa: E402
+    HAS_SQLALCHEMY,
     _record_revision,
     apply_migrations,
+    get_download_position_seconds,
     get_stored_config,
     init_database,
+    update_download_position_seconds,
     replace_sources,
     seed_sources_from_config,
     update_download_settings,
@@ -119,6 +122,37 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(replaced["youtube"][0]["type"], "video")
             self.assertTrue(replaced["youtube"][0]["enabled"])
             self.assertEqual(replaced["podcasts"], [])
+
+
+    def test_get_download_position_seconds_returns_zero_when_locked(self):
+        if HAS_SQLALCHEMY:
+            patch_target = "database.Session"
+            side_effect = Exception("database is locked")
+        else:
+            patch_target = "database.sqlite3.connect"
+            side_effect = sqlite3.OperationalError("database is locked")
+
+        with mock.patch(patch_target, side_effect=side_effect):
+            with mock.patch("database.log.warning") as warning_mock:
+                result = get_download_position_seconds("/tmp/test-lock.sqlite3", 42)
+
+        self.assertEqual(result, 0.0)
+        warning_mock.assert_called_once()
+
+    def test_update_download_position_seconds_returns_false_when_locked(self):
+        if HAS_SQLALCHEMY:
+            patch_target = "database.Session"
+            side_effect = Exception("database is locked")
+        else:
+            patch_target = "database.sqlite3.connect"
+            side_effect = sqlite3.OperationalError("database is locked")
+
+        with mock.patch(patch_target, side_effect=side_effect):
+            with mock.patch("database.log.warning") as warning_mock:
+                result = update_download_position_seconds("/tmp/test-lock.sqlite3", 42, 12.3)
+
+        self.assertFalse(result)
+        warning_mock.assert_called_once()
 
 
 if __name__ == "__main__":

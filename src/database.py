@@ -897,11 +897,17 @@ if HAS_SQLALCHEMY:
             raise
 
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
+        try:
+            with Session(_engine_for(db_path)) as session:
+                record = session.get(DownloadRecord, int(row_id))
+                if record is None:
+                    return 0.0
+                return float(record.last_position_seconds or 0)
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "reading download playback position", exc)
+            if _is_sqlite_lock_error_message(str(exc)):
                 return 0.0
-            return float(record.last_position_seconds or 0)
+            raise
 
     def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
         safe_position = max(0.0, float(position_seconds or 0.0))
@@ -921,6 +927,8 @@ if HAS_SQLALCHEMY:
                 return True
         except Exception as exc:
             _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+            if _is_sqlite_lock_error_message(str(exc)):
+                return False
             raise
 
     def get_total_listened_seconds(db_path: str) -> float:
@@ -992,20 +1000,26 @@ else:
             raise
 
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT COALESCE(last_position_seconds, 0) FROM downloads WHERE id = ?",
-                (int(row_id),),
-            ).fetchone()
-            if row is None:
+        try:
+            with sqlite3.connect(db_path, timeout=0.1) as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(last_position_seconds, 0) FROM downloads WHERE id = ?",
+                    (int(row_id),),
+                ).fetchone()
+                if row is None:
+                    return 0.0
+                return float(row[0] or 0.0)
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "reading download playback position", exc)
+            if _is_sqlite_lock_error_message(str(exc)):
                 return 0.0
-            return float(row[0] or 0.0)
+            raise
 
     def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow().isoformat()
         try:
-            with sqlite3.connect(db_path) as conn:
+            with sqlite3.connect(db_path, timeout=0.1) as conn:
                 row = conn.execute(
                     "SELECT COALESCE(last_position_seconds, 0), COALESCE(total_listened_seconds, 0) FROM downloads WHERE id = ?",
                     (int(row_id),),
@@ -1023,6 +1037,8 @@ else:
                 return cur.rowcount > 0
         except sqlite3.OperationalError as exc:
             _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+            if _is_sqlite_lock_error_message(str(exc)):
+                return False
             raise
 
     def get_total_listened_seconds(db_path: str) -> float:
