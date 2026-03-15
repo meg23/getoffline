@@ -1431,7 +1431,9 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let lastSentSeconds = -9999;
       let progressInFlight = false;
       let queuedProgressSeconds = null;
+      let progressController = null;
       const periodicProgressSeconds = 5.0;
+      const progressRequestTimeoutMs = 2000;
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
       let transcriptReady = false;
@@ -1469,7 +1471,15 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           body: body.toString(),
         }};
 
-        if (keepalive) options.keepalive = true;
+        let abortTimer = null;
+        if (!keepalive) {{
+          progressController = new AbortController();
+          options.signal = progressController.signal;
+          abortTimer = window.setTimeout(() => {{
+            if (!progressController) return;
+            progressController.abort();
+          }}, progressRequestTimeoutMs);
+        }}
 
         return fetch('/progress', options)
           .then((response) => {{
@@ -1477,8 +1487,13 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
             return response;
           }})
           .catch((err) => {{
+            if (err && err.name === 'AbortError') return null;
             console.warn('[getoffline] /progress request failed', err);
             return null;
+          }})
+          .finally(() => {{
+            if (abortTimer !== null) window.clearTimeout(abortTimer);
+            progressController = null;
           }});
       }}
 
@@ -1502,7 +1517,8 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         }}
 
         if (force) {{
-          sendProgressRequest(safe, true);
+          if (reason === 'page-exit') return;
+          sendProgressRequest(safe, false);
           return;
         }}
 
