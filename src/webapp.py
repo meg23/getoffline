@@ -1211,7 +1211,60 @@ def _render_index(
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
       let syncReloadTimer = null;
+      let syncStatusPollTimer = null;
       let suppressSyncAutoReload = false;
+      const syncStatusPollIntervalMs = 1500;
+
+      const isMediaPlaybackActive = () => {{
+        return Array.from(document.querySelectorAll('audio,video')).some((media) => {{
+          if (!media) return false;
+          return !media.paused && !media.ended && media.readyState > 2;
+        }});
+      }};
+
+      const clearSyncReloadTimer = () => {{
+        if (syncReloadTimer) {{
+          window.clearTimeout(syncReloadTimer);
+          syncReloadTimer = null;
+        }}
+      }};
+
+      const clearSyncStatusPollTimer = () => {{
+        if (syncStatusPollTimer) {{
+          window.clearTimeout(syncStatusPollTimer);
+          syncStatusPollTimer = null;
+        }}
+      }};
+
+      const scheduleSyncReloadWhenSafe = () => {{
+        clearSyncReloadTimer();
+        const attemptReload = () => {{
+          if (suppressSyncAutoReload || document.hidden || isMediaPlaybackActive()) {{
+            syncReloadTimer = window.setTimeout(attemptReload, syncStatusPollIntervalMs);
+            return;
+          }}
+          window.location.reload();
+        }};
+        syncReloadTimer = window.setTimeout(attemptReload, 250);
+      }};
+
+      const pollSyncStatusUntilFinished = () => {{
+        clearSyncStatusPollTimer();
+        fetch('/update-status', {{ cache: 'no-store' }})
+          .then((response) => response.ok ? response.json() : null)
+          .then((status) => {{
+            if (!status) throw new Error('missing status payload');
+            if (status.is_running === 'yes') {{
+              syncStatusPollTimer = window.setTimeout(pollSyncStatusUntilFinished, syncStatusPollIntervalMs);
+              return;
+            }}
+            scheduleSyncReloadWhenSafe();
+          }})
+          .catch(() => {{
+            syncStatusPollTimer = window.setTimeout(pollSyncStatusUntilFinished, syncStatusPollIntervalMs);
+          }});
+      }};
+
       if (syncForm && syncButton && !syncButton.disabled) {{
         let syncRequestInFlight = false;
 
@@ -1229,11 +1282,7 @@ def _render_index(
           fetch('/update', {{ method: 'POST', keepalive: true }})
             .catch(() => {{}})
             .finally(() => {{
-              if (suppressSyncAutoReload || document.hidden) return;
-              syncReloadTimer = window.setTimeout(() => {{
-                if (suppressSyncAutoReload || document.hidden) return;
-                window.location.reload();
-              }}, 250);
+              pollSyncStatusUntilFinished();
             }});
         }});
       }}
@@ -2307,6 +2356,17 @@ def make_handler(state: AppState):
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            if path == "/update-status":
+                status_payload = _snapshot_status(state.update_status)
+                body_bytes = json.dumps(status_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body_bytes)))
                 self.end_headers()
                 self.wfile.write(body_bytes)
