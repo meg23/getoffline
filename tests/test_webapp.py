@@ -779,6 +779,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 },
             )
             self.assertIn("const fallbackUrl = miniOpen.href || '/'", body)
+            self.assertIn("if (miniOpenNavigationPending) return;", body)
+            self.assertIn("miniOpen.setAttribute('aria-disabled', 'true');", body)
             self.assertIn("window.location.assign(fallbackUrl)", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
