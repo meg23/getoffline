@@ -227,6 +227,9 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="quick-add-open"', body)
             self.assertIn('id="quick-add-backdrop"', body)
             self.assertIn('id="quick-add-url"', body)
+            self.assertIn('id="mini-player-backdrop"', body)
+            self.assertIn('id="mini-player-transcript"', body)
+            self.assertIn('aria-label="Expand player"', body)
             self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr));", body)
             self.assertIn("const selectAllRows = document.getElementById('select-all-rows');", body)
             self.assertIn('selectAllRows.indeterminate = selectedCount > 0 && selectedCount < rowSelectors.length;', body)
@@ -302,6 +305,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('action="/batch-update"', body)
             self.assertIn('class="row-selector" name="ids"', body)
             self.assertIn('class="episode-link" href="/play?id=', body)
+            self.assertIn('data-has-subtitles="0"', body)
 
     def test_index_play_link_includes_resume_seconds(self):
         with tempfile.TemporaryDirectory() as tmpdir:
