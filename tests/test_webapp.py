@@ -696,6 +696,10 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("shouldAutoPlay", body)
             self.assertIn("get('autoplay') === '1'", body)
             self.assertIn("navigator.sendBeacon('/progress'", body)
+            self.assertIn("let progressInFlight = false", body)
+            self.assertIn("progressController = new AbortController()", body)
+            self.assertIn("queuedProgressSeconds = safe", body)
+            self.assertIn("abortPendingProgressRequest();", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

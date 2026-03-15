@@ -1277,6 +1277,9 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const transcript = document.getElementById('transcript');
       const subtitleTrackEl = document.getElementById('subtitle-track');
       let lastSentSeconds = -9999;
+      let progressInFlight = false;
+      let queuedProgressSeconds = null;
+      let progressController = null;
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
       let transcriptReady = false;
@@ -1301,27 +1304,68 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         }}
       }}
 
-      function postProgress(seconds, force) {{
-        const safe = Math.max(0, Number(seconds || 0));
-        if (!force && Math.abs(safe - lastSentSeconds) < 1.0) return;
-        lastSentSeconds = safe;
-        updateLabel(safe);
-
+      function sendProgressRequest(seconds, keepalive) {{
         const body = new URLSearchParams();
         body.set('id', String(rowId));
-        body.set('position_seconds', safe.toFixed(3));
+        body.set('position_seconds', seconds.toFixed(3));
 
-        if (force && navigator.sendBeacon) {{
-          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
-          if (navigator.sendBeacon('/progress', blob)) return;
-        }}
-
-        fetch('/progress', {{
+        const options = {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
           body: body.toString(),
-          keepalive: true,
-        }}).catch(() => {{}});
+        }};
+
+        if (keepalive) {{
+          options.keepalive = true;
+        }} else {{
+          progressController = new AbortController();
+          options.signal = progressController.signal;
+        }}
+
+        return fetch('/progress', options).catch(() => {{}});
+      }}
+
+      function abortPendingProgressRequest() {{
+        if (!progressController) return;
+        progressController.abort();
+        progressController = null;
+      }}
+
+      function postProgress(seconds, force) {{
+        const safe = Math.max(0, Number(seconds || 0));
+        if (!force && Math.abs(safe - lastSentSeconds) < 1.0) return;
+        updateLabel(safe);
+        lastSentSeconds = safe;
+
+        if (force && navigator.sendBeacon) {{
+          abortPendingProgressRequest();
+          const beaconBody = new URLSearchParams();
+          beaconBody.set('id', String(rowId));
+          beaconBody.set('position_seconds', safe.toFixed(3));
+          const blob = new Blob([beaconBody.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+          if (navigator.sendBeacon('/progress', blob)) return;
+        }}
+
+        if (force) {{
+          sendProgressRequest(safe, true);
+          return;
+        }}
+
+        if (progressInFlight) {{
+          queuedProgressSeconds = safe;
+          return;
+        }}
+
+        progressInFlight = true;
+        queuedProgressSeconds = null;
+        sendProgressRequest(safe, false).finally(() => {{
+          progressInFlight = false;
+          progressController = null;
+          if (queuedProgressSeconds === null) return;
+          const queued = queuedProgressSeconds;
+          queuedProgressSeconds = null;
+          postProgress(queued, false);
+        }});
       }}
 
       function persistMiniPlayerState() {{
@@ -1441,6 +1485,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       if (backToLibrary) {{
         backToLibrary.addEventListener('click', () => {{
           persistMiniPlayerState();
+          postProgress(player.currentTime, true);
         }});
       }}
 
@@ -1448,7 +1493,10 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         if (document.hidden) postProgress(player.currentTime, true);
       }});
       window.addEventListener('beforeunload', () => postProgress(player.currentTime, true));
-      window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
+      window.addEventListener('pagehide', () => {{
+        abortPendingProgressRequest();
+        postProgress(player.currentTime, true);
+      }});
     }})();
   </script>
 </body>
