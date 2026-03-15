@@ -1236,6 +1236,15 @@ def _render_index(
         }}
       }};
 
+      const setSyncButtonRunning = () => {{
+        if (!syncButton) return;
+        syncButton.disabled = true;
+        const icon = syncButton.querySelector('.bi');
+        const iconUse = syncButton.querySelector('use');
+        if (icon) icon.classList.add('is-spinning');
+        if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
+      }};
+
       const setSyncButtonIdle = () => {{
         if (!syncButton) return;
         syncButton.disabled = false;
@@ -1304,11 +1313,7 @@ def _render_index(
           if (syncRequestInFlight) return;
           syncRequestInFlight = true;
 
-          syncButton.disabled = true;
-          const icon = syncButton.querySelector('.bi');
-          const iconUse = syncButton.querySelector('use');
-          if (icon) icon.classList.add('is-spinning');
-          if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
+          setSyncButtonRunning();
 
           fetch('/update', {{ method: 'POST', keepalive: true }})
             .catch(() => {{}})
@@ -1714,6 +1719,7 @@ def _render_index(
 
           const formData = new window.FormData(quickAddForm);
           closeModal();
+          setSyncButtonRunning();
           fetch('/quick-add-youtube', {{
             method: 'POST',
             body: new window.URLSearchParams(formData),
