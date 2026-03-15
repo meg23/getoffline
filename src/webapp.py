@@ -1037,7 +1037,8 @@ def _render_index(
     .mini-player-media {{ width: 100%; border-radius: 12px; background: #000; }}
     #mini-player-video {{ aspect-ratio: 16 / 9; max-height: min(74vh, 780px); background: #000; }}
     #mini-player-audio {{ border-radius: 999px; }}
-    .mini-player-transcript-wrap {{ margin-top: .2rem; }}
+    .mini-player-transcript-wrap {{ margin-top: .2rem; display: none; }}
+    .mini-player.is-maximized .mini-player-transcript-wrap {{ display: block; }}
     .mini-player-transcript {{
       max-height: 220px;
       overflow-y: auto;
@@ -1047,7 +1048,7 @@ def _render_index(
       padding: .55rem;
       display: none;
     }}
-    .mini-player-transcript.is-visible {{ display: block; }}
+    .mini-player.is-maximized .mini-player-transcript.is-visible {{ display: block; }}
     .mini-player-transcript-line {{
       display: block;
       width: 100%;
