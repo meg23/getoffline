@@ -322,6 +322,50 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('class="episode-link" href="/play?id=', body)
             self.assertIn('data-has-subtitles="0"', body)
 
+    def test_index_marks_audio_row_with_sibling_subtitle_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            subtitle = root / "episode.srt"
+            media.write_text("audio", encoding="utf-8")
+            subtitle.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "SubtitleTest",
+                    "item_uid": "uid-subtitle-1",
+                    "item_url": "https://example.com/episode.mp3",
+                    "title": "Subtitle Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path)
+            self.assertIsNone(rows[0].subtitle_path)
+
+            body = _render_index(
+                rows=rows,
+                output_root=root,
+                database_path=db_path,
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn('data-has-subtitles="1"', body)
+
     def test_index_play_link_includes_resume_seconds(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
