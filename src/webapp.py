@@ -1168,9 +1168,17 @@ def _render_index(
       let miniOpenNavigationPending = false;
       let miniLastPersistedSeconds = -9999;
 
+      function updatePlayLinkResumeHint(rowId, seconds) {{
+        const safe = Math.max(0, Number(seconds || 0));
+        document.querySelectorAll('a[data-play-link="1"][data-row-id="' + String(rowId) + '"]').forEach((link) => {{
+          link.dataset.resumeSeconds = safe.toFixed(3);
+        }});
+      }}
+
       function postMiniProgress(state, seconds, force, reason) {{
         if (!state || !state.rowId) return;
         const safe = Math.max(0, Number(seconds || 0));
+        updatePlayLinkResumeHint(state.rowId, safe);
         if (!force && Math.abs(safe - miniLastPersistedSeconds) < 5.0) return;
         miniLastPersistedSeconds = safe;
 
