@@ -1435,6 +1435,8 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
       let transcriptReady = false;
+      let hasSentPageExitProgress = false;
+      let lastForcedProgressAt = 0;
 
       if (!player) return;
 
@@ -1480,9 +1482,14 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           }});
       }}
 
-      function postProgress(seconds, force) {{
+      function postProgress(seconds, force, reason) {{
         const safe = Math.max(0, Number(seconds || 0));
         if (!force && Math.abs(safe - lastSentSeconds) < periodicProgressSeconds) return;
+        if (force) {{
+          const nowMs = Date.now();
+          if ((nowMs - lastForcedProgressAt) < 1200 && reason !== 'ended' && reason !== 'page-exit') return;
+          lastForcedProgressAt = nowMs;
+        }}
         updateLabel(safe);
         lastSentSeconds = safe;
 
@@ -1621,26 +1628,28 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }});
       player.addEventListener('pause', () => {{
         persistMiniPlayerState();
-        postProgress(player.currentTime, true);
+        postProgress(player.currentTime, true, 'pause');
       }});
       player.addEventListener('play', persistMiniPlayerState);
       player.addEventListener('ended', () => {{
         localStorage.removeItem('getofflineMiniPlayerState');
-        postProgress(0, true);
+        postProgress(0, true, 'ended');
       }});
 
       if (backToLibrary) {{
         backToLibrary.addEventListener('click', () => {{
           persistMiniPlayerState();
-          postProgress(player.currentTime, true);
+          postProgress(player.currentTime, true, 'back-link');
         }});
       }}
 
-      document.addEventListener('visibilitychange', () => {{
-        if (document.hidden) postProgress(player.currentTime, true);
-      }});
-      window.addEventListener('beforeunload', () => postProgress(player.currentTime, true));
-      window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
+      function sendPageExitProgress() {{
+        if (hasSentPageExitProgress) return;
+        hasSentPageExitProgress = true;
+        postProgress(player.currentTime, true, 'page-exit');
+      }}
+
+      window.addEventListener('pagehide', sendPageExitProgress);
     }})();
   </script>
 </body>
