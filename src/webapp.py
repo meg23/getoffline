@@ -955,7 +955,7 @@ def _render_index(
     .mini-player-backdrop {{
       position: fixed;
       inset: 0;
-      background: rgba(3, 8, 22, .78);
+      background: rgba(0, 0, 0, .9);
       display: none;
       align-items: center;
       justify-content: center;
@@ -965,8 +965,11 @@ def _render_index(
     }}
     .mini-player-backdrop.is-open {{ display: flex; }}
     .mini-player {{
-      width: min(1100px, 100%);
-      max-height: min(94vh, 920px);
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      width: min(380px, calc(100vw - 2rem));
+      max-height: min(86vh, 720px);
       overflow: auto;
       border: 1px solid #2f406d;
       border-radius: 14px;
@@ -976,8 +979,18 @@ def _render_index(
       padding: .85rem;
       display: none;
       gap: .65rem;
+      z-index: 50;
     }}
     .mini-player.is-visible {{ display: grid; }}
+    .mini-player.is-maximized {{
+      right: auto;
+      bottom: auto;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(1100px, calc(100vw - 2rem));
+      max-height: min(94vh, 920px);
+    }}
     .mini-player-header {{
       display: grid;
       grid-template-columns: 1fr auto auto;
@@ -1062,7 +1075,8 @@ def _render_index(
       .summary-grid {{ grid-template-columns: 1fr; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
       .mini-player-backdrop {{ padding: .5rem; }}
-      .mini-player {{ width: 100%; max-height: 95vh; }}
+      .mini-player {{ right: .5rem; bottom: .5rem; width: calc(100vw - 1rem); max-height: 95vh; }}
+      .mini-player.is-maximized {{ width: calc(100vw - 1rem); }}
       table {{ table-layout: auto; }}
       table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
@@ -1179,7 +1193,7 @@ def _render_index(
         <div class="mini-player-title" id="mini-player-title"></div>
         <div class="mini-player-source" id="mini-player-source"></div>
         <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close mini player">&times;</button>
-        <button id="mini-player-open" class="mini-player-open" type="button" aria-label="Expand player">Open</button>
+        <button id="mini-player-open" class="mini-player-open" type="button" aria-label="Maximize player">Maximize</button>
       </div>
       <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
       <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
@@ -1401,6 +1415,21 @@ def _render_index(
         if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', () => syncMiniTranscriptFromTrack(player));
       }}
 
+      function setMiniExpanded(expanded) {{
+        if (!miniPlayer || !miniBackdrop || !miniOpen) return;
+        const isExpanded = !!expanded;
+        miniPlayer.classList.toggle('is-maximized', isExpanded);
+        miniOpen.textContent = isExpanded ? 'Minimize' : 'Maximize';
+        miniOpen.setAttribute('aria-label', isExpanded ? 'Minimize player' : 'Maximize player');
+        if (isExpanded) {{
+          miniBackdrop.classList.add('is-open');
+          miniBackdrop.setAttribute('aria-hidden', 'false');
+        }} else {{
+          miniBackdrop.classList.remove('is-open');
+          miniBackdrop.setAttribute('aria-hidden', 'true');
+        }}
+      }}
+
       function renderMiniPlayer(stateInput) {{
         if (!miniPlayer || !miniAudio || !miniVideo || !miniBackdrop) return;
         let state = stateInput || null;
@@ -1461,8 +1490,7 @@ def _render_index(
         }});
 
         miniPlayer.classList.add('is-visible');
-        miniBackdrop.classList.add('is-open');
-        miniBackdrop.setAttribute('aria-hidden', 'false');
+        setMiniExpanded(false);
       }}
 
       function closeMiniPlayer() {{
@@ -1477,10 +1505,7 @@ def _render_index(
         localStorage.removeItem('getofflineMiniPlayerState');
         clearMiniMedia();
         if (miniPlayer) miniPlayer.classList.remove('is-visible');
-        if (miniBackdrop) {{
-          miniBackdrop.classList.remove('is-open');
-          miniBackdrop.setAttribute('aria-hidden', 'true');
-        }}
+        setMiniExpanded(false);
       }}
 
       document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
@@ -1523,7 +1548,7 @@ def _render_index(
             miniOpenNavigationPending = false;
             miniOpen.removeAttribute('aria-disabled');
             miniOpen.style.pointerEvents = '';
-          }}, 3000);
+          }}, 300);
 
           const raw = localStorage.getItem('getofflineMiniPlayerState');
           if (!raw) return;
@@ -1531,22 +1556,16 @@ def _render_index(
           try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
           if (!state || !state.rowId) return;
 
-          state.playUrl = '/play?id=' + state.rowId;
-          miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');
-
           const active = state.kind === 'video' ? miniVideo : miniAudio;
           if (active && active.style.display !== 'none') {{
             state.currentTime = active.currentTime || 0;
             state.paused = active.paused;
             postMiniProgress(state, state.currentTime || 0, true, 'mini-open');
-            try {{ active.pause(); }} catch (_) {{}}
-            active.removeAttribute('src');
-            while (active.firstChild) active.removeChild(active.firstChild);
-            active.load();
             localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
           }}
 
-          renderMiniPlayer(state);
+          const currentlyExpanded = miniPlayer && miniPlayer.classList.contains('is-maximized');
+          setMiniExpanded(!currentlyExpanded);
         }});
       }}
 
