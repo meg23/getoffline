@@ -793,6 +793,12 @@ def _render_index(
       flex-wrap: wrap;
     }}
     .toolbar-form {{ margin: 0; }}
+    .toolbar-spacer {{ flex: 1 1 auto; }}
+    .batch-toolbar-form {{ margin-left: auto; display: inline-flex; align-items: center; gap: .45rem; flex-wrap: nowrap; }}
+    .batch-select {{ min-width: 10rem; border: 1px solid #c9d5ef; border-radius: 8px; padding: .22rem .42rem; font: inherit; color: #243251; background: #fff; }}
+    .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
+    .batch-apply:hover {{ background: #dfe8ff; }}
+    .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
     .quick-add-backdrop {{
       position: fixed;
       inset: 0;
@@ -895,15 +901,6 @@ def _render_index(
     .episode-link:hover {{ color: var(--accent); text-decoration: underline; }}
     .selection-cell {{ text-align: right; }}
     .row-selector {{ width: 1.05rem; height: 1.05rem; cursor: pointer; accent-color: var(--accent); }}
-    .status-header {{ display: flex; align-items: center; justify-content: space-between; gap: .55rem; flex-wrap: wrap; }}
-    .status-controls {{ display: inline-flex; align-items: center; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }}
-    .batch-select {{ min-width: 9.6rem; border: 1px solid #c9d5ef; border-radius: 8px; padding: .22rem .42rem; font: inherit; color: #243251; background: #fff; }}
-    .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
-    .batch-apply:hover {{ background: #dfe8ff; }}
-    .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
-    .batch-selected-count {{ font-size: .78rem; color: var(--muted); }}
-    .select-all-toggle {{ display: inline-flex; align-items: center; gap: .45rem; justify-content: flex-end; width: 100%; font-size: .84rem; color: #2f3f66; }}
-
     .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
     .icon-button {{
       display: inline-flex;
@@ -1076,6 +1073,17 @@ def _render_index(
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
         <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
+        <span class="toolbar-spacer" aria-hidden="true"></span>
+        <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
+          <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
+            <option value="">Choose action</option>
+            <option value="played">played</option>
+            <option value="unplayed">unplayed</option>
+            <option value="favorite">favorite</option>
+            <option value="delete">delete</option>
+          </select>
+          <button id="batch-apply" class="batch-apply" type="submit" title="Apply batch action" aria-label="Apply batch action" disabled>Apply</button>
+        </form>
       </div>
     </div>
 
@@ -1102,21 +1110,19 @@ def _render_index(
       </div>
     </div>
 
-    <form id="batch-form" method="post" action="/batch-update" class="toolbar-form">
-      <table>
-        <colgroup>
-          <col class="col-channel" />
-          <col class="col-episode" />
-          <col class="col-source" />
-          <col class="col-type" />
-          <col class="col-size" />
-          <col class="col-status" />
-          <col class="col-select" />
-        </colgroup>
-        <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th><span class="status-header"><span>Status</span><span class="status-controls"><select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action"><option value="">Choose action</option><option value="played">played</option><option value="unplayed">unplayed</option><option value="favorite">favorite</option><option value="delete">delete</option></select><button id="batch-apply" class="batch-apply" type="submit" title="Apply batch action" aria-label="Apply batch action" disabled>Apply</button><span id="batch-selected-count" class="batch-selected-count">0 selected</span></span></span></th><th><label class="select-all-toggle" for="select-all-rows">Select all <input type="checkbox" id="select-all-rows" aria-label="Select all rows" /></label></th></tr></thead>
-        <tbody>{table_rows}</tbody>
-      </table>
-    </form>
+    <table>
+      <colgroup>
+        <col class="col-channel" />
+        <col class="col-episode" />
+        <col class="col-source" />
+        <col class="col-type" />
+        <col class="col-size" />
+        <col class="col-status" />
+        <col class="col-select" />
+      </colgroup>
+      <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input type="checkbox" id="select-all-rows" aria-label="Select all rows" /></th></tr></thead>
+      <tbody>{table_rows}</tbody>
+    </table>
 
     <section id="mini-player" class="mini-player" aria-live="polite">
       <div class="mini-player-header">
@@ -1164,13 +1170,11 @@ def _render_index(
       const batchForm = document.getElementById('batch-form');
       const batchAction = document.getElementById('batch-action');
       const batchApply = document.getElementById('batch-apply');
-      const batchSelectedCount = document.getElementById('batch-selected-count');
       const selectAllRows = document.getElementById('select-all-rows');
       const rowSelectors = Array.from(document.querySelectorAll('.row-selector'));
 
       const updateBatchState = () => {{
         const selectedCount = rowSelectors.filter((input) => input.checked).length;
-        if (batchSelectedCount) batchSelectedCount.textContent = selectedCount + ' selected';
         const hasAction = batchAction && batchAction.value;
         if (batchApply) batchApply.disabled = !(selectedCount > 0 && hasAction);
         if (selectAllRows) {{
@@ -1193,10 +1197,21 @@ def _render_index(
       if (batchAction) batchAction.addEventListener('change', updateBatchState);
       if (batchForm) {{
         batchForm.addEventListener('submit', (event) => {{
-          const selectedCount = rowSelectors.filter((input) => input.checked).length;
-          if (!batchAction || !batchAction.value || selectedCount === 0) {{
+          const selectedRows = rowSelectors.filter((input) => input.checked);
+          if (!batchAction || !batchAction.value || selectedRows.length === 0) {{
             event.preventDefault();
+            return;
           }}
+
+          batchForm.querySelectorAll('input[name="ids"][data-generated="1"]').forEach((input) => input.remove());
+          selectedRows.forEach((input) => {{
+            const hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.name = 'ids';
+            hiddenInput.value = input.value;
+            hiddenInput.setAttribute('data-generated', '1');
+            batchForm.appendChild(hiddenInput);
+          }});
         }});
       }}
       updateBatchState();
