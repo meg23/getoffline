@@ -791,6 +791,71 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('status-started" title="Playback started">STARTED</span>', body)
             self.assertIn('.status-started { background: #e2f3ff; color: #114e78; }', body)
 
+    def test_index_favorites_view_shows_favorites_regardless_of_played_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row_unplayed_favorite = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="FavA",
+                title="Favorite Unplayed",
+                file_path=str(root / "fav-unplayed.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=True,
+                last_position_seconds=0,
+            )
+            row_played_favorite = SimpleNamespace(
+                row_id=2,
+                source_type="podcast",
+                source_name="FavB",
+                title="Favorite Played",
+                file_path=str(root / "fav-played.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=True,
+                favorite=True,
+                last_position_seconds=5,
+            )
+            row_non_favorite = SimpleNamespace(
+                row_id=3,
+                source_type="podcast",
+                source_name="Other",
+                title="Not Favorite",
+                file_path=str(root / "other.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=False,
+                last_position_seconds=0,
+            )
+            (root / "fav-unplayed.mp3").write_text("x", encoding="utf-8")
+            (root / "fav-played.mp3").write_text("x", encoding="utf-8")
+            (root / "other.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row_unplayed_favorite, row_played_favorite, row_non_favorite],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+                favorites_only=True,
+            )
+
+            self.assertIn("Favorite Unplayed", body)
+            self.assertIn("Favorite Played", body)
+            self.assertNotIn("Not Favorite", body)
+
     def test_index_uses_batch_controls_and_play_link_for_item_actions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
