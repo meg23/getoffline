@@ -89,6 +89,9 @@ class AppState:
     config: Dict
     update_runner: Callable[[Dict, List[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
+    pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
+    pending_progress: Dict[int, float] = field(default_factory=dict)
+    pending_progress_event: threading.Event = field(default_factory=threading.Event)
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -453,6 +456,47 @@ def trigger_background_update(state: AppState) -> bool:
     thread = threading.Thread(target=_run_update_job, args=(state,), daemon=True)
     thread.start()
     return True
+
+
+def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float) -> None:
+    with state.pending_progress_lock:
+        state.pending_progress[int(row_id)] = max(0.0, float(position_seconds or 0.0))
+        state.pending_progress_event.set()
+
+
+def _flush_pending_progress_updates(state: AppState) -> int:
+    with state.pending_progress_lock:
+        pending = dict(state.pending_progress)
+        state.pending_progress.clear()
+        state.pending_progress_event.clear()
+
+    if not pending:
+        return 0
+
+    updated_count = 0
+    for row_id, seconds in pending.items():
+        updated = update_download_position_seconds(str(state.database_path), int(row_id), float(seconds))
+        if not updated:
+            log.warning("Progress update skipped for id=%s (db busy or row missing)", row_id)
+        else:
+            updated_count += 1
+    return updated_count
+
+
+def _progress_flush_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        state.pending_progress_event.wait(0.4)
+        if stop_event.is_set():
+            break
+        try:
+            _flush_pending_progress_updates(state)
+        except Exception as exc:
+            log.warning("Progress flush loop error: %s", exc)
+
+    try:
+        _flush_pending_progress_updates(state)
+    except Exception as exc:
+        log.warning("Final progress flush error: %s", exc)
 
 
 def _auto_update_interval_seconds(state: AppState) -> int:
@@ -2045,9 +2089,7 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid position_seconds")
                     return
 
-                updated = update_download_position_seconds(str(state.database_path), int(raw_id), position_seconds)
-                if not updated:
-                    log.warning("Progress update skipped for id=%s (db busy or row missing)", raw_id)
+                _enqueue_progress_update(state, int(raw_id), position_seconds)
                 self.send_response(204)
                 self.end_headers()
                 return
@@ -2188,6 +2230,15 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         daemon=True,
     )
     auto_update_thread.start()
+
+    progress_flush_stop_event = threading.Event()
+    progress_flush_thread = threading.Thread(
+        target=_progress_flush_loop,
+        args=(state, progress_flush_stop_event),
+        daemon=True,
+    )
+    progress_flush_thread.start()
+
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
     print("Automatic download checks are enabled. Adjust the interval in Settings (minutes).")
@@ -2197,4 +2248,6 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         pass
     finally:
         auto_update_stop_event.set()
+        progress_flush_stop_event.set()
+        state.pending_progress_event.set()
         server.server_close()

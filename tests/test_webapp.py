@@ -24,6 +24,8 @@ from webapp import (  # noqa: E402
     _resolve_safe_media_path,
     fetch_downloaded_media_row_by_id,
     _stream_media,
+    _enqueue_progress_update,
+    _flush_pending_progress_updates,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -36,6 +38,43 @@ from webapp import (  # noqa: E402
 class WebAppHelpersTests(unittest.TestCase):
     def setUp(self):
         _LAST_DISCONNECT_LOGGED_AT.clear()
+
+    def test_flush_pending_progress_updates_batches_in_memory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "QueueTest",
+                    "item_uid": "uid-queue-1",
+                    "item_url": "https://example.com/episode.mp3",
+                    "title": "Queued Progress Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            row = fetch_downloaded_media_rows(db_path)[0]
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+            _enqueue_progress_update(state, row.row_id, 5.0)
+            _enqueue_progress_update(state, row.row_id, 9.5)
+
+            updated_count = _flush_pending_progress_updates(state)
+            self.assertEqual(updated_count, 1)
+            self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 9.5, places=3)
 
     def test_parse_range_header(self):
         self.assertEqual(_parse_range_header("bytes=0-99", 1000), {"start": 0, "end": 99})
