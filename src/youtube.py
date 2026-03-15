@@ -15,6 +15,7 @@ from database import (
     materialize_youtube_cookie_file,
     resolve_database_path,
     upsert_download,
+    has_episode_title_for_source,
 )
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
@@ -290,6 +291,12 @@ def download_youtube_items(config, downloaded_items):
                 if live_reason:
                     return live_reason
 
+                webpage_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip().lower()
+                if info_dict.get("_type") == "url" and info_dict.get("ie_key") == "Youtube" and not webpage_url:
+                    webpage_url = str(info_dict.get("url") or "").strip().lower()
+                if "/shorts/" in webpage_url:
+                    return "Skipping YouTube Shorts entry from playlist."
+
                 item_id = str(info_dict.get("id") or "").strip() or None
                 item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
                 media_url = str(info_dict.get("url") or "").strip() or None
@@ -297,6 +304,8 @@ def download_youtube_items(config, downloaded_items):
                 item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
                 if is_downloaded(db_path, "youtube", name, item_uid):
                     return f"Skipping already downloaded item in DB: {_clean_log_title(title)}"
+                if title and has_episode_title_for_source(db_path, "youtube", name, title):
+                    return f"Skipping duplicate title in DB: {_clean_log_title(title)}"
                 return None
 
             def record_download_progress(d):
@@ -402,6 +411,7 @@ def download_youtube_items(config, downloaded_items):
                 "no_warnings": True,
                 "noprogress": True,
                 "logger": _YoutubeDlQuietLogger(),
+                "extract_flat": "in_playlist",
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path

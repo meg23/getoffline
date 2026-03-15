@@ -45,6 +45,8 @@ MEDIA_EXTENSIONS = {
     ".mov",
 }
 
+VIDEO_EXTENSIONS = {"mp4", "mkv", "webm", "mov"}
+
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
@@ -244,6 +246,13 @@ def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
         _log_sqlite_lock("repairing downloaded file paths", exc)
         if not _is_sqlite_lock_error(exc):
             raise
+
+
+def _infer_media_type_for_redownload(row: MediaRow) -> str:
+    ext = str(row.file_ext or "").strip().lower().lstrip(".")
+    if not ext:
+        ext = Path(str(row.file_path or "")).suffix.lower().lstrip(".")
+    return "video" if ext in VIDEO_EXTENSIONS else "audio"
 
 
 def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = None) -> List[MediaRow]:
@@ -1100,8 +1109,8 @@ def _render_index(
           <div>
             <label for="quick-add-media-type">Download type</label>
             <select id="quick-add-media-type" class="quick-add-select" name="media_type">
+              <option value="video" selected>video</option>
               <option value="audio">audio</option>
-              <option value="video">video</option>
             </select>
           </div>
           <div class="quick-add-actions">
@@ -1568,6 +1577,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let transcriptReady = false;
       let hasSentPageExitProgress = false;
       let lastForcedProgressAt = 0;
+      let playbackCompleted = false;
 
       if (!player) return;
 
@@ -1783,6 +1793,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }});
       player.addEventListener('play', persistMiniPlayerState);
       player.addEventListener('ended', () => {{
+        playbackCompleted = true;
         localStorage.removeItem('getofflineMiniPlayerState');
         postProgress(0, true, 'ended');
       }});
@@ -1797,6 +1808,10 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       function sendPageExitProgress() {{
         if (hasSentPageExitProgress) return;
         hasSentPageExitProgress = true;
+        if (playbackCompleted) {{
+          postProgress(0, true, 'page-exit');
+          return;
+        }}
         postProgress(player.currentTime, true, 'page-exit');
       }}
 
@@ -2200,7 +2215,7 @@ def make_handler(state: AppState):
                     trigger_single_youtube_download(
                         state,
                         url=row.item_url,
-                        media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio",
+                        media_type=_infer_media_type_for_redownload(row),
                     )
                 elif row.source_type == "podcast":
                     trigger_background_update(state)
@@ -2354,7 +2369,7 @@ def make_handler(state: AppState):
                                 trigger_single_youtube_download(
                                     state,
                                     url=row.item_url,
-                                    media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio",
+                                    media_type=_infer_media_type_for_redownload(row),
                                 )
                             elif row.source_type == "podcast":
                                 should_trigger_podcast_redownload = True
