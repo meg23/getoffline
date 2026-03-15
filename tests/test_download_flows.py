@@ -325,7 +325,50 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
 
             combined = "\n".join(logs.output)
             self.assertIn("No new YouTube media downloaded for DupCounts (playlist_items_seen=2, allowed_after_filters=2, skipped_by_filters=0", combined)
+            self.assertIn("ytdlp_items_announced=0", combined)
             self.assertIn("YouTube accepted playlist entries for DupCounts but did not emit item download events.", combined)
+
+
+    def test_youtube_no_download_warning_includes_ytdlp_announced_item_count(self):
+        class FakeYoutubeDLAnnouncedButNoProgress(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                flt = self.opts.get("match_filter")
+                if flt:
+                    flt({"id": "x1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=x1"})
+                    flt({"id": "x2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=x2"})
+
+                logger = self.opts.get("logger")
+                if logger:
+                    logger.debug("[download] Downloading item 1 of 2")
+                    logger.debug("[download] Downloading item 2 of 2")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 3,
+                    "max_downloads": 3,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "AnnouncedNoProgress",
+                        "url": "https://youtube.com/playlist?list=announced",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLAnnouncedButNoProgress), self.assertLogs("getoffline", level="WARNING") as logs:
+                youtube.download_youtube_items(config, [])
+
+            combined = "\n".join(logs.output)
+            self.assertIn("ytdlp_items_announced=2", combined)
+            self.assertIn("yt-dlp announced 2 playlist item(s) for AnnouncedNoProgress but produced no file events", combined)
 
     def test_youtube_logs_item_failures_when_progress_hook_reports_error(self):
         class FakeYoutubeDLErrorStatus(FakeYoutubeDL):
