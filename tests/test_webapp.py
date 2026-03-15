@@ -146,6 +146,8 @@ class WebAppHelpersTests(unittest.TestCase):
             )
             self.assertIn('aria-label="Sync downloads"', body)
             self.assertIn("action=\"/update\"", body)
+            self.assertIn("event.preventDefault();", body)
+            self.assertIn("fetch('/update', { method: 'POST', keepalive: true })", body)
             self.assertIn("Mark all as played", body)
             self.assertIn("Show played", body)
             self.assertIn("Show favorites", body)
