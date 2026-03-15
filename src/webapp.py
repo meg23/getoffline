@@ -2107,9 +2107,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         name = html.escape(str(item.get("name") or ""))
         url = html.escape(str(item.get("url") or ""))
         media_type_value = str(item.get("type") or "audio")
-        media_type = html.escape(media_type_value)
         subtitles_enabled = bool(item.get("subtitles", True))
-        subtitles = "yes" if subtitles_enabled else "no"
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         toggle_to = "0" if enabled else "1"
@@ -2120,30 +2118,31 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         media_video_selected = " selected" if media_type_value == "video" else ""
         subtitles_yes_selected = " selected" if subtitles_enabled else ""
         subtitles_no_selected = "" if subtitles_enabled else " selected"
+        edit_form_id = f"youtube-edit-{row_id}"
         youtube_rows.append(
             f"""
             <tr>
-              <td colspan="6">
-                <form method="post" action="/settings" class="inline-edit-grid">
-                  <input type="hidden" name="source_action" value="edit" />
-                  <input type="hidden" name="source_id" value="{row_id}" />
-                  <input type="hidden" name="source_type" value="youtube" />
-                  <input type="text" name="name" value="{name}" required />
-                  <input type="url" name="url" value="{url}" required />
-                  <select name="media_type"><option value="audio"{media_audio_selected}>audio</option><option value="video"{media_video_selected}>video</option></select>
-                  <select name="subtitles"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select>
-                  <input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" />
-                  <span class="row-status">{status}</span>
-                  <button type="submit" class="primary">Save</button>
-                </form>
+              <td><input type="text" name="name" value="{name}" required form="{edit_form_id}" /></td>
+              <td><input type="url" name="url" value="{url}" required form="{edit_form_id}" /></td>
+              <td><select name="media_type" form="{edit_form_id}"><option value="audio"{media_audio_selected}>audio</option><option value="video"{media_video_selected}>video</option></select></td>
+              <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
+              <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
+              <td><span class="row-status">{status}</span></td>
+              <td>
                 <div class="row-actions">
-                  <form method="post" action="/settings">
+                  <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
+                    <input type="hidden" name="source_action" value="edit" />
+                    <input type="hidden" name="source_id" value="{row_id}" />
+                    <input type="hidden" name="source_type" value="youtube" />
+                    <button type="submit" class="primary">Save</button>
+                  </form>
+                  <form method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="toggle" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="enabled" value="{toggle_to}" />
                     <button type="submit">{toggle_label}</button>
                   </form>
-                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">
+                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
                     <input type="hidden" name="source_action" value="delete" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <button type="submit" class="danger">Delete</button>
@@ -2160,7 +2159,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         name = html.escape(str(item.get("name") or ""))
         url = html.escape(str(item.get("url") or ""))
         subtitles_enabled = bool(item.get("subtitles", True))
-        subtitles = "yes" if subtitles_enabled else "no"
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         toggle_to = "0" if enabled else "1"
@@ -2169,29 +2167,30 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
         subtitles_yes_selected = " selected" if subtitles_enabled else ""
         subtitles_no_selected = "" if subtitles_enabled else " selected"
+        edit_form_id = f"podcast-edit-{row_id}"
         podcast_rows.append(
             f"""
             <tr>
-              <td colspan="5">
-                <form method="post" action="/settings" class="inline-edit-grid inline-edit-grid-podcast">
-                  <input type="hidden" name="source_action" value="edit" />
-                  <input type="hidden" name="source_id" value="{row_id}" />
-                  <input type="hidden" name="source_type" value="podcast" />
-                  <input type="text" name="name" value="{name}" required />
-                  <input type="url" name="url" value="{url}" required />
-                  <select name="subtitles"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select>
-                  <input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" />
-                  <span class="row-status">{status}</span>
-                  <button type="submit" class="primary">Save</button>
-                </form>
+              <td><input type="text" name="name" value="{name}" required form="{edit_form_id}" /></td>
+              <td><input type="url" name="url" value="{url}" required form="{edit_form_id}" /></td>
+              <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
+              <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
+              <td><span class="row-status">{status}</span></td>
+              <td>
                 <div class="row-actions">
-                  <form method="post" action="/settings">
+                  <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
+                    <input type="hidden" name="source_action" value="edit" />
+                    <input type="hidden" name="source_id" value="{row_id}" />
+                    <input type="hidden" name="source_type" value="podcast" />
+                    <button type="submit" class="primary">Save</button>
+                  </form>
+                  <form method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="toggle" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="enabled" value="{toggle_to}" />
                     <button type="submit">{toggle_label}</button>
                   </form>
-                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">
+                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
                     <input type="hidden" name="source_action" value="delete" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <button type="submit" class="danger">Delete</button>
@@ -2202,8 +2201,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             """
         )
 
-    youtube_table = "".join(youtube_rows) or "<tr><td colspan='6'>No YouTube sources configured.</td></tr>"
-    podcast_table = "".join(podcast_rows) or "<tr><td colspan='5'>No podcast sources configured.</td></tr>"
+    youtube_table = "".join(youtube_rows) or "<tr><td colspan='7'>No YouTube sources configured.</td></tr>"
+    podcast_table = "".join(podcast_rows) or "<tr><td colspan='6'>No podcast sources configured.</td></tr>"
 
     return f"""<!doctype html>
 <html>
@@ -2225,12 +2224,12 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .section {{ border: 1px solid #e2e8f8; border-radius: 10px; padding: .9rem; margin-top: 1rem; }}
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }}
     table {{ width: 100%; border-collapse: collapse; margin-top: .6rem; }}
-    th, td {{ border-bottom: 1px solid #e9eef9; padding: .45rem; text-align: left; vertical-align: top; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .45rem; }}
+    th, td {{ border-bottom: 1px solid #e9eef9; padding: .45rem; text-align: left; vertical-align: middle; }}
+    .section table input, .section table select {{ width: 100%; min-width: 0; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; }}
     .row-actions form {{ margin: 0; }}
-    .inline-edit-grid {{ display: grid; grid-template-columns: 1.2fr 2.2fr .8fr .8fr .9fr auto auto; gap: .4rem; align-items: center; }}
-    .inline-edit-grid-podcast {{ grid-template-columns: 1.4fr 2.5fr .9fr .9fr auto auto; }}
-    .row-status {{ font-size: .85rem; color: #445; text-transform: uppercase; }}
+    .compact-form {{ display: inline-block; }}
+    .row-status {{ font-size: .85rem; color: #445; text-transform: uppercase; font-weight: 600; }}
   </style>
 </head>
 <body>
@@ -2290,7 +2289,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     <div class="section">
       <h2>YouTube sources</h2>
     <table>
-        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{youtube_table}</tbody>
       </table>
 
@@ -2319,7 +2318,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     <div class="section">
       <h2>Podcast sources</h2>
     <table>
-        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{podcast_table}</tbody>
       </table>
 
