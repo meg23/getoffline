@@ -1526,18 +1526,20 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         updateLabel(safe);
         lastSentSeconds = safe;
 
-        if (force && reason === 'page-exit' && navigator.sendBeacon) {{
+        if (force) {{
           const beaconBody = new URLSearchParams();
           beaconBody.set('id', String(rowId));
           beaconBody.set('position_seconds', safe.toFixed(3));
           beaconBody.set('reason', String(reason || 'unknown'));
           beaconBody.set('forced', '1');
-          const blob = new Blob([beaconBody.toString()], {{ type: 'application/x-www-form-urlencoded' }});
-          if (navigator.sendBeacon('/progress', blob)) return;
-        }}
+          if (navigator.sendBeacon) {{
+            const blob = new Blob([beaconBody.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+            if (navigator.sendBeacon('/progress', blob)) return;
+          }}
 
-        if (force) {{
-          if (reason === 'page-exit') return;
+          // During navigation lifecycle events, avoid starting extra fetches that can be cancelled.
+          if (reason === 'page-exit' || reason === 'back-link' || reason === 'pause') return;
+
           sendProgressRequest(safe, false, reason || 'forced', true);
           return;
         }}
