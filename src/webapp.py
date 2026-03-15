@@ -1102,7 +1102,7 @@ def _render_index(
   <div class="container">
     <div class="hero">
       <h1>GetOffline</h1>
-      <div class="summary-grid">
+      <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
           <div class="summary-value">{total_items}</div>
@@ -1176,7 +1176,7 @@ def _render_index(
       </div>
     </div>
 
-    <table>
+    <table id="downloads-table">
       <colgroup>
         <col class="col-channel" />
         <col class="col-episode" />
@@ -1187,7 +1187,7 @@ def _render_index(
         <col class="col-select" />
       </colgroup>
       <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th></tr></thead>
-      <tbody>{table_rows}</tbody>
+      <tbody id="downloads-table-body">{table_rows}</tbody>
     </table>
 
     <section id="mini-player-backdrop" class="mini-player-backdrop" aria-hidden="true">
@@ -1236,6 +1236,35 @@ def _render_index(
         }}
       }};
 
+      const setSyncButtonIdle = () => {{
+        if (!syncButton) return;
+        syncButton.disabled = false;
+        const icon = syncButton.querySelector('.bi');
+        const iconUse = syncButton.querySelector('use');
+        if (icon) icon.classList.remove('is-spinning');
+        if (iconUse) iconUse.setAttribute('href', '#bi-download');
+      }};
+
+      const refreshLibraryViewWithoutReload = () => {{
+        return fetch(window.location.pathname + window.location.search, {{ cache: 'no-store' }})
+          .then((response) => response.ok ? response.text() : null)
+          .then((htmlText) => {{
+            if (!htmlText) return;
+            const parsed = new window.DOMParser().parseFromString(htmlText, 'text/html');
+            const nextSummary = parsed.getElementById('summary-grid');
+            const nextTableBody = parsed.getElementById('downloads-table-body');
+            const currentSummary = document.getElementById('summary-grid');
+            const currentTableBody = document.getElementById('downloads-table-body');
+
+            if (currentSummary && nextSummary) currentSummary.innerHTML = nextSummary.innerHTML;
+            if (currentTableBody && nextTableBody) currentTableBody.innerHTML = nextTableBody.innerHTML;
+          }})
+          .catch(() => {{}})
+          .finally(() => {{
+            setSyncButtonIdle();
+          }});
+      }};
+
       const scheduleSyncReloadWhenSafe = () => {{
         clearSyncReloadTimer();
         const attemptReload = () => {{
@@ -1258,6 +1287,8 @@ def _render_index(
               syncStatusPollTimer = window.setTimeout(pollSyncStatusUntilFinished, syncStatusPollIntervalMs);
               return;
             }}
+            setSyncButtonIdle();
+            refreshLibraryViewWithoutReload();
             scheduleSyncReloadWhenSafe();
           }})
           .catch(() => {{
