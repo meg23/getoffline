@@ -1536,6 +1536,19 @@ def _render_index(
           miniBackdrop.classList.remove('is-open');
           miniBackdrop.setAttribute('aria-hidden', 'true');
         }}
+
+        if (isExpanded && !miniTranscriptReady) {{
+          const raw = localStorage.getItem('getofflineMiniPlayerState');
+          let state = null;
+          try {{ state = raw ? JSON.parse(raw) : null; }} catch (_) {{ state = null; }}
+          if (state && state.kind === 'audio' && state.hasSubtitles) {{
+            const active = miniAudio && miniAudio.style.display !== 'none' ? miniAudio : null;
+            if (active) {{
+              const subtitleTrackEl = active.querySelector('track[kind="subtitles"]');
+              scheduleMiniTranscriptInit(state, active, subtitleTrackEl);
+            }}
+          }}
+        }}
       }}
 
       function renderMiniPlayer(stateInput) {{
