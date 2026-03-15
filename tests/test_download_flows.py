@@ -790,7 +790,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
         with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
             source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
 
-        self.assertEqual(source_name, "Channel_Name")
+        self.assertEqual(source_name, "ChannelName")
 
     def test_resolve_youtube_source_name_falls_back_to_title(self):
         class FakeYoutubeDLForMetadata(FakeYoutubeDL):
@@ -801,7 +801,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
         with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
             source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
 
-        self.assertEqual(source_name, "A_Title_Only")
+        self.assertEqual(source_name, "ATitleOnly")
 
 
 class PodcastRetryTests(unittest.TestCase):

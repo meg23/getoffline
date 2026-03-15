@@ -8,7 +8,7 @@ from yt_dlp import YoutubeDL
 from database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from utils import ensure_dir, sanitize
+from utils import ensure_dir, sanitize, sanitize_channel_name
 
 
 PODCAST_DOWNLOAD_RETRIES = 3
@@ -99,7 +99,7 @@ def download_podcasts(config, downloaded_items):
         if not entry.get("enabled", True):
             continue
         try:
-            name = sanitize(entry["name"])
+            name = sanitize_channel_name(entry["name"])
             url = entry["url"]
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
