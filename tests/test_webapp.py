@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -85,6 +86,25 @@ class WebAppHelpersTests(unittest.TestCase):
             )
 
             _stream_media(handler, media)
+
+
+    def test_fetch_downloaded_media_row_by_id_returns_none_when_locked(self):
+        with mock.patch("webapp.init_database"), mock.patch(
+            "webapp.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
+        ), mock.patch("webapp.log.warning") as warning_mock:
+            row = fetch_downloaded_media_row_by_id(Path("/tmp/test.sqlite3"), 1)
+
+        self.assertIsNone(row)
+        warning_mock.assert_called_once()
+
+    def test_fetch_downloaded_media_rows_returns_empty_when_locked(self):
+        with mock.patch("webapp.init_database"), mock.patch(
+            "webapp.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
+        ), mock.patch("webapp.log.warning") as warning_mock:
+            rows = fetch_downloaded_media_rows(Path("/tmp/test.sqlite3"))
+
+        self.assertEqual(rows, [])
+        warning_mock.assert_called()
 
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
