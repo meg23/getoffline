@@ -234,6 +234,9 @@ def download_youtube_items(config, downloaded_items):
             download_progress_markers = {}
             known_download_titles = {}
             finished_download_info: Dict[str, Dict] = {}
+            failed_download_reasons: Dict[str, int] = {}
+            candidate_entries_seen = 0
+            candidate_entries_allowed = 0
             skip_reason_counts: Dict[str, int] = {}
             skip_reason_examples: Dict[str, str] = {}
 
@@ -287,6 +290,10 @@ def download_youtube_items(config, downloaded_items):
                 file_stem = Path(str(output_file or "")).stem.strip()
                 return file_stem or "unknown title"
 
+            def _record_download_failure(reason: str):
+                reason_key = str(reason or "unknown failure").strip() or "unknown failure"
+                failed_download_reasons[reason_key] = failed_download_reasons.get(reason_key, 0) + 1
+
             def _record_skip(reason: str, info_dict: dict):
                 reason_key = str(reason or "unknown").strip() or "unknown"
                 skip_reason_counts[reason_key] = skip_reason_counts.get(reason_key, 0) + 1
@@ -297,7 +304,9 @@ def download_youtube_items(config, downloaded_items):
                         skip_reason_examples[reason_key] = title
 
             def skip_known_downloads(info_dict, *, incomplete=False):
+                nonlocal candidate_entries_seen, candidate_entries_allowed
                 _ = incomplete
+                candidate_entries_seen += 1
                 live_reason = skip_live_streams(info_dict, incomplete=incomplete)
                 if live_reason:
                     _record_skip(live_reason, info_dict)
@@ -324,6 +333,7 @@ def download_youtube_items(config, downloaded_items):
                     reason = "Skipping duplicate title in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
+                candidate_entries_allowed += 1
                 return None
 
             def record_download_progress(d):
@@ -352,6 +362,11 @@ def download_youtube_items(config, downloaded_items):
                     elif download_key not in download_progress_markers:
                         download_progress_markers[download_key] = 0
                         log.info("Download progress for %s: %s (size unknown)", name, output_file)
+
+                if status == "error":
+                    reason = str(d.get("error") or "yt-dlp reported an item download error")
+                    _record_download_failure(reason)
+                    log.warning("YouTube item failed for %s: %s", name, reason)
 
                 if status == "finished":
                     total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
@@ -426,7 +441,7 @@ def download_youtube_items(config, downloaded_items):
                 "match_filter": skip_known_downloads,
                 "ignoreerrors": True,
                 "quiet": True,
-                "no_warnings": True,
+                "no_warnings": False,
                 "noprogress": True,
                 "logger": _YoutubeDlQuietLogger(),
                 "extract_flat": "in_playlist",
@@ -500,10 +515,18 @@ def download_youtube_items(config, downloaded_items):
                         skip_parts.append(f"{reason}={count}")
                 log.info("YouTube skips for %s: %s", name, "; ".join(skip_parts))
 
+            if failed_download_reasons:
+                failure_parts = [f"{reason}={count}" for reason, count in sorted(failed_download_reasons.items(), key=lambda item: item[0].lower())]
+                log.warning("YouTube download errors for %s: %s", name, "; ".join(failure_parts))
+
             if not completed_download_ids:
                 log.warning(
-                    "No new YouTube media downloaded for %s. This usually means entries were already in the DB or filtered out.",
+                    "No new YouTube media downloaded for %s (playlist_items_seen=%d, allowed_after_filters=%d, skipped_by_filters=%d, failed_downloads=%d).",
                     name,
+                    candidate_entries_seen,
+                    candidate_entries_allowed,
+                    max(candidate_entries_seen - candidate_entries_allowed, 0),
+                    sum(failed_download_reasons.values()),
                 )
 
             if download_type == "audio":

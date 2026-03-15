@@ -284,6 +284,52 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             youtube_items = [item for item in downloaded_items if item.startswith("YouTube: ")]
             self.assertEqual(youtube_items, ["YouTube: WarFronts – Main Title"])
 
+
+    def test_youtube_logs_item_failures_when_progress_hook_reports_error(self):
+        class FakeYoutubeDLErrorStatus(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                info_dict = {
+                    "id": "video-error",
+                    "title": "Broken Item",
+                    "webpage_url": "https://youtube.com/watch?v=video-error",
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "error",
+                            "info_dict": info_dict,
+                            "error": "HTTP Error 403: Forbidden",
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "ErrorChannel",
+                        "url": "https://youtube.com/watch?v=video-error",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLErrorStatus), self.assertLogs("getoffline", level="WARNING") as logs:
+                youtube.download_youtube_items(config, [])
+
+            combined = "\n".join(logs.output)
+            self.assertIn("YouTube item failed for ErrorChannel: HTTP Error 403: Forbidden", combined)
+            self.assertIn("YouTube download errors for ErrorChannel: HTTP Error 403: Forbidden=1", combined)
+
     def test_podcast_subtitles_default_to_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
