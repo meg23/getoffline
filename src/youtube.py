@@ -234,6 +234,8 @@ def download_youtube_items(config, downloaded_items):
             download_progress_markers = {}
             known_download_titles = {}
             finished_download_info: Dict[str, Dict] = {}
+            skip_reason_counts: Dict[str, int] = {}
+            skip_reason_examples: Dict[str, str] = {}
 
             subtitle_or_aux_exts = {
                 ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
@@ -285,17 +287,29 @@ def download_youtube_items(config, downloaded_items):
                 file_stem = Path(str(output_file or "")).stem.strip()
                 return file_stem or "unknown title"
 
+            def _record_skip(reason: str, info_dict: dict):
+                reason_key = str(reason or "unknown").strip() or "unknown"
+                skip_reason_counts[reason_key] = skip_reason_counts.get(reason_key, 0) + 1
+
+                if reason_key not in skip_reason_examples:
+                    title = _clean_log_title(info_dict.get("title"))
+                    if title and title != "unknown title":
+                        skip_reason_examples[reason_key] = title
+
             def skip_known_downloads(info_dict, *, incomplete=False):
                 _ = incomplete
                 live_reason = skip_live_streams(info_dict, incomplete=incomplete)
                 if live_reason:
+                    _record_skip(live_reason, info_dict)
                     return live_reason
 
                 webpage_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip().lower()
                 if info_dict.get("_type") == "url" and info_dict.get("ie_key") == "Youtube" and not webpage_url:
                     webpage_url = str(info_dict.get("url") or "").strip().lower()
                 if "/shorts/" in webpage_url:
-                    return "Skipping YouTube Shorts entry from playlist."
+                    reason = "Skipping YouTube Shorts entry from playlist."
+                    _record_skip(reason, info_dict)
+                    return reason
 
                 item_id = str(info_dict.get("id") or "").strip() or None
                 item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
@@ -303,9 +317,13 @@ def download_youtube_items(config, downloaded_items):
                 title = str(info_dict.get("title") or "").strip() or None
                 item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
                 if is_downloaded(db_path, "youtube", name, item_uid):
-                    return f"Skipping already downloaded item in DB: {_clean_log_title(title)}"
+                    reason = "Skipping already downloaded item in DB"
+                    _record_skip(reason, info_dict)
+                    return f"{reason}: {_clean_log_title(title)}"
                 if title and has_episode_title_for_source(db_path, "youtube", name, title):
-                    return f"Skipping duplicate title in DB: {_clean_log_title(title)}"
+                    reason = "Skipping duplicate title in DB"
+                    _record_skip(reason, info_dict)
+                    return f"{reason}: {_clean_log_title(title)}"
                 return None
 
             def record_download_progress(d):
@@ -471,6 +489,22 @@ def download_youtube_items(config, downloaded_items):
                 len(delta_video),
                 len(hook_files_all),
             )
+
+            if skip_reason_counts:
+                skip_parts = []
+                for reason, count in sorted(skip_reason_counts.items(), key=lambda item: item[0].lower()):
+                    example = skip_reason_examples.get(reason)
+                    if example:
+                        skip_parts.append(f"{reason}={count} (e.g., {example})")
+                    else:
+                        skip_parts.append(f"{reason}={count}")
+                log.info("YouTube skips for %s: %s", name, "; ".join(skip_parts))
+
+            if not completed_download_ids:
+                log.warning(
+                    "No new YouTube media downloaded for %s. This usually means entries were already in the DB or filtered out.",
+                    name,
+                )
 
             if download_type == "audio":
                 worker_count = int(defaults.get("processing_workers", 2))
