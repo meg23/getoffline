@@ -1412,8 +1412,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let lastSentSeconds = -9999;
       let progressInFlight = false;
       let queuedProgressSeconds = null;
-      let progressController = null;
-      const progressRequestTimeoutMs = 2500;
+      const periodicProgressSeconds = 5.0;
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
       let transcriptReady = false;
@@ -1449,18 +1448,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           body: body.toString(),
         }};
 
-        let abortTimer = null;
-        if (keepalive) {{
-          options.keepalive = true;
-        }} else {{
-          progressController = new AbortController();
-          options.signal = progressController.signal;
-          abortTimer = window.setTimeout(() => {{
-            if (!progressController) return;
-            progressController.abort();
-            console.warn('[getoffline] /progress request timed out and was aborted');
-          }}, progressRequestTimeoutMs);
-        }}
+        if (keepalive) options.keepalive = true;
 
         return fetch('/progress', options)
           .then((response) => {{
@@ -1468,29 +1456,18 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
             return response;
           }})
           .catch((err) => {{
-            if (err && err.name === 'AbortError') return null;
             console.warn('[getoffline] /progress request failed', err);
             return null;
-          }})
-          .finally(() => {{
-            if (abortTimer !== null) window.clearTimeout(abortTimer);
           }});
-      }}
-
-      function abortPendingProgressRequest() {{
-        if (!progressController) return;
-        progressController.abort();
-        progressController = null;
       }}
 
       function postProgress(seconds, force) {{
         const safe = Math.max(0, Number(seconds || 0));
-        if (!force && Math.abs(safe - lastSentSeconds) < 1.0) return;
+        if (!force && Math.abs(safe - lastSentSeconds) < periodicProgressSeconds) return;
         updateLabel(safe);
         lastSentSeconds = safe;
 
         if (force && navigator.sendBeacon) {{
-          abortPendingProgressRequest();
           const beaconBody = new URLSearchParams();
           beaconBody.set('id', String(rowId));
           beaconBody.set('position_seconds', safe.toFixed(3));
@@ -1512,7 +1489,6 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         queuedProgressSeconds = null;
         sendProgressRequest(safe, false).finally(() => {{
           progressInFlight = false;
-          progressController = null;
           if (queuedProgressSeconds === null) return;
           const queued = queuedProgressSeconds;
           queuedProgressSeconds = null;
@@ -1645,10 +1621,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         if (document.hidden) postProgress(player.currentTime, true);
       }});
       window.addEventListener('beforeunload', () => postProgress(player.currentTime, true));
-      window.addEventListener('pagehide', () => {{
-        abortPendingProgressRequest();
-        postProgress(player.currentTime, true);
-      }});
+      window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
     }})();
   </script>
 </body>
