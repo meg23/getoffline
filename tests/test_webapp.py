@@ -780,6 +780,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
             self.assertIn("if (miniOpenNavigationPending) {", body)
             self.assertIn("miniOpen.setAttribute('aria-disabled', 'true');", body)
+            self.assertIn("suppressSyncAutoReload = true;", body)
+            self.assertIn("window.clearTimeout(syncReloadTimer);", body)
             self.assertIn("miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):

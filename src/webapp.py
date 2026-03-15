@@ -1124,6 +1124,8 @@ def _render_index(
     (() => {{
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
+      let syncReloadTimer = null;
+      let suppressSyncAutoReload = false;
       if (syncForm && syncButton && !syncButton.disabled) {{
         let syncRequestInFlight = false;
 
@@ -1141,9 +1143,11 @@ def _render_index(
           fetch('/update', {{ method: 'POST', keepalive: true }})
             .catch(() => {{}})
             .finally(() => {{
-              window.setTimeout(() => {{
+              if (suppressSyncAutoReload || document.hidden) return;
+              syncReloadTimer = window.setTimeout(() => {{
+                if (suppressSyncAutoReload || document.hidden) return;
                 window.location.reload();
-              }}, 150);
+              }}, 250);
             }});
         }});
       }}
@@ -1242,6 +1246,12 @@ def _render_index(
 
       if (miniOpen) {{
         miniOpen.addEventListener('click', (event) => {{
+          suppressSyncAutoReload = true;
+          if (syncReloadTimer !== null) {{
+            window.clearTimeout(syncReloadTimer);
+            syncReloadTimer = null;
+          }}
+
           if (miniOpenNavigationPending) {{
             event.preventDefault();
             return;
