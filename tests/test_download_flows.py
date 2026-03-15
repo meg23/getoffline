@@ -284,6 +284,165 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             youtube_items = [item for item in downloaded_items if item.startswith("YouTube: ")]
             self.assertEqual(youtube_items, ["YouTube: WarFronts – Main Title"])
 
+
+
+    def test_youtube_download_uses_full_entry_extraction(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "FullExtract",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL):
+                youtube.download_youtube_items(config, [])
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertTrue("extract_flat" not in opts or not opts.get("extract_flat"))
+
+    def test_youtube_no_download_warning_uses_unique_filter_counts(self):
+        class FakeYoutubeDLDuplicateFilterCalls(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                flt = self.opts.get("match_filter")
+                entries = [
+                    {"id": "a1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=a1"},
+                    {"id": "a1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=a1"},
+                    {"id": "b2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=b2"},
+                    {"id": "b2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=b2"},
+                ]
+                for entry in entries:
+                    if flt:
+                        flt(entry)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 3,
+                    "max_downloads": 3,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "DupCounts",
+                        "url": "https://youtube.com/playlist?list=dup",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLDuplicateFilterCalls), self.assertLogs("getoffline", level="WARNING") as logs:
+                youtube.download_youtube_items(config, [])
+
+            combined = "\n".join(logs.output)
+            self.assertIn("No new YouTube media downloaded for DupCounts (playlist_items_seen=2, allowed_after_filters=2, skipped_by_filters=0", combined)
+            self.assertIn("ytdlp_items_announced=0", combined)
+            self.assertIn("YouTube accepted playlist entries for DupCounts but did not emit item download events.", combined)
+
+
+    def test_youtube_no_download_warning_includes_ytdlp_announced_item_count(self):
+        class FakeYoutubeDLAnnouncedButNoProgress(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                flt = self.opts.get("match_filter")
+                if flt:
+                    flt({"id": "x1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=x1"})
+                    flt({"id": "x2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=x2"})
+
+                logger = self.opts.get("logger")
+                if logger:
+                    logger.debug("[download] Downloading item 1 of 2")
+                    logger.debug("[download] Downloading item 2 of 2")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 3,
+                    "max_downloads": 3,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "AnnouncedNoProgress",
+                        "url": "https://youtube.com/playlist?list=announced",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLAnnouncedButNoProgress), self.assertLogs("getoffline", level="WARNING") as logs:
+                youtube.download_youtube_items(config, [])
+
+            combined = "\n".join(logs.output)
+            self.assertIn("ytdlp_items_announced=2", combined)
+            self.assertIn("yt-dlp announced 2 playlist item(s) for AnnouncedNoProgress but produced no file events", combined)
+
+    def test_youtube_logs_item_failures_when_progress_hook_reports_error(self):
+        class FakeYoutubeDLErrorStatus(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                info_dict = {
+                    "id": "video-error",
+                    "title": "Broken Item",
+                    "webpage_url": "https://youtube.com/watch?v=video-error",
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "error",
+                            "info_dict": info_dict,
+                            "error": "HTTP Error 403: Forbidden",
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "ErrorChannel",
+                        "url": "https://youtube.com/watch?v=video-error",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLErrorStatus), self.assertLogs("getoffline", level="WARNING") as logs:
+                youtube.download_youtube_items(config, [])
+
+            combined = "\n".join(logs.output)
+            self.assertIn("YouTube item failed for ErrorChannel: HTTP Error 403: Forbidden", combined)
+            self.assertIn("YouTube download errors for ErrorChannel: HTTP Error 403: Forbidden=1", combined)
+
     def test_podcast_subtitles_default_to_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {

@@ -91,12 +91,31 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
 
 
 class _YoutubeDlQuietLogger:
+    def __init__(self, run_stats: Optional[Dict[str, int]] = None):
+        self.run_stats = run_stats if run_stats is not None else {}
+
+    def _count(self, key: str):
+        self.run_stats[key] = self.run_stats.get(key, 0) + 1
+
+    def _record_message(self, message: str):
+        lower = message.lower()
+        if "[download] downloading item " in lower:
+            self._count("playlist_item_announced")
+        if "unavailable" in lower:
+            self._count("messages_unavailable")
+        if "private" in lower:
+            self._count("messages_private")
+        if "sign in" in lower or "age-restricted" in lower:
+            self._count("messages_auth")
+
     def debug(self, msg):
         if not msg:
             return
         message = str(msg).strip()
         if not message:
             return
+
+        self._record_message(message)
 
         if message.startswith("[debug]"):
             log.debug("%s", message)
@@ -105,11 +124,19 @@ class _YoutubeDlQuietLogger:
 
     def warning(self, msg):
         if msg:
-            log.warning("%s", msg)
+            message = str(msg).strip()
+            if message:
+                self._record_message(message)
+                self._count("warnings")
+                log.warning("%s", message)
 
     def error(self, msg):
         if msg:
-            log.error("%s", msg)
+            message = str(msg).strip()
+            if message:
+                self._record_message(message)
+                self._count("errors")
+                log.error("%s", message)
 
 
 def _process_audio_media_file(
@@ -234,6 +261,14 @@ def download_youtube_items(config, downloaded_items):
             download_progress_markers = {}
             known_download_titles = {}
             finished_download_info: Dict[str, Dict] = {}
+            failed_download_reasons: Dict[str, int] = {}
+            candidate_entries_seen_keys = set()
+            candidate_entries_allowed_keys = set()
+            candidate_entries_allowed_examples: List[str] = []
+            progress_status_counts: Dict[str, int] = {}
+            ytdlp_message_stats: Dict[str, int] = {}
+            skip_reason_counts: Dict[str, int] = {}
+            skip_reason_examples: Dict[str, str] = {}
 
             subtitle_or_aux_exts = {
                 ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
@@ -268,6 +303,13 @@ def download_youtube_items(config, downloaded_items):
                     or fallback
                 )
 
+            def _entry_key(info_dict: dict) -> str:
+                return get_download_key(
+                    info_dict,
+                    str(info_dict.get("url") or info_dict.get("title") or "unknown-entry").strip() or "unknown-entry",
+                )
+
+
             def _is_subtitle_or_aux_download(output_file: str) -> bool:
                 path = Path(str(output_file or ""))
                 return path.suffix.lower() in subtitle_or_aux_exts
@@ -285,17 +327,35 @@ def download_youtube_items(config, downloaded_items):
                 file_stem = Path(str(output_file or "")).stem.strip()
                 return file_stem or "unknown title"
 
+            def _record_download_failure(reason: str):
+                reason_key = str(reason or "unknown failure").strip() or "unknown failure"
+                failed_download_reasons[reason_key] = failed_download_reasons.get(reason_key, 0) + 1
+
+            def _record_skip(reason: str, info_dict: dict):
+                reason_key = str(reason or "unknown").strip() or "unknown"
+                skip_reason_counts[reason_key] = skip_reason_counts.get(reason_key, 0) + 1
+
+                if reason_key not in skip_reason_examples:
+                    title = _clean_log_title(info_dict.get("title"))
+                    if title and title != "unknown title":
+                        skip_reason_examples[reason_key] = title
+
             def skip_known_downloads(info_dict, *, incomplete=False):
                 _ = incomplete
+                entry_key = _entry_key(info_dict)
+                candidate_entries_seen_keys.add(entry_key)
                 live_reason = skip_live_streams(info_dict, incomplete=incomplete)
                 if live_reason:
+                    _record_skip(live_reason, info_dict)
                     return live_reason
 
                 webpage_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip().lower()
                 if info_dict.get("_type") == "url" and info_dict.get("ie_key") == "Youtube" and not webpage_url:
                     webpage_url = str(info_dict.get("url") or "").strip().lower()
                 if "/shorts/" in webpage_url:
-                    return "Skipping YouTube Shorts entry from playlist."
+                    reason = "Skipping YouTube Shorts entry from playlist."
+                    _record_skip(reason, info_dict)
+                    return reason
 
                 item_id = str(info_dict.get("id") or "").strip() or None
                 item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
@@ -303,13 +363,22 @@ def download_youtube_items(config, downloaded_items):
                 title = str(info_dict.get("title") or "").strip() or None
                 item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
                 if is_downloaded(db_path, "youtube", name, item_uid):
-                    return f"Skipping already downloaded item in DB: {_clean_log_title(title)}"
+                    reason = "Skipping already downloaded item in DB"
+                    _record_skip(reason, info_dict)
+                    return f"{reason}: {_clean_log_title(title)}"
                 if title and has_episode_title_for_source(db_path, "youtube", name, title):
-                    return f"Skipping duplicate title in DB: {_clean_log_title(title)}"
+                    reason = "Skipping duplicate title in DB"
+                    _record_skip(reason, info_dict)
+                    return f"{reason}: {_clean_log_title(title)}"
+                candidate_entries_allowed_keys.add(entry_key)
+                title = _clean_log_title(info_dict.get("title"))
+                if title != "unknown title" and title not in candidate_entries_allowed_examples and len(candidate_entries_allowed_examples) < 3:
+                    candidate_entries_allowed_examples.append(title)
                 return None
 
             def record_download_progress(d):
-                status = d.get("status")
+                status = str(d.get("status") or "unknown")
+                progress_status_counts[status] = progress_status_counts.get(status, 0) + 1
                 info = d.get("info_dict") or {}
                 output_file = d.get("filename") or info.get("_filename") or "unknown file"
                 download_key = get_download_key(info, output_file)
@@ -334,6 +403,11 @@ def download_youtube_items(config, downloaded_items):
                     elif download_key not in download_progress_markers:
                         download_progress_markers[download_key] = 0
                         log.info("Download progress for %s: %s (size unknown)", name, output_file)
+
+                if status == "error":
+                    reason = str(d.get("error") or "yt-dlp reported an item download error")
+                    _record_download_failure(reason)
+                    log.warning("YouTube item failed for %s: %s", name, reason)
 
                 if status == "finished":
                     total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
@@ -408,10 +482,9 @@ def download_youtube_items(config, downloaded_items):
                 "match_filter": skip_known_downloads,
                 "ignoreerrors": True,
                 "quiet": True,
-                "no_warnings": True,
+                "no_warnings": False,
                 "noprogress": True,
-                "logger": _YoutubeDlQuietLogger(),
-                "extract_flat": "in_playlist",
+                "logger": _YoutubeDlQuietLogger(ytdlp_message_stats),
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
@@ -436,6 +509,7 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
+            log.info("YouTube download mode for %s: full entry extraction enabled", name)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
@@ -471,6 +545,67 @@ def download_youtube_items(config, downloaded_items):
                 len(delta_video),
                 len(hook_files_all),
             )
+
+            if skip_reason_counts:
+                skip_parts = []
+                for reason, count in sorted(skip_reason_counts.items(), key=lambda item: item[0].lower()):
+                    example = skip_reason_examples.get(reason)
+                    if example:
+                        skip_parts.append(f"{reason}={count} (e.g., {example})")
+                    else:
+                        skip_parts.append(f"{reason}={count}")
+                log.info("YouTube skips for %s: %s", name, "; ".join(skip_parts))
+
+            if failed_download_reasons:
+                failure_parts = [f"{reason}={count}" for reason, count in sorted(failed_download_reasons.items(), key=lambda item: item[0].lower())]
+                log.warning("YouTube download errors for %s: %s", name, "; ".join(failure_parts))
+
+            if not completed_download_ids:
+                seen_count = len(candidate_entries_seen_keys)
+                allowed_count = len(candidate_entries_allowed_keys)
+                failed_count = sum(failed_download_reasons.values())
+                hook_finished_count = progress_status_counts.get("finished", 0)
+                hook_error_count = progress_status_counts.get("error", 0)
+
+                announced_count = ytdlp_message_stats.get("playlist_item_announced", 0)
+                log.warning(
+                    "No new YouTube media downloaded for %s (playlist_items_seen=%d, allowed_after_filters=%d, skipped_by_filters=%d, failed_downloads=%d, hook_finished_events=%d, hook_error_events=%d, ytdlp_items_announced=%d).",
+                    name,
+                    seen_count,
+                    allowed_count,
+                    max(seen_count - allowed_count, 0),
+                    failed_count,
+                    hook_finished_count,
+                    hook_error_count,
+                    announced_count,
+                )
+
+                if allowed_count > 0 and hook_finished_count == 0 and hook_error_count == 0:
+                    example_text = ", ".join(candidate_entries_allowed_examples) if candidate_entries_allowed_examples else "no example titles"
+                    log.warning(
+                        "YouTube accepted playlist entries for %s but did not emit item download events. Sample allowed entries: %s",
+                        name,
+                        example_text,
+                    )
+                if announced_count > 0 and hook_finished_count == 0 and hook_error_count == 0:
+                    unavailable_count = ytdlp_message_stats.get("messages_unavailable", 0)
+                    private_count = ytdlp_message_stats.get("messages_private", 0)
+                    auth_count = ytdlp_message_stats.get("messages_auth", 0)
+                    if unavailable_count or private_count or auth_count:
+                        log.warning(
+                            "yt-dlp announced %d playlist item(s) for %s but produced no file events (unavailable_msgs=%d, private_msgs=%d, auth_msgs=%d).",
+                            announced_count,
+                            name,
+                            unavailable_count,
+                            private_count,
+                            auth_count,
+                        )
+                    else:
+                        log.warning(
+                            "yt-dlp announced %d playlist item(s) for %s but produced no file events. This usually indicates extraction-only behavior or upstream blocking.",
+                            announced_count,
+                            name,
+                        )
 
             if download_type == "audio":
                 worker_count = int(defaults.get("processing_workers", 2))
