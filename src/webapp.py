@@ -98,6 +98,8 @@ class AppState:
     progress_received_count: int = 0
     progress_flush_count: int = 0
     progress_last_log_at: float = 0.0
+    progress_last_reason: str = "unknown"
+    progress_last_forced: bool = False
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -464,7 +466,7 @@ def trigger_background_update(state: AppState) -> bool:
     return True
 
 
-def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float) -> None:
+def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float, reason: str = "unknown", forced: bool = False) -> None:
     safe_seconds = max(0.0, float(position_seconds or 0.0))
     with state.pending_progress_lock:
         state.pending_progress[int(row_id)] = safe_seconds
@@ -474,6 +476,8 @@ def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: flo
     now = time.monotonic()
     with state.progress_metrics_lock:
         state.progress_received_count += 1
+        state.progress_last_reason = str(reason or "unknown")
+        state.progress_last_forced = bool(forced)
         received_count = state.progress_received_count
         should_log = (now - state.progress_last_log_at) >= 2.0
         if should_log:
@@ -481,11 +485,13 @@ def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: flo
 
     if should_log:
         log.info(
-            "Progress enqueue stats: received=%s queue_size=%s latest_id=%s latest_seconds=%.3f",
+            "Progress enqueue stats: received=%s queue_size=%s latest_id=%s latest_seconds=%.3f reason=%s forced=%s",
             received_count,
             queue_size,
             int(row_id),
             safe_seconds,
+            str(reason or "unknown"),
+            "yes" if forced else "no",
         )
 
 
@@ -1470,10 +1476,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         }}
       }}
 
-      function sendProgressRequest(seconds, keepalive) {{
+      function sendProgressRequest(seconds, keepalive, reason, forced) {{
         const body = new URLSearchParams();
         body.set('id', String(rowId));
         body.set('position_seconds', seconds.toFixed(3));
+        body.set('reason', String(reason || 'unknown'));
+        body.set('forced', forced ? '1' : '0');
 
         const options = {{
           method: 'POST',
@@ -1518,17 +1526,19 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         updateLabel(safe);
         lastSentSeconds = safe;
 
-        if (force && navigator.sendBeacon) {{
+        if (force && reason === 'page-exit' && navigator.sendBeacon) {{
           const beaconBody = new URLSearchParams();
           beaconBody.set('id', String(rowId));
           beaconBody.set('position_seconds', safe.toFixed(3));
+          beaconBody.set('reason', String(reason || 'unknown'));
+          beaconBody.set('forced', '1');
           const blob = new Blob([beaconBody.toString()], {{ type: 'application/x-www-form-urlencoded' }});
           if (navigator.sendBeacon('/progress', blob)) return;
         }}
 
         if (force) {{
           if (reason === 'page-exit') return;
-          sendProgressRequest(safe, false);
+          sendProgressRequest(safe, false, reason || 'forced', true);
           return;
         }}
 
@@ -1539,12 +1549,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
         progressInFlight = true;
         queuedProgressSeconds = null;
-        sendProgressRequest(safe, false).finally(() => {{
+        sendProgressRequest(safe, false, reason || 'timeupdate', false).finally(() => {{
           progressInFlight = false;
           if (queuedProgressSeconds === null) return;
           const queued = queuedProgressSeconds;
           queuedProgressSeconds = null;
-          postProgress(queued, false);
+          postProgress(queued, false, reason);
         }});
       }}
 
@@ -2168,6 +2178,9 @@ def make_handler(state: AppState):
                 form = parse_qs(body)
                 raw_id = (form.get("id") or [None])[0]
                 raw_position = (form.get("position_seconds") or [None])[0]
+                raw_reason = str((form.get("reason") or ["unknown"])[0]).strip() or "unknown"
+                raw_forced = str((form.get("forced") or ["0"])[0]).strip().lower()
+                is_forced = raw_forced in {"1", "true", "yes", "on"}
                 if raw_id is None or not str(raw_id).isdigit():
                     log.warning("POST /progress missing/invalid id payload=%s", body)
                     self.send_error(400, "Missing or invalid id")
@@ -2180,7 +2193,10 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid position_seconds")
                     return
 
-                _enqueue_progress_update(state, int(raw_id), position_seconds)
+                if is_forced:
+                    log.info("POST /progress forced id=%s reason=%s seconds=%.3f", raw_id, raw_reason, position_seconds)
+
+                _enqueue_progress_update(state, int(raw_id), position_seconds, reason=raw_reason, forced=is_forced)
                 self.send_response(204)
                 self.end_headers()
                 return

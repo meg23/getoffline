@@ -761,6 +761,9 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("queuedProgressSeconds = safe", body)
             self.assertIn("const periodicProgressSeconds = 5.0", body)
             self.assertIn("/progress request failed", body)
+            self.assertIn("body.set('reason'", body)
+            self.assertIn("body.set('forced'", body)
+            self.assertIn("reason === 'page-exit'", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
