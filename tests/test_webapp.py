@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -23,6 +24,8 @@ from webapp import (  # noqa: E402
     _resolve_safe_media_path,
     fetch_downloaded_media_row_by_id,
     _stream_media,
+    _enqueue_progress_update,
+    _flush_pending_progress_updates,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -35,6 +38,43 @@ from webapp import (  # noqa: E402
 class WebAppHelpersTests(unittest.TestCase):
     def setUp(self):
         _LAST_DISCONNECT_LOGGED_AT.clear()
+
+    def test_flush_pending_progress_updates_batches_in_memory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "QueueTest",
+                    "item_uid": "uid-queue-1",
+                    "item_url": "https://example.com/episode.mp3",
+                    "title": "Queued Progress Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            row = fetch_downloaded_media_rows(db_path)[0]
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+            _enqueue_progress_update(state, row.row_id, 5.0)
+            _enqueue_progress_update(state, row.row_id, 9.5)
+
+            updated_count = _flush_pending_progress_updates(state)
+            self.assertEqual(updated_count, 1)
+            self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 9.5, places=3)
 
     def test_parse_range_header(self):
         self.assertEqual(_parse_range_header("bytes=0-99", 1000), {"start": 0, "end": 99})
@@ -85,6 +125,25 @@ class WebAppHelpersTests(unittest.TestCase):
             )
 
             _stream_media(handler, media)
+
+
+    def test_fetch_downloaded_media_row_by_id_returns_none_when_locked(self):
+        with mock.patch("webapp.init_database"), mock.patch(
+            "webapp.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
+        ), mock.patch("webapp.log.warning") as warning_mock:
+            row = fetch_downloaded_media_row_by_id(Path("/tmp/test.sqlite3"), 1)
+
+        self.assertIsNone(row)
+        warning_mock.assert_called_once()
+
+    def test_fetch_downloaded_media_rows_returns_empty_when_locked(self):
+        with mock.patch("webapp.init_database"), mock.patch(
+            "webapp.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
+        ), mock.patch("webapp.log.warning") as warning_mock:
+            rows = fetch_downloaded_media_rows(Path("/tmp/test.sqlite3"))
+
+        self.assertEqual(rows, [])
+        warning_mock.assert_called()
 
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -146,6 +205,8 @@ class WebAppHelpersTests(unittest.TestCase):
             )
             self.assertIn('aria-label="Sync downloads"', body)
             self.assertIn("action=\"/update\"", body)
+            self.assertIn("event.preventDefault();", body)
+            self.assertIn("fetch('/update', { method: 'POST', keepalive: true })", body)
             self.assertIn("Mark all as played", body)
             self.assertIn("Show played", body)
             self.assertIn("Show favorites", body)
@@ -696,6 +757,15 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("shouldAutoPlay", body)
             self.assertIn("get('autoplay') === '1'", body)
             self.assertIn("navigator.sendBeacon('/progress'", body)
+            self.assertIn("let progressInFlight = false", body)
+            self.assertIn("queuedProgressSeconds = safe", body)
+            self.assertIn("const periodicProgressSeconds = 5.0", body)
+            self.assertIn("/progress request failed", body)
+            self.assertIn("body.set('reason'", body)
+            self.assertIn("body.set('forced'", body)
+            self.assertIn("reason === 'page-exit'", body)
+            self.assertIn("reason === 'back-link'", body)
+            self.assertIn("reason === 'pause'", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -713,8 +783,18 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                     "last_items_count": "0",
                 },
             )
-            self.assertIn("const fallbackUrl = miniOpen.href || '/'", body)
-            self.assertIn("window.location.assign(fallbackUrl)", body)
+            self.assertIn("if (miniOpenNavigationPending) {", body)
+            self.assertIn("miniOpen.setAttribute('aria-disabled', 'true');", body)
+            self.assertIn("suppressSyncAutoReload = true;", body)
+            self.assertIn("window.clearTimeout(syncReloadTimer);", body)
+            self.assertIn("miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');", body)
+            self.assertIn("postMiniProgress(state, state.currentTime || 0, true, 'mini-open');", body)
+            self.assertIn("postMiniProgress(state, active.currentTime || 0, true, 'mini-close');", body)
+            self.assertIn("postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');", body)
+            self.assertIn("function updatePlayLinkResumeHint(rowId, seconds)", body)
+            self.assertIn("link.dataset.resumeSeconds = safe.toFixed(3);", body)
+            self.assertIn("active.removeAttribute('src');", body)
+            self.assertIn("while (active.firstChild) active.removeChild(active.firstChild);", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
