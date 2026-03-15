@@ -3,10 +3,12 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from database import (  # noqa: E402
+    _record_revision,
     apply_migrations,
     get_stored_config,
     init_database,
@@ -18,6 +20,23 @@ from database import (  # noqa: E402
 
 
 class DatabaseMigrationsTests(unittest.TestCase):
+    def test_logs_when_sqlite_write_hits_lock(self):
+        with mock.patch("database.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")):
+            with mock.patch("database.log.warning") as warning_mock:
+                with self.assertRaises(sqlite3.OperationalError):
+                    _record_revision("/tmp/test-lock.sqlite3", "0001_create_downloads")
+
+                warning_mock.assert_called_once()
+                self.assertIn("recording schema revision", str(warning_mock.call_args))
+
+    def test_does_not_log_non_lock_sqlite_write_errors(self):
+        with mock.patch("database.sqlite3.connect", side_effect=sqlite3.OperationalError("no such table")):
+            with mock.patch("database.log.warning") as warning_mock:
+                with self.assertRaises(sqlite3.OperationalError):
+                    _record_revision("/tmp/test-lock.sqlite3", "0001_create_downloads")
+
+                warning_mock.assert_not_called()
+
     def test_init_database_applies_schema_migrations(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "downloads.sqlite3")

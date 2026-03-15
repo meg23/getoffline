@@ -8,6 +8,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from logger import get_logger
+
 try:
     from sqlalchemy import (
         Boolean,
@@ -25,6 +27,28 @@ try:
     HAS_SQLALCHEMY = True
 except ModuleNotFoundError:  # pragma: no cover
     HAS_SQLALCHEMY = False
+
+
+log = get_logger("database")
+
+
+def _is_sqlite_lock_error_message(message: str) -> bool:
+    text = str(message or "").lower()
+    return "database is locked" in text or "database table is locked" in text
+
+
+def _log_sqlite_lock(db_path: str, operation: str, error_message: str) -> None:
+    log.warning(
+        "SQLite lock while %s (db=%s): %s",
+        operation,
+        db_path,
+        error_message,
+    )
+
+
+def _log_sqlite_lock_if_needed(db_path: str, operation: str, exc: Exception) -> None:
+    if _is_sqlite_lock_error_message(str(exc)):
+        _log_sqlite_lock(db_path, operation, str(exc))
 
 
 def _utcnow() -> datetime:
@@ -85,12 +109,16 @@ def _is_revision_applied(db_path: str, revision: str) -> bool:
 
 
 def _record_revision(db_path: str, revision: str) -> None:
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO schema_migrations (revision, applied_at) VALUES (?, ?)",
-            (revision, _utcnow().isoformat()),
-        )
-        conn.commit()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO schema_migrations (revision, applied_at) VALUES (?, ?)",
+                (revision, _utcnow().isoformat()),
+            )
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "recording schema revision", exc)
+        raise
 
 
 def _migration_0001_create_downloads(db_path: str) -> None:
@@ -286,26 +314,30 @@ def ensure_config_seeded(db_path: str, defaults: Optional[Dict[str, Any]] = None
             if key in defaults and defaults.get(key) is not None:
                 seed[key] = str(defaults[key])
 
-    with sqlite3.connect(db_path) as conn:
-        for key, value in seed.items():
+    try:
+        with sqlite3.connect(db_path) as conn:
+            for key, value in seed.items():
+                conn.execute(
+                    """
+                    INSERT INTO app_config (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO NOTHING
+                    """,
+                    (key, str(value), now),
+                )
+
             conn.execute(
                 """
-                INSERT INTO app_config (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO NOTHING
+                INSERT INTO download_settings (id, youtube_cookie_text, cookie_updated_at, updated_at)
+                VALUES (1, NULL, NULL, ?)
+                ON CONFLICT(id) DO NOTHING
                 """,
-                (key, str(value), now),
+                (now,),
             )
-
-        conn.execute(
-            """
-            INSERT INTO download_settings (id, youtube_cookie_text, cookie_updated_at, updated_at)
-            VALUES (1, NULL, NULL, ?)
-            ON CONFLICT(id) DO NOTHING
-            """,
-            (now,),
-        )
-        conn.commit()
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "seeding app config", exc)
+        raise
 
 
 def get_stored_config(db_path: str) -> Dict[str, Any]:
@@ -367,41 +399,49 @@ def update_stored_defaults(db_path: str, updates: Dict[str, Any]) -> None:
         return
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
-    with sqlite3.connect(db_path) as conn:
-        for key, value in updates.items():
-            if key not in DEFAULT_APP_CONFIG or value is None:
-                continue
-            conn.execute(
-                """
-                INSERT INTO app_config (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                """,
-                (key, str(value), now),
-            )
-        conn.commit()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            for key, value in updates.items():
+                if key not in DEFAULT_APP_CONFIG or value is None:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO app_config (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                    """,
+                    (key, str(value), now),
+                )
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "updating app defaults", exc)
+        raise
 
 
 def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO download_settings (id, youtube_cookie_text, cookie_updated_at, updated_at)
-            VALUES (1, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                youtube_cookie_text = excluded.youtube_cookie_text,
-                cookie_updated_at = excluded.cookie_updated_at,
-                updated_at = excluded.updated_at
-            """,
-            (
-                youtube_cookie_text,
-                now if youtube_cookie_text else None,
-                now,
-            ),
-        )
-        conn.commit()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO download_settings (id, youtube_cookie_text, cookie_updated_at, updated_at)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    youtube_cookie_text = excluded.youtube_cookie_text,
+                    cookie_updated_at = excluded.cookie_updated_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    youtube_cookie_text,
+                    now if youtube_cookie_text else None,
+                    now,
+                ),
+            )
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "updating download settings", exc)
+        raise
 
 
 def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = None) -> Optional[str]:
@@ -422,50 +462,53 @@ def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = N
 def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[Dict[str, Any]]) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("DELETE FROM source_configs")
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("DELETE FROM source_configs")
+            for idx, item in enumerate(youtube):
+                conn.execute(
+                    """
+                    INSERT INTO source_configs (
+                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "youtube",
+                        idx,
+                        str(item.get("name") or "").strip(),
+                        str(item.get("url") or "").strip(),
+                        str(item.get("type") or "audio").strip().lower(),
+                        1 if bool(item.get("enabled", True)) else 0,
+                        1 if bool(item.get("subtitles", True)) else 0,
+                        item.get("subtitle_offset_seconds"),
+                        now,
+                    ),
+                )
 
-        for idx, item in enumerate(youtube):
-            conn.execute(
-                """
-                INSERT INTO source_configs (
-                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "youtube",
-                    idx,
-                    str(item.get("name") or "").strip(),
-                    str(item.get("url") or "").strip(),
-                    str(item.get("type") or "audio").strip().lower(),
-                    1 if bool(item.get("enabled", True)) else 0,
-                    1 if bool(item.get("subtitles", True)) else 0,
-                    item.get("subtitle_offset_seconds"),
-                    now,
-                ),
-            )
+            for idx, item in enumerate(podcasts):
+                conn.execute(
+                    """
+                    INSERT INTO source_configs (
+                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "podcast",
+                        idx,
+                        str(item.get("name") or "").strip(),
+                        str(item.get("url") or "").strip(),
+                        None,
+                        1 if bool(item.get("enabled", True)) else 0,
+                        1 if bool(item.get("subtitles", True)) else 0,
+                        item.get("subtitle_offset_seconds"),
+                        now,
+                    ),
+                )
 
-        for idx, item in enumerate(podcasts):
-            conn.execute(
-                """
-                INSERT INTO source_configs (
-                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "podcast",
-                    idx,
-                    str(item.get("name") or "").strip(),
-                    str(item.get("url") or "").strip(),
-                    None,
-                    1 if bool(item.get("enabled", True)) else 0,
-                    1 if bool(item.get("subtitles", True)) else 0,
-                    item.get("subtitle_offset_seconds"),
-                    now,
-                ),
-            )
-
-        conn.commit()
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "replacing source configs", exc)
+        raise
 
 
 def seed_sources_from_config(db_path: str, config: Dict[str, Any]) -> None:
@@ -490,49 +533,61 @@ def add_source_config(
 ) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
-    with sqlite3.connect(db_path) as conn:
-        current_position = conn.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 FROM source_configs WHERE source_type = ?",
-            (source_type,),
-        ).fetchone()[0]
-        conn.execute(
-            """
-            INSERT INTO source_configs (
-                source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                source_type,
-                int(current_position or 0),
-                str(name or "").strip(),
-                str(url or "").strip(),
-                (str(media_type).strip().lower() if media_type is not None else None),
-                1 if enabled else 0,
-                1 if subtitles else 0,
-                subtitle_offset_seconds,
-                now,
-            ),
-        )
-        conn.commit()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            current_position = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM source_configs WHERE source_type = ?",
+                (source_type,),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO source_configs (
+                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source_type,
+                    int(current_position or 0),
+                    str(name or "").strip(),
+                    str(url or "").strip(),
+                    (str(media_type).strip().lower() if media_type is not None else None),
+                    1 if enabled else 0,
+                    1 if subtitles else 0,
+                    subtitle_offset_seconds,
+                    now,
+                ),
+            )
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "adding source config", exc)
+        raise
 
 
 def delete_source_config(db_path: str, row_id: int) -> bool:
     ensure_config_seeded(db_path)
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.execute("DELETE FROM source_configs WHERE id = ?", (int(row_id),))
-        conn.commit()
-        return (cur.rowcount or 0) > 0
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute("DELETE FROM source_configs WHERE id = ?", (int(row_id),))
+            conn.commit()
+            return (cur.rowcount or 0) > 0
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "deleting source config", exc)
+        raise
 
 
 def set_source_enabled(db_path: str, row_id: int, enabled: bool) -> bool:
     ensure_config_seeded(db_path)
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.execute(
-            "UPDATE source_configs SET enabled = ?, updated_at = ? WHERE id = ?",
-            (1 if enabled else 0, _utcnow().isoformat(), int(row_id)),
-        )
-        conn.commit()
-        return (cur.rowcount or 0) > 0
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE source_configs SET enabled = ?, updated_at = ? WHERE id = ?",
+                (1 if enabled else 0, _utcnow().isoformat(), int(row_id)),
+            )
+            conn.commit()
+            return (cur.rowcount or 0) > 0
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "updating source enabled state", exc)
+        raise
 
 
 def _init_database_sqlite(db_path: str) -> None:
@@ -604,8 +659,9 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "played_at": payload.get("played_at"),
     }
 
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
             """
             INSERT INTO downloads (
                 source_type, source_name, source_url, item_uid, item_id, item_url, media_url,
@@ -657,9 +713,12 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 favorite=COALESCE(downloads.favorite, 0),
                 played_at=downloads.played_at
             """,
-            values,
-        )
-        conn.commit()
+                values,
+            )
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "upserting download row", exc)
+        raise
 
 
 if HAS_SQLALCHEMY:
@@ -741,81 +800,101 @@ if HAS_SQLALCHEMY:
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
         now = _utcnow()
-        with Session(_engine_for(db_path)) as session:
-            stmt = select(DownloadRecord).where(
-                DownloadRecord.source_type == payload["source_type"],
-                DownloadRecord.source_name == payload["source_name"],
-                DownloadRecord.item_uid == payload["item_uid"],
-            )
-            existing = session.execute(stmt).scalar_one_or_none()
-            if existing is None:
-                existing = DownloadRecord(
-                    source_type=payload["source_type"],
-                    source_name=payload["source_name"],
-                    source_url=payload.get("source_url"),
-                    item_uid=payload["item_uid"],
-                    first_seen_at=now,
+        try:
+            with Session(_engine_for(db_path)) as session:
+                stmt = select(DownloadRecord).where(
+                    DownloadRecord.source_type == payload["source_type"],
+                    DownloadRecord.source_name == payload["source_name"],
+                    DownloadRecord.item_uid == payload["item_uid"],
                 )
-                session.add(existing)
+                existing = session.execute(stmt).scalar_one_or_none()
+                if existing is None:
+                    existing = DownloadRecord(
+                        source_type=payload["source_type"],
+                        source_name=payload["source_name"],
+                        source_url=payload.get("source_url"),
+                        item_uid=payload["item_uid"],
+                        first_seen_at=now,
+                    )
+                    session.add(existing)
 
-            for key in [
-                "item_id", "item_url", "media_url", "title", "description", "uploader", "channel", "extractor",
-                "playlist_id", "playlist_title", "upload_date", "duration_seconds", "file_path", "file_ext",
-                "file_size_bytes", "expected_bytes", "format_id", "format_note", "audio_codec", "video_codec",
-                "resolution", "fps", "subtitle_path", "download_status", "error_message",
-            ]:
-                setattr(existing, key, payload.get(key))
-            existing.subtitle_enabled = bool(payload.get("subtitle_enabled", True))
-            existing.raw_metadata_json = _coerce_json(payload.get("raw_metadata"))
-            existing.last_seen_at = now
-            if existing.download_status == "downloaded":
-                existing.completed_at = now
-            session.commit()
+                for key in [
+                    "item_id", "item_url", "media_url", "title", "description", "uploader", "channel", "extractor",
+                    "playlist_id", "playlist_title", "upload_date", "duration_seconds", "file_path", "file_ext",
+                    "file_size_bytes", "expected_bytes", "format_id", "format_note", "audio_codec", "video_codec",
+                    "resolution", "fps", "subtitle_path", "download_status", "error_message",
+                ]:
+                    setattr(existing, key, payload.get(key))
+                existing.subtitle_enabled = bool(payload.get("subtitle_enabled", True))
+                existing.raw_metadata_json = _coerce_json(payload.get("raw_metadata"))
+                existing.last_seen_at = now
+                if existing.download_status == "downloaded":
+                    existing.completed_at = now
+                session.commit()
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "upserting download row", exc)
+            raise
 
     def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
         now = _utcnow() if played else None
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            record.played = bool(played)
-            record.played_at = now
-            record.last_seen_at = _utcnow()
-            session.commit()
-            return True
+        try:
+            with Session(_engine_for(db_path)) as session:
+                record = session.get(DownloadRecord, int(row_id))
+                if record is None:
+                    return False
+                record.played = bool(played)
+                record.played_at = now
+                record.last_seen_at = _utcnow()
+                session.commit()
+                return True
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "marking download played", exc)
+            raise
 
     def mark_all_downloads_played(db_path: str) -> int:
         now = _utcnow()
-        with Session(_engine_for(db_path)) as session:
-            updated = session.query(DownloadRecord).filter(DownloadRecord.played.is_(False)).update(
-                {
-                    DownloadRecord.played: True,
-                    DownloadRecord.played_at: now,
-                    DownloadRecord.last_seen_at: now,
-                },
-                synchronize_session=False,
-            )
-            session.commit()
-            return int(updated or 0)
+        try:
+            with Session(_engine_for(db_path)) as session:
+                updated = session.query(DownloadRecord).filter(DownloadRecord.played.is_(False)).update(
+                    {
+                        DownloadRecord.played: True,
+                        DownloadRecord.played_at: now,
+                        DownloadRecord.last_seen_at: now,
+                    },
+                    synchronize_session=False,
+                )
+                session.commit()
+                return int(updated or 0)
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "marking all downloads played", exc)
+            raise
 
     def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            record.favorite = bool(favorite)
-            record.last_seen_at = _utcnow()
-            session.commit()
-            return True
+        try:
+            with Session(_engine_for(db_path)) as session:
+                record = session.get(DownloadRecord, int(row_id))
+                if record is None:
+                    return False
+                record.favorite = bool(favorite)
+                record.last_seen_at = _utcnow()
+                session.commit()
+                return True
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "marking download favorite", exc)
+            raise
 
     def delete_download_entry(db_path: str, row_id: int) -> bool:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            session.delete(record)
-            session.commit()
-            return True
+        try:
+            with Session(_engine_for(db_path)) as session:
+                record = session.get(DownloadRecord, int(row_id))
+                if record is None:
+                    return False
+                session.delete(record)
+                session.commit()
+                return True
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "deleting download entry", exc)
+            raise
 
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
         with Session(_engine_for(db_path)) as session:
@@ -827,18 +906,22 @@ if HAS_SQLALCHEMY:
     def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow()
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            previous = max(0.0, float(record.last_position_seconds or 0.0))
-            listened_delta = max(0.0, safe_position - previous)
-            record.last_position_seconds = safe_position
-            record.total_listened_seconds = max(0.0, float(record.total_listened_seconds or 0.0)) + listened_delta
-            record.last_position_updated_at = now
-            record.last_seen_at = now
-            session.commit()
-            return True
+        try:
+            with Session(_engine_for(db_path)) as session:
+                record = session.get(DownloadRecord, int(row_id))
+                if record is None:
+                    return False
+                previous = max(0.0, float(record.last_position_seconds or 0.0))
+                listened_delta = max(0.0, safe_position - previous)
+                record.last_position_seconds = safe_position
+                record.total_listened_seconds = max(0.0, float(record.total_listened_seconds or 0.0)) + listened_delta
+                record.last_position_updated_at = now
+                record.last_seen_at = now
+                session.commit()
+                return True
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+            raise
 
     def get_total_listened_seconds(db_path: str) -> float:
         with Session(_engine_for(db_path)) as session:
@@ -859,38 +942,54 @@ else:
 
     def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
         now = _utcnow().isoformat() if played else None
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.execute(
-                "UPDATE downloads SET played = ?, played_at = ?, last_seen_at = ? WHERE id = ?",
-                (1 if played else 0, now, _utcnow().isoformat(), int(row_id)),
-            )
-            conn.commit()
-            return cur.rowcount > 0
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.execute(
+                    "UPDATE downloads SET played = ?, played_at = ?, last_seen_at = ? WHERE id = ?",
+                    (1 if played else 0, now, _utcnow().isoformat(), int(row_id)),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "marking download played", exc)
+            raise
 
     def mark_all_downloads_played(db_path: str) -> int:
         now = _utcnow().isoformat()
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.execute(
-                "UPDATE downloads SET played = 1, played_at = ?, last_seen_at = ? WHERE COALESCE(played, 0) = 0",
-                (now, now),
-            )
-            conn.commit()
-            return int(cur.rowcount or 0)
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.execute(
+                    "UPDATE downloads SET played = 1, played_at = ?, last_seen_at = ? WHERE COALESCE(played, 0) = 0",
+                    (now, now),
+                )
+                conn.commit()
+                return int(cur.rowcount or 0)
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "marking all downloads played", exc)
+            raise
 
     def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.execute(
-                "UPDATE downloads SET favorite = ?, last_seen_at = ? WHERE id = ?",
-                (1 if favorite else 0, _utcnow().isoformat(), int(row_id)),
-            )
-            conn.commit()
-            return cur.rowcount > 0
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.execute(
+                    "UPDATE downloads SET favorite = ?, last_seen_at = ? WHERE id = ?",
+                    (1 if favorite else 0, _utcnow().isoformat(), int(row_id)),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "marking download favorite", exc)
+            raise
 
     def delete_download_entry(db_path: str, row_id: int) -> bool:
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.execute("DELETE FROM downloads WHERE id = ?", (int(row_id),))
-            conn.commit()
-            return cur.rowcount > 0
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.execute("DELETE FROM downloads WHERE id = ?", (int(row_id),))
+                conn.commit()
+                return cur.rowcount > 0
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "deleting download entry", exc)
+            raise
 
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
         with sqlite3.connect(db_path) as conn:
@@ -905,22 +1004,26 @@ else:
     def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow().isoformat()
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT COALESCE(last_position_seconds, 0), COALESCE(total_listened_seconds, 0) FROM downloads WHERE id = ?",
-                (int(row_id),),
-            ).fetchone()
-            if row is None:
-                return False
-            previous = max(0.0, float(row[0] or 0.0))
-            total = max(0.0, float(row[1] or 0.0))
-            listened_delta = max(0.0, safe_position - previous)
-            cur = conn.execute(
-                "UPDATE downloads SET last_position_seconds = ?, total_listened_seconds = ?, last_position_updated_at = ?, last_seen_at = ? WHERE id = ?",
-                (safe_position, total + listened_delta, now, now, int(row_id)),
-            )
-            conn.commit()
-            return cur.rowcount > 0
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(last_position_seconds, 0), COALESCE(total_listened_seconds, 0) FROM downloads WHERE id = ?",
+                    (int(row_id),),
+                ).fetchone()
+                if row is None:
+                    return False
+                previous = max(0.0, float(row[0] or 0.0))
+                total = max(0.0, float(row[1] or 0.0))
+                listened_delta = max(0.0, safe_position - previous)
+                cur = conn.execute(
+                    "UPDATE downloads SET last_position_seconds = ?, total_listened_seconds = ?, last_position_updated_at = ?, last_seen_at = ? WHERE id = ?",
+                    (safe_position, total + listened_delta, now, now, int(row_id)),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+            raise
 
     def get_total_listened_seconds(db_path: str) -> float:
         with sqlite3.connect(db_path) as conn:

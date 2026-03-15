@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from logger import get_logger
 from database import (
     add_source_config,
     delete_source_config,
@@ -45,6 +46,11 @@ MEDIA_EXTENSIONS = {
 }
 
 DEFAULT_AUTO_UPDATE_MINUTES = 20
+DISCONNECT_LOG_WINDOW_SECONDS = 30.0
+
+log = get_logger("webapp")
+_DISCONNECT_LOG_LOCK = threading.Lock()
+_LAST_DISCONNECT_LOGGED_AT: Dict[str, float] = {}
 
 
 @dataclass
@@ -247,6 +253,40 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         )
         for row in rows
     ]
+
+
+def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
+    init_database(str(db_path))
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+            FROM downloads
+            WHERE id = ? AND download_status = 'downloaded'
+            LIMIT 1
+            """,
+            (int(row_id),),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return MediaRow(
+        row_id=row[0],
+        source_type=row[1],
+        source_name=row[2],
+        item_url=row[3],
+        title=row[4],
+        file_path=row[5],
+        file_ext=row[6],
+        file_size_bytes=row[7],
+        upload_date=row[8],
+        played=bool(row[9]),
+        favorite=bool(row[10]),
+        played_at=row[11],
+        subtitle_path=row[12],
+    )
 
 
 def _format_vtt_timestamp(value: float) -> str:
@@ -1616,13 +1656,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 </html>"""
 
 
-def _find_row_by_id(rows: List[MediaRow], row_id: int) -> Optional[MediaRow]:
-    for row in rows:
-        if row.row_id == row_id:
-            return row
-    return None
-
-
 def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str, int]]:
     if not range_header or not range_header.startswith("bytes="):
         return None
@@ -1651,6 +1684,20 @@ def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str,
     return {"start": start, "end": end}
 
 
+def _write_stream_bytes(handler: BaseHTTPRequestHandler, media_path: Path, stream, total_bytes: int) -> None:
+    remaining = max(0, int(total_bytes))
+    while remaining > 0:
+        chunk = stream.read(min(256 * 1024, remaining))
+        if not chunk:
+            break
+        try:
+            handler.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            _log_stream_disconnect(media_path)
+            break
+        remaining -= len(chunk)
+
+
 def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
     file_size = media_path.stat().st_size
     content_type = mimetypes.guess_type(str(media_path))[0] or "application/octet-stream"
@@ -1666,7 +1713,7 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
         handler.end_headers()
 
         with media_path.open("rb") as f:
-            handler.wfile.write(f.read())
+            _write_stream_bytes(handler, media_path, f, file_size)
         return
 
     start = parsed["start"]
@@ -1682,28 +1729,47 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
 
     with media_path.open("rb") as f:
         f.seek(start)
-        remaining = length
-        while remaining > 0:
-            chunk = f.read(min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            handler.wfile.write(chunk)
-            remaining -= len(chunk)
+        _write_stream_bytes(handler, media_path, f, length)
+
+
+def _log_stream_disconnect(media_path: Path) -> None:
+    media_key = str(media_path)
+    now = time.monotonic()
+    with _DISCONNECT_LOG_LOCK:
+        last_logged = _LAST_DISCONNECT_LOGGED_AT.get(media_key)
+        if last_logged is not None and (now - last_logged) < DISCONNECT_LOG_WINDOW_SECONDS:
+            return
+        _LAST_DISCONNECT_LOGGED_AT[media_key] = now
+
+    log.info("Client disconnected while streaming media: %s", media_path.name)
 
 
 def make_handler(state: AppState):
     class _Handler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            try:
+                self.connection.settimeout(5.0)
+            except OSError:
+                pass
+
         def do_GET(self):  # noqa: N802
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
-            rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
+            rows_cache: Optional[List[MediaRow]] = None
+
+            def _rows() -> List[MediaRow]:
+                nonlocal rows_cache
+                if rows_cache is None:
+                    rows_cache = fetch_downloaded_media_rows(state.database_path, state.output_root)
+                return rows_cache
 
             if path == "/":
                 status = _snapshot_status(state.update_status)
                 show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
                 favorites_only = (query.get('favorites') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
-                body = _render_index(rows, state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
+                body = _render_index(_rows(), state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1754,7 +1820,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = _find_row_by_id(rows, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -1773,7 +1839,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = _find_row_by_id(rows, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -1796,7 +1862,7 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid id")
                     return
 
-                row = _find_row_by_id(rows, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
