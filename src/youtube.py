@@ -235,8 +235,10 @@ def download_youtube_items(config, downloaded_items):
             known_download_titles = {}
             finished_download_info: Dict[str, Dict] = {}
             failed_download_reasons: Dict[str, int] = {}
-            candidate_entries_seen = 0
-            candidate_entries_allowed = 0
+            candidate_entries_seen_keys = set()
+            candidate_entries_allowed_keys = set()
+            candidate_entries_allowed_examples: List[str] = []
+            progress_status_counts: Dict[str, int] = {}
             skip_reason_counts: Dict[str, int] = {}
             skip_reason_examples: Dict[str, str] = {}
 
@@ -273,6 +275,13 @@ def download_youtube_items(config, downloaded_items):
                     or fallback
                 )
 
+            def _entry_key(info_dict: dict) -> str:
+                return get_download_key(
+                    info_dict,
+                    str(info_dict.get("url") or info_dict.get("title") or "unknown-entry").strip() or "unknown-entry",
+                )
+
+
             def _is_subtitle_or_aux_download(output_file: str) -> bool:
                 path = Path(str(output_file or ""))
                 return path.suffix.lower() in subtitle_or_aux_exts
@@ -304,9 +313,9 @@ def download_youtube_items(config, downloaded_items):
                         skip_reason_examples[reason_key] = title
 
             def skip_known_downloads(info_dict, *, incomplete=False):
-                nonlocal candidate_entries_seen, candidate_entries_allowed
                 _ = incomplete
-                candidate_entries_seen += 1
+                entry_key = _entry_key(info_dict)
+                candidate_entries_seen_keys.add(entry_key)
                 live_reason = skip_live_streams(info_dict, incomplete=incomplete)
                 if live_reason:
                     _record_skip(live_reason, info_dict)
@@ -333,11 +342,15 @@ def download_youtube_items(config, downloaded_items):
                     reason = "Skipping duplicate title in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
-                candidate_entries_allowed += 1
+                candidate_entries_allowed_keys.add(entry_key)
+                title = _clean_log_title(info_dict.get("title"))
+                if title != "unknown title" and title not in candidate_entries_allowed_examples and len(candidate_entries_allowed_examples) < 3:
+                    candidate_entries_allowed_examples.append(title)
                 return None
 
             def record_download_progress(d):
-                status = d.get("status")
+                status = str(d.get("status") or "unknown")
+                progress_status_counts[status] = progress_status_counts.get(status, 0) + 1
                 info = d.get("info_dict") or {}
                 output_file = d.get("filename") or info.get("_filename") or "unknown file"
                 download_key = get_download_key(info, output_file)
@@ -520,14 +533,30 @@ def download_youtube_items(config, downloaded_items):
                 log.warning("YouTube download errors for %s: %s", name, "; ".join(failure_parts))
 
             if not completed_download_ids:
+                seen_count = len(candidate_entries_seen_keys)
+                allowed_count = len(candidate_entries_allowed_keys)
+                failed_count = sum(failed_download_reasons.values())
+                hook_finished_count = progress_status_counts.get("finished", 0)
+                hook_error_count = progress_status_counts.get("error", 0)
+
                 log.warning(
-                    "No new YouTube media downloaded for %s (playlist_items_seen=%d, allowed_after_filters=%d, skipped_by_filters=%d, failed_downloads=%d).",
+                    "No new YouTube media downloaded for %s (playlist_items_seen=%d, allowed_after_filters=%d, skipped_by_filters=%d, failed_downloads=%d, hook_finished_events=%d, hook_error_events=%d).",
                     name,
-                    candidate_entries_seen,
-                    candidate_entries_allowed,
-                    max(candidate_entries_seen - candidate_entries_allowed, 0),
-                    sum(failed_download_reasons.values()),
+                    seen_count,
+                    allowed_count,
+                    max(seen_count - allowed_count, 0),
+                    failed_count,
+                    hook_finished_count,
+                    hook_error_count,
                 )
+
+                if allowed_count > 0 and hook_finished_count == 0 and hook_error_count == 0:
+                    example_text = ", ".join(candidate_entries_allowed_examples) if candidate_entries_allowed_examples else "no example titles"
+                    log.warning(
+                        "YouTube accepted playlist entries for %s but did not emit item download events. Sample allowed entries: %s",
+                        name,
+                        example_text,
+                    )
 
             if download_type == "audio":
                 worker_count = int(defaults.get("processing_workers", 2))
