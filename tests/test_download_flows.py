@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import podcasts  # noqa: E402
 import youtube  # noqa: E402
+from database import has_episode_title_for_source, upsert_download, init_database  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -695,6 +696,78 @@ class PodcastRetryTests(unittest.TestCase):
             self.assertEqual(opts["retries"], 10)
             self.assertEqual(opts["fragment_retries"], 10)
             self.assertEqual(opts["socket_timeout"], 30)
+
+
+class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
+    def setUp(self):
+        FakeYoutubeDL.instances = []
+
+    def test_skip_filter_excludes_shorts_and_duplicate_titles(self):
+        class FakeYoutubeDLForFilter(FakeYoutubeDL):
+            match_filter_result = None
+
+            def download(self, urls):
+                self.urls.extend(urls)
+                fn = self.opts.get("match_filter")
+                self.__class__.match_filter_result = fn(
+                    {
+                        "id": "abc123",
+                        "title": "Daily Episode",
+                        "webpage_url": "https://www.youtube.com/shorts/abc123",
+                    },
+                    incomplete=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "existing-1",
+                    "title": "Daily Episode",
+                    "download_status": "downloaded",
+                },
+            )
+
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": db_path,
+                },
+                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+                youtube.download_youtube_items(config, [])
+
+            self.assertEqual(FakeYoutubeDLForFilter.match_filter_result, "Skipping YouTube Shorts entry from playlist.")
+
+    def test_has_episode_title_for_source_is_case_insensitive(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "existing-1",
+                    "title": "Episode Forty Two",
+                    "download_status": "downloaded",
+                },
+            )
+
+            self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
+            self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "another episode"))
 
 
 if __name__ == "__main__":

@@ -798,6 +798,23 @@ if HAS_SQLALCHEMY:
             return Path(str(file_path)).expanduser().is_file()
 
 
+    def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
+        normalized = str(title or "").strip().casefold()
+        if not normalized:
+            return False
+
+        with Session(_engine_for(db_path)) as session:
+            rows = session.execute(
+                select(DownloadRecord.title).where(
+                    DownloadRecord.source_type == source_type,
+                    DownloadRecord.source_name == source_name,
+                    DownloadRecord.download_status == "downloaded",
+                    DownloadRecord.title.is_not(None),
+                )
+            ).scalars().all()
+            return any(str(row or "").strip().casefold() == normalized for row in rows)
+
+
     def upsert_download(db_path: str, payload: Dict[str, Any]):
         now = _utcnow()
         try:
@@ -944,6 +961,29 @@ else:
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
         return _is_downloaded_sqlite(db_path, source_type, source_name, item_uid)
+
+    def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
+        normalized = str(title or "").strip().casefold()
+        if not normalized:
+            return False
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT title
+                    FROM downloads
+                    WHERE source_type = ?
+                      AND source_name = ?
+                      AND download_status = 'downloaded'
+                      AND COALESCE(title, '') != ''
+                    """,
+                    (source_type, source_name),
+                ).fetchall()
+                return any(str(row[0] or "").strip().casefold() == normalized for row in rows)
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "checking existing download title", exc)
+            raise
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
         _upsert_download_sqlite(db_path, payload)
