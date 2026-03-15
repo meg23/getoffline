@@ -18,6 +18,7 @@ from database import (  # noqa: E402
     replace_sources,
     seed_sources_from_config,
     update_download_settings,
+    update_source_config,
     update_stored_defaults,
 )
 
@@ -123,6 +124,46 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertTrue(replaced["youtube"][0]["enabled"])
             self.assertEqual(replaced["podcasts"], [])
 
+
+
+    def test_update_source_config_updates_existing_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            seed_sources_from_config(
+                db_path,
+                {
+                    "defaults": {"output_root": tmpdir},
+                    "youtube": [
+                        {
+                            "name": "YT 1",
+                            "url": "https://youtube.com/@one",
+                            "type": "audio",
+                            "subtitles": True,
+                        }
+                    ],
+                    "podcasts": [],
+                },
+            )
+
+            row_id = get_stored_config(db_path)["youtube"][0]["id"]
+            updated = update_source_config(
+                db_path,
+                row_id=row_id,
+                name="YT Updated",
+                url="https://youtube.com/@updated",
+                media_type="video",
+                subtitles=False,
+                subtitle_offset_seconds=1.25,
+            )
+
+            self.assertTrue(updated)
+            config = get_stored_config(db_path)
+            self.assertEqual(config["youtube"][0]["name"], "YT Updated")
+            self.assertEqual(config["youtube"][0]["url"], "https://youtube.com/@updated")
+            self.assertEqual(config["youtube"][0]["type"], "video")
+            self.assertFalse(config["youtube"][0]["subtitles"])
+            self.assertEqual(config["youtube"][0]["subtitle_offset_seconds"], 1.25)
 
     def test_get_download_position_seconds_returns_zero_when_locked(self):
         if HAS_SQLALCHEMY:

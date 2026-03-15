@@ -590,6 +590,49 @@ def set_source_enabled(db_path: str, row_id: int, enabled: bool) -> bool:
         raise
 
 
+def update_source_config(
+    db_path: str,
+    *,
+    row_id: int,
+    name: str,
+    url: str,
+    media_type: Optional[str],
+    subtitles: bool,
+    subtitle_offset_seconds: Optional[float],
+) -> bool:
+    ensure_config_seeded(db_path)
+    normalized_media_type = (str(media_type).strip().lower() if media_type is not None else None)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                """
+                UPDATE source_configs
+                SET
+                    name = ?,
+                    url = ?,
+                    media_type = ?,
+                    subtitles = ?,
+                    subtitle_offset_seconds = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    str(name or "").strip(),
+                    str(url or "").strip(),
+                    normalized_media_type,
+                    1 if subtitles else 0,
+                    subtitle_offset_seconds,
+                    _utcnow().isoformat(),
+                    int(row_id),
+                ),
+            )
+            conn.commit()
+            return (cur.rowcount or 0) > 0
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "updating source config", exc)
+        raise
+
+
 def _init_database_sqlite(db_path: str) -> None:
     apply_migrations(db_path)
 
