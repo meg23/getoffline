@@ -788,6 +788,9 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("suppressSyncAutoReload = true;", body)
             self.assertIn("window.clearTimeout(syncReloadTimer);", body)
             self.assertIn("miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');", body)
+            self.assertIn("postMiniProgress(state, state.currentTime || 0, true, 'mini-open');", body)
+            self.assertIn("postMiniProgress(state, active.currentTime || 0, true, 'mini-close');", body)
+            self.assertIn("postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');", body)
             self.assertIn("active.removeAttribute('src');", body)
             self.assertIn("while (active.firstChild) active.removeChild(active.firstChild);", body)
 
