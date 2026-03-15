@@ -1296,6 +1296,10 @@ def _render_index(
           if (active && active.style.display !== 'none') {{
             state.currentTime = active.currentTime || 0;
             state.paused = active.paused;
+            try {{ active.pause(); }} catch (_) {{}}
+            active.removeAttribute('src');
+            while (active.firstChild) active.removeChild(active.firstChild);
+            active.load();
           }}
 
           state.playUrl = '/play?id=' + state.rowId;
@@ -2157,7 +2161,12 @@ def make_handler(state: AppState):
                     self.wfile.write(body_bytes)
                     return
 
+                media_started_at = time.monotonic()
+                range_header = self.headers.get("Range") or "none"
+                log.info("GET /media id=%s range=%s", raw_id, range_header)
                 _stream_media(self, media_path)
+                elapsed_ms = (time.monotonic() - media_started_at) * 1000.0
+                log.info("GET /media id=%s completed stream_ms=%.1f", raw_id, elapsed_ms)
                 return
 
             self.send_error(404, "Not found")
