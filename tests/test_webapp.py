@@ -788,6 +788,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("suppressSyncAutoReload = true;", body)
             self.assertIn("window.clearTimeout(syncReloadTimer);", body)
             self.assertIn("miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');", body)
+            self.assertIn("active.removeAttribute('src');", body)
+            self.assertIn("while (active.firstChild) active.removeChild(active.firstChild);", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
