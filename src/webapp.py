@@ -867,13 +867,13 @@ def _render_index(
     tbody tr:nth-child(even) td {{ background: #fbfcff; }}
     tr:last-child td {{ border-bottom: none; }}
     .title-cell {{ font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }}
-    .col-channel {{ width: 14%; }}
-    .col-episode {{ width: 36%; }}
+    .col-channel {{ width: 16%; }}
+    .col-episode {{ width: 42%; }}
     .col-source {{ width: 10%; }}
-    .col-type {{ width: 8%; }}
-    .col-size {{ width: 10%; }}
-    .col-status {{ width: 20%; }}
-    .col-select {{ width: 8%; }}
+    .col-type {{ width: 7%; }}
+    .col-size {{ width: 9%; }}
+    .col-status {{ width: 10%; }}
+    .col-select {{ width: 6%; }}
     td[data-label="Type"], td[data-label="Size"], td[data-label="Status"],
     thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
       text-align: left;
@@ -901,6 +901,7 @@ def _render_index(
     .episode-link:hover {{ color: var(--accent); text-decoration: underline; }}
     .selection-cell {{ text-align: right; }}
     .row-selector {{ width: 1.05rem; height: 1.05rem; cursor: pointer; accent-color: var(--accent); }}
+    .select-all-selector {{ display: inline-block; vertical-align: middle; }}
     .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
     .icon-button {{
       display: inline-flex;
@@ -1120,7 +1121,7 @@ def _render_index(
         <col class="col-status" />
         <col class="col-select" />
       </colgroup>
-      <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input type="checkbox" id="select-all-rows" aria-label="Select all rows" /></th></tr></thead>
+      <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
 
