@@ -183,6 +183,11 @@ def _log_sqlite_lock(operation: str, exc: Exception) -> None:
         log.warning("SQLite lock while %s: %s", operation, exc)
 
 
+def _is_playback_completion_reason(reason: str) -> bool:
+    value = str(reason or "").strip().lower()
+    return value in {"ended", "mini-ended"}
+
+
 def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional[Path]:
     root = output_root.expanduser().resolve()
     raw = Path(candidate_path).expanduser()
@@ -920,7 +925,7 @@ def _render_index(
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-unplayed {{ background: var(--new-bg); color: var(--new-text); }}
-    .status-started {{ background: #fff4d8; color: #7a5310; }}
+    .status-started {{ background: #e2f3ff; color: #114e78; }}
     .status-missing {{ background: #fde7e9; color: #96253b; }}
 
     .episode-link {{ color: inherit; text-decoration: none; }}
@@ -2680,7 +2685,10 @@ def make_handler(state: AppState):
                 if is_forced:
                     log.info("POST /progress forced id=%s reason=%s seconds=%.3f", raw_id, raw_reason, position_seconds)
 
-                _enqueue_progress_update(state, int(raw_id), position_seconds, reason=raw_reason, forced=is_forced)
+                row_id = int(raw_id)
+                _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
+                if _is_playback_completion_reason(raw_reason):
+                    mark_download_played(str(state.database_path), row_id, played=True)
                 self.send_response(204)
                 self.end_headers()
                 return

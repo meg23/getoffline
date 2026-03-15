@@ -15,6 +15,7 @@ from webapp import (  # noqa: E402
     AppState,
     _LAST_DISCONNECT_LOGGED_AT,
     _log_stream_disconnect,
+    _is_playback_completion_reason,
     _parse_range_header,
     _resolve_safe_subtitle_path,
     _render_index,
@@ -76,6 +77,11 @@ class WebAppHelpersTests(unittest.TestCase):
             updated_count = _flush_pending_progress_updates(state)
             self.assertEqual(updated_count, 1)
             self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 9.5, places=3)
+
+    def test_is_playback_completion_reason(self):
+        self.assertTrue(_is_playback_completion_reason("ended"))
+        self.assertTrue(_is_playback_completion_reason("mini-ended"))
+        self.assertFalse(_is_playback_completion_reason("pause"))
 
     def test_parse_range_header(self):
         self.assertEqual(_parse_range_header("bytes=0-99", 1000), {"start": 0, "end": 99})
@@ -783,6 +789,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
 
             self.assertIn('status-started" title="Playback started">STARTED</span>', body)
+            self.assertIn('.status-started { background: #e2f3ff; color: #114e78; }', body)
 
     def test_index_uses_batch_controls_and_play_link_for_item_actions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
