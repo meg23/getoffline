@@ -791,6 +791,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("postMiniProgress(state, state.currentTime || 0, true, 'mini-open');", body)
             self.assertIn("postMiniProgress(state, active.currentTime || 0, true, 'mini-close');", body)
             self.assertIn("postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');", body)
+            self.assertIn("function updatePlayLinkResumeHint(rowId, seconds)", body)
+            self.assertIn("link.dataset.resumeSeconds = safe.toFixed(3);", body)
             self.assertIn("active.removeAttribute('src');", body)
             self.assertIn("while (active.firstChild) active.removeChild(active.firstChild);", body)
 
