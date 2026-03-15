@@ -212,7 +212,14 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("Show favorites", body)
             self.assertIn('<th class="channel-col">Channel</th>', body)
             self.assertIn('<th class="episode-col">Episode</th>', body)
-            self.assertIn('<th aria-label="Actions"></th>', body)
+            self.assertIn('name="batch_action"', body)
+            self.assertIn('Choose action</option>', body)
+            self.assertIn('>played</option>', body)
+            self.assertIn('>unplayed</option>', body)
+            self.assertIn('>favorite</option>', body)
+            self.assertIn('>delete</option>', body)
+            self.assertIn('>download</option>', body)
+            self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn("/settings", body)
             self.assertIn("/quick-add-youtube", body)
             self.assertIn("Add single YouTube link", body)
@@ -220,8 +227,56 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="quick-add-backdrop"', body)
             self.assertIn('id="quick-add-url"', body)
             self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr));", body)
+            self.assertIn("const selectAllRows = document.getElementById('select-all-rows');", body)
+            self.assertIn('selectAllRows.indeterminate = selectedCount > 0 && selectedCount < rowSelectors.length;', body)
+            self.assertIn("batchForm.addEventListener('submit'", body)
+            self.assertIn('if (!batchAction || !batchAction.value || selectedRows.length === 0)', body)
+            self.assertIn("hiddenInput.name = 'ids';", body)
             self.assertIn('persistedMiniPlayerState.paused === false', body)
 
+
+
+    def test_index_rows_render_checkboxes_for_batch_updates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "BatchTest",
+                    "item_uid": "uid-batch-1",
+                    "item_url": "https://example.com/batch.mp3",
+                    "title": "Batch Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path)
+            body = _render_index(
+                rows=rows,
+                output_root=root,
+                database_path=db_path,
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn('action="/batch-update"', body)
+            self.assertIn('class="row-selector" name="ids"', body)
+            self.assertIn('class="episode-link" href="/play?id=', body)
 
     def test_index_play_link_includes_resume_seconds(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -653,7 +708,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("Played Item", body)
             self.assertIn("Hide played", body)
 
-    def test_index_uses_icons_and_tooltips_for_item_actions(self):
+    def test_index_uses_batch_controls_and_play_link_for_item_actions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             row = SimpleNamespace(
@@ -684,12 +739,12 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn('aria-label="Play this item"', body)
-            self.assertIn('title="Play this item"', body)
-            self.assertIn('href="#bi-play-fill"', body)
-            self.assertIn('title="Mark played"', body)
-            self.assertIn('aria-label="Mark played"', body)
-            self.assertIn('href="#bi-check2-circle"', body)
+            self.assertIn('class="episode-link" href="/play?id=1"', body)
+            self.assertIn('class="row-selector" name="ids" value="1"', body)
+            self.assertIn('name="batch_action"', body)
+            self.assertIn('class="batch-toolbar-form"', body)
+            self.assertIn('id="batch-apply"', body)
+            self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn('title="Sync downloads"', body)
             self.assertIn('href="#bi-download"', body)
             self.assertIn('title="Mark all as played"', body)
@@ -878,7 +933,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
             self.assertIn('>missing</span>', body)
             self.assertIn('/redownload?id=1', body)
-            self.assertIn('/delete-file?id=1', body)
+            self.assertIn('name="ids" value="1"', body)
 
     def test_mark_download_favorite_updates_row_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
