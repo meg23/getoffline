@@ -662,39 +662,26 @@ def _render_index(
             status_label = "missing"
             status_class = "status-missing"
             status_title = "File missing locally"
-        mark_action = "unplay" if row.played else "played"
-        mark_label = "Mark unplayed" if row.played else "Mark played"
-        mark_icon = "bi-arrow-counterclockwise" if row.played else "bi-check2-circle"
-        favorite_action = "unfavorite" if row_is_favorite else "favorite"
-        favorite_label = "Remove favorite" if row_is_favorite else "Add favorite"
-        favorite_icon = "bi-heart-fill" if row_is_favorite else "bi-heart"
-        favorite_class = " icon-button-active" if row_is_favorite else ""
         play_or_download_href = f"/play?id={row.row_id}" if file_exists else f"/redownload?id={row.row_id}"
         play_or_download_label = "Play this item" if file_exists else "Redownload this item"
-        play_or_download_icon = "bi-play-fill" if file_exists else "bi-download"
         resume_seconds = 0.0
         if file_exists:
             try:
                 resume_seconds = get_download_position_seconds(str(database_path), row.row_id)
             except Exception:
                 resume_seconds = 0.0
-        delete_label = "Delete local file" if file_exists else "Delete this item from library"
-        missing_action = f'<a class="icon-button" href="/delete-file?id={row.row_id}" title="{delete_label}" aria-label="{delete_label}">{_icon_use("bi-trash")}</a>'
 
         cards.append(
             f"""
             <tr>
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell episode-col" data-label="Episode" title="{title}">{title}</td>
+                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
                 <td data-label="Status"><span class="pill {status_class}" title="{status_title}">{status_label}</span></td>
-                <td class="actions" data-label="Actions">
-                  <a class="icon-button" href="{play_or_download_href}" title="{play_or_download_label}" aria-label="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{_icon_use(play_or_download_icon)}</a>
-                  <a class="icon-button{favorite_class}" href="/{favorite_action}?id={row.row_id}" title="{favorite_label}" aria-label="{favorite_label}">{_icon_use(favorite_icon)}</a>
-                  <a class="icon-button" href="/mark-{mark_action}?id={row.row_id}" title="{mark_label}" aria-label="{mark_label}">{_icon_use(mark_icon)}</a>
-                  {missing_action}
+                <td class="selection-cell" data-label="Select">
+                  <input type="checkbox" class="row-selector" name="ids" value="{row.row_id}" aria-label="Select {title}" />
                 </td>
             </tr>
             """
@@ -806,6 +793,12 @@ def _render_index(
       flex-wrap: wrap;
     }}
     .toolbar-form {{ margin: 0; }}
+    .toolbar-spacer {{ flex: 1 1 auto; }}
+    .batch-toolbar-form {{ margin-left: auto; display: inline-flex; align-items: center; gap: .45rem; flex-wrap: nowrap; }}
+    .batch-select {{ min-width: 10rem; border: 1px solid #c9d5ef; border-radius: 8px; padding: .22rem .42rem; font: inherit; color: #243251; background: #fff; }}
+    .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
+    .batch-apply:hover {{ background: #dfe8ff; }}
+    .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
     .quick-add-backdrop {{
       position: fixed;
       inset: 0;
@@ -874,18 +867,18 @@ def _render_index(
     tbody tr:nth-child(even) td {{ background: #fbfcff; }}
     tr:last-child td {{ border-bottom: none; }}
     .title-cell {{ font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }}
-    .col-channel {{ width: 14%; }}
-    .col-episode {{ width: 36%; }}
+    .col-channel {{ width: 16%; }}
+    .col-episode {{ width: 42%; }}
     .col-source {{ width: 10%; }}
-    .col-type {{ width: 8%; }}
-    .col-size {{ width: 10%; }}
-    .col-status {{ width: 8%; }}
-    .col-actions {{ width: 14%; }}
+    .col-type {{ width: 7%; }}
+    .col-size {{ width: 9%; }}
+    .col-status {{ width: 10%; }}
+    .col-select {{ width: 6%; }}
     td[data-label="Type"], td[data-label="Size"], td[data-label="Status"],
     thead th:nth-child(4), thead th:nth-child(5), thead th:nth-child(6) {{
       text-align: left;
     }}
-    td[data-label="Actions"], thead th:nth-child(7) {{
+    td[data-label="Select"], thead th:nth-child(7) {{
       text-align: right;
     }}
     th.channel-col, td.channel-col {{ padding-right: .2rem; }}
@@ -903,6 +896,12 @@ def _render_index(
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
     .status-new {{ background: var(--new-bg); color: var(--new-text); }}
     .status-missing {{ background: #fde7e9; color: #96253b; }}
+
+    .episode-link {{ color: inherit; text-decoration: none; }}
+    .episode-link:hover {{ color: var(--accent); text-decoration: underline; }}
+    .selection-cell {{ text-align: right; }}
+    .row-selector {{ width: 1.05rem; height: 1.05rem; cursor: pointer; accent-color: var(--accent); }}
+    .select-all-selector {{ display: inline-block; vertical-align: middle; }}
     .actions {{ white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: .6rem; }}
     .icon-button {{
       display: inline-flex;
@@ -1075,6 +1074,18 @@ def _render_index(
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
         <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
+        <span class="toolbar-spacer" aria-hidden="true"></span>
+        <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
+          <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
+            <option value="">Choose action</option>
+            <option value="played">played</option>
+            <option value="unplayed">unplayed</option>
+            <option value="favorite">favorite</option>
+            <option value="delete">delete</option>
+            <option value="download">download</option>
+          </select>
+          <button id="batch-apply" class="batch-apply" type="submit" title="Apply batch action" aria-label="Apply batch action" disabled>Apply</button>
+        </form>
       </div>
     </div>
 
@@ -1109,9 +1120,9 @@ def _render_index(
         <col class="col-type" />
         <col class="col-size" />
         <col class="col-status" />
-        <col class="col-actions" />
+        <col class="col-select" />
       </colgroup>
-      <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th aria-label="Actions"></th></tr></thead>
+      <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
 
@@ -1157,6 +1168,55 @@ def _render_index(
             }});
         }});
       }}
+
+      const batchForm = document.getElementById('batch-form');
+      const batchAction = document.getElementById('batch-action');
+      const batchApply = document.getElementById('batch-apply');
+      const selectAllRows = document.getElementById('select-all-rows');
+      const rowSelectors = Array.from(document.querySelectorAll('.row-selector'));
+
+      const updateBatchState = () => {{
+        const selectedCount = rowSelectors.filter((input) => input.checked).length;
+        const hasAction = batchAction && batchAction.value;
+        if (batchApply) batchApply.disabled = !(selectedCount > 0 && hasAction);
+        if (selectAllRows) {{
+          selectAllRows.checked = rowSelectors.length > 0 && selectedCount === rowSelectors.length;
+          selectAllRows.indeterminate = selectedCount > 0 && selectedCount < rowSelectors.length;
+        }}
+      }};
+
+      if (selectAllRows) {{
+        selectAllRows.addEventListener('change', () => {{
+          const checked = !!selectAllRows.checked;
+          rowSelectors.forEach((input) => {{ input.checked = checked; }});
+          updateBatchState();
+        }});
+      }}
+
+      rowSelectors.forEach((input) => {{
+        input.addEventListener('change', updateBatchState);
+      }});
+      if (batchAction) batchAction.addEventListener('change', updateBatchState);
+      if (batchForm) {{
+        batchForm.addEventListener('submit', (event) => {{
+          const selectedRows = rowSelectors.filter((input) => input.checked);
+          if (!batchAction || !batchAction.value || selectedRows.length === 0) {{
+            event.preventDefault();
+            return;
+          }}
+
+          batchForm.querySelectorAll('input[name="ids"][data-generated="1"]').forEach((input) => input.remove());
+          selectedRows.forEach((input) => {{
+            const hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.name = 'ids';
+            hiddenInput.value = input.value;
+            hiddenInput.setAttribute('data-generated', '1');
+            batchForm.appendChild(hiddenInput);
+          }});
+        }});
+      }}
+      updateBatchState();
 
       const miniPlayer = document.getElementById('mini-player');
       const miniTitle = document.getElementById('mini-player-title');
@@ -2258,6 +2318,52 @@ def make_handler(state: AppState):
 
                 _enqueue_progress_update(state, int(raw_id), position_seconds, reason=raw_reason, forced=is_forced)
                 self.send_response(204)
+                self.end_headers()
+                return
+
+            if path == "/batch-update":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                batch_action = str((form.get("batch_action") or [""])[0]).strip().lower()
+                row_ids = [int(raw_id) for raw_id in (form.get("ids") or []) if str(raw_id).isdigit()]
+
+                if batch_action in {"played", "unplayed", "favorite", "delete", "download"} and row_ids:
+                    should_trigger_podcast_redownload = False
+                    for row_id in row_ids:
+                        if batch_action == "played":
+                            mark_download_played(str(state.database_path), row_id, played=True)
+                        elif batch_action == "unplayed":
+                            mark_download_played(str(state.database_path), row_id, played=False)
+                        elif batch_action == "favorite":
+                            mark_download_favorite(str(state.database_path), row_id, favorite=True)
+                        elif batch_action == "delete":
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            if row is None:
+                                continue
+                            media_path = _resolve_safe_media_path(state.output_root, row.file_path)
+                            if media_path is not None and media_path.exists():
+                                media_path.unlink(missing_ok=True)
+                            else:
+                                delete_download_entry(str(state.database_path), row_id)
+                        elif batch_action == "download":
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            if row is None:
+                                continue
+                            if row.source_type == "youtube" and row.item_url:
+                                trigger_single_youtube_download(
+                                    state,
+                                    url=row.item_url,
+                                    media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio",
+                                )
+                            elif row.source_type == "podcast":
+                                should_trigger_podcast_redownload = True
+
+                    if batch_action == "download" and should_trigger_podcast_redownload:
+                        trigger_background_update(state)
+
+                self.send_response(303)
+                self.send_header("Location", "/")
                 self.end_headers()
                 return
 
