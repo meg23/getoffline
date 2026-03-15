@@ -955,15 +955,16 @@ def _render_index(
     .mini-player-backdrop {{
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, .9);
-      display: none;
-      align-items: center;
-      justify-content: center;
+      background: transparent;
+      pointer-events: none;
       z-index: 45;
       padding: clamp(.75rem, 2.2vw, 1.6rem);
-      backdrop-filter: blur(1px);
     }}
-    .mini-player-backdrop.is-open {{ display: flex; }}
+    .mini-player-backdrop.is-open {{
+      background: rgba(0, 0, 0, .9);
+      backdrop-filter: blur(1px);
+      pointer-events: auto;
+    }}
     .mini-player {{
       position: fixed;
       right: 1rem;
@@ -980,6 +981,7 @@ def _render_index(
       display: none;
       gap: .65rem;
       z-index: 50;
+      pointer-events: auto;
     }}
     .mini-player.is-visible {{ display: grid; }}
     .mini-player.is-maximized {{
