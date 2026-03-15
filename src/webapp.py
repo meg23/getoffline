@@ -416,8 +416,9 @@ def _srt_to_vtt(content: str) -> str:
 
 def _resolve_safe_subtitle_path(output_root: Path, row: MediaRow, media_path: Path) -> Optional[Path]:
     candidate_paths = []
-    if row.subtitle_path:
-        candidate_paths.append(Path(row.subtitle_path))
+    subtitle_path = getattr(row, "subtitle_path", None)
+    if subtitle_path:
+        candidate_paths.append(Path(subtitle_path))
     candidate_paths.append(media_path.with_suffix(".srt"))
     candidate_paths.append(media_path.with_suffix(".vtt"))
 
@@ -677,6 +678,10 @@ def _render_index(
         raw_ext = (row.file_ext or path.suffix.lstrip(".")) or "?"
         ext = html.escape(raw_ext)
         media_kind = "video" if str(raw_ext).lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+        has_subtitles = False
+        if file_exists and media_kind == "audio" and safe is not None:
+            has_subtitles = _resolve_safe_subtitle_path(output_root, row, safe) is not None
+
         status_label = "UNPLAYED"
         status_class = "status-unplayed"
         status_title = "Never played"
@@ -705,7 +710,7 @@ def _render_index(
             f"""
             <tr>
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if media_kind == 'audio' and bool(getattr(row, 'subtitle_path', None)) else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
+                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
@@ -1535,6 +1540,19 @@ def _render_index(
         }} else {{
           miniBackdrop.classList.remove('is-open');
           miniBackdrop.setAttribute('aria-hidden', 'true');
+        }}
+
+        if (isExpanded && !miniTranscriptReady) {{
+          const raw = localStorage.getItem('getofflineMiniPlayerState');
+          let state = null;
+          try {{ state = raw ? JSON.parse(raw) : null; }} catch (_) {{ state = null; }}
+          if (state && state.kind === 'audio' && state.hasSubtitles) {{
+            const active = miniAudio && miniAudio.style.display !== 'none' ? miniAudio : null;
+            if (active) {{
+              const subtitleTrackEl = active.querySelector('track[kind="subtitles"]');
+              scheduleMiniTranscriptInit(state, active, subtitleTrackEl);
+            }}
+          }}
         }}
       }}
 
