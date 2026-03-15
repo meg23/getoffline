@@ -1131,9 +1131,6 @@ def _render_index(
       <form id="sync-form" method="post" action="/update" class="toolbar-form">
         <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg></button>
       </form>
-      <form method="post" action="/mark-all-played" class="toolbar-form">
-        <button class="icon-button" type="submit" title="Mark all as played" aria-label="Mark all as played" {'disabled' if unplayed_items == 0 else ''}>{_icon_use("bi-check2-circle")}</button>
-      </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
         <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
@@ -1145,6 +1142,7 @@ def _render_index(
             <option value="played">played</option>
             <option value="unplayed">unplayed</option>
             <option value="favorite">favorite</option>
+            <option value="unfavorite">unfavorite</option>
             <option value="delete">delete</option>
             <option value="download">download</option>
           </select>
@@ -2622,7 +2620,7 @@ def make_handler(state: AppState):
                 batch_action = str((form.get("batch_action") or [""])[0]).strip().lower()
                 row_ids = [int(raw_id) for raw_id in (form.get("ids") or []) if str(raw_id).isdigit()]
 
-                if batch_action in {"played", "unplayed", "favorite", "delete", "download"} and row_ids:
+                if batch_action in {"played", "unplayed", "favorite", "unfavorite", "delete", "download"} and row_ids:
                     should_trigger_podcast_redownload = False
                     for row_id in row_ids:
                         if batch_action == "played":
@@ -2631,6 +2629,8 @@ def make_handler(state: AppState):
                             mark_download_played(str(state.database_path), row_id, played=False)
                         elif batch_action == "favorite":
                             mark_download_favorite(str(state.database_path), row_id, favorite=True)
+                        elif batch_action == "unfavorite":
+                            mark_download_favorite(str(state.database_path), row_id, favorite=False)
                         elif batch_action == "delete":
                             row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
                             if row is None:
