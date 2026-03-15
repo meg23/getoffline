@@ -1082,6 +1082,7 @@ def _render_index(
             <option value="unplayed">unplayed</option>
             <option value="favorite">favorite</option>
             <option value="delete">delete</option>
+            <option value="download">download</option>
           </select>
           <button id="batch-apply" class="batch-apply" type="submit" title="Apply batch action" aria-label="Apply batch action" disabled>Apply</button>
         </form>
@@ -2327,7 +2328,8 @@ def make_handler(state: AppState):
                 batch_action = str((form.get("batch_action") or [""])[0]).strip().lower()
                 row_ids = [int(raw_id) for raw_id in (form.get("ids") or []) if str(raw_id).isdigit()]
 
-                if batch_action in {"played", "unplayed", "favorite", "delete"} and row_ids:
+                if batch_action in {"played", "unplayed", "favorite", "delete", "download"} and row_ids:
+                    should_trigger_podcast_redownload = False
                     for row_id in row_ids:
                         if batch_action == "played":
                             mark_download_played(str(state.database_path), row_id, played=True)
@@ -2344,6 +2346,21 @@ def make_handler(state: AppState):
                                 media_path.unlink(missing_ok=True)
                             else:
                                 delete_download_entry(str(state.database_path), row_id)
+                        elif batch_action == "download":
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            if row is None:
+                                continue
+                            if row.source_type == "youtube" and row.item_url:
+                                trigger_single_youtube_download(
+                                    state,
+                                    url=row.item_url,
+                                    media_type="video" if (row.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio",
+                                )
+                            elif row.source_type == "podcast":
+                                should_trigger_podcast_redownload = True
+
+                    if batch_action == "download" and should_trigger_podcast_redownload:
+                        trigger_background_update(state)
 
                 self.send_response(303)
                 self.send_header("Location", "/")

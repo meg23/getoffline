@@ -218,6 +218,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('>unplayed</option>', body)
             self.assertIn('>favorite</option>', body)
             self.assertIn('>delete</option>', body)
+            self.assertIn('>download</option>', body)
             self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn("/settings", body)
             self.assertIn("/quick-add-youtube", body)
