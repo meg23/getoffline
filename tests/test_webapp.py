@@ -22,6 +22,7 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
+    _infer_media_type_for_redownload,
     fetch_downloaded_media_row_by_id,
     _stream_media,
     _enqueue_progress_update,
@@ -235,6 +236,30 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('persistedMiniPlayerState.paused === false', body)
 
 
+
+
+    def test_quick_add_modal_defaults_to_video(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            body = _render_index(
+                rows=[],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn('<option value="video" selected>video</option>', body)
+
+    def test_infer_media_type_for_redownload_uses_file_path_suffix(self):
+        row = SimpleNamespace(file_ext=None, file_path="/tmp/video_episode.webm")
+        self.assertEqual(_infer_media_type_for_redownload(row), "video")
 
     def test_index_rows_render_checkboxes_for_batch_updates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
