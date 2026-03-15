@@ -778,10 +778,9 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                     "last_items_count": "0",
                 },
             )
-            self.assertIn("const fallbackUrl = miniOpen.href || '/'", body)
-            self.assertIn("if (miniOpenNavigationPending) return;", body)
+            self.assertIn("if (miniOpenNavigationPending) {", body)
             self.assertIn("miniOpen.setAttribute('aria-disabled', 'true');", body)
-            self.assertIn("window.location.assign(fallbackUrl)", body)
+            self.assertIn("miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:

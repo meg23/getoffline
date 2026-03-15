@@ -1242,13 +1242,16 @@ def _render_index(
 
       if (miniOpen) {{
         miniOpen.addEventListener('click', (event) => {{
-          event.preventDefault();
-          if (miniOpenNavigationPending) return;
+          if (miniOpenNavigationPending) {{
+            event.preventDefault();
+            return;
+          }}
+
           miniOpenNavigationPending = true;
           miniOpen.setAttribute('aria-disabled', 'true');
           miniOpen.style.pointerEvents = 'none';
 
-          const finishNavigationAttempt = () => {{
+          const clearPending = () => {{
             window.setTimeout(() => {{
               miniOpenNavigationPending = false;
               miniOpen.removeAttribute('aria-disabled');
@@ -1256,22 +1259,20 @@ def _render_index(
             }}, 3000);
           }};
 
-          const fallbackUrl = miniOpen.href || '/';
           const raw = localStorage.getItem('getofflineMiniPlayerState');
           if (!raw) {{
-            finishNavigationAttempt();
-            window.location.assign(fallbackUrl);
+            clearPending();
             return;
           }}
+
           let state = null;
           try {{ state = JSON.parse(raw); }} catch (_) {{
-            finishNavigationAttempt();
-            window.location.assign(fallbackUrl);
+            clearPending();
             return;
           }}
+
           if (!state || !state.rowId) {{
-            finishNavigationAttempt();
-            window.location.assign(fallbackUrl);
+            clearPending();
             return;
           }}
 
@@ -1280,11 +1281,11 @@ def _render_index(
             state.currentTime = active.currentTime || 0;
             state.paused = active.paused;
           }}
+
           state.playUrl = '/play?id=' + state.rowId;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
-          const targetUrl = state.playUrl + (state.paused ? '' : '&autoplay=1');
-          finishNavigationAttempt();
-          window.location.assign(targetUrl);
+          miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');
+          clearPending();
         }});
       }}
 
