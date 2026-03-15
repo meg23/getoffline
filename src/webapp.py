@@ -667,7 +667,7 @@ def _render_index(
         is_started = bool(position_seconds > 0 and not row.played)
 
         visible_rows.append(row)
-        if not show_played and (row.played or not file_exists):
+        if not favorites_only and not show_played and (row.played or not file_exists):
             continue
 
         title = html.escape(row.title or path.name or "Unknown title")
