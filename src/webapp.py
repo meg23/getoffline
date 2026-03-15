@@ -1684,6 +1684,20 @@ def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str,
     return {"start": start, "end": end}
 
 
+def _write_stream_bytes(handler: BaseHTTPRequestHandler, media_path: Path, stream, total_bytes: int) -> None:
+    remaining = max(0, int(total_bytes))
+    while remaining > 0:
+        chunk = stream.read(min(256 * 1024, remaining))
+        if not chunk:
+            break
+        try:
+            handler.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            _log_stream_disconnect(media_path)
+            break
+        remaining -= len(chunk)
+
+
 def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
     file_size = media_path.stat().st_size
     content_type = mimetypes.guess_type(str(media_path))[0] or "application/octet-stream"
@@ -1699,10 +1713,7 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
         handler.end_headers()
 
         with media_path.open("rb") as f:
-            try:
-                handler.wfile.write(f.read())
-            except (BrokenPipeError, ConnectionResetError):
-                _log_stream_disconnect(media_path)
+            _write_stream_bytes(handler, media_path, f, file_size)
         return
 
     start = parsed["start"]
@@ -1718,17 +1729,7 @@ def _stream_media(handler: BaseHTTPRequestHandler, media_path: Path) -> None:
 
     with media_path.open("rb") as f:
         f.seek(start)
-        remaining = length
-        while remaining > 0:
-            chunk = f.read(min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            try:
-                handler.wfile.write(chunk)
-            except (BrokenPipeError, ConnectionResetError):
-                _log_stream_disconnect(media_path)
-                break
-            remaining -= len(chunk)
+        _write_stream_bytes(handler, media_path, f, length)
 
 
 def _log_stream_disconnect(media_path: Path) -> None:
@@ -1745,6 +1746,13 @@ def _log_stream_disconnect(media_path: Path) -> None:
 
 def make_handler(state: AppState):
     class _Handler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            try:
+                self.connection.settimeout(5.0)
+            except OSError:
+                pass
+
         def do_GET(self):  # noqa: N802
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)

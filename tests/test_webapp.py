@@ -53,6 +53,24 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(_resolve_safe_media_path(root, str(media)), media.resolve())
             self.assertIsNone(_resolve_safe_media_path(root, str(unsafe)))
 
+    def test_stream_media_without_range_is_chunked(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "big.mp3"
+            media.write_bytes(b"a" * (700 * 1024))
+
+            write_mock = mock.Mock()
+            handler = SimpleNamespace(
+                headers={},
+                send_response=mock.Mock(),
+                send_header=mock.Mock(),
+                end_headers=mock.Mock(),
+                wfile=SimpleNamespace(write=write_mock),
+            )
+
+            _stream_media(handler, media)
+
+            self.assertGreater(write_mock.call_count, 1)
+
     def test_stream_media_ignores_client_disconnect(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp3"
