@@ -19,7 +19,7 @@ from database import (
 )
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from utils import ensure_dir, normalize_media_filename, sanitize
+from utils import ensure_dir, normalize_media_filename, sanitize, sanitize_channel_name
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
@@ -81,11 +81,11 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
         for key in ("channel", "uploader", "uploader_id"):
             value = str(info.get(key) or "").strip()
             if value:
-                return sanitize(value)
+                return sanitize_channel_name(value)
 
         title = str(info.get("title") or "").strip()
         if title:
-            return sanitize(title)
+            return sanitize_channel_name(title)
 
     return "youtube-single"
 
@@ -244,7 +244,7 @@ def download_youtube_items(config, downloaded_items):
         if not entry.get("enabled", True):
             continue
         try:
-            name = sanitize(entry["name"])
+            name = sanitize_channel_name(entry["name"])
             url = entry["url"]
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)

@@ -9,6 +9,11 @@ def sanitize(name):
     return sanitized or "item"
 
 
+def sanitize_channel_name(name):
+    sanitized = sanitize(name).replace("_", "")
+    return sanitized or "channel"
+
+
 def ensure_dir(path):
     Path(path).expanduser().mkdir(parents=True, exist_ok=True)
 
