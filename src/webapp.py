@@ -1166,6 +1166,31 @@ def _render_index(
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
       let miniOpenNavigationPending = false;
+      let miniLastPersistedSeconds = -9999;
+
+      function postMiniProgress(state, seconds, force, reason) {{
+        if (!state || !state.rowId) return;
+        const safe = Math.max(0, Number(seconds || 0));
+        if (!force && Math.abs(safe - miniLastPersistedSeconds) < 5.0) return;
+        miniLastPersistedSeconds = safe;
+
+        const body = new URLSearchParams();
+        body.set('id', String(state.rowId));
+        body.set('position_seconds', safe.toFixed(3));
+        body.set('reason', String(reason || 'mini-timeupdate'));
+        body.set('forced', force ? '1' : '0');
+
+        if (force && navigator.sendBeacon) {{
+          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+          if (navigator.sendBeacon('/progress', blob)) return;
+        }}
+
+        fetch('/progress', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+          body: body.toString(),
+        }}).catch(() => {{}});
+      }}
 
       function clearMiniMedia() {{
         [miniAudio, miniVideo].forEach((el) => {{
@@ -1212,10 +1237,17 @@ def _render_index(
             paused: active.paused,
           }}));
         }};
-        active.addEventListener('timeupdate', persist);
-        active.addEventListener('pause', persist);
+        active.addEventListener('timeupdate', () => {{
+          persist();
+          if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
+        }});
+        active.addEventListener('pause', () => {{
+          persist();
+          postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
+        }});
         active.addEventListener('play', persist);
         active.addEventListener('ended', () => {{
+          postMiniProgress(state, 0, true, 'mini-ended');
           closeMiniPlayer();
         }});
 
@@ -1223,6 +1255,14 @@ def _render_index(
       }}
 
       function closeMiniPlayer() {{
+        const raw = localStorage.getItem('getofflineMiniPlayerState');
+        let state = null;
+        try {{ state = raw ? JSON.parse(raw) : null; }} catch (_) {{ state = null; }}
+        const active = state && state.kind === 'video' ? miniVideo : miniAudio;
+        if (state && active && active.style.display !== 'none') {{
+          postMiniProgress(state, active.currentTime || 0, true, 'mini-close');
+        }}
+
         localStorage.removeItem('getofflineMiniPlayerState');
         clearMiniMedia();
         if (miniPlayer) miniPlayer.classList.remove('is-visible');
@@ -1296,6 +1336,7 @@ def _render_index(
           if (active && active.style.display !== 'none') {{
             state.currentTime = active.currentTime || 0;
             state.paused = active.paused;
+            postMiniProgress(state, state.currentTime || 0, true, 'mini-open');
             try {{ active.pause(); }} catch (_) {{}}
             active.removeAttribute('src');
             while (active.firstChild) active.removeChild(active.firstChild);
