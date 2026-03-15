@@ -1322,6 +1322,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let progressInFlight = false;
       let queuedProgressSeconds = null;
       let progressController = null;
+      const progressRequestTimeoutMs = 2500;
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
       let transcriptReady = false;
@@ -1357,14 +1358,32 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
           body: body.toString(),
         }};
 
+        let abortTimer = null;
         if (keepalive) {{
           options.keepalive = true;
         }} else {{
           progressController = new AbortController();
           options.signal = progressController.signal;
+          abortTimer = window.setTimeout(() => {{
+            if (!progressController) return;
+            progressController.abort();
+            console.warn('[getoffline] /progress request timed out and was aborted');
+          }}, progressRequestTimeoutMs);
         }}
 
-        return fetch('/progress', options).catch(() => {{}});
+        return fetch('/progress', options)
+          .then((response) => {{
+            if (!response.ok) console.warn('[getoffline] /progress failed with status', response.status);
+            return response;
+          }})
+          .catch((err) => {{
+            if (err && err.name === 'AbortError') return null;
+            console.warn('[getoffline] /progress request failed', err);
+            return null;
+          }})
+          .finally(() => {{
+            if (abortTimer !== null) window.clearTimeout(abortTimer);
+          }});
       }}
 
       function abortPendingProgressRequest() {{
@@ -2026,7 +2045,9 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid position_seconds")
                     return
 
-                update_download_position_seconds(str(state.database_path), int(raw_id), position_seconds)
+                updated = update_download_position_seconds(str(state.database_path), int(raw_id), position_seconds)
+                if not updated:
+                    log.warning("Progress update skipped for id=%s (db busy or row missing)", raw_id)
                 self.send_response(204)
                 self.end_headers()
                 return

@@ -722,6 +722,9 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("progressController = new AbortController()", body)
             self.assertIn("queuedProgressSeconds = safe", body)
             self.assertIn("abortPendingProgressRequest();", body)
+            self.assertIn("const progressRequestTimeoutMs = 2500", body)
+            self.assertIn("/progress request timed out and was aborted", body)
+            self.assertIn("/progress request failed", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
