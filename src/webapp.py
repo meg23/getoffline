@@ -1155,6 +1155,7 @@ def _render_index(
       const miniVideo = document.getElementById('mini-player-video');
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
+      let miniOpenNavigationPending = false;
 
       function clearMiniMedia() {{
         [miniAudio, miniVideo].forEach((el) => {{
@@ -1242,18 +1243,34 @@ def _render_index(
       if (miniOpen) {{
         miniOpen.addEventListener('click', (event) => {{
           event.preventDefault();
+          if (miniOpenNavigationPending) return;
+          miniOpenNavigationPending = true;
+          miniOpen.setAttribute('aria-disabled', 'true');
+          miniOpen.style.pointerEvents = 'none';
+
+          const finishNavigationAttempt = () => {{
+            window.setTimeout(() => {{
+              miniOpenNavigationPending = false;
+              miniOpen.removeAttribute('aria-disabled');
+              miniOpen.style.pointerEvents = '';
+            }}, 3000);
+          }};
+
           const fallbackUrl = miniOpen.href || '/';
           const raw = localStorage.getItem('getofflineMiniPlayerState');
           if (!raw) {{
+            finishNavigationAttempt();
             window.location.assign(fallbackUrl);
             return;
           }}
           let state = null;
           try {{ state = JSON.parse(raw); }} catch (_) {{
+            finishNavigationAttempt();
             window.location.assign(fallbackUrl);
             return;
           }}
           if (!state || !state.rowId) {{
+            finishNavigationAttempt();
             window.location.assign(fallbackUrl);
             return;
           }}
@@ -1266,6 +1283,7 @@ def _render_index(
           state.playUrl = '/play?id=' + state.rowId;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
           const targetUrl = state.playUrl + (state.paused ? '' : '&autoplay=1');
+          finishNavigationAttempt();
           window.location.assign(targetUrl);
         }});
       }}
