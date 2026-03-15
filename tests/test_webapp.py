@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from database import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
+    _LAST_DISCONNECT_LOGGED_AT,
+    _log_stream_disconnect,
     _parse_range_header,
     _resolve_safe_subtitle_path,
     _render_index,
@@ -19,6 +21,8 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
+    fetch_downloaded_media_row_by_id,
+    _stream_media,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -29,6 +33,9 @@ from webapp import (  # noqa: E402
 
 
 class WebAppHelpersTests(unittest.TestCase):
+    def setUp(self):
+        _LAST_DISCONNECT_LOGGED_AT.clear()
+
     def test_parse_range_header(self):
         self.assertEqual(_parse_range_header("bytes=0-99", 1000), {"start": 0, "end": 99})
         self.assertEqual(_parse_range_header("bytes=100-", 1000), {"start": 100, "end": 999})
@@ -45,6 +52,81 @@ class WebAppHelpersTests(unittest.TestCase):
 
             self.assertEqual(_resolve_safe_media_path(root, str(media)), media.resolve())
             self.assertIsNone(_resolve_safe_media_path(root, str(unsafe)))
+
+    def test_stream_media_without_range_is_chunked(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "big.mp3"
+            media.write_bytes(b"a" * (700 * 1024))
+
+            write_mock = mock.Mock()
+            handler = SimpleNamespace(
+                headers={},
+                send_response=mock.Mock(),
+                send_header=mock.Mock(),
+                end_headers=mock.Mock(),
+                wfile=SimpleNamespace(write=write_mock),
+            )
+
+            _stream_media(handler, media)
+
+            self.assertGreater(write_mock.call_count, 1)
+
+    def test_stream_media_ignores_client_disconnect(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_bytes(b"a" * 4096)
+
+            handler = SimpleNamespace(
+                headers={"Range": "bytes=0-1023"},
+                send_response=mock.Mock(),
+                send_header=mock.Mock(),
+                end_headers=mock.Mock(),
+                wfile=SimpleNamespace(write=mock.Mock(side_effect=ConnectionResetError("peer reset"))),
+            )
+
+            _stream_media(handler, media)
+
+    def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "SingleRowTest",
+                    "item_uid": "uid-single-row",
+                    "item_url": "https://example.com/episode.mp3",
+                    "title": "Single Row Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path)
+            row = fetch_downloaded_media_row_by_id(db_path, rows[0].row_id)
+            self.assertIsNotNone(row)
+            self.assertEqual(row.row_id, rows[0].row_id)
+            self.assertEqual(row.title, "Single Row Episode")
+
+    def test_stream_disconnect_logging_is_throttled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_bytes(b"a")
+
+            with mock.patch("webapp.log.info") as info_mock:
+                with mock.patch("webapp.time.monotonic", side_effect=[100.0, 101.0, 132.0]):
+                    _log_stream_disconnect(media)
+                    _log_stream_disconnect(media)
+                    _log_stream_disconnect(media)
+
+            self.assertEqual(info_mock.call_count, 2)
 
     def test_index_contains_update_button(self):
         with tempfile.TemporaryDirectory() as tmpdir:
