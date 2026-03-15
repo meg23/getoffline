@@ -485,7 +485,6 @@ def download_youtube_items(config, downloaded_items):
                 "no_warnings": False,
                 "noprogress": True,
                 "logger": _YoutubeDlQuietLogger(ytdlp_message_stats),
-                "extract_flat": "in_playlist",
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
@@ -510,6 +509,7 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
+            log.info("YouTube download mode for %s: full entry extraction enabled", name)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
@@ -602,7 +602,7 @@ def download_youtube_items(config, downloaded_items):
                         )
                     else:
                         log.warning(
-                            "yt-dlp announced %d playlist item(s) for %s but produced no file events. This can happen when entries are metadata-only, blocked, or skipped upstream.",
+                            "yt-dlp announced %d playlist item(s) for %s but produced no file events. This usually indicates extraction-only behavior or upstream blocking.",
                             announced_count,
                             name,
                         )

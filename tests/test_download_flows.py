@@ -285,6 +285,34 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertEqual(youtube_items, ["YouTube: WarFronts – Main Title"])
 
 
+
+    def test_youtube_download_uses_full_entry_extraction(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [
+                    {
+                        "name": "FullExtract",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "video",
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL):
+                youtube.download_youtube_items(config, [])
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertTrue("extract_flat" not in opts or not opts.get("extract_flat"))
+
     def test_youtube_no_download_warning_uses_unique_filter_counts(self):
         class FakeYoutubeDLDuplicateFilterCalls(FakeYoutubeDL):
             def download(self, urls):
