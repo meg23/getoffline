@@ -26,6 +26,7 @@ from database import (
     mark_download_favorite,
     mark_download_played,
     set_source_enabled,
+    update_source_config,
     update_download_settings,
     update_stored_defaults,
     update_download_position_seconds,
@@ -2105,21 +2106,49 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         row_id = int(item.get("id") or 0)
         name = html.escape(str(item.get("name") or ""))
         url = html.escape(str(item.get("url") or ""))
-        media_type = html.escape(str(item.get("type") or "audio"))
-        subtitles = "yes" if item.get("subtitles", True) else "no"
+        media_type_value = str(item.get("type") or "audio")
+        media_type = html.escape(media_type_value)
+        subtitles_enabled = bool(item.get("subtitles", True))
+        subtitles = "yes" if subtitles_enabled else "no"
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         toggle_to = "0" if enabled else "1"
         toggle_label = "Disable" if enabled else "Enable"
+        subtitle_offset = item.get("subtitle_offset_seconds")
+        subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
+        media_audio_selected = " selected" if media_type_value == "audio" else ""
+        media_video_selected = " selected" if media_type_value == "video" else ""
+        subtitles_yes_selected = " selected" if subtitles_enabled else ""
+        subtitles_no_selected = "" if subtitles_enabled else " selected"
         youtube_rows.append(
             f"""
             <tr>
-              <td>{name}</td>
-              <td><a href="{url}" target="_blank" rel="noreferrer">{url}</a></td>
-              <td>{media_type}</td>
-              <td>{subtitles}</td>
-              <td>{status}</td>
-              <td class="row-actions">                <form method="post" action="/settings">                  <input type="hidden" name="source_action" value="toggle" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <input type="hidden" name="enabled" value="{toggle_to}" />                  <button type="submit">{toggle_label}</button>                </form>                <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">                  <input type="hidden" name="source_action" value="delete" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <button type="submit" class="danger">Delete</button>                </form>
+              <td colspan="6">
+                <form method="post" action="/settings" class="inline-edit-grid">
+                  <input type="hidden" name="source_action" value="edit" />
+                  <input type="hidden" name="source_id" value="{row_id}" />
+                  <input type="hidden" name="source_type" value="youtube" />
+                  <input type="text" name="name" value="{name}" required />
+                  <input type="url" name="url" value="{url}" required />
+                  <select name="media_type"><option value="audio"{media_audio_selected}>audio</option><option value="video"{media_video_selected}>video</option></select>
+                  <select name="subtitles"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select>
+                  <input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" />
+                  <span class="row-status">{status}</span>
+                  <button type="submit" class="primary">Save</button>
+                </form>
+                <div class="row-actions">
+                  <form method="post" action="/settings">
+                    <input type="hidden" name="source_action" value="toggle" />
+                    <input type="hidden" name="source_id" value="{row_id}" />
+                    <input type="hidden" name="enabled" value="{toggle_to}" />
+                    <button type="submit">{toggle_label}</button>
+                  </form>
+                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">
+                    <input type="hidden" name="source_action" value="delete" />
+                    <input type="hidden" name="source_id" value="{row_id}" />
+                    <button type="submit" class="danger">Delete</button>
+                  </form>
+                </div>
               </td>
             </tr>
             """
@@ -2130,19 +2159,44 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         row_id = int(item.get("id") or 0)
         name = html.escape(str(item.get("name") or ""))
         url = html.escape(str(item.get("url") or ""))
-        subtitles = "yes" if item.get("subtitles", True) else "no"
+        subtitles_enabled = bool(item.get("subtitles", True))
+        subtitles = "yes" if subtitles_enabled else "no"
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         toggle_to = "0" if enabled else "1"
         toggle_label = "Disable" if enabled else "Enable"
+        subtitle_offset = item.get("subtitle_offset_seconds")
+        subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
+        subtitles_yes_selected = " selected" if subtitles_enabled else ""
+        subtitles_no_selected = "" if subtitles_enabled else " selected"
         podcast_rows.append(
             f"""
             <tr>
-              <td>{name}</td>
-              <td><a href="{url}" target="_blank" rel="noreferrer">{url}</a></td>
-              <td>{subtitles}</td>
-              <td>{status}</td>
-              <td class="row-actions">                <form method="post" action="/settings">                  <input type="hidden" name="source_action" value="toggle" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <input type="hidden" name="enabled" value="{toggle_to}" />                  <button type="submit">{toggle_label}</button>                </form>                <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">                  <input type="hidden" name="source_action" value="delete" />                  <input type="hidden" name="source_id" value="{row_id}" />                  <button type="submit" class="danger">Delete</button>                </form>
+              <td colspan="5">
+                <form method="post" action="/settings" class="inline-edit-grid inline-edit-grid-podcast">
+                  <input type="hidden" name="source_action" value="edit" />
+                  <input type="hidden" name="source_id" value="{row_id}" />
+                  <input type="hidden" name="source_type" value="podcast" />
+                  <input type="text" name="name" value="{name}" required />
+                  <input type="url" name="url" value="{url}" required />
+                  <select name="subtitles"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select>
+                  <input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" />
+                  <span class="row-status">{status}</span>
+                  <button type="submit" class="primary">Save</button>
+                </form>
+                <div class="row-actions">
+                  <form method="post" action="/settings">
+                    <input type="hidden" name="source_action" value="toggle" />
+                    <input type="hidden" name="source_id" value="{row_id}" />
+                    <input type="hidden" name="enabled" value="{toggle_to}" />
+                    <button type="submit">{toggle_label}</button>
+                  </form>
+                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');">
+                    <input type="hidden" name="source_action" value="delete" />
+                    <input type="hidden" name="source_id" value="{row_id}" />
+                    <button type="submit" class="danger">Delete</button>
+                  </form>
+                </div>
               </td>
             </tr>
             """
@@ -2172,8 +2226,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }}
     table {{ width: 100%; border-collapse: collapse; margin-top: .6rem; }}
     th, td {{ border-bottom: 1px solid #e9eef9; padding: .45rem; text-align: left; vertical-align: top; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .45rem; }}
     .row-actions form {{ margin: 0; }}
+    .inline-edit-grid {{ display: grid; grid-template-columns: 1.2fr 2.2fr .8fr .8fr .9fr auto auto; gap: .4rem; align-items: center; }}
+    .inline-edit-grid-podcast {{ grid-template-columns: 1.4fr 2.5fr .9fr .9fr auto auto; }}
+    .row-status {{ font-size: .85rem; color: #445; text-transform: uppercase; }}
   </style>
 </head>
 <body>
@@ -2753,6 +2810,38 @@ def make_handler(state: AppState):
                         elif source_action == "toggle":
                             enabled = (form.get("enabled") or ["1"])[0] in {"1", "true", "yes", "on"}
                             set_source_enabled(str(state.database_path), source_id, enabled)
+                        elif source_action == "edit":
+                            source_type = str((form.get("source_type") or [""])[0]).strip().lower()
+                            if source_type not in {"youtube", "podcast"}:
+                                self.send_error(400, "Invalid source_type")
+                                return
+                            name = str((form.get("name") or [""])[0]).strip()
+                            url = str((form.get("url") or [""])[0]).strip()
+                            if not name or not url:
+                                self.send_error(400, "Missing source name/url")
+                                return
+                            media_type = None
+                            if source_type == "youtube":
+                                media_type = str((form.get("media_type") or ["audio"])[0]).strip().lower()
+                                if media_type not in {"audio", "video"}:
+                                    self.send_error(400, "Invalid media_type")
+                                    return
+                            subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                            raw_offset = str((form.get("subtitle_offset_seconds") or [""])[0]).strip()
+                            try:
+                                subtitle_offset = float(raw_offset) if raw_offset else None
+                            except ValueError:
+                                self.send_error(400, "Invalid subtitle_offset_seconds")
+                                return
+                            update_source_config(
+                                str(state.database_path),
+                                row_id=source_id,
+                                name=name,
+                                url=url,
+                                media_type=media_type,
+                                subtitles=subtitles,
+                                subtitle_offset_seconds=subtitle_offset,
+                            )
 
                 stored = get_stored_config(str(state.database_path))
                 state.config["defaults"] = stored["defaults"]

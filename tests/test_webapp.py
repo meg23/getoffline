@@ -426,6 +426,9 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("Add YouTube source", body)
         self.assertIn("Add podcast source", body)
         self.assertIn("Disable", body)
+        self.assertIn('name="source_action" value="edit"', body)
+        self.assertIn('class="inline-edit-grid"', body)
+        self.assertIn('>Save</button>', body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
