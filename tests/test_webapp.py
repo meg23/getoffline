@@ -15,6 +15,7 @@ from webapp import (  # noqa: E402
     AppState,
     _LAST_DISCONNECT_LOGGED_AT,
     _log_stream_disconnect,
+    _is_playback_completion_reason,
     _parse_range_header,
     _resolve_safe_subtitle_path,
     _render_index,
@@ -76,6 +77,11 @@ class WebAppHelpersTests(unittest.TestCase):
             updated_count = _flush_pending_progress_updates(state)
             self.assertEqual(updated_count, 1)
             self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 9.5, places=3)
+
+    def test_is_playback_completion_reason(self):
+        self.assertTrue(_is_playback_completion_reason("ended"))
+        self.assertTrue(_is_playback_completion_reason("mini-ended"))
+        self.assertFalse(_is_playback_completion_reason("pause"))
 
     def test_parse_range_header(self):
         self.assertEqual(_parse_range_header("bytes=0-99", 1000), {"start": 0, "end": 99})
@@ -214,7 +220,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="downloads-table-body"', body)
             self.assertIn("setSyncButtonRunning", body)
             self.assertIn("refreshLibraryViewWithoutReload", body)
-            self.assertIn("Show played", body)
+            self.assertIn("Show everything", body)
             self.assertIn("Show favorites", body)
             self.assertIn('<th class="channel-col">Channel</th>', body)
             self.assertIn('<th class="episode-col">Episode</th>', body)
@@ -748,7 +754,107 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
 
             self.assertIn("Played Item", body)
-            self.assertIn("Hide played", body)
+            self.assertIn("Show default", body)
+
+    def test_index_marks_started_items_with_started_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row_started = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="ShowA",
+                title="In Progress",
+                file_path=str(root / "progress.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=False,
+                last_position_seconds=12.5,
+            )
+            (root / "progress.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row_started],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn('status-started" title="Playback started">STARTED</span>', body)
+            self.assertIn('.status-started { background: #e2f3ff; color: #114e78; }', body)
+
+    def test_index_favorites_view_shows_favorites_regardless_of_played_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row_unplayed_favorite = SimpleNamespace(
+                row_id=1,
+                source_type="podcast",
+                source_name="FavA",
+                title="Favorite Unplayed",
+                file_path=str(root / "fav-unplayed.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=True,
+                last_position_seconds=0,
+            )
+            row_played_favorite = SimpleNamespace(
+                row_id=2,
+                source_type="podcast",
+                source_name="FavB",
+                title="Favorite Played",
+                file_path=str(root / "fav-played.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=True,
+                favorite=True,
+                last_position_seconds=5,
+            )
+            row_non_favorite = SimpleNamespace(
+                row_id=3,
+                source_type="podcast",
+                source_name="Other",
+                title="Not Favorite",
+                file_path=str(root / "other.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=False,
+                last_position_seconds=0,
+            )
+            (root / "fav-unplayed.mp3").write_text("x", encoding="utf-8")
+            (root / "fav-played.mp3").write_text("x", encoding="utf-8")
+            (root / "other.mp3").write_text("x", encoding="utf-8")
+
+            body = _render_index(
+                rows=[row_unplayed_favorite, row_played_favorite, row_non_favorite],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+                favorites_only=True,
+            )
+
+            self.assertIn("Favorite Unplayed", body)
+            self.assertIn("Favorite Played", body)
+            self.assertNotIn("Not Favorite", body)
 
     def test_index_uses_batch_controls_and_play_link_for_item_actions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -789,8 +895,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn('title="Sync downloads"', body)
             self.assertIn('href="#bi-download"', body)
-            self.assertIn('title="Show played"', body)
-            self.assertIn('aria-label="Show played"', body)
+            self.assertIn('title="Show everything"', body)
+            self.assertIn('aria-label="Show everything"', body)
             self.assertIn('href="#bi-eye"', body)
             self.assertIn('title="Settings"', body)
             self.assertIn('aria-label="Settings"', body)
@@ -833,7 +939,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                 },
             )
 
-            self.assertNotIn('status-new">new</span>', body)
+            self.assertNotIn('status-unplayed">UNPLAYED</span>', body)
 
     def test_player_page_includes_resume_progress_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -942,7 +1048,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertEqual(resolved, subtitle.resolve())
 
 
-    def test_index_shows_missing_file_with_redownload_action(self):
+    def test_index_hides_missing_file_by_default_and_shows_with_everything_toggle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             row = SimpleNamespace(
@@ -971,7 +1077,23 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                     "last_items_count": "0",
                 },
             )
-            self.assertIn('>missing</span>', body)
+            self.assertNotIn('>MISSING</span>', body)
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+                show_played=True,
+            )
+            self.assertIn('>MISSING</span>', body)
             self.assertIn('/redownload?id=1', body)
             self.assertIn('name="ids" value="1"', body)
 

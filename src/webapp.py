@@ -73,6 +73,7 @@ class MediaRow:
     played: bool
     favorite: bool = False
     played_at: Optional[str] = None
+    last_position_seconds: float = 0.0
     subtitle_path: Optional[str] = None
 
 
@@ -182,6 +183,11 @@ def _log_sqlite_lock(operation: str, exc: Exception) -> None:
         log.warning("SQLite lock while %s: %s", operation, exc)
 
 
+def _is_playback_completion_reason(reason: str) -> bool:
+    value = str(reason or "").strip().lower()
+    return value in {"ended", "mini-ended"}
+
+
 def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional[Path]:
     root = output_root.expanduser().resolve()
     raw = Path(candidate_path).expanduser()
@@ -266,7 +272,8 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             rows = conn.execute(
                 """
                 SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
-                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path
                 FROM downloads
                 WHERE download_status = 'downloaded'
                 ORDER BY last_seen_at DESC, id DESC
@@ -292,7 +299,8 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             played=bool(row[9]),
             favorite=bool(row[10]),
             played_at=row[11],
-            subtitle_path=row[12],
+            last_position_seconds=float(row[12] or 0.0),
+            subtitle_path=row[13],
         )
         for row in rows
     ]
@@ -305,7 +313,8 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
             row = conn.execute(
                 """
                 SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
-                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path
                 FROM downloads
                 WHERE id = ? AND download_status = 'downloaded'
                 LIMIT 1
@@ -334,7 +343,8 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         played=bool(row[9]),
         favorite=bool(row[10]),
         played_at=row[11],
-        subtitle_path=row[12],
+        last_position_seconds=float(row[12] or 0.0),
+        subtitle_path=row[13],
     )
 
 
@@ -653,8 +663,11 @@ def _render_index(
         if favorites_only and not row_is_favorite:
             continue
 
+        position_seconds = max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0))
+        is_started = bool(position_seconds > 0 and not row.played)
+
         visible_rows.append(row)
-        if row.played and not show_played:
+        if not favorites_only and not show_played and (row.played or not file_exists):
             continue
 
         title = html.escape(row.title or path.name or "Unknown title")
@@ -664,12 +677,19 @@ def _render_index(
         raw_ext = (row.file_ext or path.suffix.lstrip(".")) or "?"
         ext = html.escape(raw_ext)
         media_kind = "video" if str(raw_ext).lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
-        ever_played = bool(row.played or getattr(row, "played_at", None))
-        status_label = "played" if row.played else ("" if ever_played else "new")
-        status_class = "status-played" if row.played else "status-new"
-        status_title = "Already played" if row.played else ("Played previously" if ever_played else "Not played yet")
+        status_label = "UNPLAYED"
+        status_class = "status-unplayed"
+        status_title = "Never played"
+        if is_started:
+            status_label = "STARTED"
+            status_class = "status-started"
+            status_title = "Playback started"
+        if row.played:
+            status_label = "PLAYED"
+            status_class = "status-played"
+            status_title = "Playback completed"
         if not file_exists:
-            status_label = "missing"
+            status_label = "MISSING"
             status_class = "status-missing"
             status_title = "File missing locally"
         play_or_download_href = f"/play?id={row.row_id}" if file_exists else f"/redownload?id={row.row_id}"
@@ -715,7 +735,7 @@ def _render_index(
     if favorites_only:
         query_bits.append("favorites=1")
     toggle_href = "/" + ("?" + "&".join(query_bits) if query_bits else "")
-    toggle_label = "Show played" if toggle_show_played else "Hide played"
+    toggle_label = "Show everything" if toggle_show_played else "Show default"
     toggle_icon = "bi-eye" if toggle_show_played else "bi-eye-slash"
     toggle_favorites_only = not favorites_only
     fav_query_bits = []
@@ -904,7 +924,8 @@ def _render_index(
       letter-spacing: .04em;
     }}
     .status-played {{ background: var(--ok-bg); color: var(--ok-text); }}
-    .status-new {{ background: var(--new-bg); color: var(--new-text); }}
+    .status-unplayed {{ background: var(--new-bg); color: var(--new-text); }}
+    .status-started {{ background: #e2f3ff; color: #114e78; }}
     .status-missing {{ background: #fde7e9; color: #96253b; }}
 
     .episode-link {{ color: inherit; text-decoration: none; }}
@@ -2664,7 +2685,10 @@ def make_handler(state: AppState):
                 if is_forced:
                     log.info("POST /progress forced id=%s reason=%s seconds=%.3f", raw_id, raw_reason, position_seconds)
 
-                _enqueue_progress_update(state, int(raw_id), position_seconds, reason=raw_reason, forced=is_forced)
+                row_id = int(raw_id)
+                _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
+                if _is_playback_completion_reason(raw_reason):
+                    mark_download_played(str(state.database_path), row_id, played=True)
                 self.send_response(204)
                 self.end_headers()
                 return
