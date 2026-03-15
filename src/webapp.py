@@ -47,6 +47,9 @@ MEDIA_EXTENSIONS = {
 
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
+SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
+PROGRESS_FLUSH_COALESCE_SECONDS = 0.35
+PROGRESS_FLUSH_POLL_SECONDS = 0.5
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -88,6 +91,15 @@ class AppState:
     config: Dict
     update_runner: Callable[[Dict, List[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
+    pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
+    pending_progress: Dict[int, float] = field(default_factory=dict)
+    pending_progress_event: threading.Event = field(default_factory=threading.Event)
+    progress_metrics_lock: threading.Lock = field(default_factory=threading.Lock)
+    progress_received_count: int = 0
+    progress_flush_count: int = 0
+    progress_last_log_at: float = 0.0
+    progress_last_reason: str = "unknown"
+    progress_last_forced: bool = False
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -157,6 +169,16 @@ def _normalize_stem(value: str) -> str:
     return normalized or "item"
 
 
+def _is_sqlite_lock_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "database is locked" in text or "database table is locked" in text
+
+
+def _log_sqlite_lock(operation: str, exc: Exception) -> None:
+    if _is_sqlite_lock_error(exc):
+        log.warning("SQLite lock while %s: %s", operation, exc)
+
+
 def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional[Path]:
     root = output_root.expanduser().resolve()
     raw = Path(candidate_path).expanduser()
@@ -182,41 +204,46 @@ def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional
 
 def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
     root = output_root.expanduser().resolve()
-    with sqlite3.connect(str(db_path)) as conn:
-        stale_rows = conn.execute(
-            """
-            SELECT id, file_path
-            FROM downloads
-            WHERE download_status = 'downloaded' AND COALESCE(file_path, '') != ''
-            """
-        ).fetchall()
+    try:
+        with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+            stale_rows = conn.execute(
+                """
+                SELECT id, file_path
+                FROM downloads
+                WHERE download_status = 'downloaded' AND COALESCE(file_path, '') != ''
+                """
+            ).fetchall()
 
-        updates = []
-        for row_id, file_path in stale_rows:
-            if _resolve_safe_media_path(root, file_path):
-                continue
-
-            raw = Path(file_path).expanduser()
-            candidate_bases = [raw] if raw.is_absolute() else [root / raw, raw]
-
-            repaired_path = None
-            for base in candidate_bases:
-                normalized_name = f"{_normalize_stem(base.stem)}{base.suffix}"
-                normalized_candidate = base.with_name(normalized_name).resolve()
-                try:
-                    normalized_candidate.relative_to(root)
-                except ValueError:
+            updates = []
+            for row_id, file_path in stale_rows:
+                if _resolve_safe_media_path(root, file_path):
                     continue
-                if normalized_candidate.exists() and normalized_candidate.is_file() and _is_media_file(normalized_candidate):
-                    repaired_path = str(normalized_candidate)
-                    break
 
-            if repaired_path:
-                updates.append((repaired_path, int(row_id)))
+                raw = Path(file_path).expanduser()
+                candidate_bases = [raw] if raw.is_absolute() else [root / raw, raw]
 
-        if updates:
-            conn.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", updates)
-            conn.commit()
+                repaired_path = None
+                for base in candidate_bases:
+                    normalized_name = f"{_normalize_stem(base.stem)}{base.suffix}"
+                    normalized_candidate = base.with_name(normalized_name).resolve()
+                    try:
+                        normalized_candidate.relative_to(root)
+                    except ValueError:
+                        continue
+                    if normalized_candidate.exists() and normalized_candidate.is_file() and _is_media_file(normalized_candidate):
+                        repaired_path = str(normalized_candidate)
+                        break
+
+                if repaired_path:
+                    updates.append((repaired_path, int(row_id)))
+
+            if updates:
+                conn.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", updates)
+                conn.commit()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock("repairing downloaded file paths", exc)
+        if not _is_sqlite_lock_error(exc):
+            raise
 
 
 def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = None) -> List[MediaRow]:
@@ -224,16 +251,22 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     repair_root = output_root or db_path.parent
     _repair_downloaded_file_paths(db_path, repair_root)
 
-    with sqlite3.connect(str(db_path)) as conn:
-        rows = conn.execute(
-            """
-            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
-            FROM downloads
-            WHERE download_status = 'downloaded'
-            ORDER BY last_seen_at DESC, id DESC
-            """
-        ).fetchall()
+    try:
+        with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+                FROM downloads
+                WHERE download_status = 'downloaded'
+                ORDER BY last_seen_at DESC, id DESC
+                """
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock("reading downloaded media rows", exc)
+        if _is_sqlite_lock_error(exc):
+            return []
+        raise
 
     return [
         MediaRow(
@@ -257,17 +290,23 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
 
 def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
     init_database(str(db_path))
-    with sqlite3.connect(str(db_path)) as conn:
-        row = conn.execute(
-            """
-            SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
-                   file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
-            FROM downloads
-            WHERE id = ? AND download_status = 'downloaded'
-            LIMIT 1
-            """,
-            (int(row_id),),
-        ).fetchone()
+    try:
+        with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+            row = conn.execute(
+                """
+                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                       file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0), played_at, subtitle_path
+                FROM downloads
+                WHERE id = ? AND download_status = 'downloaded'
+                LIMIT 1
+                """,
+                (int(row_id),),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock("reading downloaded media row by id", exc)
+        if _is_sqlite_lock_error(exc):
+            return None
+        raise
 
     if row is None:
         return None
@@ -425,6 +464,92 @@ def trigger_background_update(state: AppState) -> bool:
     thread = threading.Thread(target=_run_update_job, args=(state,), daemon=True)
     thread.start()
     return True
+
+
+def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float, reason: str = "unknown", forced: bool = False) -> None:
+    safe_seconds = max(0.0, float(position_seconds or 0.0))
+    with state.pending_progress_lock:
+        state.pending_progress[int(row_id)] = safe_seconds
+        queue_size = len(state.pending_progress)
+        state.pending_progress_event.set()
+
+    now = time.monotonic()
+    with state.progress_metrics_lock:
+        state.progress_received_count += 1
+        state.progress_last_reason = str(reason or "unknown")
+        state.progress_last_forced = bool(forced)
+        received_count = state.progress_received_count
+        should_log = (now - state.progress_last_log_at) >= 2.0
+        if should_log:
+            state.progress_last_log_at = now
+
+    if should_log:
+        log.info(
+            "Progress enqueue stats: received=%s queue_size=%s latest_id=%s latest_seconds=%.3f reason=%s forced=%s",
+            received_count,
+            queue_size,
+            int(row_id),
+            safe_seconds,
+            str(reason or "unknown"),
+            "yes" if forced else "no",
+        )
+
+
+def _flush_pending_progress_updates(state: AppState) -> int:
+    with state.pending_progress_lock:
+        pending = dict(state.pending_progress)
+        state.pending_progress.clear()
+        state.pending_progress_event.clear()
+
+    if not pending:
+        return 0
+
+    flush_started_at = time.monotonic()
+    updated_count = 0
+    for row_id, seconds in pending.items():
+        updated = update_download_position_seconds(str(state.database_path), int(row_id), float(seconds))
+        if not updated:
+            log.warning("Progress update skipped for id=%s (db busy or row missing)", row_id)
+        else:
+            updated_count += 1
+
+    with state.progress_metrics_lock:
+        state.progress_flush_count += 1
+        flush_count = state.progress_flush_count
+
+    elapsed_ms = (time.monotonic() - flush_started_at) * 1000.0
+    log.info(
+        "Progress flush #%s: attempted=%s updated=%s flush_ms=%.1f",
+        flush_count,
+        len(pending),
+        updated_count,
+        elapsed_ms,
+    )
+    return updated_count
+
+
+def _progress_flush_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        has_pending = state.pending_progress_event.wait(PROGRESS_FLUSH_POLL_SECONDS)
+        if stop_event.is_set():
+            break
+        if not has_pending:
+            continue
+
+        # Coalesce frequent /progress events to reduce write churn.
+        time.sleep(PROGRESS_FLUSH_COALESCE_SECONDS)
+        if stop_event.is_set():
+            break
+
+        try:
+            _flush_pending_progress_updates(state)
+        except Exception as exc:
+            log.warning("Progress flush loop error: %s", exc)
+
+    try:
+        _flush_pending_progress_updates(state)
+    except Exception as exc:
+        log.warning("Final progress flush error: %s", exc)
 
 
 def _auto_update_interval_seconds(state: AppState) -> int:
@@ -1005,13 +1130,31 @@ def _render_index(
     (() => {{
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
+      let syncReloadTimer = null;
+      let suppressSyncAutoReload = false;
       if (syncForm && syncButton && !syncButton.disabled) {{
-        syncForm.addEventListener('submit', () => {{
+        let syncRequestInFlight = false;
+
+        syncForm.addEventListener('submit', (event) => {{
+          event.preventDefault();
+          if (syncRequestInFlight) return;
+          syncRequestInFlight = true;
+
           syncButton.disabled = true;
           const icon = syncButton.querySelector('.bi');
           const iconUse = syncButton.querySelector('use');
           if (icon) icon.classList.add('is-spinning');
           if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
+
+          fetch('/update', {{ method: 'POST', keepalive: true }})
+            .catch(() => {{}})
+            .finally(() => {{
+              if (suppressSyncAutoReload || document.hidden) return;
+              syncReloadTimer = window.setTimeout(() => {{
+                if (suppressSyncAutoReload || document.hidden) return;
+                window.location.reload();
+              }}, 250);
+            }});
         }});
       }}
 
@@ -1022,6 +1165,40 @@ def _render_index(
       const miniVideo = document.getElementById('mini-player-video');
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
+      let miniOpenNavigationPending = false;
+      let miniLastPersistedSeconds = -9999;
+
+      function updatePlayLinkResumeHint(rowId, seconds) {{
+        const safe = Math.max(0, Number(seconds || 0));
+        document.querySelectorAll('a[data-play-link="1"][data-row-id="' + String(rowId) + '"]').forEach((link) => {{
+          link.dataset.resumeSeconds = safe.toFixed(3);
+        }});
+      }}
+
+      function postMiniProgress(state, seconds, force, reason) {{
+        if (!state || !state.rowId) return;
+        const safe = Math.max(0, Number(seconds || 0));
+        updatePlayLinkResumeHint(state.rowId, safe);
+        if (!force && Math.abs(safe - miniLastPersistedSeconds) < 5.0) return;
+        miniLastPersistedSeconds = safe;
+
+        const body = new URLSearchParams();
+        body.set('id', String(state.rowId));
+        body.set('position_seconds', safe.toFixed(3));
+        body.set('reason', String(reason || 'mini-timeupdate'));
+        body.set('forced', force ? '1' : '0');
+
+        if (force && navigator.sendBeacon) {{
+          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+          if (navigator.sendBeacon('/progress', blob)) return;
+        }}
+
+        fetch('/progress', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+          body: body.toString(),
+        }}).catch(() => {{}});
+      }}
 
       function clearMiniMedia() {{
         [miniAudio, miniVideo].forEach((el) => {{
@@ -1068,10 +1245,17 @@ def _render_index(
             paused: active.paused,
           }}));
         }};
-        active.addEventListener('timeupdate', persist);
-        active.addEventListener('pause', persist);
+        active.addEventListener('timeupdate', () => {{
+          persist();
+          if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
+        }});
+        active.addEventListener('pause', () => {{
+          persist();
+          postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
+        }});
         active.addEventListener('play', persist);
         active.addEventListener('ended', () => {{
+          postMiniProgress(state, 0, true, 'mini-ended');
           closeMiniPlayer();
         }});
 
@@ -1079,6 +1263,14 @@ def _render_index(
       }}
 
       function closeMiniPlayer() {{
+        const raw = localStorage.getItem('getofflineMiniPlayerState');
+        let state = null;
+        try {{ state = raw ? JSON.parse(raw) : null; }} catch (_) {{ state = null; }}
+        const active = state && state.kind === 'video' ? miniVideo : miniAudio;
+        if (state && active && active.style.display !== 'none') {{
+          postMiniProgress(state, active.currentTime || 0, true, 'mini-close');
+        }}
+
         localStorage.removeItem('getofflineMiniPlayerState');
         clearMiniMedia();
         if (miniPlayer) miniPlayer.classList.remove('is-visible');
@@ -1108,20 +1300,43 @@ def _render_index(
 
       if (miniOpen) {{
         miniOpen.addEventListener('click', (event) => {{
-          event.preventDefault();
-          const fallbackUrl = miniOpen.href || '/';
+          suppressSyncAutoReload = true;
+          if (syncReloadTimer !== null) {{
+            window.clearTimeout(syncReloadTimer);
+            syncReloadTimer = null;
+          }}
+
+          if (miniOpenNavigationPending) {{
+            event.preventDefault();
+            return;
+          }}
+
+          miniOpenNavigationPending = true;
+          miniOpen.setAttribute('aria-disabled', 'true');
+          miniOpen.style.pointerEvents = 'none';
+
+          const clearPending = () => {{
+            window.setTimeout(() => {{
+              miniOpenNavigationPending = false;
+              miniOpen.removeAttribute('aria-disabled');
+              miniOpen.style.pointerEvents = '';
+            }}, 3000);
+          }};
+
           const raw = localStorage.getItem('getofflineMiniPlayerState');
           if (!raw) {{
-            window.location.assign(fallbackUrl);
+            clearPending();
             return;
           }}
+
           let state = null;
           try {{ state = JSON.parse(raw); }} catch (_) {{
-            window.location.assign(fallbackUrl);
+            clearPending();
             return;
           }}
+
           if (!state || !state.rowId) {{
-            window.location.assign(fallbackUrl);
+            clearPending();
             return;
           }}
 
@@ -1129,11 +1344,17 @@ def _render_index(
           if (active && active.style.display !== 'none') {{
             state.currentTime = active.currentTime || 0;
             state.paused = active.paused;
+            postMiniProgress(state, state.currentTime || 0, true, 'mini-open');
+            try {{ active.pause(); }} catch (_) {{}}
+            active.removeAttribute('src');
+            while (active.firstChild) active.removeChild(active.firstChild);
+            active.load();
           }}
+
           state.playUrl = '/play?id=' + state.rowId;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
-          const targetUrl = state.playUrl + (state.paused ? '' : '&autoplay=1');
-          window.location.assign(targetUrl);
+          miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');
+          clearPending();
         }});
       }}
 
@@ -1277,9 +1498,16 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const transcript = document.getElementById('transcript');
       const subtitleTrackEl = document.getElementById('subtitle-track');
       let lastSentSeconds = -9999;
+      let progressInFlight = false;
+      let queuedProgressSeconds = null;
+      let progressController = null;
+      const periodicProgressSeconds = 5.0;
+      const progressRequestTimeoutMs = 2000;
       let hasAppliedInitialSeek = false;
       let lastActiveCue = null;
       let transcriptReady = false;
+      let hasSentPageExitProgress = false;
+      let lastForcedProgressAt = 0;
 
       if (!player) return;
 
@@ -1301,27 +1529,88 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         }}
       }}
 
-      function postProgress(seconds, force) {{
-        const safe = Math.max(0, Number(seconds || 0));
-        if (!force && Math.abs(safe - lastSentSeconds) < 1.0) return;
-        lastSentSeconds = safe;
-        updateLabel(safe);
-
+      function sendProgressRequest(seconds, keepalive, reason, forced) {{
         const body = new URLSearchParams();
         body.set('id', String(rowId));
-        body.set('position_seconds', safe.toFixed(3));
+        body.set('position_seconds', seconds.toFixed(3));
+        body.set('reason', String(reason || 'unknown'));
+        body.set('forced', forced ? '1' : '0');
 
-        if (force && navigator.sendBeacon) {{
-          const blob = new Blob([body.toString()], {{ type: 'application/x-www-form-urlencoded' }});
-          if (navigator.sendBeacon('/progress', blob)) return;
-        }}
-
-        fetch('/progress', {{
+        const options = {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
           body: body.toString(),
-          keepalive: true,
-        }}).catch(() => {{}});
+        }};
+
+        let abortTimer = null;
+        if (!keepalive) {{
+          progressController = new AbortController();
+          options.signal = progressController.signal;
+          abortTimer = window.setTimeout(() => {{
+            if (!progressController) return;
+            progressController.abort();
+          }}, progressRequestTimeoutMs);
+        }}
+
+        return fetch('/progress', options)
+          .then((response) => {{
+            if (!response.ok) console.warn('[getoffline] /progress failed with status', response.status);
+            return response;
+          }})
+          .catch((err) => {{
+            if (err && err.name === 'AbortError') return null;
+            console.warn('[getoffline] /progress request failed', err);
+            return null;
+          }})
+          .finally(() => {{
+            if (abortTimer !== null) window.clearTimeout(abortTimer);
+            progressController = null;
+          }});
+      }}
+
+      function postProgress(seconds, force, reason) {{
+        const safe = Math.max(0, Number(seconds || 0));
+        if (!force && Math.abs(safe - lastSentSeconds) < periodicProgressSeconds) return;
+        if (force) {{
+          const nowMs = Date.now();
+          if ((nowMs - lastForcedProgressAt) < 1200 && reason !== 'ended' && reason !== 'page-exit') return;
+          lastForcedProgressAt = nowMs;
+        }}
+        updateLabel(safe);
+        lastSentSeconds = safe;
+
+        if (force) {{
+          const beaconBody = new URLSearchParams();
+          beaconBody.set('id', String(rowId));
+          beaconBody.set('position_seconds', safe.toFixed(3));
+          beaconBody.set('reason', String(reason || 'unknown'));
+          beaconBody.set('forced', '1');
+          if (navigator.sendBeacon) {{
+            const blob = new Blob([beaconBody.toString()], {{ type: 'application/x-www-form-urlencoded' }});
+            if (navigator.sendBeacon('/progress', blob)) return;
+          }}
+
+          // During navigation lifecycle events, avoid starting extra fetches that can be cancelled.
+          if (reason === 'page-exit' || reason === 'back-link' || reason === 'pause') return;
+
+          sendProgressRequest(safe, false, reason || 'forced', true);
+          return;
+        }}
+
+        if (progressInFlight) {{
+          queuedProgressSeconds = safe;
+          return;
+        }}
+
+        progressInFlight = true;
+        queuedProgressSeconds = null;
+        sendProgressRequest(safe, false, reason || 'timeupdate', false).finally(() => {{
+          progressInFlight = false;
+          if (queuedProgressSeconds === null) return;
+          const queued = queuedProgressSeconds;
+          queuedProgressSeconds = null;
+          postProgress(queued, false, reason);
+        }});
       }}
 
       function persistMiniPlayerState() {{
@@ -1430,25 +1719,28 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }});
       player.addEventListener('pause', () => {{
         persistMiniPlayerState();
-        postProgress(player.currentTime, true);
+        postProgress(player.currentTime, true, 'pause');
       }});
       player.addEventListener('play', persistMiniPlayerState);
       player.addEventListener('ended', () => {{
         localStorage.removeItem('getofflineMiniPlayerState');
-        postProgress(0, true);
+        postProgress(0, true, 'ended');
       }});
 
       if (backToLibrary) {{
         backToLibrary.addEventListener('click', () => {{
           persistMiniPlayerState();
+          postProgress(player.currentTime, true, 'back-link');
         }});
       }}
 
-      document.addEventListener('visibilitychange', () => {{
-        if (document.hidden) postProgress(player.currentTime, true);
-      }});
-      window.addEventListener('beforeunload', () => postProgress(player.currentTime, true));
-      window.addEventListener('pagehide', () => postProgress(player.currentTime, true));
+      function sendPageExitProgress() {{
+        if (hasSentPageExitProgress) return;
+        hasSentPageExitProgress = true;
+        postProgress(player.currentTime, true, 'page-exit');
+      }}
+
+      window.addEventListener('pagehide', sendPageExitProgress);
     }})();
   </script>
 </body>
@@ -1792,6 +2084,7 @@ def make_handler(state: AppState):
             if path in {"/mark-played", "/mark-unplay"}:
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
+                    log.warning("POST /progress missing/invalid id payload=%s", body)
                     self.send_error(400, "Missing or invalid id")
                     return
 
@@ -1857,18 +2150,23 @@ def make_handler(state: AppState):
                 return
 
             if path in {"/play", "/media", "/subtitle"}:
+                request_started_at = time.monotonic()
                 raw_id = (query.get("id") or [None])[0]
+                log.info("GET %s requested id=%s", path, raw_id)
                 if raw_id is None or not str(raw_id).isdigit():
+                    log.warning("GET %s invalid id=%s", path, raw_id)
                     self.send_error(400, "Missing or invalid id")
                     return
 
                 row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
                 if row is None:
+                    log.warning("GET %s missing row id=%s", path, raw_id)
                     self.send_error(404, "Item not found")
                     return
 
                 media_path = _resolve_safe_media_path(state.output_root, row.file_path)
                 if media_path is None:
+                    log.warning("GET %s media unavailable id=%s path=%s", path, raw_id, row.file_path)
                     self.send_error(404, "Media file unavailable")
                     return
 
@@ -1877,6 +2175,14 @@ def make_handler(state: AppState):
                     subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
                     body = _render_player(row, media_path, resume_seconds, subtitle_path is not None)
                     body_bytes = body.encode("utf-8")
+                    elapsed_ms = (time.monotonic() - request_started_at) * 1000.0
+                    log.info(
+                        "GET /play id=%s resume_seconds=%.3f subtitle=%s render_ms=%.1f",
+                        row.row_id,
+                        resume_seconds,
+                        "yes" if subtitle_path is not None else "no",
+                        elapsed_ms,
+                    )
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(body_bytes)))
@@ -1904,7 +2210,12 @@ def make_handler(state: AppState):
                     self.wfile.write(body_bytes)
                     return
 
+                media_started_at = time.monotonic()
+                range_header = self.headers.get("Range") or "none"
+                log.info("GET /media id=%s range=%s", raw_id, range_header)
                 _stream_media(self, media_path)
+                elapsed_ms = (time.monotonic() - media_started_at) * 1000.0
+                log.info("GET /media id=%s completed stream_ms=%.1f", raw_id, elapsed_ms)
                 return
 
             self.send_error(404, "Not found")
@@ -1914,7 +2225,8 @@ def make_handler(state: AppState):
             path = posixpath.normpath(parsed.path)
 
             if path == "/update":
-                trigger_background_update(state)
+                started = trigger_background_update(state)
+                log.info("Manual update requested (started=%s)", "yes" if started else "no")
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -1926,17 +2238,25 @@ def make_handler(state: AppState):
                 form = parse_qs(body)
                 raw_id = (form.get("id") or [None])[0]
                 raw_position = (form.get("position_seconds") or [None])[0]
+                raw_reason = str((form.get("reason") or ["unknown"])[0]).strip() or "unknown"
+                raw_forced = str((form.get("forced") or ["0"])[0]).strip().lower()
+                is_forced = raw_forced in {"1", "true", "yes", "on"}
                 if raw_id is None or not str(raw_id).isdigit():
+                    log.warning("POST /progress missing/invalid id payload=%s", body)
                     self.send_error(400, "Missing or invalid id")
                     return
 
                 try:
                     position_seconds = float(raw_position or 0.0)
                 except (TypeError, ValueError):
+                    log.warning("POST /progress invalid position_seconds payload=%s", body)
                     self.send_error(400, "Missing or invalid position_seconds")
                     return
 
-                update_download_position_seconds(str(state.database_path), int(raw_id), position_seconds)
+                if is_forced:
+                    log.info("POST /progress forced id=%s reason=%s seconds=%.3f", raw_id, raw_reason, position_seconds)
+
+                _enqueue_progress_update(state, int(raw_id), position_seconds, reason=raw_reason, forced=is_forced)
                 self.send_response(204)
                 self.end_headers()
                 return
@@ -2077,6 +2397,15 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         daemon=True,
     )
     auto_update_thread.start()
+
+    progress_flush_stop_event = threading.Event()
+    progress_flush_thread = threading.Thread(
+        target=_progress_flush_loop,
+        args=(state, progress_flush_stop_event),
+        daemon=True,
+    )
+    progress_flush_thread.start()
+
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
     print("Automatic download checks are enabled. Adjust the interval in Settings (minutes).")
@@ -2086,4 +2415,6 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         pass
     finally:
         auto_update_stop_event.set()
+        progress_flush_stop_event.set()
+        state.pending_progress_event.set()
         server.server_close()
