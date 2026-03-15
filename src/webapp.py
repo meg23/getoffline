@@ -1102,7 +1102,7 @@ def _render_index(
   <div class="container">
     <div class="hero">
       <h1>GetOffline</h1>
-      <div class="summary-grid">
+      <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
           <div class="summary-value">{total_items}</div>
@@ -1156,7 +1156,7 @@ def _render_index(
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
         <h2 id="quick-add-title">Add single YouTube link</h2>
-        <form method="post" action="/quick-add-youtube" class="quick-add-form">
+        <form id="quick-add-form" method="post" action="/quick-add-youtube" class="quick-add-form">
           <div>
             <label for="quick-add-url">YouTube URL</label>
             <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
@@ -1176,7 +1176,7 @@ def _render_index(
       </div>
     </div>
 
-    <table>
+    <table id="downloads-table">
       <colgroup>
         <col class="col-channel" />
         <col class="col-episode" />
@@ -1187,7 +1187,7 @@ def _render_index(
         <col class="col-select" />
       </colgroup>
       <thead><tr><th class="channel-col">Channel</th><th class="episode-col">Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th></tr></thead>
-      <tbody>{table_rows}</tbody>
+      <tbody id="downloads-table-body">{table_rows}</tbody>
     </table>
 
     <section id="mini-player-backdrop" class="mini-player-backdrop" aria-hidden="true">
@@ -1211,7 +1211,100 @@ def _render_index(
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
       let syncReloadTimer = null;
+      let syncStatusPollTimer = null;
       let suppressSyncAutoReload = false;
+      const syncStatusPollIntervalMs = 1500;
+
+      const isMediaPlaybackActive = () => {{
+        return Array.from(document.querySelectorAll('audio,video')).some((media) => {{
+          if (!media) return false;
+          return !media.paused && !media.ended && media.readyState > 2;
+        }});
+      }};
+
+      const clearSyncReloadTimer = () => {{
+        if (syncReloadTimer) {{
+          window.clearTimeout(syncReloadTimer);
+          syncReloadTimer = null;
+        }}
+      }};
+
+      const clearSyncStatusPollTimer = () => {{
+        if (syncStatusPollTimer) {{
+          window.clearTimeout(syncStatusPollTimer);
+          syncStatusPollTimer = null;
+        }}
+      }};
+
+      const setSyncButtonRunning = () => {{
+        if (!syncButton) return;
+        syncButton.disabled = true;
+        const icon = syncButton.querySelector('.bi');
+        const iconUse = syncButton.querySelector('use');
+        if (icon) icon.classList.add('is-spinning');
+        if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
+      }};
+
+      const setSyncButtonIdle = () => {{
+        if (!syncButton) return;
+        syncButton.disabled = false;
+        const icon = syncButton.querySelector('.bi');
+        const iconUse = syncButton.querySelector('use');
+        if (icon) icon.classList.remove('is-spinning');
+        if (iconUse) iconUse.setAttribute('href', '#bi-download');
+      }};
+
+      const refreshLibraryViewWithoutReload = () => {{
+        return fetch(window.location.pathname + window.location.search, {{ cache: 'no-store' }})
+          .then((response) => response.ok ? response.text() : null)
+          .then((htmlText) => {{
+            if (!htmlText) return;
+            const parsed = new window.DOMParser().parseFromString(htmlText, 'text/html');
+            const nextSummary = parsed.getElementById('summary-grid');
+            const nextTableBody = parsed.getElementById('downloads-table-body');
+            const currentSummary = document.getElementById('summary-grid');
+            const currentTableBody = document.getElementById('downloads-table-body');
+
+            if (currentSummary && nextSummary) currentSummary.innerHTML = nextSummary.innerHTML;
+            if (currentTableBody && nextTableBody) currentTableBody.innerHTML = nextTableBody.innerHTML;
+          }})
+          .catch(() => {{}})
+          .finally(() => {{
+            setSyncButtonIdle();
+          }});
+      }};
+
+      const scheduleSyncReloadWhenSafe = () => {{
+        clearSyncReloadTimer();
+        const attemptReload = () => {{
+          if (suppressSyncAutoReload || document.hidden || isMediaPlaybackActive()) {{
+            syncReloadTimer = window.setTimeout(attemptReload, syncStatusPollIntervalMs);
+            return;
+          }}
+          window.location.reload();
+        }};
+        syncReloadTimer = window.setTimeout(attemptReload, 250);
+      }};
+
+      const pollSyncStatusUntilFinished = () => {{
+        clearSyncStatusPollTimer();
+        fetch('/update-status', {{ cache: 'no-store' }})
+          .then((response) => response.ok ? response.json() : null)
+          .then((status) => {{
+            if (!status) throw new Error('missing status payload');
+            if (status.is_running === 'yes') {{
+              syncStatusPollTimer = window.setTimeout(pollSyncStatusUntilFinished, syncStatusPollIntervalMs);
+              return;
+            }}
+            setSyncButtonIdle();
+            refreshLibraryViewWithoutReload();
+            scheduleSyncReloadWhenSafe();
+          }})
+          .catch(() => {{
+            syncStatusPollTimer = window.setTimeout(pollSyncStatusUntilFinished, syncStatusPollIntervalMs);
+          }});
+      }};
+
       if (syncForm && syncButton && !syncButton.disabled) {{
         let syncRequestInFlight = false;
 
@@ -1220,20 +1313,12 @@ def _render_index(
           if (syncRequestInFlight) return;
           syncRequestInFlight = true;
 
-          syncButton.disabled = true;
-          const icon = syncButton.querySelector('.bi');
-          const iconUse = syncButton.querySelector('use');
-          if (icon) icon.classList.add('is-spinning');
-          if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
+          setSyncButtonRunning();
 
           fetch('/update', {{ method: 'POST', keepalive: true }})
             .catch(() => {{}})
             .finally(() => {{
-              if (suppressSyncAutoReload || document.hidden) return;
-              syncReloadTimer = window.setTimeout(() => {{
-                if (suppressSyncAutoReload || document.hidden) return;
-                window.location.reload();
-              }}, 250);
+              pollSyncStatusUntilFinished();
             }});
         }});
       }}
@@ -1601,26 +1686,53 @@ def _render_index(
       const backdrop = document.getElementById('quick-add-backdrop');
       const cancelBtn = document.getElementById('quick-add-cancel');
       const urlInput = document.getElementById('quick-add-url');
-      if (!openBtn || !backdrop) return;
+      const quickAddForm = document.getElementById('quick-add-form');
 
       const closeModal = () => {{
+        if (!backdrop) return;
         backdrop.classList.remove('is-open');
         backdrop.setAttribute('aria-hidden', 'true');
       }};
 
-      openBtn.addEventListener('click', () => {{
-        backdrop.classList.add('is-open');
-        backdrop.setAttribute('aria-hidden', 'false');
-        if (urlInput) urlInput.focus();
-      }});
+      if (openBtn && backdrop) {{
+        openBtn.addEventListener('click', () => {{
+          backdrop.classList.add('is-open');
+          backdrop.setAttribute('aria-hidden', 'false');
+          if (urlInput) urlInput.focus();
+        }});
 
-      if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-      backdrop.addEventListener('click', (event) => {{
-        if (event.target === backdrop) closeModal();
-      }});
-      document.addEventListener('keydown', (event) => {{
-        if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-      }});
+        if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', (event) => {{
+          if (event.target === backdrop) closeModal();
+        }});
+        document.addEventListener('keydown', (event) => {{
+          if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
+        }});
+      }}
+
+      if (quickAddForm) {{
+        let quickAddRequestInFlight = false;
+        quickAddForm.addEventListener('submit', (event) => {{
+          event.preventDefault();
+          if (quickAddRequestInFlight) return;
+          quickAddRequestInFlight = true;
+
+          const formData = new window.FormData(quickAddForm);
+          closeModal();
+          setSyncButtonRunning();
+          fetch('/quick-add-youtube', {{
+            method: 'POST',
+            body: new window.URLSearchParams(formData),
+            keepalive: true,
+            headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
+          }})
+            .catch(() => {{}})
+            .finally(() => {{
+              quickAddRequestInFlight = false;
+              pollSyncStatusUntilFinished();
+            }});
+        }});
+      }}
     }})();
   </script>
 </body>
@@ -2307,6 +2419,17 @@ def make_handler(state: AppState):
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            if path == "/update-status":
+                status_payload = _snapshot_status(state.update_status)
+                body_bytes = json.dumps(status_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body_bytes)))
                 self.end_headers()
                 self.wfile.write(body_bytes)
