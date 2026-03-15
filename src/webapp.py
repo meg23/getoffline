@@ -1006,12 +1006,26 @@ def _render_index(
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
       if (syncForm && syncButton && !syncButton.disabled) {{
-        syncForm.addEventListener('submit', () => {{
+        let syncRequestInFlight = false;
+
+        syncForm.addEventListener('submit', (event) => {{
+          event.preventDefault();
+          if (syncRequestInFlight) return;
+          syncRequestInFlight = true;
+
           syncButton.disabled = true;
           const icon = syncButton.querySelector('.bi');
           const iconUse = syncButton.querySelector('use');
           if (icon) icon.classList.add('is-spinning');
           if (iconUse) iconUse.setAttribute('href', '#bi-arrow-repeat');
+
+          fetch('/update', {{ method: 'POST', keepalive: true }})
+            .catch(() => {{}})
+            .finally(() => {{
+              window.setTimeout(() => {{
+                window.location.reload();
+              }}, 150);
+            }});
         }});
       }}
 
