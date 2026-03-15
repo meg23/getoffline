@@ -684,7 +684,7 @@ def _render_index(
             f"""
             <tr>
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
+                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if media_kind == 'audio' and bool(getattr(row, 'subtitle_path', None)) else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
@@ -952,43 +952,69 @@ def _render_index(
     .icon-button-active {{ color: #fff; background: #df3f6b; border-color: #df3f6b; }}
     .icon-button-active:hover {{ color: #fff; background: #c53057; border-color: #c53057; }}
 
+    .mini-player-backdrop {{
+      position: fixed;
+      inset: 0;
+      background: transparent;
+      pointer-events: none;
+      z-index: 45;
+      padding: clamp(.75rem, 2.2vw, 1.6rem);
+    }}
+    .mini-player-backdrop.is-open {{
+      background: rgba(0, 0, 0, .9);
+      backdrop-filter: blur(1px);
+      pointer-events: auto;
+    }}
     .mini-player {{
       position: fixed;
       right: 1rem;
       bottom: 1rem;
-      width: min(360px, calc(100vw - 2rem));
-      z-index: 40;
-      border: 1px solid #cbd6ee;
-      border-radius: 12px;
-      background: #fff;
-      box-shadow: 0 12px 30px rgba(15, 34, 74, 0.2);
-      padding: .7rem;
+      width: min(380px, calc(100vw - 2rem));
+      max-height: min(86vh, 720px);
+      overflow: auto;
+      border: 1px solid #2f406d;
+      border-radius: 14px;
+      background: #0f1831;
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.5);
+      color: #e8efff;
+      padding: .85rem;
       display: none;
-      gap: .55rem;
+      gap: .65rem;
+      z-index: 50;
+      pointer-events: auto;
     }}
     .mini-player.is-visible {{ display: grid; }}
+    .mini-player.is-maximized {{
+      right: auto;
+      bottom: auto;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(1100px, calc(100vw - 2rem));
+      max-height: min(94vh, 920px);
+    }}
     .mini-player-header {{
       display: grid;
       grid-template-columns: 1fr auto auto;
       align-items: start;
       gap: .35rem .5rem;
     }}
-    .mini-player-title {{ grid-column: 1; font-weight: 700; color: #17213a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .mini-player-source {{ grid-column: 1; color: #5d6780; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .mini-player-title {{ grid-column: 1; font-weight: 700; color: #f0f4ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .mini-player-source {{ grid-column: 1; color: #b4c2e3; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .mini-player-open {{
       grid-row: 1;
       grid-column: 2;
       align-self: center;
       justify-self: end;
       font-size: .82rem;
-      color: #2f62f2;
-      text-decoration: none;
-      border: 1px solid #cbd6ee;
+      color: #d2ddff;
+      border: 1px solid #3a4e84;
       border-radius: 999px;
       padding: .25rem .65rem;
-      background: #f4f7ff;
+      background: #1a2748;
+      cursor: pointer;
     }}
-    .mini-player-open:hover {{ background: #e9efff; text-decoration: none; }}
+    .mini-player-open:hover {{ background: #23355f; }}
     .mini-player-close {{
       grid-row: 1;
       grid-column: 3;
@@ -996,9 +1022,9 @@ def _render_index(
       width: 1.7rem;
       height: 1.7rem;
       border-radius: 999px;
-      border: 1px solid #cbd6ee;
-      background: #f4f7ff;
-      color: #2c3e74;
+      border: 1px solid #3a4e84;
+      background: #1a2748;
+      color: #d2ddff;
       font-size: 1.15rem;
       line-height: 1;
       cursor: pointer;
@@ -1007,10 +1033,37 @@ def _render_index(
       justify-content: center;
       padding: 0;
     }}
-    .mini-player-close:hover {{ background: #e9efff; }}
-    .mini-player-media {{ width: 100%; border-radius: 10px; background: transparent; }}
-    #mini-player-video {{ aspect-ratio: 16 / 9; max-height: 203px; background: #000; }}
+    .mini-player-close:hover {{ background: #23355f; }}
+    .mini-player-media {{ width: 100%; border-radius: 12px; background: #000; }}
+    #mini-player-video {{ aspect-ratio: 16 / 9; max-height: min(74vh, 780px); background: #000; }}
     #mini-player-audio {{ border-radius: 999px; }}
+    .mini-player-transcript-wrap {{ margin-top: .2rem; display: none; }}
+    .mini-player.is-maximized .mini-player-transcript-wrap {{ display: block; }}
+    .mini-player-transcript {{
+      max-height: 220px;
+      overflow-y: auto;
+      border: 1px solid #2d3f6d;
+      border-radius: 10px;
+      background: #111c37;
+      padding: .55rem;
+      display: none;
+    }}
+    .mini-player.is-maximized .mini-player-transcript.is-visible {{ display: block; }}
+    .mini-player-transcript-line {{
+      display: block;
+      width: 100%;
+      text-align: left;
+      color: #cbd8fb;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      margin: 0;
+      padding: .33rem .42rem;
+      cursor: pointer;
+      line-height: 1.35;
+    }}
+    .mini-player-transcript-line:hover {{ background: #1e2f55; }}
+    .mini-player-transcript-line.active {{ background: #2a427f; color: #f2f6ff; }}
 
     @keyframes spin {{
       from {{ transform: rotate(0deg); }}
@@ -1024,7 +1077,9 @@ def _render_index(
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
-      .mini-player {{ right: .5rem; left: .5rem; bottom: .5rem; width: auto; }}
+      .mini-player-backdrop {{ padding: .5rem; }}
+      .mini-player {{ right: .5rem; bottom: .5rem; width: calc(100vw - 1rem); max-height: 95vh; }}
+      .mini-player.is-maximized {{ width: calc(100vw - 1rem); }}
       table {{ table-layout: auto; }}
       table, thead, tbody, th, td, tr {{ display: block; }}
       thead {{ display: none; }}
@@ -1135,16 +1190,21 @@ def _render_index(
       <tbody>{table_rows}</tbody>
     </table>
 
+    <section id="mini-player-backdrop" class="mini-player-backdrop" aria-hidden="true">
     <section id="mini-player" class="mini-player" aria-live="polite">
       <div class="mini-player-header">
         <div class="mini-player-title" id="mini-player-title"></div>
         <div class="mini-player-source" id="mini-player-source"></div>
         <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close mini player">&times;</button>
-        <a id="mini-player-open" class="mini-player-open" href="/" aria-label="Open in dedicated player">Open</a>
+        <button id="mini-player-open" class="mini-player-open" type="button" aria-label="Maximize player">Maximize</button>
       </div>
       <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
       <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
+      <section class="mini-player-transcript-wrap">
+        <div id="mini-player-transcript" class="mini-player-transcript" aria-live="polite"></div>
+      </section>
     </section>
+  </section>
   </div>
   <script>
     (() => {{
@@ -1227,15 +1287,19 @@ def _render_index(
       }}
       updateBatchState();
 
+      const miniBackdrop = document.getElementById('mini-player-backdrop');
       const miniPlayer = document.getElementById('mini-player');
       const miniTitle = document.getElementById('mini-player-title');
       const miniSource = document.getElementById('mini-player-source');
       const miniAudio = document.getElementById('mini-player-audio');
       const miniVideo = document.getElementById('mini-player-video');
+      const miniTranscript = document.getElementById('mini-player-transcript');
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
-      let miniOpenNavigationPending = false;
       let miniLastPersistedSeconds = -9999;
+      let miniOpenNavigationPending = false;
+      let miniLastActiveCue = null;
+      let miniTranscriptReady = false;
 
       function updatePlayLinkResumeHint(rowId, seconds) {{
         const safe = Math.max(0, Number(seconds || 0));
@@ -1269,7 +1333,16 @@ def _render_index(
         }}).catch(() => {{}});
       }}
 
+      function hideMiniTranscript() {{
+        miniLastActiveCue = null;
+        miniTranscriptReady = false;
+        if (!miniTranscript) return;
+        miniTranscript.classList.remove('is-visible');
+        miniTranscript.textContent = '';
+      }}
+
       function clearMiniMedia() {{
+        hideMiniTranscript();
         [miniAudio, miniVideo].forEach((el) => {{
           if (!el) return;
           try {{ el.pause(); }} catch (_) {{}}
@@ -1280,8 +1353,88 @@ def _render_index(
         }});
       }}
 
+      function syncMiniTranscriptFromTrack(player) {{
+        if (!miniTranscript || !player || !player.textTracks || player.textTracks.length === 0) return false;
+        const track = player.textTracks[0];
+        if (!track) return false;
+
+        track.mode = 'hidden';
+        const cues = Array.from(track.cues || []);
+        if (!cues.length) return false;
+
+        miniTranscript.textContent = '';
+        cues.forEach((cue, idx) => {{
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'mini-player-transcript-line';
+          btn.dataset.idx = String(idx);
+          btn.textContent = (cue.text || '').replace(/\s+/g, ' ').trim();
+          btn.addEventListener('click', () => {{
+            player.currentTime = Math.max(0, cue.startTime || 0);
+            player.play().catch(() => {{}});
+          }});
+          miniTranscript.appendChild(btn);
+        }});
+
+        const onCueChange = () => {{
+          const activeCue = track.activeCues && track.activeCues.length ? track.activeCues[0] : null;
+          if (activeCue === miniLastActiveCue) return;
+          miniLastActiveCue = activeCue;
+
+          const activeIndex = cues.indexOf(activeCue);
+          miniTranscript.querySelectorAll('.mini-player-transcript-line').forEach((line, idx) => {{
+            if (idx === activeIndex) {{
+              line.classList.add('active');
+              line.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});
+            }} else {{
+              line.classList.remove('active');
+            }}
+          }});
+        }};
+
+        track.addEventListener('cuechange', onCueChange);
+        onCueChange();
+        miniTranscript.classList.add('is-visible');
+        miniTranscriptReady = true;
+        return true;
+      }}
+
+      function scheduleMiniTranscriptInit(state, player, subtitleTrackEl) {{
+        if (!miniTranscript || !state || !state.hasSubtitles || state.kind !== 'audio') {{
+          hideMiniTranscript();
+          return;
+        }}
+        miniTranscript.classList.add('is-visible');
+        miniTranscript.textContent = 'Loading transcript…';
+        let attempts = 0;
+        const maxAttempts = 40;
+        const timer = window.setInterval(() => {{
+          attempts += 1;
+          if (syncMiniTranscriptFromTrack(player) || attempts >= maxAttempts) {{
+            window.clearInterval(timer);
+            if (!miniTranscriptReady) miniTranscript.textContent = 'No subtitle cues available.';
+          }}
+        }}, 150);
+        if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', () => syncMiniTranscriptFromTrack(player));
+      }}
+
+      function setMiniExpanded(expanded) {{
+        if (!miniPlayer || !miniBackdrop || !miniOpen) return;
+        const isExpanded = !!expanded;
+        miniPlayer.classList.toggle('is-maximized', isExpanded);
+        miniOpen.textContent = isExpanded ? 'Minimize' : 'Maximize';
+        miniOpen.setAttribute('aria-label', isExpanded ? 'Minimize player' : 'Maximize player');
+        if (isExpanded) {{
+          miniBackdrop.classList.add('is-open');
+          miniBackdrop.setAttribute('aria-hidden', 'false');
+        }} else {{
+          miniBackdrop.classList.remove('is-open');
+          miniBackdrop.setAttribute('aria-hidden', 'true');
+        }}
+      }}
+
       function renderMiniPlayer(stateInput) {{
-        if (!miniPlayer || !miniAudio || !miniVideo) return;
+        if (!miniPlayer || !miniAudio || !miniVideo || !miniBackdrop) return;
         let state = stateInput || null;
         if (!state) {{
           const raw = localStorage.getItem('getofflineMiniPlayerState');
@@ -1289,7 +1442,6 @@ def _render_index(
           try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
         }}
         if (!state || !state.rowId || !state.src || !state.kind) return;
-        if (miniOpen) miniOpen.href = state.playUrl || ('/play?id=' + state.rowId);
 
         clearMiniMedia();
         if (miniTitle) miniTitle.textContent = state.title || 'Now playing';
@@ -1301,10 +1453,22 @@ def _render_index(
         source.src = state.src;
         active.appendChild(source);
 
+        let subtitleTrackEl = null;
+        if (state.kind === 'audio' && state.hasSubtitles) {{
+          subtitleTrackEl = document.createElement('track');
+          subtitleTrackEl.kind = 'subtitles';
+          subtitleTrackEl.srclang = 'en';
+          subtitleTrackEl.label = 'English';
+          subtitleTrackEl.default = true;
+          subtitleTrackEl.src = '/subtitle?id=' + state.rowId;
+          active.appendChild(subtitleTrackEl);
+        }}
+
         active.addEventListener('loadedmetadata', () => {{
           active.currentTime = Math.max(0, Number(state.currentTime || 0));
           if (!state.paused) active.play().catch(() => {{}});
         }}, {{ once: true }});
+        active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
         active.load();
 
         const persist = () => {{
@@ -1329,6 +1493,7 @@ def _render_index(
         }});
 
         miniPlayer.classList.add('is-visible');
+        setMiniExpanded(false);
       }}
 
       function closeMiniPlayer() {{
@@ -1343,6 +1508,7 @@ def _render_index(
         localStorage.removeItem('getofflineMiniPlayerState');
         clearMiniMedia();
         if (miniPlayer) miniPlayer.classList.remove('is-visible');
+        setMiniExpanded(false);
       }}
 
       document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
@@ -1357,6 +1523,7 @@ def _render_index(
             title: link.dataset.title || '',
             source: link.dataset.source || '',
             kind: link.dataset.kind || 'audio',
+            hasSubtitles: link.dataset.hasSubtitles === '1',
             src: '/media?id=' + rowId,
             playUrl: '/play?id=' + rowId,
             currentTime: resumeSeconds,
@@ -1368,64 +1535,52 @@ def _render_index(
       }});
 
       if (miniOpen) {{
-        miniOpen.addEventListener('click', (event) => {{
+        miniOpen.addEventListener('click', () => {{
           suppressSyncAutoReload = true;
           if (syncReloadTimer !== null) {{
             window.clearTimeout(syncReloadTimer);
             syncReloadTimer = null;
           }}
-
           if (miniOpenNavigationPending) {{
-            event.preventDefault();
             return;
           }}
-
           miniOpenNavigationPending = true;
           miniOpen.setAttribute('aria-disabled', 'true');
           miniOpen.style.pointerEvents = 'none';
-
-          const clearPending = () => {{
-            window.setTimeout(() => {{
-              miniOpenNavigationPending = false;
-              miniOpen.removeAttribute('aria-disabled');
-              miniOpen.style.pointerEvents = '';
-            }}, 3000);
-          }};
+          window.setTimeout(() => {{
+            miniOpenNavigationPending = false;
+            miniOpen.removeAttribute('aria-disabled');
+            miniOpen.style.pointerEvents = '';
+          }}, 300);
 
           const raw = localStorage.getItem('getofflineMiniPlayerState');
-          if (!raw) {{
-            clearPending();
-            return;
-          }}
-
+          if (!raw) return;
           let state = null;
-          try {{ state = JSON.parse(raw); }} catch (_) {{
-            clearPending();
-            return;
-          }}
-
-          if (!state || !state.rowId) {{
-            clearPending();
-            return;
-          }}
+          try {{ state = JSON.parse(raw); }} catch (_) {{ return; }}
+          if (!state || !state.rowId) return;
 
           const active = state.kind === 'video' ? miniVideo : miniAudio;
           if (active && active.style.display !== 'none') {{
             state.currentTime = active.currentTime || 0;
             state.paused = active.paused;
             postMiniProgress(state, state.currentTime || 0, true, 'mini-open');
-            try {{ active.pause(); }} catch (_) {{}}
-            active.removeAttribute('src');
-            while (active.firstChild) active.removeChild(active.firstChild);
-            active.load();
+            localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
           }}
 
-          state.playUrl = '/play?id=' + state.rowId;
-          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
-          miniOpen.href = state.playUrl + (state.paused ? '' : '&autoplay=1');
-          clearPending();
+          const currentlyExpanded = miniPlayer && miniPlayer.classList.contains('is-maximized');
+          setMiniExpanded(!currentlyExpanded);
         }});
       }}
+
+      if (miniBackdrop) {{
+        miniBackdrop.addEventListener('click', (event) => {{
+          if (event.target === miniBackdrop) closeMiniPlayer();
+        }});
+      }}
+
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'Escape' && miniBackdrop && miniBackdrop.classList.contains('is-open')) closeMiniPlayer();
+      }});
 
       if (miniClose) {{
         miniClose.addEventListener('click', () => {{
@@ -1440,6 +1595,7 @@ def _render_index(
           if (persistedMiniPlayerState && persistedMiniPlayerState.paused === false) renderMiniPlayer(persistedMiniPlayerState);
         }} catch (_) {{}}
       }}
+
 
       const openBtn = document.getElementById('quick-add-open');
       const backdrop = document.getElementById('quick-add-backdrop');
