@@ -699,7 +699,14 @@ def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
             state.update_status.last_finished_at = time.time()
 
 
-def trigger_single_youtube_download(state: AppState, *, url: str, media_type: str, force_redownload: bool = False) -> bool:
+def trigger_single_youtube_download(
+    state: AppState,
+    *,
+    url: str,
+    media_type: str,
+    force_redownload: bool = False,
+    subtitles_enabled: Optional[bool] = None,
+) -> bool:
     from youtube import resolve_youtube_source_name
 
     with state.update_status.lock:
@@ -718,7 +725,7 @@ def trigger_single_youtube_download(state: AppState, *, url: str, media_type: st
                 "url": url,
                 "type": media_type,
                 "enabled": True,
-                "subtitles": media_type == "audio",
+                "subtitles": media_type == "audio" if subtitles_enabled is None else bool(subtitles_enabled),
                 "redownload": bool(force_redownload),
             }
         ],
@@ -2939,6 +2946,7 @@ def make_handler(state: AppState):
                     state,
                     url=url,
                     media_type=media_type,
+                    subtitles_enabled=True,
                 )
                 self.send_response(303)
                 self.send_header("Location", "/")
