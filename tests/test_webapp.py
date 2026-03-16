@@ -181,6 +181,7 @@ class WebAppHelpersTests(unittest.TestCase):
 
         self.assertIsNone(row)
         warning_mock.assert_called_once()
+        self.assertIn("db=/tmp/test.sqlite3", warning_mock.call_args.args[3])
 
     def test_render_index_handles_unavailable_database_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir, mock.patch(

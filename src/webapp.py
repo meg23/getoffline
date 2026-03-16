@@ -1,6 +1,7 @@
 import html
 import json
 import mimetypes
+import os
 import posixpath
 import re
 import sqlite3
@@ -187,6 +188,17 @@ def _log_sqlite_lock(operation: str, exc: Exception) -> None:
         log.warning("SQLite lock while %s: %s", operation, exc)
 
 
+def _sqlite_open_diagnostic_context(db_path: Path) -> str:
+    expanded = db_path.expanduser()
+    parent = expanded.parent
+    resolved = expanded.resolve(strict=False)
+    return (
+        f"db={expanded} resolved={resolved} exists={expanded.exists()} "
+        f"parent_exists={parent.exists()} parent_writable={os.access(parent, os.W_OK)} "
+        f"cwd={Path.cwd()} pid={os.getpid()}"
+    )
+
+
 def _fallback_database_path(db_path: Path, output_root: Optional[Path]) -> Optional[Path]:
     candidate_root = (output_root or db_path.parent).expanduser()
     candidate_db_path = (candidate_root / "downloads.sqlite3").resolve()
@@ -342,7 +354,12 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         init_database(str(db_path))
     except sqlite3.OperationalError as exc:
         if _is_sqlite_open_error(exc):
-            log.warning("Unable to open database while loading media row id=%s: %s", row_id, exc)
+            log.warning(
+                "Unable to open database while loading media row id=%s: %s (%s)",
+                row_id,
+                exc,
+                _sqlite_open_diagnostic_context(db_path),
+            )
             return None
         raise
     try:
