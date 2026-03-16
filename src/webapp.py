@@ -187,6 +187,23 @@ def _log_sqlite_lock(operation: str, exc: Exception) -> None:
         log.warning("SQLite lock while %s: %s", operation, exc)
 
 
+def _fallback_database_path(db_path: Path, output_root: Optional[Path]) -> Optional[Path]:
+    candidate_root = (output_root or db_path.parent).expanduser()
+    candidate_db_path = (candidate_root / "downloads.sqlite3").resolve()
+    if candidate_db_path == db_path.expanduser().resolve():
+        return None
+
+    try:
+        init_database(str(candidate_db_path))
+    except sqlite3.OperationalError as exc:
+        if _is_sqlite_open_error(exc):
+            return None
+        raise
+
+    log.warning("Switching to fallback database path after open failure: %s", candidate_db_path)
+    return candidate_db_path
+
+
 def _is_playback_completion_reason(reason: str) -> bool:
     value = str(reason or "").strip().lower()
     return value in {"ended", "mini-ended"}
@@ -271,9 +288,13 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         init_database(str(db_path))
     except sqlite3.OperationalError as exc:
         if _is_sqlite_open_error(exc):
-            log.warning("Unable to open database while preparing downloaded media rows: %s", exc)
-            return []
-        raise
+            fallback = _fallback_database_path(db_path, output_root)
+            if fallback is None:
+                log.warning("Unable to open database while preparing downloaded media rows (db=%s): %s", db_path, exc)
+                return []
+            db_path = fallback
+        else:
+            raise
     repair_root = output_root or db_path.parent
     _repair_downloaded_file_paths(db_path, repair_root)
 
@@ -752,8 +773,12 @@ def _render_index(
         total_listened = _human_duration(get_total_listened_seconds(str(database_path)))
     except sqlite3.OperationalError as exc:
         if _is_sqlite_open_error(exc):
-            log.warning("Unable to open database while rendering summary stats: %s", exc)
-            total_listened = _human_duration(0.0)
+            fallback = _fallback_database_path(database_path, output_root)
+            if fallback is None:
+                log.warning("Unable to open database while rendering summary stats (db=%s): %s", database_path, exc)
+                total_listened = _human_duration(0.0)
+            else:
+                total_listened = _human_duration(get_total_listened_seconds(str(fallback)))
         else:
             raise
     toggle_show_played = not show_played
