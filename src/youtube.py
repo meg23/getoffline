@@ -3,6 +3,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 
@@ -51,6 +52,33 @@ def _human_size(num_bytes: Optional[float]) -> str:
         size /= 1024
     return f"{num_bytes:.0f} B"
 
+
+
+
+def _extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
+    candidate = str(url or "").strip()
+    if not candidate:
+        return None
+
+    parsed = urlparse(candidate)
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+
+    if host.endswith("youtu.be"):
+        value = path.strip("/")
+        return value or None
+
+    if "youtube.com" in host:
+        if path.startswith("/watch"):
+            query_values = parse_qs(parsed.query or "")
+            video_id = str((query_values.get("v") or [""])[0]).strip()
+            return video_id or None
+        if path.startswith("/shorts/") or path.startswith("/embed/"):
+            parts = [segment for segment in path.split("/") if segment]
+            if len(parts) >= 2:
+                return parts[1].strip() or None
+
+    return None
 
 def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> str:
     source_url = str(url or "").strip()
@@ -358,9 +386,11 @@ def download_youtube_items(config, downloaded_items):
                     _record_skip(reason, info_dict)
                     return reason
 
-                item_id = str(info_dict.get("id") or "").strip() or None
                 item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
                 media_url = str(info_dict.get("url") or "").strip() or None
+                item_id = str(info_dict.get("id") or "").strip() or None
+                if not item_id:
+                    item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
                 title = str(info_dict.get("title") or "").strip() or None
                 item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
                 if is_downloaded(db_path, "youtube", name, item_uid):

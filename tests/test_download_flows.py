@@ -910,6 +910,55 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
+    def test_skip_filter_uses_video_id_from_url_when_id_missing(self):
+        class FakeYoutubeDLForFilter(FakeYoutubeDL):
+            match_filter_result = None
+
+            def download(self, urls):
+                self.urls.extend(urls)
+                fn = self.opts.get("match_filter")
+                self.__class__.match_filter_result = fn(
+                    {
+                        "title": "Daily Episode",
+                        "webpage_url": "https://www.youtube.com/watch?v=abc123&list=xyz",
+                        "url": "https://r1---sn-a5meknsz.googlevideo.com/videoplayback?expire=123",
+                    },
+                    incomplete=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "abc123",
+                    "title": "Daily Episode",
+                    "download_status": "downloaded",
+                },
+            )
+
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": db_path,
+                },
+                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+                youtube.download_youtube_items(config, [])
+
+            self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
+
     def test_skip_filter_excludes_shorts_and_duplicate_titles(self):
         class FakeYoutubeDLForFilter(FakeYoutubeDL):
             match_filter_result = None
