@@ -516,6 +516,48 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(cfg["youtube"][0]["name"], "MyChannel")
             self.assertEqual(cfg["youtube"][0]["url"], "https://www.youtube.com/watch?v=abc123")
             self.assertEqual(cfg["youtube"][0]["type"], "audio")
+            self.assertFalse(cfg["youtube"][0]["redownload"])
+
+
+    def test_trigger_single_youtube_download_marks_forced_redownload_entry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+
+            captured = {}
+
+            def _fake_download(config, downloaded_items):
+                captured["config"] = config
+                downloaded_items.append("one")
+
+            with mock.patch("youtube.resolve_youtube_source_name", return_value="MyChannel"), mock.patch(
+                "youtube.download_youtube_items", side_effect=_fake_download
+            ):
+                started = trigger_single_youtube_download(
+                    state,
+                    url="https://www.youtube.com/watch?v=abc123",
+                    media_type="video",
+                    force_redownload=True,
+                )
+                self.assertTrue(started)
+
+                deadline = time.time() + 2
+                while time.time() < deadline:
+                    with state.update_status.lock:
+                        if not state.update_status.is_running and state.update_status.last_result == "ok":
+                            break
+                    time.sleep(0.05)
+
+            cfg = captured["config"]
+            self.assertEqual(cfg["youtube"][0]["type"], "video")
+            self.assertTrue(cfg["youtube"][0]["redownload"])
 
     def test_render_settings_contains_cookie_field(self):
         body = _render_settings(
