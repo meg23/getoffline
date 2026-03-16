@@ -777,6 +777,8 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
 
 
 if HAS_SQLALCHEMY:
+    _ENGINE_REGISTRY: Dict[str, Any] = {}
+
     class Base(DeclarativeBase):
         pass
 
@@ -831,7 +833,23 @@ if HAS_SQLALCHEMY:
     @lru_cache(maxsize=4)
     def _engine_for(db_path: str):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        return create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        _ENGINE_REGISTRY[str(db_path)] = engine
+        return engine
+
+
+    def close_cached_descriptors() -> int:
+        """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
+        cache_info = _engine_for.cache_info()
+        engines = list(_ENGINE_REGISTRY.values())
+        for engine in engines:
+            try:
+                engine.dispose()
+            except Exception:  # pragma: no cover - defensive cleanup only
+                pass
+        _ENGINE_REGISTRY.clear()
+        _engine_for.cache_clear()
+        return int(cache_info.currsize)
 
 
     def init_database(db_path: str) -> None:
@@ -1016,6 +1034,9 @@ if HAS_SQLALCHEMY:
 else:
     def init_database(db_path: str) -> None:
         _init_database_sqlite(db_path)
+
+    def close_cached_descriptors() -> int:
+        return 0
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
         return _is_downloaded_sqlite(db_path, source_type, source_name, item_uid)
