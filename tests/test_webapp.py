@@ -80,6 +80,44 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(updated_count, 1)
             self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 9.5, places=3)
 
+    def test_completion_progress_reset_is_sticky_until_flush(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "QueueTest",
+                    "item_uid": "uid-queue-2",
+                    "item_url": "https://example.com/episode2.mp3",
+                    "title": "Completion Reset Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            row = fetch_downloaded_media_rows(db_path)[0]
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+            _enqueue_progress_update(state, row.row_id, 120.0, reason="timeupdate")
+            _enqueue_progress_update(state, row.row_id, 999.0, reason="ended", forced=True)
+            _enqueue_progress_update(state, row.row_id, 119.0, reason="pause", forced=True)
+
+            updated_count = _flush_pending_progress_updates(state)
+            self.assertEqual(updated_count, 1)
+            self.assertAlmostEqual(get_download_position_seconds(str(db_path), row.row_id), 0.0, places=3)
+
     def test_is_playback_completion_reason(self):
         self.assertTrue(_is_playback_completion_reason("ended"))
         self.assertTrue(_is_playback_completion_reason("mini-ended"))
@@ -1138,6 +1176,10 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("reason === 'page-exit'", body)
             self.assertIn("reason === 'back-link'", body)
             self.assertIn("reason === 'pause'", body)
+            self.assertIn("if (playbackCompleted) return;", body)
+            self.assertIn("try { player.currentTime = 0; } catch (_) {}", body)
+            self.assertIn("if (playbackCompleted) {", body)
+            self.assertIn("postProgress(0, true, 'back-link');", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
