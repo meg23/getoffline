@@ -58,8 +58,13 @@ def _utcnow() -> datetime:
 def resolve_database_path(defaults: Dict[str, Any]) -> str:
     configured = defaults.get("database_path")
     if configured:
-        return os.path.expanduser(configured)
-    return os.path.join(os.path.expanduser(defaults["output_root"]), "downloads.sqlite3")
+        return os.path.abspath(os.path.expandvars(os.path.expanduser(str(configured).strip())))
+    return os.path.abspath(
+        os.path.join(
+            os.path.expandvars(os.path.expanduser(str(defaults["output_root"]).strip())),
+            "downloads.sqlite3",
+        )
+    )
 
 
 def build_item_uid(*, item_id: Optional[str], item_url: Optional[str], media_url: Optional[str], title: Optional[str]) -> str:

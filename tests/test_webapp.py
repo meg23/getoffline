@@ -161,6 +161,18 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertEqual(rows, [])
         warning_mock.assert_called_once()
 
+    def test_fetch_downloaded_media_rows_uses_output_root_fallback_database(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fallback_db = root / "downloads.sqlite3"
+            init_database(str(fallback_db))
+
+            missing_db = root / "missing" / "downloads.sqlite3"
+            rows = fetch_downloaded_media_rows(missing_db, root)
+
+            self.assertEqual(rows, [])
+            self.assertTrue(fallback_db.is_file())
+
     def test_fetch_downloaded_media_row_by_id_returns_none_when_db_unavailable(self):
         with mock.patch(
             "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")

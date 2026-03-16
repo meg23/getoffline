@@ -14,6 +14,7 @@ from database import (  # noqa: E402
     get_download_position_seconds,
     get_stored_config,
     init_database,
+    resolve_database_path,
     update_download_position_seconds,
     replace_sources,
     seed_sources_from_config,
@@ -24,6 +25,19 @@ from database import (  # noqa: E402
 
 
 class DatabaseMigrationsTests(unittest.TestCase):
+    def test_resolve_database_path_returns_absolute_path_for_default_location(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = resolve_database_path({"output_root": os.path.join(tmpdir, "downloads")})
+            self.assertTrue(os.path.isabs(path))
+            self.assertTrue(path.endswith(os.path.join("downloads", "downloads.sqlite3")))
+
+    def test_resolve_database_path_normalizes_configured_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            configured = os.path.join(tmpdir, "nested", "..", "db.sqlite3") + "\n"
+            path = resolve_database_path({"output_root": tmpdir, "database_path": configured})
+            self.assertTrue(os.path.isabs(path))
+            self.assertEqual(path, os.path.abspath(os.path.join(tmpdir, "db.sqlite3")))
+
     def test_logs_when_sqlite_write_hits_lock(self):
         with mock.patch("database.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")):
             with mock.patch("database.log.warning") as warning_mock:
