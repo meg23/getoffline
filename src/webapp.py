@@ -178,6 +178,10 @@ def _is_sqlite_lock_error(exc: Exception) -> bool:
     return "database is locked" in text or "database table is locked" in text
 
 
+def _is_sqlite_open_error(exc: Exception) -> bool:
+    return "unable to open database file" in str(exc or "").lower()
+
+
 def _log_sqlite_lock(operation: str, exc: Exception) -> None:
     if _is_sqlite_lock_error(exc):
         log.warning("SQLite lock while %s: %s", operation, exc)
@@ -263,7 +267,13 @@ def _infer_media_type_for_redownload(row: MediaRow) -> str:
 
 
 def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = None) -> List[MediaRow]:
-    init_database(str(db_path))
+    try:
+        init_database(str(db_path))
+    except sqlite3.OperationalError as exc:
+        if _is_sqlite_open_error(exc):
+            log.warning("Unable to open database while preparing downloaded media rows: %s", exc)
+            return []
+        raise
     repair_root = output_root or db_path.parent
     _repair_downloaded_file_paths(db_path, repair_root)
 
@@ -307,7 +317,13 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
 
 
 def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
-    init_database(str(db_path))
+    try:
+        init_database(str(db_path))
+    except sqlite3.OperationalError as exc:
+        if _is_sqlite_open_error(exc):
+            log.warning("Unable to open database while loading media row id=%s: %s", row_id, exc)
+            return None
+        raise
     try:
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             row = conn.execute(
@@ -731,8 +747,15 @@ def _render_index(
     played_items = sum(1 for item in visible_rows if item.played)
     favorite_items = sum(1 for item in visible_rows if bool(getattr(item, "favorite", False)))
     unplayed_items = max(total_items - played_items, 0)
-    init_database(str(database_path))
-    total_listened = _human_duration(get_total_listened_seconds(str(database_path)))
+    try:
+        init_database(str(database_path))
+        total_listened = _human_duration(get_total_listened_seconds(str(database_path)))
+    except sqlite3.OperationalError as exc:
+        if _is_sqlite_open_error(exc):
+            log.warning("Unable to open database while rendering summary stats: %s", exc)
+            total_listened = _human_duration(0.0)
+        else:
+            raise
     toggle_show_played = not show_played
     query_bits = []
     if toggle_show_played:
