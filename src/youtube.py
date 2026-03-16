@@ -204,7 +204,6 @@ def _build_youtube_payload(
     if width and height:
         resolution = f"{width}x{height}"
 
-    item_id = str(info.get("id") or "").strip() or None
     item_url = (
         str(info.get("webpage_url") or "").strip()
         or str(info.get("original_url") or "").strip()
@@ -212,6 +211,9 @@ def _build_youtube_payload(
         or None
     )
     media_url = str(info.get("requested_url") or "").strip() or None
+    item_id = str(info.get("id") or "").strip() or None
+    if not item_id:
+        item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
     title = str(info.get("title") or "").strip() or None
 
     return {
@@ -394,7 +396,11 @@ def download_youtube_items(config, downloaded_items):
                     item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
                 title = str(info_dict.get("title") or "").strip() or None
                 item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
-                if not is_forced_redownload and is_downloaded(db_path, "youtube", name, item_uid):
+                legacy_item_uid = build_item_uid(item_id=None, item_url=item_url, media_url=media_url, title=title)
+                if not is_forced_redownload and (
+                    is_downloaded(db_path, "youtube", name, item_uid)
+                    or (legacy_item_uid != item_uid and is_downloaded(db_path, "youtube", name, legacy_item_uid))
+                ):
                     reason = "Skipping already downloaded item in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
