@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import podcasts  # noqa: E402
 import youtube  # noqa: E402
-from database import has_episode_title_for_source, upsert_download, init_database  # noqa: E402
+from database import has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -910,6 +910,160 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
+    def test_skip_filter_uses_video_id_from_url_when_id_missing(self):
+        class FakeYoutubeDLForFilter(FakeYoutubeDL):
+            match_filter_result = None
+
+            def download(self, urls):
+                self.urls.extend(urls)
+                fn = self.opts.get("match_filter")
+                self.__class__.match_filter_result = fn(
+                    {
+                        "title": "Daily Episode",
+                        "webpage_url": "https://www.youtube.com/watch?v=abc123&list=xyz",
+                        "url": "https://r1---sn-a5meknsz.googlevideo.com/videoplayback?expire=123",
+                    },
+                    incomplete=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "abc123",
+                    "title": "Daily Episode",
+                    "download_status": "downloaded",
+                },
+            )
+
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": db_path,
+                },
+                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+                youtube.download_youtube_items(config, [])
+
+            self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
+
+    def test_skip_filter_matches_legacy_url_uid_rows_when_id_missing(self):
+        class FakeYoutubeDLForFilter(FakeYoutubeDL):
+            match_filter_result = None
+
+            def download(self, urls):
+                self.urls.extend(urls)
+                fn = self.opts.get("match_filter")
+                self.__class__.match_filter_result = fn(
+                    {
+                        "title": "Daily Episode",
+                        "webpage_url": "https://www.youtube.com/watch?v=abc123&list=xyz",
+                        "url": "https://r1---sn-a5meknsz.googlevideo.com/videoplayback?expire=123",
+                    },
+                    incomplete=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "https://www.youtube.com/watch?v=abc123&list=xyz",
+                    "title": "Daily Episode",
+                    "download_status": "downloaded",
+                },
+            )
+
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": db_path,
+                },
+                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+                youtube.download_youtube_items(config, [])
+
+            self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
+
+    def test_skip_filter_allows_forced_redownload_when_db_row_exists(self):
+        class FakeYoutubeDLForFilter(FakeYoutubeDL):
+            match_filter_result = "not-called"
+
+            def download(self, urls):
+                self.urls.extend(urls)
+                fn = self.opts.get("match_filter")
+                self.__class__.match_filter_result = fn(
+                    {
+                        "id": "abc123",
+                        "title": "Daily Episode",
+                        "webpage_url": "https://www.youtube.com/watch?v=abc123",
+                    },
+                    incomplete=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "abc123",
+                    "title": "Daily Episode",
+                    "download_status": "downloaded",
+                },
+            )
+
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "database_path": db_path,
+                },
+                "youtube": [
+                    {
+                        "name": "MyChannel",
+                        "url": "https://www.youtube.com/watch?v=abc123",
+                        "type": "video",
+                        "redownload": True,
+                    }
+                ],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+                youtube.download_youtube_items(config, [])
+
+            self.assertIsNone(FakeYoutubeDLForFilter.match_filter_result)
+
     def test_skip_filter_excludes_shorts_and_duplicate_titles(self):
         class FakeYoutubeDLForFilter(FakeYoutubeDL):
             match_filter_result = None
@@ -980,7 +1134,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
             self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
             self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "another episode"))
 
-    def test_has_episode_title_for_source_ignores_missing_files(self):
+    def test_has_episode_title_for_source_accepts_missing_files_when_db_has_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "downloads.sqlite3")
             missing_path = os.path.join(tmpdir, "missing.mp3")
@@ -997,8 +1151,25 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 },
             )
 
-            self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
+            self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
 
+    def test_is_downloaded_true_when_downloaded_row_exists_even_if_file_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "existing-1",
+                    "title": "Episode Forty Two",
+                    "file_path": os.path.join(tmpdir, "missing.mp4"),
+                    "download_status": "downloaded",
+                },
+            )
+
+            self.assertTrue(is_downloaded(db_path, "youtube", "MyChannel", "existing-1"))
 
 if __name__ == "__main__":
     unittest.main()

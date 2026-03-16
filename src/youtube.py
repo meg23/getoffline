@@ -3,6 +3,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 
@@ -51,6 +52,33 @@ def _human_size(num_bytes: Optional[float]) -> str:
         size /= 1024
     return f"{num_bytes:.0f} B"
 
+
+
+
+def _extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
+    candidate = str(url or "").strip()
+    if not candidate:
+        return None
+
+    parsed = urlparse(candidate)
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+
+    if host.endswith("youtu.be"):
+        value = path.strip("/")
+        return value or None
+
+    if "youtube.com" in host:
+        if path.startswith("/watch"):
+            query_values = parse_qs(parsed.query or "")
+            video_id = str((query_values.get("v") or [""])[0]).strip()
+            return video_id or None
+        if path.startswith("/shorts/") or path.startswith("/embed/"):
+            parts = [segment for segment in path.split("/") if segment]
+            if len(parts) >= 2:
+                return parts[1].strip() or None
+
+    return None
 
 def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> str:
     source_url = str(url or "").strip()
@@ -176,7 +204,6 @@ def _build_youtube_payload(
     if width and height:
         resolution = f"{width}x{height}"
 
-    item_id = str(info.get("id") or "").strip() or None
     item_url = (
         str(info.get("webpage_url") or "").strip()
         or str(info.get("original_url") or "").strip()
@@ -184,6 +211,9 @@ def _build_youtube_payload(
         or None
     )
     media_url = str(info.get("requested_url") or "").strip() or None
+    item_id = str(info.get("id") or "").strip() or None
+    if not item_id:
+        item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
     title = str(info.get("title") or "").strip() or None
 
     return {
@@ -253,6 +283,7 @@ def download_youtube_items(config, downloaded_items):
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             should_generate_subtitles = entry_subtitles_enabled
+            is_forced_redownload = bool(entry.get("redownload", False))
 
             extracted_audio_files: List[Path] = []
             postprocessed_file_by_key: Dict[str, Path] = {}
@@ -358,16 +389,22 @@ def download_youtube_items(config, downloaded_items):
                     _record_skip(reason, info_dict)
                     return reason
 
-                item_id = str(info_dict.get("id") or "").strip() or None
                 item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
                 media_url = str(info_dict.get("url") or "").strip() or None
+                item_id = str(info_dict.get("id") or "").strip() or None
+                if not item_id:
+                    item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
                 title = str(info_dict.get("title") or "").strip() or None
                 item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
-                if is_downloaded(db_path, "youtube", name, item_uid):
+                legacy_item_uid = build_item_uid(item_id=None, item_url=item_url, media_url=media_url, title=title)
+                if not is_forced_redownload and (
+                    is_downloaded(db_path, "youtube", name, item_uid)
+                    or (legacy_item_uid != item_uid and is_downloaded(db_path, "youtube", name, legacy_item_uid))
+                ):
                     reason = "Skipping already downloaded item in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
-                if title and has_episode_title_for_source(db_path, "youtube", name, title):
+                if not is_forced_redownload and title and has_episode_title_for_source(db_path, "youtube", name, title):
                     reason = "Skipping duplicate title in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
@@ -531,6 +568,8 @@ def download_youtube_items(config, downloaded_items):
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
             log.info("YouTube download mode for %s: full entry extraction enabled", name)
+            if is_forced_redownload:
+                log.info("YouTube download mode for %s: forced redownload (duplicate skip disabled)", name)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 

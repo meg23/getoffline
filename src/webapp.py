@@ -689,7 +689,7 @@ def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
             state.update_status.last_finished_at = time.time()
 
 
-def trigger_single_youtube_download(state: AppState, *, url: str, media_type: str) -> bool:
+def trigger_single_youtube_download(state: AppState, *, url: str, media_type: str, force_redownload: bool = False) -> bool:
     from youtube import resolve_youtube_source_name
 
     with state.update_status.lock:
@@ -709,6 +709,7 @@ def trigger_single_youtube_download(state: AppState, *, url: str, media_type: st
                 "type": media_type,
                 "enabled": True,
                 "subtitles": media_type == "audio",
+                "redownload": bool(force_redownload),
             }
         ],
         "podcasts": [],
@@ -2718,6 +2719,7 @@ def make_handler(state: AppState):
                         state,
                         url=row.item_url,
                         media_type=_infer_media_type_for_redownload(row),
+                        force_redownload=True,
                     )
                 elif row.source_type == "podcast":
                     trigger_background_update(state)
@@ -2877,6 +2879,7 @@ def make_handler(state: AppState):
                                     state,
                                     url=row.item_url,
                                     media_type=_infer_media_type_for_redownload(row),
+                                    force_redownload=True,
                                 )
                             elif row.source_type == "podcast":
                                 should_trigger_podcast_redownload = True

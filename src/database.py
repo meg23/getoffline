@@ -651,25 +651,13 @@ def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             """
-            SELECT COALESCE(file_path, '') FROM downloads
+            SELECT 1 FROM downloads
             WHERE source_type = ? AND source_name = ? AND item_uid = ? AND download_status = 'downloaded'
             LIMIT 1
             """,
             (source_type, source_name, item_uid),
         ).fetchone()
-        if row is None:
-            return False
-        file_path = str(row[0] or "").strip()
-        if not file_path:
-            return False
-        return Path(file_path).expanduser().is_file()
-
-
-def _downloaded_file_exists(file_path: Optional[str]) -> bool:
-    normalized = str(file_path or "").strip()
-    if not normalized:
-        return False
-    return Path(normalized).expanduser().is_file()
+        return row is not None
 
 
 def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
@@ -859,16 +847,14 @@ if HAS_SQLALCHEMY:
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
         with Session(_engine_for(db_path)) as session:
-            stmt = select(DownloadRecord.file_path).where(
+            stmt = select(DownloadRecord.id).where(
                 DownloadRecord.source_type == source_type,
                 DownloadRecord.source_name == source_name,
                 DownloadRecord.item_uid == item_uid,
                 DownloadRecord.download_status == "downloaded",
             )
-            file_path = session.execute(stmt).scalar_one_or_none()
-            if not file_path:
-                return False
-            return Path(str(file_path)).expanduser().is_file()
+            row_id = session.execute(stmt).scalar_one_or_none()
+            return row_id is not None
 
 
     def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
@@ -878,17 +864,14 @@ if HAS_SQLALCHEMY:
 
         with Session(_engine_for(db_path)) as session:
             rows = session.execute(
-                select(DownloadRecord.title, DownloadRecord.file_path).where(
+                select(DownloadRecord.title).where(
                     DownloadRecord.source_type == source_type,
                     DownloadRecord.source_name == source_name,
                     DownloadRecord.download_status == "downloaded",
                     DownloadRecord.title.is_not(None),
                 )
             ).all()
-            return any(
-                str(row.title or "").strip().casefold() == normalized and _downloaded_file_exists(row.file_path)
-                for row in rows
-            )
+            return any(str(row.title or "").strip().casefold() == normalized for row in rows)
 
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
@@ -1050,7 +1033,7 @@ else:
             with sqlite3.connect(db_path) as conn:
                 rows = conn.execute(
                     """
-                    SELECT title, COALESCE(file_path, '')
+                    SELECT title
                     FROM downloads
                     WHERE source_type = ?
                       AND source_name = ?
@@ -1059,10 +1042,7 @@ else:
                     """,
                     (source_type, source_name),
                 ).fetchall()
-                return any(
-                    str(row[0] or "").strip().casefold() == normalized and _downloaded_file_exists(row[1])
-                    for row in rows
-                )
+                return any(str(row[0] or "").strip().casefold() == normalized for row in rows)
         except sqlite3.OperationalError as exc:
             _log_sqlite_lock_if_needed(db_path, "checking existing download title", exc)
             raise
