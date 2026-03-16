@@ -188,10 +188,18 @@ def _log_sqlite_lock(operation: str, exc: Exception) -> None:
         log.warning("SQLite lock while %s: %s", operation, exc)
 
 
+def _safe_resolve_path(path: Path) -> Path:
+    expanded = path.expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return expanded.absolute()
+
+
 def _sqlite_open_diagnostic_context(db_path: Path) -> str:
     expanded = db_path.expanduser()
     parent = expanded.parent
-    resolved = expanded.resolve(strict=False)
+    resolved = _safe_resolve_path(expanded)
     return (
         f"db={expanded} resolved={resolved} exists={expanded.exists()} "
         f"parent_exists={parent.exists()} parent_writable={os.access(parent, os.W_OK)} "
@@ -201,8 +209,9 @@ def _sqlite_open_diagnostic_context(db_path: Path) -> str:
 
 def _fallback_database_path(db_path: Path, output_root: Optional[Path]) -> Optional[Path]:
     candidate_root = (output_root or db_path.parent).expanduser()
-    candidate_db_path = (candidate_root / "downloads.sqlite3").resolve()
-    if candidate_db_path == db_path.expanduser().resolve():
+    candidate_db_path = _safe_resolve_path(candidate_root / "downloads.sqlite3")
+    requested_db_path = _safe_resolve_path(db_path)
+    if candidate_db_path == requested_db_path:
         return None
 
     try:

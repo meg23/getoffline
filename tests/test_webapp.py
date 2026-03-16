@@ -173,6 +173,14 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(rows, [])
             self.assertTrue(fallback_db.is_file())
 
+    def test_fetch_downloaded_media_rows_handles_resolve_emfile_in_fallback(self):
+        with mock.patch(
+            "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("webapp.Path.resolve", side_effect=OSError(24, "Too many open files")):
+            rows = fetch_downloaded_media_rows(Path("/tmp/missing/downloads.sqlite3"), Path("/tmp"))
+
+        self.assertEqual(rows, [])
+
     def test_fetch_downloaded_media_row_by_id_returns_none_when_db_unavailable(self):
         with mock.patch(
             "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
