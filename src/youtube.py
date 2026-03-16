@@ -384,7 +384,13 @@ def download_youtube_items(config, downloaded_items):
                 webpage_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip().lower()
                 if info_dict.get("_type") == "url" and info_dict.get("ie_key") == "Youtube" and not webpage_url:
                     webpage_url = str(info_dict.get("url") or "").strip().lower()
-                if "/shorts/" in webpage_url:
+
+                candidate_urls = [
+                    webpage_url,
+                    str(info_dict.get("original_url") or "").strip().lower(),
+                    str(info_dict.get("url") or "").strip().lower(),
+                ]
+                if any("/shorts/" in candidate for candidate in candidate_urls if candidate):
                     reason = "Skipping YouTube Shorts entry from playlist."
                     _record_skip(reason, info_dict)
                     return reason
@@ -535,6 +541,11 @@ def download_youtube_items(config, downloaded_items):
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
+                "extractor_args": {
+                    "youtube": {
+                        "skip": ["shorts"],
+                    }
+                },
                 "progress_hooks": [record_download_progress],
                 "postprocessor_hooks": [record_postprocess_file],
                 "match_filter": skip_known_downloads,
