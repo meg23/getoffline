@@ -31,6 +31,7 @@ from database import (
     update_download_settings,
     update_stored_defaults,
     update_download_position_seconds,
+    close_cached_descriptors,
 )
 
 
@@ -54,6 +55,7 @@ DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
 PROGRESS_FLUSH_COALESCE_SECONDS = 0.35
 PROGRESS_FLUSH_POLL_SECONDS = 0.5
+DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -650,6 +652,15 @@ def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
         if stop_event.wait(_auto_update_interval_seconds(state)):
             break
         trigger_background_update(state)
+
+
+def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        if stop_event.wait(DESCRIPTOR_CLEANUP_INTERVAL_SECONDS):
+            break
+        closed_count = close_cached_descriptors()
+        if closed_count:
+            log.info("Descriptor cleanup: disposed %s cached database engine(s)", closed_count)
 
 
 def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
@@ -3055,6 +3066,14 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     )
     progress_flush_thread.start()
 
+    descriptor_cleanup_stop_event = threading.Event()
+    descriptor_cleanup_thread = threading.Thread(
+        target=_descriptor_cleanup_loop,
+        args=(state, descriptor_cleanup_stop_event),
+        daemon=True,
+    )
+    descriptor_cleanup_thread.start()
+
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
     print("Automatic download checks are enabled. Adjust the interval in Settings (minutes).")
@@ -3065,5 +3084,6 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     finally:
         auto_update_stop_event.set()
         progress_flush_stop_event.set()
+        descriptor_cleanup_stop_event.set()
         state.pending_progress_event.set()
         server.server_close()

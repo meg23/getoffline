@@ -2,6 +2,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -28,6 +29,7 @@ from webapp import (  # noqa: E402
     _stream_media,
     _enqueue_progress_update,
     _flush_pending_progress_updates,
+    _descriptor_cleanup_loop,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
     get_total_listened_seconds,
@@ -258,6 +260,24 @@ class WebAppHelpersTests(unittest.TestCase):
                     _log_stream_disconnect(media)
 
             self.assertEqual(info_mock.call_count, 2)
+
+    def test_descriptor_cleanup_loop_disposes_cached_descriptors(self):
+        stop_event = threading.Event()
+        state = AppState(
+            output_root=Path("/tmp"),
+            database_path=Path("/tmp/downloads.sqlite3"),
+            config={"defaults": {}},
+            update_runner=lambda config, items: None,
+        )
+
+        wait_mock = mock.Mock(side_effect=[False, True])
+        with mock.patch.object(stop_event, "wait", wait_mock), mock.patch(
+            "webapp.close_cached_descriptors", return_value=2
+        ) as cleanup_mock, mock.patch("webapp.log.info") as info_mock:
+            _descriptor_cleanup_loop(state, stop_event)
+
+        cleanup_mock.assert_called_once()
+        info_mock.assert_called_once()
 
     def test_index_contains_update_button(self):
         with tempfile.TemporaryDirectory() as tmpdir:
