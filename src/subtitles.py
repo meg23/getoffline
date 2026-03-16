@@ -13,6 +13,12 @@ _SUBTITLE_SIDECAR_SUFFIXES = {
     ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
 }
 
+_KNOWN_EMPTY_AUDIO_FAILURE_PATTERNS = (
+    "cannot reshape tensor of 0 elements",
+    "Output file does not contain any stream",
+    "Stream map 'a' matches no streams",
+)
+
 
 def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
     stem = media_file.stem
@@ -152,7 +158,7 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         result = transcribe_with_whisper(input_file, model_name, "subtitle-generation", language=subtitle_language)
     except Exception as exc:
         error_message = str(exc)
-        if "cannot reshape tensor of 0 elements" in error_message:
+        if any(pattern in error_message for pattern in _KNOWN_EMPTY_AUDIO_FAILURE_PATTERNS):
             failed_marker_path.parent.mkdir(parents=True, exist_ok=True)
             failed_marker_path.write_text(
                 f"Known Whisper empty-audio failure for {input_file.name}\n{error_message}\n",

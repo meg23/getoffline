@@ -827,6 +827,32 @@ class SubtitleFailureCachingTests(unittest.TestCase):
             marker = media.with_suffix(".srt.failed")
             self.assertTrue(marker.exists())
 
+    def test_ffmpeg_no_audio_stream_failure_is_cached(self):
+        import subtitles
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "video_only.mp4"
+            media.write_text("fake", encoding="utf-8")
+
+            settings = {"subtitle_model": "base"}
+            calls = {"count": 0}
+
+            def _boom(*args, **kwargs):
+                _ = args, kwargs
+                calls["count"] += 1
+                raise RuntimeError(
+                    "Transcription failed for video_only.mp4 (base): Failed to load audio: ffmpeg ... Output file does not contain any stream"
+                )
+
+            with patch("subtitles.transcribe_with_whisper", side_effect=_boom):
+                first = subtitles.generate_whisper_subtitles(media, settings)
+                second = subtitles.generate_whisper_subtitles(media, settings)
+
+            self.assertIsNone(first)
+            self.assertIsNone(second)
+            self.assertEqual(calls["count"], 1)
+            marker = media.with_suffix(".srt.failed")
+            self.assertTrue(marker.exists())
 
 class YoutubeSourceResolverTests(unittest.TestCase):
     def test_resolve_youtube_source_name_prefers_channel(self):
