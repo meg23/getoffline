@@ -209,6 +209,27 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertNotIn("subtitleslangs", opts)
 
 
+    def test_youtube_download_enables_ejs_remote_component_when_deno_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
+            }
+
+            with patch("youtube.shutil.which", return_value="/usr/bin/deno"), patch("youtube.YoutubeDL", FakeYoutubeDL):
+                youtube.download_youtube_items(config, [])
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertEqual(opts.get("remote_components"), "ejs:github")
+
     def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
         class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):
             def download(self, urls):

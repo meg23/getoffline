@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,6 +27,36 @@ _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
 
 log = get_logger("youtube")
+
+_YTDLP_REMOTE_COMPONENTS = "ejs:github"
+
+
+def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
+    """Enable yt-dlp's YouTube EJS remote component when a JS runtime is available."""
+    deno_binary = shutil.which("deno")
+    if not deno_binary:
+        return
+
+    existing_value = ydl_opts.get("remote_components")
+    if isinstance(existing_value, list):
+        if _YTDLP_REMOTE_COMPONENTS in existing_value:
+            return
+        existing_value.append(_YTDLP_REMOTE_COMPONENTS)
+    elif isinstance(existing_value, str) and existing_value.strip():
+        existing_parts = [part.strip() for part in existing_value.split(",") if part.strip()]
+        if _YTDLP_REMOTE_COMPONENTS in existing_parts:
+            return
+        existing_parts.append(_YTDLP_REMOTE_COMPONENTS)
+        ydl_opts["remote_components"] = ",".join(existing_parts)
+    else:
+        ydl_opts["remote_components"] = _YTDLP_REMOTE_COMPONENTS
+
+    log.info(
+        "Enabled yt-dlp remote component %s for %s (runtime: %s)",
+        _YTDLP_REMOTE_COMPONENTS,
+        context_label,
+        deno_binary,
+    )
 
 
 def _clean_log_title(value: str) -> str:
@@ -94,6 +125,7 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
     }
     if cookie_file:
         ydl_opts["cookiefile"] = cookie_file
+    _enable_youtube_ejs_remote_component(ydl_opts, "source-name resolution")
 
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(source_url, download=False)
@@ -557,6 +589,7 @@ def download_youtube_items(config, downloaded_items):
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
+            _enable_youtube_ejs_remote_component(ydl_opts, f"download source {name}")
 
             ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
 
