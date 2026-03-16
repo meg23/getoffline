@@ -269,6 +269,7 @@ def download_youtube_items(config, downloaded_items):
             ytdlp_message_stats: Dict[str, int] = {}
             skip_reason_counts: Dict[str, int] = {}
             skip_reason_examples: Dict[str, str] = {}
+            subtitle_futures_by_media: Dict[Path, object] = {}
 
             subtitle_or_aux_exts = {
                 ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
@@ -441,6 +442,17 @@ def download_youtube_items(config, downloaded_items):
                         completed_download_ids.add(download_key)
                         downloaded_items.append(f"YouTube: {name} – {title}")
 
+                    if subtitle_executor is not None and download_type == "video" and should_generate_subtitles and output_file:
+                        candidate_file = Path(output_file).expanduser().resolve()
+                        if candidate_file.exists() and candidate_file not in subtitle_futures_by_media:
+                            subtitle_futures_by_media[candidate_file] = subtitle_executor.submit(
+                                _process_media_file,
+                                candidate_file,
+                                name,
+                                should_generate_subtitles,
+                                subtitle_offset_seconds,
+                            )
+
             def record_postprocess_file(d):
                 info = d.get("info_dict") or {}
                 postprocessor = d.get("postprocessor") or "unknown"
@@ -463,6 +475,15 @@ def download_youtube_items(config, downloaded_items):
                     resolved_path = path.resolve()
                     extracted_audio_files.append(resolved_path)
                     postprocessed_file_by_key[download_key] = resolved_path
+
+                    if subtitle_executor is not None and should_generate_subtitles and resolved_path not in subtitle_futures_by_media:
+                        subtitle_futures_by_media[resolved_path] = subtitle_executor.submit(
+                            _process_media_file,
+                            resolved_path,
+                            name,
+                            should_generate_subtitles,
+                            subtitle_offset_seconds,
+                        )
                 else:
                     resolved_path = path.resolve()
                     postprocessed_file_by_key[download_key] = resolved_path
@@ -513,6 +534,10 @@ def download_youtube_items(config, downloaded_items):
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
+            subtitle_worker_count = int(defaults.get("processing_workers", 2))
+            subtitle_worker_count = max(1, subtitle_worker_count)
+
+            subtitle_executor = ThreadPoolExecutor(max_workers=subtitle_worker_count)
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
@@ -608,7 +633,7 @@ def download_youtube_items(config, downloaded_items):
                         )
 
             media_files_for_subtitles = new_audio_files if download_type == "audio" else delta_video
-            worker_count = int(defaults.get("processing_workers", 2))
+            worker_count = subtitle_worker_count
             worker_count = max(1, min(worker_count, len(media_files_for_subtitles) or 1))
             log.info(
                 "Running YouTube subtitle processing with %d worker(s) for %s (type=%s)",
@@ -617,33 +642,25 @@ def download_youtube_items(config, downloaded_items):
                 download_type,
             )
 
-            if worker_count == 1:
-                for media_file in media_files_for_subtitles:
-                    downloaded_items.extend(
-                        _process_media_file(
-                            media_file,
-                            name,
-                            should_generate_subtitles,
-                            subtitle_offset_seconds,
-                        )
-                    )
-            else:
-                with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                    futures = [
-                        executor.submit(
-                            _process_media_file,
-                            media_file,
-                            name,
-                            should_generate_subtitles,
-                            subtitle_offset_seconds,
-                        )
-                        for media_file in media_files_for_subtitles
-                    ]
-                    for future in as_completed(futures):
-                        try:
-                            downloaded_items.extend(future.result())
-                        except Exception as processing_exc:
-                            log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
+            for media_file in media_files_for_subtitles:
+                candidate = Path(media_file).expanduser().resolve()
+                if candidate in subtitle_futures_by_media:
+                    continue
+                subtitle_futures_by_media[candidate] = subtitle_executor.submit(
+                    _process_media_file,
+                    candidate,
+                    name,
+                    should_generate_subtitles,
+                    subtitle_offset_seconds,
+                )
+
+            for future in as_completed(list(subtitle_futures_by_media.values())):
+                try:
+                    downloaded_items.extend(future.result())
+                except Exception as processing_exc:
+                    log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
+
+            subtitle_executor.shutdown(wait=True)
 
             for download_key, record in finished_download_info.items():
                 info = record["info"]
