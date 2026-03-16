@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
@@ -99,7 +99,7 @@ class AppState:
     update_runner: Callable[[Dict, List[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
     pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
-    pending_progress: Dict[int, float] = field(default_factory=dict)
+    pending_progress: Dict[int, Tuple[float, bool]] = field(default_factory=dict)
     pending_progress_event: threading.Event = field(default_factory=threading.Event)
     progress_metrics_lock: threading.Lock = field(default_factory=threading.Lock)
     progress_received_count: int = 0
@@ -554,8 +554,17 @@ def trigger_background_update(state: AppState) -> bool:
 
 def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float, reason: str = "unknown", forced: bool = False) -> None:
     safe_seconds = max(0.0, float(position_seconds or 0.0))
+    completion = _is_playback_completion_reason(reason)
+    if completion:
+        safe_seconds = 0.0
+
     with state.pending_progress_lock:
-        state.pending_progress[int(row_id)] = safe_seconds
+        existing = state.pending_progress.get(int(row_id))
+        if existing and existing[1] and not completion:
+            # Keep completion resets sticky until they are flushed to storage.
+            safe_seconds = float(existing[0])
+        else:
+            state.pending_progress[int(row_id)] = (safe_seconds, completion)
         queue_size = len(state.pending_progress)
         state.pending_progress_event.set()
 
@@ -592,8 +601,9 @@ def _flush_pending_progress_updates(state: AppState) -> int:
 
     flush_started_at = time.monotonic()
     updated_count = 0
-    for row_id, seconds in pending.items():
-        updated = update_download_position_seconds(str(state.database_path), int(row_id), float(seconds))
+    for row_id, progress_payload in pending.items():
+        seconds = float(progress_payload[0]) if isinstance(progress_payload, tuple) else float(progress_payload)
+        updated = update_download_position_seconds(str(state.database_path), int(row_id), seconds)
         if not updated:
             log.warning("Progress update skipped for id=%s (db busy or row missing)", row_id)
         else:
@@ -2843,6 +2853,8 @@ def make_handler(state: AppState):
                     log.info("POST /progress forced id=%s reason=%s seconds=%.3f", raw_id, raw_reason, position_seconds)
 
                 row_id = int(raw_id)
+                if _is_playback_completion_reason(raw_reason):
+                    position_seconds = 0.0
                 _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
                 if _is_playback_completion_reason(raw_reason):
                     mark_download_played(str(state.database_path), row_id, played=True)
