@@ -2282,6 +2282,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     output_root = html.escape(str(defaults.get("output_root") or ""))
     audio_format = html.escape(str(defaults.get("audio_format") or "mp3"))
     audio_quality = html.escape(str(defaults.get("audio_quality") or "0"))
+    ffmpeg_audio_filter = html.escape(str(defaults.get("ffmpeg_audio_filter") or ""))
     max_downloads = html.escape(str(defaults.get("max_downloads") or "3"))
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
@@ -2438,6 +2439,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           <div>
             <label for="audio_quality">Audio quality</label>
             <input id="audio_quality" name="audio_quality" value="{audio_quality}" required />
+          </div>
+          <div>
+            <label for="ffmpeg_audio_filter">FFmpeg audio filter</label>
+            <input id="ffmpeg_audio_filter" name="ffmpeg_audio_filter" value="{ffmpeg_audio_filter}" placeholder="loudnorm=I=-14:TP=-1.5:LRA=11" />
           </div>
           <div>
             <label for="max_downloads">Max downloads</label>
@@ -2951,12 +2956,17 @@ def make_handler(state: AppState):
                         "output_root": (form.get("output_root") or [""])[0],
                         "audio_format": (form.get("audio_format") or [""])[0],
                         "audio_quality": (form.get("audio_quality") or [""])[0],
+                        "ffmpeg_audio_filter": (form.get("ffmpeg_audio_filter") or [""])[0],
                         "max_downloads": (form.get("max_downloads") or [""])[0],
                         "playlist_end": (form.get("playlist_end") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
                     }
-                    sanitized_updates = {k: str(v).strip() for k, v in updates.items() if str(v).strip()}
+                    sanitized_updates = {
+                        k: str(v).strip()
+                        for k, v in updates.items()
+                        if str(v).strip() or k == "ffmpeg_audio_filter"
+                    }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
 
                 elif settings_action == "update_cookie":

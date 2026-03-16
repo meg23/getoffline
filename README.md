@@ -7,6 +7,7 @@
 - Batch download from YouTube playlists/channels and podcast RSS feeds
 - Central SQLite download history using SQLAlchemy (replaces per-source text archives)
 - Automatic audio extraction to MP3
+- Configurable FFmpeg audio filter for automatic volume/loudness normalization on extracted audio and YouTube video audio tracks
 - Automatic Whisper subtitle (`.srt`) generation for new audio downloads when `subtitles: true`
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source

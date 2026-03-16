@@ -182,6 +182,9 @@ def download_podcasts(config, downloaded_items):
                     "noprogress": True,
                     "logger": _YoutubeDlQuietLogger(),
                 }
+                ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
+                if ffmpeg_audio_filter:
+                    ydl_opts["postprocessor_args"] = ["-af", ffmpeg_audio_filter]
 
                 episode_jobs.append(
                     {
