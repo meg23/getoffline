@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import podcasts  # noqa: E402
 import youtube  # noqa: E402
-from database import has_episode_title_for_source, upsert_download, init_database  # noqa: E402
+from database import has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -980,7 +980,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
             self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
             self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "another episode"))
 
-    def test_has_episode_title_for_source_ignores_missing_files(self):
+    def test_has_episode_title_for_source_accepts_missing_files_when_db_has_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "downloads.sqlite3")
             missing_path = os.path.join(tmpdir, "missing.mp3")
@@ -997,8 +997,25 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 },
             )
 
-            self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
+            self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
 
+    def test_is_downloaded_true_when_downloaded_row_exists_even_if_file_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "existing-1",
+                    "title": "Episode Forty Two",
+                    "file_path": os.path.join(tmpdir, "missing.mp4"),
+                    "download_status": "downloaded",
+                },
+            )
+
+            self.assertTrue(is_downloaded(db_path, "youtube", "MyChannel", "existing-1"))
 
 if __name__ == "__main__":
     unittest.main()
