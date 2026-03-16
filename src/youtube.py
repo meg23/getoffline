@@ -576,6 +576,9 @@ def download_youtube_items(config, downloaded_items):
                         ],
                     }
                 )
+                ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
+                if ffmpeg_audio_filter:
+                    ydl_opts["postprocessor_args"] = ["-af", ffmpeg_audio_filter]
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
             log.info("YouTube download mode for %s: full entry extraction enabled", name)
