@@ -1525,10 +1525,23 @@ def _render_index(
         miniTranscript.textContent = '';
       }}
 
+      function detachMiniHandlers(el) {{
+        if (!el || !el._miniPersistentHandlers) return;
+        const prev = el._miniPersistentHandlers;
+        if (prev.timeupdate) el.removeEventListener('timeupdate', prev.timeupdate);
+        if (prev.pause) el.removeEventListener('pause', prev.pause);
+        if (prev.play) el.removeEventListener('play', prev.play);
+        if (prev.ended) el.removeEventListener('ended', prev.ended);
+        if (prev.subtitleTrack && prev.subtitleLoad) prev.subtitleTrack.removeEventListener('load', prev.subtitleLoad);
+        if (prev.textTrack && prev.cuechange) prev.textTrack.removeEventListener('cuechange', prev.cuechange);
+        delete el._miniPersistentHandlers;
+      }}
+
       function clearMiniMedia() {{
         hideMiniTranscript();
         [miniAudio, miniVideo].forEach((el) => {{
           if (!el) return;
+          detachMiniHandlers(el);
           try {{ el.pause(); }} catch (_) {{}}
           el.removeAttribute('src');
           while (el.firstChild) el.removeChild(el.firstChild);
@@ -1560,6 +1573,11 @@ def _render_index(
           miniTranscript.appendChild(btn);
         }});
 
+        const existing = player._miniPersistentHandlers;
+        if (existing && existing.textTrack && existing.cuechange) {{
+          existing.textTrack.removeEventListener('cuechange', existing.cuechange);
+        }}
+
         const onCueChange = () => {{
           const activeCue = track.activeCues && track.activeCues.length ? track.activeCues[0] : null;
           if (activeCue === miniLastActiveCue) return;
@@ -1577,6 +1595,10 @@ def _render_index(
         }};
 
         track.addEventListener('cuechange', onCueChange);
+        if (existing) {{
+          existing.textTrack = track;
+          existing.cuechange = onCueChange;
+        }}
         onCueChange();
         miniTranscript.classList.add('is-visible');
         miniTranscriptReady = true;
@@ -1599,7 +1621,14 @@ def _render_index(
             if (!miniTranscriptReady) miniTranscript.textContent = 'No subtitle cues available.';
           }}
         }}, 150);
-        if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', () => syncMiniTranscriptFromTrack(player));
+        if (subtitleTrackEl) {{
+          const onSubtitleLoad = () => syncMiniTranscriptFromTrack(player);
+          subtitleTrackEl.addEventListener('load', onSubtitleLoad);
+          if (player._miniPersistentHandlers) {{
+            player._miniPersistentHandlers.subtitleTrack = subtitleTrackEl;
+            player._miniPersistentHandlers.subtitleLoad = onSubtitleLoad;
+          }}
+        }}
       }}
 
       function setMiniExpanded(expanded) {{
@@ -1668,13 +1697,7 @@ def _render_index(
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
         active.load();
 
-        if (active._miniPersistentHandlers) {{
-          const prev = active._miniPersistentHandlers;
-          active.removeEventListener('timeupdate', prev.timeupdate);
-          active.removeEventListener('pause', prev.pause);
-          active.removeEventListener('play', prev.play);
-          active.removeEventListener('ended', prev.ended);
-        }}
+        detachMiniHandlers(active);
 
         const persist = () => {{
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{

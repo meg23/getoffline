@@ -213,8 +213,9 @@ class WebAppHelpersTests(unittest.TestCase):
                 status={"is_running": "no", "last_result": "idle", "last_finished": "Never", "last_error": "", "cookie_present": "no"},
             )
 
-        self.assertIn("active._miniPersistentHandlers", body)
-        self.assertIn("active.removeEventListener('timeupdate', prev.timeupdate)", body)
+        self.assertIn("function detachMiniHandlers(el)", body)
+        self.assertIn("existing.textTrack.removeEventListener('cuechange', existing.cuechange)", body)
+        self.assertIn("player._miniPersistentHandlers.subtitleLoad = onSubtitleLoad", body)
 
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
