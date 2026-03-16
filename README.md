@@ -1,6 +1,6 @@
-# Listens: Automated Media Downloader
+# GetOffline: Automated Media Downloader
 
-**Listens** is a Python-based tool to batch download YouTube videos and podcast episodes. Runtime defaults, source lists, and download settings (including full `cookies.txt` content) are persisted in SQLite and editable in the web UI.
+**GetOffline** is a Python-based tool to batch download YouTube videos and podcast episodes. Runtime defaults, source lists, and download settings (including full `cookies.txt` content) are persisted in SQLite and editable in the web UI.
 
 ## Features
 
@@ -17,23 +17,18 @@
 
 ## Requirements
 
+Install the following system tools first:
+
+- `make`
+- `ffmpeg` (includes `ffprobe`)
+- `deno`
 - Python 3.8+
-- `yt-dlp`
-- `feedparser`
-- `browser_cookie3`
-- `ffmpeg`/`ffprobe`
-- `openai-whisper`
-- `SQLAlchemy`
 
-Install dependencies:
-
-```bash
-pip install -r src/requirements.txt
-```
+Python dependencies are installed automatically by the Makefile.
 
 ## Configuration
 
-Listens no longer depends on `config.yaml`.
+GetOffline no longer depends on `config.yaml`.
 
 On startup, defaults are seeded in SQLite automatically and can be edited at `/settings`.
 Initial bootstrap values come from built-in defaults, with optional environment overrides:
@@ -45,16 +40,18 @@ YouTube live streams are skipped automatically and will not be downloaded.
 
 ## Usage
 
-Run the downloader:
+Build and run the app:
 
 ```bash
-python src/main.py download
+make run
 ```
 
-Start the local media web app:
+This command creates a virtual environment, installs Python dependencies, validates required system dependencies, builds the executable, and runs the app.
+
+You can still run the Python entrypoint directly if needed:
 
 ```bash
-python src/main.py serve --host 127.0.0.1 --port 8080
+python src/main.py
 ```
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
