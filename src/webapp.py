@@ -2121,6 +2121,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function persistMiniPlayerState() {{
+        if (playbackCompleted) return;
         localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
           rowId,
           title: {json.dumps(row.title or media_path.name)},
@@ -2231,12 +2232,18 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       player.addEventListener('play', persistMiniPlayerState);
       player.addEventListener('ended', () => {{
         playbackCompleted = true;
+        try {{ player.currentTime = 0; }} catch (_) {{}}
         localStorage.removeItem('getofflineMiniPlayerState');
         postProgress(0, true, 'ended');
       }});
 
       if (backToLibrary) {{
         backToLibrary.addEventListener('click', () => {{
+          if (playbackCompleted) {{
+            localStorage.removeItem('getofflineMiniPlayerState');
+            postProgress(0, true, 'back-link');
+            return;
+          }}
           persistMiniPlayerState();
           postProgress(player.currentTime, true, 'back-link');
         }});

@@ -1138,6 +1138,10 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("reason === 'page-exit'", body)
             self.assertIn("reason === 'back-link'", body)
             self.assertIn("reason === 'pause'", body)
+            self.assertIn("if (playbackCompleted) return;", body)
+            self.assertIn("try { player.currentTime = 0; } catch (_) {}", body)
+            self.assertIn("if (playbackCompleted) {", body)
+            self.assertIn("postProgress(0, true, 'back-link');", body)
 
     def test_index_open_button_has_navigation_fallback_when_state_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
