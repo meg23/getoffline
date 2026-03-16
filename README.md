@@ -12,7 +12,7 @@
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
-- Easy YAML configuration
+- Database-backed runtime configuration (no `config.yaml` required)
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
 
 ## Requirements
@@ -21,7 +21,6 @@
 - `yt-dlp`
 - `feedparser`
 - `browser_cookie3`
-- `PyYAML`
 - `ffmpeg`/`ffprobe`
 - `openai-whisper`
 - `SQLAlchemy`
@@ -34,20 +33,13 @@ pip install -r src/requirements.txt
 
 ## Configuration
 
-`config.yaml` now only needs default runtime values and database location. Manage YouTube playlists/channels, podcast feeds, and cookie text from the web UI at `/settings`.
+Listens no longer depends on `config.yaml`.
 
-```yaml
+On startup, defaults are seeded in SQLite automatically and can be edited at `/settings`.
+Initial bootstrap values come from built-in defaults, with optional environment overrides:
 
-defaults:
-  output_root: ./downloads
-  database_path: ./downloads/downloads.sqlite3
-  audio_format: mp3
-  audio_quality: 0
-  max_downloads: 3
-  playlist_end: 3
-  auto_update_minutes: 20
-
-```
+- `GETOFFLINE_OUTPUT_ROOT`
+- `GETOFFLINE_DATABASE_PATH`
 
 YouTube live streams are skipped automatically and will not be downloaded.
 

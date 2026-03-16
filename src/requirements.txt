@@ -1,6 +1,5 @@
 yt-dlp>=2025.05.22
 feedparser>=6.0.10
 browser-cookie3>=0.19.1
-PyYAML>=6.0.1
 openai-whisper>=20240930
 SQLAlchemy>=2.0.36
