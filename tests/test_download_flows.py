@@ -1075,7 +1075,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                     {
                         "id": "abc123",
                         "title": "Daily Episode",
-                        "webpage_url": "https://www.youtube.com/shorts/abc123",
+                        "url": "https://www.youtube.com/shorts/abc123",
                     },
                     incomplete=False,
                 )
@@ -1112,6 +1112,8 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 youtube.download_youtube_items(config, [])
 
             self.assertEqual(FakeYoutubeDLForFilter.match_filter_result, "Skipping YouTube Shorts entry from playlist.")
+            opts = FakeYoutubeDLForFilter.instances[-1].opts
+            self.assertEqual(opts.get("extractor_args", {}).get("youtube", {}).get("skip"), ["shorts"])
 
     def test_has_episode_title_for_source_is_case_insensitive(self):
         with tempfile.TemporaryDirectory() as tmpdir:
