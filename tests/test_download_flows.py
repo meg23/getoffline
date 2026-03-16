@@ -6,8 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import yaml
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import podcasts  # noqa: E402
@@ -69,17 +67,7 @@ def _fake_subtitle_generator(media_path, subtitle_settings):
     return srt_path
 
 
-def _build_sample_config_from_repo_config(output_root):
-    with open("config.yaml", encoding="utf-8") as f:
-        source = yaml.safe_load(f)
-
-    youtube_entry = next(
-        item
-        for item in source.get("youtube", [])
-        if item.get("type", "audio").lower() == "audio" and item.get("subtitles")
-    )
-    podcast_entry = next(item for item in source.get("podcasts", []) if item.get("subtitles"))
-
+def _build_sample_config(output_root):
     return {
         "defaults": {
             "cookie_path": os.path.join(output_root, "cookies.txt"),
@@ -91,14 +79,14 @@ def _build_sample_config_from_repo_config(output_root):
             "processing_workers": 1,
         },
         "youtube": [{
-            "name": youtube_entry["name"],
-            "url": youtube_entry["url"],
+            "name": "Test YouTube Source",
+            "url": "https://youtube.com/playlist?list=test-playlist",
             "type": "audio",
             "subtitles": True,
         }],
         "podcasts": [{
-            "name": podcast_entry["name"],
-            "url": podcast_entry["url"],
+            "name": "Test Podcast Source",
+            "url": "https://feeds.example.com/test-podcast.xml",
             "subtitles": True,
         }],
     }
@@ -110,7 +98,7 @@ class DownloadFlowTests(unittest.TestCase):
 
     def test_sample_config_single_youtube_and_podcast_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = _build_sample_config_from_repo_config(tmpdir)
+            config = _build_sample_config(tmpdir)
 
             mp3_url = "https://cdn.example.com/episode-1.mp3"
             fake_feed = SimpleNamespace(
@@ -133,8 +121,8 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertEqual(FakeYoutubeDL.instances[0].urls, [config["youtube"][0]["url"]])
             self.assertEqual(FakeYoutubeDL.instances[1].urls, [mp3_url])
 
-            youtube_folder = Path(tmpdir) / youtube.sanitize(config["youtube"][0]["name"])
-            podcast_folder = Path(tmpdir) / podcasts.sanitize(config["podcasts"][0]["name"])
+            youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(config["youtube"][0]["name"])
+            podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(config["podcasts"][0]["name"])
 
             youtube_mp3 = next(youtube_folder.glob("*.mp3"), None)
             podcast_mp3 = next(podcast_folder.glob("*.mp3"), None)
@@ -156,7 +144,7 @@ class DownloadFlowTests(unittest.TestCase):
         import sqlite3
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = _build_sample_config_from_repo_config(tmpdir)
+            config = _build_sample_config(tmpdir)
             config["defaults"]["database_path"] = os.path.join(tmpdir, "downloads.sqlite3")
 
             mp3_url = "https://cdn.example.com/episode-1.mp3"
