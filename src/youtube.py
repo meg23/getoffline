@@ -558,8 +558,27 @@ def download_youtube_items(config, downloaded_items):
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
 
+            ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
+
             if download_type == "video":
                 ydl_opts["format"] = "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]"
+                if ffmpeg_audio_filter:
+                    ydl_opts["postprocessors"] = [
+                        {
+                            "key": "FFmpegVideoConvertor",
+                            "preferedformat": "mp4",
+                        }
+                    ]
+                    ydl_opts["postprocessor_args"] = [
+                        "-c:v",
+                        "copy",
+                        "-c:a",
+                        "aac",
+                        "-b:a",
+                        "192k",
+                        "-af",
+                        ffmpeg_audio_filter,
+                    ]
             else:
                 ydl_opts.update(
                     {
@@ -576,7 +595,6 @@ def download_youtube_items(config, downloaded_items):
                         ],
                     }
                 )
-                ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
                 if ffmpeg_audio_filter:
                     ydl_opts["postprocessor_args"] = ["-af", ffmpeg_audio_filter]
 
