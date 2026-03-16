@@ -139,7 +139,7 @@ class _YoutubeDlQuietLogger:
                 log.error("%s", message)
 
 
-def _process_audio_media_file(
+def _process_media_file(
     media_file: Path,
     name: str,
     entry_subtitles_enabled: bool,
@@ -252,7 +252,7 @@ def download_youtube_items(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
-            should_generate_subtitles = entry_subtitles_enabled and download_type == "audio"
+            should_generate_subtitles = entry_subtitles_enabled
 
             extracted_audio_files: List[Path] = []
             postprocessed_file_by_key: Dict[str, Path] = {}
@@ -607,40 +607,43 @@ def download_youtube_items(config, downloaded_items):
                             name,
                         )
 
-            if download_type == "audio":
-                worker_count = int(defaults.get("processing_workers", 2))
-                worker_count = max(1, min(worker_count, len(new_audio_files) or 1))
-                log.info("Running YouTube post-processing with %d worker(s) for %s", worker_count, name)
+            media_files_for_subtitles = new_audio_files if download_type == "audio" else delta_video
+            worker_count = int(defaults.get("processing_workers", 2))
+            worker_count = max(1, min(worker_count, len(media_files_for_subtitles) or 1))
+            log.info(
+                "Running YouTube subtitle processing with %d worker(s) for %s (type=%s)",
+                worker_count,
+                name,
+                download_type,
+            )
 
-                if worker_count == 1:
-                    for mp3 in new_audio_files:
-                        downloaded_items.extend(
-                            _process_audio_media_file(
-                                mp3,
-                                name,
-                                should_generate_subtitles,
-                                subtitle_offset_seconds,
-                            )
+            if worker_count == 1:
+                for media_file in media_files_for_subtitles:
+                    downloaded_items.extend(
+                        _process_media_file(
+                            media_file,
+                            name,
+                            should_generate_subtitles,
+                            subtitle_offset_seconds,
                         )
-                else:
-                    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                        futures = [
-                            executor.submit(
-                                _process_audio_media_file,
-                                mp3,
-                                name,
-                                should_generate_subtitles,
-                                subtitle_offset_seconds,
-                            )
-                            for mp3 in new_audio_files
-                        ]
-                        for future in as_completed(futures):
-                            try:
-                                downloaded_items.extend(future.result())
-                            except Exception as processing_exc:
-                                log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
+                    )
             else:
-                log.info("Subtitles skipped for %s (type=%s)", name, download_type)
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    futures = [
+                        executor.submit(
+                            _process_media_file,
+                            media_file,
+                            name,
+                            should_generate_subtitles,
+                            subtitle_offset_seconds,
+                        )
+                        for media_file in media_files_for_subtitles
+                    ]
+                    for future in as_completed(futures):
+                        try:
+                            downloaded_items.extend(future.result())
+                        except Exception as processing_exc:
+                            log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
 
             for download_key, record in finished_download_info.items():
                 info = record["info"]

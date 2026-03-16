@@ -700,6 +700,67 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertNotIn(".f140.m4a", row[0])
 
 
+    def test_video_download_generates_sidecar_subtitles_without_burning_into_video(self):
+        class FakeYoutubeDLVideoOnly(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                outtmpl = self.opts.get("outtmpl")
+                output_path = (
+                    outtmpl.replace("%(upload_date)s", "20260101")
+                    .replace("%(title)s", "Visible Captions Off")
+                    .replace("%(ext)s", "mp4")
+                )
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write("video")
+
+                info_dict = {
+                    "id": "video-with-subs",
+                    "title": "Visible Captions Off",
+                    "webpage_url": "https://youtube.com/watch?v=video-with-subs",
+                    "_filename": output_path,
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": output_path,
+                            "total_bytes": 1024,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                },
+                "youtube": [{
+                    "name": "VideoSubs",
+                    "url": "https://youtube.com/watch?v=video-with-subs",
+                    "type": "video",
+                    "subtitles": True,
+                }],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLVideoOnly), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            ):
+                youtube.download_youtube_items(config, [])
+
+            folder = Path(tmpdir) / youtube.sanitize_channel_name("VideoSubs")
+            mp4_file = next(folder.glob("*.mp4"), None)
+            self.assertIsNotNone(mp4_file)
+            self.assertTrue(mp4_file.with_suffix(".srt").exists())
+
+
+
 class SubtitleSidecarCleanupTests(unittest.TestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
         import subtitles
