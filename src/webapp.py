@@ -1668,6 +1668,14 @@ def _render_index(
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
         active.load();
 
+        if (active._miniPersistentHandlers) {{
+          const prev = active._miniPersistentHandlers;
+          active.removeEventListener('timeupdate', prev.timeupdate);
+          active.removeEventListener('pause', prev.pause);
+          active.removeEventListener('play', prev.play);
+          active.removeEventListener('ended', prev.ended);
+        }}
+
         const persist = () => {{
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
             ...state,
@@ -1675,19 +1683,33 @@ def _render_index(
             paused: active.paused,
           }}));
         }};
-        active.addEventListener('timeupdate', () => {{
+        const timeupdateHandler = () => {{
           persist();
           if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
-        }});
-        active.addEventListener('pause', () => {{
+        }};
+        const pauseHandler = () => {{
           persist();
           postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
-        }});
-        active.addEventListener('play', persist);
-        active.addEventListener('ended', () => {{
+        }};
+        const playHandler = () => {{
+          persist();
+        }};
+        const endedHandler = () => {{
           postMiniProgress(state, 0, true, 'mini-ended');
           closeMiniPlayer();
-        }});
+        }};
+
+        active._miniPersistentHandlers = {{
+          timeupdate: timeupdateHandler,
+          pause: pauseHandler,
+          play: playHandler,
+          ended: endedHandler,
+        }};
+
+        active.addEventListener('timeupdate', timeupdateHandler);
+        active.addEventListener('pause', pauseHandler);
+        active.addEventListener('play', playHandler);
+        active.addEventListener('ended', endedHandler);
 
         miniPlayer.classList.add('is-visible');
         setMiniExpanded(false);

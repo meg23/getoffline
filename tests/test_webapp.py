@@ -204,6 +204,18 @@ class WebAppHelpersTests(unittest.TestCase):
 
         self.assertIn("GetOffline Media Library", body)
 
+    def test_render_index_includes_mini_player_listener_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            body = _render_index(
+                rows=[],
+                output_root=Path(tmpdir),
+                database_path=Path(tmpdir) / "downloads.sqlite3",
+                status={"is_running": "no", "last_result": "idle", "last_finished": "Never", "last_error": "", "cookie_present": "no"},
+            )
+
+        self.assertIn("active._miniPersistentHandlers", body)
+        self.assertIn("active.removeEventListener('timeupdate', prev.timeupdate)", body)
+
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
