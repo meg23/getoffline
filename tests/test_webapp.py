@@ -152,6 +152,37 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertEqual(rows, [])
         warning_mock.assert_called()
 
+    def test_fetch_downloaded_media_rows_returns_empty_when_db_unavailable(self):
+        with mock.patch(
+            "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("webapp.log.warning") as warning_mock:
+            rows = fetch_downloaded_media_rows(Path("/tmp/test.sqlite3"))
+
+        self.assertEqual(rows, [])
+        warning_mock.assert_called_once()
+
+    def test_fetch_downloaded_media_row_by_id_returns_none_when_db_unavailable(self):
+        with mock.patch(
+            "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("webapp.log.warning") as warning_mock:
+            row = fetch_downloaded_media_row_by_id(Path("/tmp/test.sqlite3"), 1)
+
+        self.assertIsNone(row)
+        warning_mock.assert_called_once()
+
+    def test_render_index_handles_unavailable_database_stats(self):
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ):
+            body = _render_index(
+                rows=[],
+                output_root=Path(tmpdir),
+                database_path=Path(tmpdir) / "downloads.sqlite3",
+                status={"is_running": "no", "last_result": "idle", "last_finished": "Never", "last_error": "", "cookie_present": "no"},
+            )
+
+        self.assertIn("GetOffline Media Library", body)
+
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
