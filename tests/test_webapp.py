@@ -173,6 +173,14 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(rows, [])
             self.assertTrue(fallback_db.is_file())
 
+    def test_fetch_downloaded_media_rows_handles_resolve_emfile_in_fallback(self):
+        with mock.patch(
+            "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("webapp.Path.resolve", side_effect=OSError(24, "Too many open files")):
+            rows = fetch_downloaded_media_rows(Path("/tmp/missing/downloads.sqlite3"), Path("/tmp"))
+
+        self.assertEqual(rows, [])
+
     def test_fetch_downloaded_media_row_by_id_returns_none_when_db_unavailable(self):
         with mock.patch(
             "webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
@@ -181,6 +189,7 @@ class WebAppHelpersTests(unittest.TestCase):
 
         self.assertIsNone(row)
         warning_mock.assert_called_once()
+        self.assertIn("db=/tmp/test.sqlite3", warning_mock.call_args.args[3])
 
     def test_render_index_handles_unavailable_database_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
@@ -194,6 +203,19 @@ class WebAppHelpersTests(unittest.TestCase):
             )
 
         self.assertIn("GetOffline Media Library", body)
+
+    def test_render_index_includes_mini_player_listener_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            body = _render_index(
+                rows=[],
+                output_root=Path(tmpdir),
+                database_path=Path(tmpdir) / "downloads.sqlite3",
+                status={"is_running": "no", "last_result": "idle", "last_finished": "Never", "last_error": "", "cookie_present": "no"},
+            )
+
+        self.assertIn("function detachMiniHandlers(el)", body)
+        self.assertIn("existing.textTrack.removeEventListener('cuechange', existing.cuechange)", body)
+        self.assertIn("player._miniPersistentHandlers.subtitleLoad = onSubtitleLoad", body)
 
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:

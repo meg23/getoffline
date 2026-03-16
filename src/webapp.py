@@ -1,6 +1,7 @@
 import html
 import json
 import mimetypes
+import os
 import posixpath
 import re
 import sqlite3
@@ -187,10 +188,30 @@ def _log_sqlite_lock(operation: str, exc: Exception) -> None:
         log.warning("SQLite lock while %s: %s", operation, exc)
 
 
+def _safe_resolve_path(path: Path) -> Path:
+    expanded = path.expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return expanded.absolute()
+
+
+def _sqlite_open_diagnostic_context(db_path: Path) -> str:
+    expanded = db_path.expanduser()
+    parent = expanded.parent
+    resolved = _safe_resolve_path(expanded)
+    return (
+        f"db={expanded} resolved={resolved} exists={expanded.exists()} "
+        f"parent_exists={parent.exists()} parent_writable={os.access(parent, os.W_OK)} "
+        f"cwd={Path.cwd()} pid={os.getpid()}"
+    )
+
+
 def _fallback_database_path(db_path: Path, output_root: Optional[Path]) -> Optional[Path]:
     candidate_root = (output_root or db_path.parent).expanduser()
-    candidate_db_path = (candidate_root / "downloads.sqlite3").resolve()
-    if candidate_db_path == db_path.expanduser().resolve():
+    candidate_db_path = _safe_resolve_path(candidate_root / "downloads.sqlite3")
+    requested_db_path = _safe_resolve_path(db_path)
+    if candidate_db_path == requested_db_path:
         return None
 
     try:
@@ -342,7 +363,12 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         init_database(str(db_path))
     except sqlite3.OperationalError as exc:
         if _is_sqlite_open_error(exc):
-            log.warning("Unable to open database while loading media row id=%s: %s", row_id, exc)
+            log.warning(
+                "Unable to open database while loading media row id=%s: %s (%s)",
+                row_id,
+                exc,
+                _sqlite_open_diagnostic_context(db_path),
+            )
             return None
         raise
     try:
@@ -1499,10 +1525,23 @@ def _render_index(
         miniTranscript.textContent = '';
       }}
 
+      function detachMiniHandlers(el) {{
+        if (!el || !el._miniPersistentHandlers) return;
+        const prev = el._miniPersistentHandlers;
+        if (prev.timeupdate) el.removeEventListener('timeupdate', prev.timeupdate);
+        if (prev.pause) el.removeEventListener('pause', prev.pause);
+        if (prev.play) el.removeEventListener('play', prev.play);
+        if (prev.ended) el.removeEventListener('ended', prev.ended);
+        if (prev.subtitleTrack && prev.subtitleLoad) prev.subtitleTrack.removeEventListener('load', prev.subtitleLoad);
+        if (prev.textTrack && prev.cuechange) prev.textTrack.removeEventListener('cuechange', prev.cuechange);
+        delete el._miniPersistentHandlers;
+      }}
+
       function clearMiniMedia() {{
         hideMiniTranscript();
         [miniAudio, miniVideo].forEach((el) => {{
           if (!el) return;
+          detachMiniHandlers(el);
           try {{ el.pause(); }} catch (_) {{}}
           el.removeAttribute('src');
           while (el.firstChild) el.removeChild(el.firstChild);
@@ -1534,6 +1573,11 @@ def _render_index(
           miniTranscript.appendChild(btn);
         }});
 
+        const existing = player._miniPersistentHandlers;
+        if (existing && existing.textTrack && existing.cuechange) {{
+          existing.textTrack.removeEventListener('cuechange', existing.cuechange);
+        }}
+
         const onCueChange = () => {{
           const activeCue = track.activeCues && track.activeCues.length ? track.activeCues[0] : null;
           if (activeCue === miniLastActiveCue) return;
@@ -1551,6 +1595,10 @@ def _render_index(
         }};
 
         track.addEventListener('cuechange', onCueChange);
+        if (existing) {{
+          existing.textTrack = track;
+          existing.cuechange = onCueChange;
+        }}
         onCueChange();
         miniTranscript.classList.add('is-visible');
         miniTranscriptReady = true;
@@ -1573,7 +1621,14 @@ def _render_index(
             if (!miniTranscriptReady) miniTranscript.textContent = 'No subtitle cues available.';
           }}
         }}, 150);
-        if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', () => syncMiniTranscriptFromTrack(player));
+        if (subtitleTrackEl) {{
+          const onSubtitleLoad = () => syncMiniTranscriptFromTrack(player);
+          subtitleTrackEl.addEventListener('load', onSubtitleLoad);
+          if (player._miniPersistentHandlers) {{
+            player._miniPersistentHandlers.subtitleTrack = subtitleTrackEl;
+            player._miniPersistentHandlers.subtitleLoad = onSubtitleLoad;
+          }}
+        }}
       }}
 
       function setMiniExpanded(expanded) {{
@@ -1642,6 +1697,8 @@ def _render_index(
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
         active.load();
 
+        detachMiniHandlers(active);
+
         const persist = () => {{
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
             ...state,
@@ -1649,19 +1706,33 @@ def _render_index(
             paused: active.paused,
           }}));
         }};
-        active.addEventListener('timeupdate', () => {{
+        const timeupdateHandler = () => {{
           persist();
           if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
-        }});
-        active.addEventListener('pause', () => {{
+        }};
+        const pauseHandler = () => {{
           persist();
           postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
-        }});
-        active.addEventListener('play', persist);
-        active.addEventListener('ended', () => {{
+        }};
+        const playHandler = () => {{
+          persist();
+        }};
+        const endedHandler = () => {{
           postMiniProgress(state, 0, true, 'mini-ended');
           closeMiniPlayer();
-        }});
+        }};
+
+        active._miniPersistentHandlers = {{
+          timeupdate: timeupdateHandler,
+          pause: pauseHandler,
+          play: playHandler,
+          ended: endedHandler,
+        }};
+
+        active.addEventListener('timeupdate', timeupdateHandler);
+        active.addEventListener('pause', pauseHandler);
+        active.addEventListener('play', playHandler);
+        active.addEventListener('ended', endedHandler);
 
         miniPlayer.classList.add('is-visible');
         setMiniExpanded(false);
