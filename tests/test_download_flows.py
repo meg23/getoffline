@@ -962,6 +962,8 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
     def test_has_episode_title_for_source_is_case_insensitive(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            media_path = os.path.join(tmpdir, "episode-42.mp3")
+            Path(media_path).write_text("audio", encoding="utf-8")
             init_database(db_path)
             upsert_download(
                 db_path,
@@ -970,12 +972,32 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                     "source_name": "MyChannel",
                     "item_uid": "existing-1",
                     "title": "Episode Forty Two",
+                    "file_path": media_path,
                     "download_status": "downloaded",
                 },
             )
 
             self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
             self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "another episode"))
+
+    def test_has_episode_title_for_source_ignores_missing_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            missing_path = os.path.join(tmpdir, "missing.mp3")
+            init_database(db_path)
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "existing-1",
+                    "title": "Episode Forty Two",
+                    "file_path": missing_path,
+                    "download_status": "downloaded",
+                },
+            )
+
+            self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
 
 
 if __name__ == "__main__":
