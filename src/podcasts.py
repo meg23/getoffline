@@ -1,5 +1,6 @@
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import feedparser
@@ -27,6 +28,38 @@ class _YoutubeDlQuietLogger:
 
 
 log = get_logger("podcast")
+
+
+def _download_episode_media(episode_job: dict):
+    ydl_opts = episode_job["ydl_opts"]
+    mp3_url = episode_job["mp3_url"]
+    name = episode_job["name"]
+    episode_title = episode_job["episode_title"]
+
+    log.info(f"Downloading podcast: {name} – {episode_title}")
+    last_download_error = None
+    for attempt in range(1, PODCAST_DOWNLOAD_RETRIES + 1):
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                ydl.download([mp3_url])
+            last_download_error = None
+            break
+        except Exception as download_exc:
+            last_download_error = download_exc
+            if attempt < PODCAST_DOWNLOAD_RETRIES:
+                backoff_seconds = attempt * 2
+                log.warning(
+                    "Retrying podcast download (%s/%s) for %s – %s in %ss: %s",
+                    attempt,
+                    PODCAST_DOWNLOAD_RETRIES,
+                    name,
+                    episode_title,
+                    backoff_seconds,
+                    download_exc,
+                )
+                time.sleep(backoff_seconds)
+
+    return last_download_error
 
 
 def _episode_payload(
@@ -109,6 +142,7 @@ def download_podcasts(config, downloaded_items):
             feed = feedparser.parse(url)
             entries = feed.entries[: defaults["max_downloads"]]
 
+            episode_jobs = []
             for ep in entries:
                 if not ep.enclosures:
                     continue
@@ -149,84 +183,83 @@ def download_podcasts(config, downloaded_items):
                     "logger": _YoutubeDlQuietLogger(),
                 }
 
-                log.info(f"Downloading podcast: {name} – {episode_title}")
-                last_download_error = None
-                for attempt in range(1, PODCAST_DOWNLOAD_RETRIES + 1):
-                    try:
-                        with YoutubeDL(ydl_opts) as ydl:
-                            ydl.download([mp3_url])
-                        last_download_error = None
-                        break
-                    except Exception as download_exc:
-                        last_download_error = download_exc
-                        if attempt < PODCAST_DOWNLOAD_RETRIES:
-                            backoff_seconds = attempt * 2
-                            log.warning(
-                                "Retrying podcast download (%s/%s) for %s – %s in %ss: %s",
-                                attempt,
-                                PODCAST_DOWNLOAD_RETRIES,
-                                name,
-                                episode_title,
-                                backoff_seconds,
-                                download_exc,
-                            )
-                            time.sleep(backoff_seconds)
+                episode_jobs.append(
+                    {
+                        "name": name,
+                        "source_url": url,
+                        "entry_subtitles_enabled": entry_subtitles_enabled,
+                        "subtitle_offset_seconds": subtitle_offset_seconds,
+                        "episode_title": episode_title,
+                        "description": getattr(ep, "summary", None),
+                        "mp3_url": mp3_url,
+                        "final_audio": Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}",
+                        "ydl_opts": ydl_opts,
+                    }
+                )
 
-                if last_download_error is not None:
+            worker_count = int(defaults.get("processing_workers", 2))
+            worker_count = max(1, min(worker_count, len(episode_jobs) or 1))
+
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_by_job = {executor.submit(_download_episode_media, job): job for job in episode_jobs}
+                for future in as_completed(future_by_job):
+                    job = future_by_job[future]
+                    last_download_error = future.result()
+
+                    if last_download_error is not None:
+                        upsert_download(
+                            db_path,
+                            _episode_payload(
+                                db_path=db_path,
+                                source_name=job["name"],
+                                source_url=job["source_url"],
+                                media_url=job["mp3_url"],
+                                title=job["episode_title"],
+                                description=job["description"],
+                                file_path=None,
+                                subtitle_enabled=job["entry_subtitles_enabled"],
+                                subtitle_path=None,
+                                download_status="failed",
+                                error_message=str(last_download_error),
+                            ),
+                        )
+                        log.error(
+                            "Failed to download podcast episode after %s attempts: %s – %s (%s)",
+                            PODCAST_DOWNLOAD_RETRIES,
+                            job["name"],
+                            job["episode_title"],
+                            last_download_error,
+                        )
+                        continue
+
+                    subtitle_path = create_subtitles(
+                        media_file=job["final_audio"],
+                        subtitle_offset_seconds=job["subtitle_offset_seconds"],
+                        entry_subtitles_enabled=job["entry_subtitles_enabled"],
+                        logger=log,
+                        context_name=f"podcast {job['name']}",
+                        context_label="podcast",
+                    )
+                    if subtitle_path:
+                        downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
+
                     upsert_download(
                         db_path,
                         _episode_payload(
                             db_path=db_path,
-                            source_name=name,
-                            source_url=url,
-                            media_url=mp3_url,
-                            title=episode_title,
-                            description=getattr(ep, "summary", None),
-                            file_path=None,
-                            subtitle_enabled=entry_subtitles_enabled,
-                            subtitle_path=None,
-                            download_status="failed",
-                            error_message=str(last_download_error),
+                            source_name=job["name"],
+                            source_url=job["source_url"],
+                            media_url=job["mp3_url"],
+                            title=job["episode_title"],
+                            description=job["description"],
+                            file_path=job["final_audio"],
+                            subtitle_enabled=job["entry_subtitles_enabled"],
+                            subtitle_path=subtitle_path,
+                            download_status="downloaded",
                         ),
                     )
-                    log.error(
-                        "Failed to download podcast episode after %s attempts: %s – %s (%s)",
-                        PODCAST_DOWNLOAD_RETRIES,
-                        name,
-                        episode_title,
-                        last_download_error,
-                    )
-                    continue
 
-                final_audio = Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}"
-                subtitle_path = create_subtitles(
-                    media_file=final_audio,
-                    subtitle_offset_seconds=subtitle_offset_seconds,
-                    entry_subtitles_enabled=entry_subtitles_enabled,
-                    logger=log,
-                    context_name=f"podcast {name}",
-                    context_label="podcast",
-                )
-                if subtitle_path:
-                    downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
-
-                upsert_download(
-                    db_path,
-                    _episode_payload(
-                        db_path=db_path,
-                        source_name=name,
-                        source_url=url,
-                        media_url=mp3_url,
-                        title=episode_title,
-                        description=getattr(ep, "summary", None),
-                        file_path=final_audio,
-                        subtitle_enabled=entry_subtitles_enabled,
-                        subtitle_path=subtitle_path,
-                        download_status="downloaded",
-                    ),
-                )
-
-                downloaded_items.append(f"Podcast: {name} – {episode_title}")
+                    downloaded_items.append(f"Podcast: {job['name']} – {job['episode_title']}")
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
