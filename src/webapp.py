@@ -129,6 +129,7 @@ def _icon_sprite() -> str:
       <symbol id="bi-eye-slash" viewBox="0 0 16 16"><path d="M13.359 11.238C12.124 12.33 10.384 13 8 13c-5 0-8-5-8-5a16.79 16.79 0 0 1 3.168-3.646L1.146 2.354a.5.5 0 1 1 .708-.708l13 13a.5.5 0 0 1-.708.708l-.787-.787z"/><path d="M11.297 9.176 6.824 4.703A3 3 0 0 1 11.297 9.176z"/><path d="M5.34 7.218 8.782 10.66A3 3 0 0 1 5.34 7.218z"/><path d="M7.646 3.007C7.764 3.002 7.882 3 8 3c5 0 8 5 8 5a17.362 17.362 0 0 1-2.363 2.955l-.723-.723A16.74 16.74 0 0 0 14.828 8c-.058-.087-.122-.183-.195-.288-.335-.48-.83-1.12-1.465-1.707C11.879 4.724 10.12 4 8 4c-.076 0-.152.001-.227.003l-.127-.996z"/></symbol>
       <symbol id="bi-gear" viewBox="0 0 16 16"><path d="M9.605 1.05c-.413-1.4-2.397-1.4-2.81 0l-.094.319a1.464 1.464 0 0 1-2.105.872l-.29-.17c-1.257-.736-2.66.667-1.924 1.924l.17.29c.446.764.003 1.74-.872 2.105l-.319.094c-1.4.413-1.4 2.397 0 2.81l.319.094c.875.365 1.318 1.34.872 2.105l-.17.29c-.736 1.257.667 2.66 1.924 1.924l.29-.17c.764-.446 1.74-.003 2.105.872l.094.319c.413 1.4 2.397 1.4 2.81 0l.094-.319c.365-.875 1.34-1.318 2.105-.872l.29.17c1.257.736 2.66-.667 1.924-1.924l-.17-.29a1.464 1.464 0 0 1 .872-2.105l.319-.094c1.4-.413 1.4-2.397 0-2.81l-.319-.094a1.464 1.464 0 0 1-.872-2.105l.17-.29c.736-1.257-.667-2.66-1.924-1.924l-.29.17a1.464 1.464 0 0 1-2.105-.872l-.094-.319zM8 10.5A2.5 2.5 0 1 1 8 5.5a2.5 2.5 0 0 1 0 5z"/></symbol>
       <symbol id="bi-plus-lg" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 2.5a.5.5 0 0 1 .5.5v4.5H13a.5.5 0 0 1 0 1H8.5V13a.5.5 0 0 1-1 0V8.5H3a.5.5 0 0 1 0-1h4.5V3a.5.5 0 0 1 .5-.5"/></symbol>
+      <symbol id="bi-search" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.867-3.834zm-5.242.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10"/></symbol>
       <symbol id="bi-heart" viewBox="0 0 16 16"><path d="m8 2.748-.717-.737C5.6.281 2.514.878 1.4 3.053c-.523 1.023-.641 2.5.314 4.385.92 1.815 2.834 3.989 6.286 6.357 3.452-2.368 5.365-4.542 6.286-6.357.955-1.886.838-3.362.314-4.385C13.486.878 10.4.28 8.717 2.01z"/></symbol>
       <symbol id="bi-heart-fill" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 1.314C12.438-3.248 23.534 4.735 8 15-7.534 4.736 3.562-3.248 8 1.314"/></symbol>
       <symbol id="bi-trash" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11z"/></symbol>
@@ -970,6 +971,29 @@ def _render_index(
       box-sizing: border-box;
     }}
     .quick-add-actions {{ display: flex; justify-content: flex-end; gap: .5rem; margin-top: .2rem; }}
+    .quick-add-search-row {{ display: grid; grid-template-columns: 1fr auto; gap: .5rem; }}
+    .quick-add-results {{
+      margin-top: .2rem;
+      display: grid;
+      gap: .5rem;
+      max-height: 300px;
+      overflow-y: auto;
+      padding-right: .2rem;
+    }}
+    .quick-add-result {{
+      border: 1px solid #d8e1f6;
+      border-radius: 10px;
+      padding: .45rem;
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      gap: .6rem;
+      align-items: center;
+      background: #fbfcff;
+    }}
+    .quick-add-thumb {{ width: 120px; height: 68px; object-fit: cover; border-radius: 8px; background: #edf2ff; }}
+    .quick-add-meta-title {{ font-weight: 600; color: #253559; }}
+    .quick-add-meta-sub {{ font-size: .82rem; color: #5f6d90; margin-top: .15rem; }}
+    .quick-add-empty {{ color: #5f6d90; font-size: .88rem; }}
 
 
     table {{
@@ -1261,7 +1285,7 @@ def _render_index(
       <form id="sync-form" method="post" action="/update" class="toolbar-form">
         <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg></button>
       </form>
-      <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
+      <button id="quick-add-open" class="icon-button" type="button" title="YouTube spotlight" aria-label="YouTube spotlight">{_icon_use("bi-search")}</button>
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
         <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
@@ -1283,11 +1307,14 @@ def _render_index(
 
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
-        <h2 id="quick-add-title">Add single YouTube link</h2>
+        <h2 id="quick-add-title">YouTube spotlight</h2>
         <form id="quick-add-form" method="post" action="/quick-add-youtube" class="quick-add-form">
           <div>
-            <label for="quick-add-url">YouTube URL</label>
-            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
+            <label for="quick-add-search">Search YouTube</label>
+            <div class="quick-add-search-row">
+              <input id="quick-add-search" class="quick-add-input" type="search" name="q" placeholder="Search videos..." autocomplete="off" />
+              <button id="quick-add-search-button" type="button" class="primary">Search</button>
+            </div>
           </div>
           <div>
             <label for="quick-add-media-type">Download type</label>
@@ -1296,9 +1323,14 @@ def _render_index(
               <option value="audio">audio</option>
             </select>
           </div>
+          <div id="quick-add-results" class="quick-add-results" aria-live="polite"></div>
+          <div>
+            <label for="quick-add-url">Or paste YouTube URL</label>
+            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." />
+          </div>
           <div class="quick-add-actions">
-            <button id="quick-add-cancel" type="button">Cancel</button>
-            <button type="submit" class="primary">Add</button>
+            <button id="quick-add-cancel" type="button">Close</button>
+            <button type="submit" class="primary">Download URL</button>
           </div>
         </form>
       </div>
@@ -1873,6 +1905,10 @@ def _render_index(
       const cancelBtn = document.getElementById('quick-add-cancel');
       const urlInput = document.getElementById('quick-add-url');
       const quickAddForm = document.getElementById('quick-add-form');
+      const searchInput = document.getElementById('quick-add-search');
+      const searchButton = document.getElementById('quick-add-search-button');
+      const searchResults = document.getElementById('quick-add-results');
+      const mediaTypeSelect = document.getElementById('quick-add-media-type');
 
       const closeModal = () => {{
         if (!backdrop) return;
@@ -1880,11 +1916,81 @@ def _render_index(
         backdrop.setAttribute('aria-hidden', 'true');
       }};
 
+      const renderSearchResults = (items) => {{
+        if (!searchResults) return;
+        if (!Array.isArray(items) || items.length === 0) {{
+          searchResults.innerHTML = '<div class="quick-add-empty">No videos found.</div>';
+          return;
+        }}
+
+        searchResults.innerHTML = items.map((item) => {{
+          const title = String(item.title || 'Untitled');
+          const channel = String(item.channel || '');
+          const duration = String(item.duration || '');
+          const url = String(item.url || '');
+          const thumbnail = String(item.thumbnail || '');
+          const sub = [channel, duration].filter(Boolean).join(' • ');
+
+          return `
+            <div class="quick-add-result">
+              <img class="quick-add-thumb" src="${{thumbnail}}" alt="${{title}} thumbnail" loading="lazy" referrerpolicy="no-referrer" />
+              <div>
+                <div class="quick-add-meta-title">${{title}}</div>
+                <div class="quick-add-meta-sub">${{sub}}</div>
+              </div>
+              <button type="button" class="primary" data-download-url="${{url}}">Download</button>
+            </div>
+          `;
+        }}).join('');
+      }};
+
+      const runSpotlightSearch = () => {{
+        if (!searchInput || !searchResults) return;
+        const q = String(searchInput.value || '').trim();
+        if (!q) {{
+          searchResults.innerHTML = '<div class="quick-add-empty">Type a query to search YouTube.</div>';
+          return;
+        }}
+
+        searchResults.innerHTML = '<div class="quick-add-empty">Searching...</div>';
+        fetch('/youtube-search?q=' + encodeURIComponent(q), {{ cache: 'no-store' }})
+          .then((response) => response.ok ? response.json() : null)
+          .then((payload) => {{
+            renderSearchResults(payload && payload.results ? payload.results : []);
+          }})
+          .catch(() => {{
+            searchResults.innerHTML = '<div class="quick-add-empty">Search failed. Try again.</div>';
+          }});
+      }};
+
+      const submitQuickDownload = (url) => {{
+        const safeUrl = String(url || '').trim();
+        if (!safeUrl) return;
+
+        const formBody = new window.URLSearchParams();
+        formBody.set('url', safeUrl);
+        formBody.set('media_type', mediaTypeSelect ? mediaTypeSelect.value : 'video');
+
+        closeModal();
+        setSyncButtonRunning();
+        fetch('/quick-add-youtube', {{
+          method: 'POST',
+          body: formBody.toString(),
+          keepalive: true,
+          headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
+        }})
+          .catch(() => {{}})
+          .finally(() => {{
+            pollSyncStatusUntilFinished();
+          }});
+      }};
+
       if (openBtn && backdrop) {{
         openBtn.addEventListener('click', () => {{
           backdrop.classList.add('is-open');
           backdrop.setAttribute('aria-hidden', 'false');
-          if (urlInput) urlInput.focus();
+          if (searchInput) searchInput.focus();
+          if (searchResults) searchResults.innerHTML = '<div class="quick-add-empty">Type a query to search YouTube.</div>';
         }});
 
         if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
@@ -1896,27 +2002,29 @@ def _render_index(
         }});
       }}
 
+      if (searchButton) searchButton.addEventListener('click', runSpotlightSearch);
+      if (searchInput) {{
+        searchInput.addEventListener('keydown', (event) => {{
+          if (event.key === 'Enter') {{
+            event.preventDefault();
+            runSpotlightSearch();
+          }}
+        }});
+      }}
+      if (searchResults) {{
+        searchResults.addEventListener('click', (event) => {{
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+          const downloadUrl = target.getAttribute('data-download-url');
+          if (!downloadUrl) return;
+          submitQuickDownload(downloadUrl);
+        }});
+      }}
+
       if (quickAddForm) {{
-        let quickAddRequestInFlight = false;
         quickAddForm.addEventListener('submit', (event) => {{
           event.preventDefault();
-          if (quickAddRequestInFlight) return;
-          quickAddRequestInFlight = true;
-
-          const formData = new window.FormData(quickAddForm);
-          closeModal();
-          setSyncButtonRunning();
-          fetch('/quick-add-youtube', {{
-            method: 'POST',
-            body: new window.URLSearchParams(formData),
-            keepalive: true,
-            headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
-          }})
-            .catch(() => {{}})
-            .finally(() => {{
-              quickAddRequestInFlight = false;
-              pollSyncStatusUntilFinished();
-            }});
+          submitQuickDownload(urlInput ? urlInput.value : '');
         }});
       }}
     }})();
@@ -2680,6 +2788,20 @@ def make_handler(state: AppState):
             if path == "/update-status":
                 status_payload = _snapshot_status(state.update_status)
                 body_bytes = json.dumps(status_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            if path == "/youtube-search":
+                from youtube import search_youtube_videos
+
+                query_text = str((query.get("q") or [""])[0]).strip()
+                results = search_youtube_videos(query_text, limit=10) if query_text else []
+                body_bytes = json.dumps({"results": results}).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")

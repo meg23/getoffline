@@ -191,6 +191,56 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
     return "youtube-single"
 
 
+def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
+    search_query = str(query or "").strip()
+    if not search_query:
+        return []
+
+    bounded_limit = max(1, min(int(limit), 20))
+    ydl_opts = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "extract_flat": "discard_in_playlist",
+        "logger": _YoutubeDlQuietLogger(),
+    }
+    _enable_youtube_ejs_remote_component(ydl_opts, "search")
+
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            payload = ydl.extract_info(f"ytsearch{bounded_limit}:{search_query}", download=False) or {}
+    except Exception as exc:
+        log.warning("YouTube search failed for query=%r: %s", search_query, exc)
+        return []
+
+    results = []
+    for item in payload.get("entries") or []:
+        if not isinstance(item, dict):
+            continue
+        video_url = str(item.get("webpage_url") or item.get("url") or "").strip()
+        if not video_url:
+            continue
+        thumbnails = item.get("thumbnails") or []
+        thumbnail_url = ""
+        if thumbnails and isinstance(thumbnails, list):
+            thumb = thumbnails[0]
+            if isinstance(thumb, dict):
+                thumbnail_url = str(thumb.get("url") or "").strip()
+
+        results.append(
+            {
+                "title": str(item.get("title") or "Untitled").strip(),
+                "url": video_url,
+                "thumbnail": thumbnail_url,
+                "channel": str(item.get("channel") or item.get("uploader") or "").strip(),
+                "duration": str(item.get("duration_string") or "").strip(),
+            }
+        )
+
+    return results
+
+
 class _YoutubeDlQuietLogger:
     def __init__(self, run_stats: Optional[Dict[str, int]] = None):
         self.run_stats = run_stats if run_stats is not None else {}
