@@ -900,6 +900,43 @@ class YoutubeSourceResolverTests(unittest.TestCase):
         self.assertEqual(source_name, "ATitleOnly")
 
 
+    def test_search_youtube_videos_returns_normalized_results(self):
+        class FakeYoutubeDLForSearch(FakeYoutubeDL):
+            def extract_info(self, url, download=False):
+                _ = download
+                self.urls.append(url)
+                return {
+                    "entries": [
+                        {
+                            "title": "Sample video",
+                            "webpage_url": "https://www.youtube.com/watch?v=abc123",
+                            "thumbnails": [{"url": "https://img.youtube.com/vi/abc123/hqdefault.jpg"}],
+                            "channel": "Sample channel",
+                            "duration_string": "12:34",
+                        }
+                    ]
+                }
+
+        with patch("youtube.YoutubeDL", FakeYoutubeDLForSearch):
+            results = youtube.search_youtube_videos("sample query", limit=5)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], "Sample video")
+        self.assertEqual(results[0]["channel"], "Sample channel")
+        self.assertEqual(results[0]["duration"], "12:34")
+        self.assertIn("youtube.com/watch", results[0]["url"])
+
+    def test_search_youtube_videos_handles_search_errors(self):
+        class BrokenYoutubeDL(FakeYoutubeDL):
+            def extract_info(self, url, download=False):
+                _ = url, download
+                raise RuntimeError("network fail")
+
+        with patch("youtube.YoutubeDL", BrokenYoutubeDL):
+            results = youtube.search_youtube_videos("sample query")
+
+        self.assertEqual(results, [])
+
 class PodcastRetryTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
