@@ -1055,6 +1055,31 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
 
             self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
 
+    def test_audio_download_applies_ffmpeg_filter_with_post_pass(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
+                },
+                "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "youtube._apply_ffmpeg_audio_filter", return_value=True
+            ) as mock_apply_filter:
+                youtube.download_youtube_items(config, [])
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertNotIn("postprocessor_args", opts)
+            self.assertTrue(mock_apply_filter.called)
+
     def test_skip_filter_allows_forced_redownload_when_db_row_exists(self):
         class FakeYoutubeDLForFilter(FakeYoutubeDL):
             match_filter_result = "not-called"

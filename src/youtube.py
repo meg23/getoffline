@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -29,6 +30,46 @@ _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 log = get_logger("youtube")
 
 _YTDLP_REMOTE_COMPONENTS = "ejs:github"
+
+
+def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bool:
+    source = Path(media_file).expanduser().resolve()
+    if not source.exists() or not source.is_file():
+        return False
+
+    output_file = source.with_name(f"{source.stem}.normalized{source.suffix}")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(source),
+        "-af",
+        ffmpeg_audio_filter,
+        "-vn",
+        str(output_file),
+    ]
+
+    try:
+        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        log.warning("Skipping FFmpeg audio filter for %s because ffmpeg is not installed", source.name)
+        output_file.unlink(missing_ok=True)
+        return False
+
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        log.warning(
+            "Failed to apply FFmpeg audio filter for %s (code=%s): %s",
+            source.name,
+            completed.returncode,
+            stderr or "unknown error",
+        )
+        output_file.unlink(missing_ok=True)
+        return False
+
+    output_file.replace(source)
+    log.info("Applied FFmpeg audio filter for %s", source.name)
+    return True
 
 
 def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
@@ -622,14 +663,12 @@ def download_youtube_items(config, downloaded_items):
                         "postprocessors": [
                             {
                                 "key": "FFmpegExtractAudio",
-                                "preferredcodec": "mp3",
+                                "preferredcodec": defaults["audio_format"],
                                 "preferredquality": defaults["audio_quality"],
                             }
                         ],
                     }
                 )
-                if ffmpeg_audio_filter:
-                    ydl_opts["postprocessor_args"] = ["-af", ffmpeg_audio_filter]
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
             log.info("YouTube download mode for %s: full entry extraction enabled", name)
@@ -666,6 +705,15 @@ def download_youtube_items(config, downloaded_items):
                         log.info("Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
                     normalized_audio_files.append(normalized_audio)
                 new_audio_files = sorted(set(normalized_audio_files))
+
+                if ffmpeg_audio_filter:
+                    filtered_audio_files = []
+                    for audio_file in new_audio_files:
+                        candidate = Path(audio_file).expanduser().resolve()
+                        if _apply_ffmpeg_audio_filter(candidate, ffmpeg_audio_filter):
+                            filtered_audio_files.append(candidate)
+                    if filtered_audio_files:
+                        new_audio_files = sorted(set(filtered_audio_files))
 
             log.info(
                 "YouTube files for %s: new_audio=%d new_video=%d postprocess_candidates=%d",
