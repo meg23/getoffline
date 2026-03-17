@@ -228,7 +228,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
-            self.assertEqual(opts.get("remote_components"), "ejs:github")
+            self.assertEqual(opts.get("remote_components"), ["ejs:github"])
 
     def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
         class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):

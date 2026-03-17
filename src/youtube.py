@@ -29,7 +29,7 @@ _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
 log = get_logger("youtube")
 
-_YTDLP_REMOTE_COMPONENTS = "ejs:github"
+_YTDLP_REMOTE_COMPONENT = "ejs:github"
 
 
 def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bool:
@@ -80,21 +80,21 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
 
     existing_value = ydl_opts.get("remote_components")
     if isinstance(existing_value, list):
-        if _YTDLP_REMOTE_COMPONENTS in existing_value:
-            return
-        existing_value.append(_YTDLP_REMOTE_COMPONENTS)
+        components = existing_value
     elif isinstance(existing_value, str) and existing_value.strip():
-        existing_parts = [part.strip() for part in existing_value.split(",") if part.strip()]
-        if _YTDLP_REMOTE_COMPONENTS in existing_parts:
-            return
-        existing_parts.append(_YTDLP_REMOTE_COMPONENTS)
-        ydl_opts["remote_components"] = ",".join(existing_parts)
+        components = [part.strip() for part in existing_value.split(",") if part.strip()]
     else:
-        ydl_opts["remote_components"] = _YTDLP_REMOTE_COMPONENTS
+        components = []
+
+    if _YTDLP_REMOTE_COMPONENT in components:
+        return
+
+    components.append(_YTDLP_REMOTE_COMPONENT)
+    ydl_opts["remote_components"] = components
 
     log.info(
         "Enabled yt-dlp remote component %s for %s (runtime: %s)",
-        _YTDLP_REMOTE_COMPONENTS,
+        _YTDLP_REMOTE_COMPONENT,
         context_label,
         deno_binary,
     )
