@@ -340,6 +340,10 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("fetch('/update-status', { cache: 'no-store' })", body)
             self.assertIn("const isMediaPlaybackActive = () => {", body)
             self.assertIn('id="summary-grid"', body)
+            self.assertIn('id="summary-visible-items"', body)
+            self.assertIn('id="summary-played-items"', body)
+            self.assertIn('id="summary-new-items"', body)
+            self.assertIn('id="summary-favorite-items"', body)
             self.assertIn('id="downloads-table-body"', body)
             self.assertIn("setSyncButtonRunning", body)
             self.assertIn("refreshLibraryViewWithoutReload", body)
@@ -384,6 +388,9 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("rowSelectors = Array.from(document.querySelectorAll('.row-selector[name=\"ids\"]'));", body)
             self.assertIn("bindBatchControls();", body)
             self.assertIn("bindPlayLinks();", body)
+            self.assertIn("applyBatchActionLocally(requestedAction, selectedRows);", body)
+            self.assertIn("scheduleDeferredLibraryRefresh();", body)
+            self.assertIn("const mediaSettingsStorageKey = 'getofflineMediaElementSettings';", body)
             self.assertIn('persistedMiniPlayerState.paused === false', body)
 
 
@@ -453,6 +460,9 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('action="/batch-update"', body)
             self.assertIn('class="row-selector" name="ids"', body)
             self.assertIn('class="episode-link" href="/play?id=', body)
+            self.assertIn('data-row-id="', body)
+            self.assertIn('data-played="0"', body)
+            self.assertIn('data-favorite="0"', body)
             self.assertIn('data-has-subtitles="0"', body)
 
     def test_index_marks_audio_row_with_sibling_subtitle_file(self):
@@ -1228,6 +1238,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("reason === 'page-exit'", body)
             self.assertIn("reason === 'back-link'", body)
             self.assertIn("reason === 'pause'", body)
+            self.assertIn("const mediaSettingsStorageKey = 'getofflineMediaElementSettings';", body)
+            self.assertIn("player.addEventListener('volumechange', persistMediaSettings);", body)
             self.assertIn("if (playbackCompleted) return;", body)
             self.assertIn("try { player.currentTime = 0; } catch (_) {}", body)
             self.assertIn("if (playbackCompleted) {", body)

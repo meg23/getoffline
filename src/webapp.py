@@ -806,7 +806,7 @@ def _render_index(
 
         cards.append(
             f"""
-            <tr>
+            <tr data-row-id="{row.row_id}" data-played="{'1' if row.played else '0'}" data-favorite="{'1' if row_is_favorite else '0'}" data-file-exists="{'1' if file_exists else '0'}">
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
                 <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
@@ -1264,23 +1264,23 @@ def _render_index(
       <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
-          <div class="summary-value">{total_items}</div>
+          <div id="summary-visible-items" class="summary-value">{total_items}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">Played</div>
-          <div class="summary-value">{played_items}</div>
+          <div id="summary-played-items" class="summary-value">{played_items}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">New</div>
-          <div class="summary-value">{unplayed_items}</div>
+          <div id="summary-new-items" class="summary-value">{unplayed_items}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">Favorites</div>
-          <div class="summary-value">{favorite_items}</div>
+          <div id="summary-favorite-items" class="summary-value">{favorite_items}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">Listened</div>
-          <div class="summary-value">{total_listened}</div>
+          <div id="summary-listened-items" class="summary-value">{total_listened}</div>
         </div>
       </div>
     </div>
@@ -1396,14 +1396,48 @@ def _render_index(
       const syncButton = document.getElementById('sync-button');
       let syncReloadTimer = null;
       let syncStatusPollTimer = null;
+      let deferredLibraryRefreshTimer = null;
       let suppressSyncAutoReload = false;
       const syncStatusPollIntervalMs = 1500;
+      const mediaSettingsStorageKey = 'getofflineMediaElementSettings';
 
       const isMediaPlaybackActive = () => {{
         return Array.from(document.querySelectorAll('audio,video')).some((media) => {{
           if (!media) return false;
           return !media.paused && !media.ended && media.readyState > 2;
         }});
+      }};
+
+      const readStoredMediaSettings = () => {{
+        const raw = window.localStorage.getItem(mediaSettingsStorageKey);
+        if (!raw) return null;
+        try {{
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object') return null;
+          const volume = Number(parsed.volume);
+          return {{
+            volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : null,
+            muted: !!parsed.muted,
+          }};
+        }} catch (_) {{
+          return null;
+        }}
+      }};
+
+      const applyStoredMediaSettings = (media) => {{
+        if (!media) return;
+        const stored = readStoredMediaSettings();
+        if (!stored) return;
+        if (stored.volume !== null) media.volume = stored.volume;
+        media.muted = !!stored.muted;
+      }};
+
+      const persistMediaSettings = (media) => {{
+        if (!media) return;
+        window.localStorage.setItem(mediaSettingsStorageKey, JSON.stringify({{
+          volume: Number(media.volume),
+          muted: !!media.muted,
+        }}));
       }};
 
       const clearSyncReloadTimer = () => {{
@@ -1460,6 +1494,77 @@ def _render_index(
           .finally(() => {{
             setSyncButtonIdle();
           }});
+      }};
+
+      const scheduleDeferredLibraryRefresh = () => {{
+        if (deferredLibraryRefreshTimer !== null) return;
+        const attemptRefresh = () => {{
+          if (isMediaPlaybackActive()) {{
+            deferredLibraryRefreshTimer = window.setTimeout(attemptRefresh, 1000);
+            return;
+          }}
+          deferredLibraryRefreshTimer = null;
+          refreshLibraryViewWithoutReload();
+        }};
+        deferredLibraryRefreshTimer = window.setTimeout(attemptRefresh, 1000);
+      }};
+
+      const getCurrentViewFlags = () => {{
+        const params = new window.URLSearchParams(window.location.search);
+        return {{
+          showPlayed: params.get('show_played') === '1',
+          favoritesOnly: params.get('favorites') === '1',
+        }};
+      }};
+
+      const renderVisibleSummaryCounts = () => {{
+        const renderedRows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]'));
+        const visibleCountEl = document.getElementById('summary-visible-items');
+        const playedCountEl = document.getElementById('summary-played-items');
+        const newCountEl = document.getElementById('summary-new-items');
+        const favoriteCountEl = document.getElementById('summary-favorite-items');
+        const playedCount = renderedRows.filter((row) => row.dataset.played === '1').length;
+        const favoriteCount = renderedRows.filter((row) => row.dataset.favorite === '1').length;
+
+        if (visibleCountEl) visibleCountEl.textContent = String(renderedRows.length);
+        if (playedCountEl) playedCountEl.textContent = String(playedCount);
+        if (newCountEl) newCountEl.textContent = String(Math.max(renderedRows.length - playedCount, 0));
+        if (favoriteCountEl) favoriteCountEl.textContent = String(favoriteCount);
+      }};
+
+      const applyBatchActionLocally = (actionName, selectedRows) => {{
+        const flags = getCurrentViewFlags();
+        selectedRows.forEach((input) => {{
+          const row = input.closest('tr[data-row-id]');
+          if (!row) return;
+
+          if (actionName === 'delete') {{
+            row.remove();
+            return;
+          }}
+
+          if (actionName === 'favorite') {{
+            row.dataset.favorite = '1';
+            return;
+          }}
+
+          if (actionName === 'unfavorite') {{
+            row.dataset.favorite = '0';
+            if (flags.favoritesOnly) row.remove();
+            return;
+          }}
+
+          if (actionName === 'played') {{
+            row.dataset.played = '1';
+            if (!flags.showPlayed) row.remove();
+            return;
+          }}
+
+          if (actionName === 'unplayed') {{
+            row.dataset.played = '0';
+          }}
+        }});
+        renderVisibleSummaryCounts();
       }};
 
       const scheduleSyncReloadWhenSafe = () => {{
@@ -1564,6 +1669,7 @@ def _render_index(
 
           event.preventDefault();
           if (batchApply) batchApply.disabled = true;
+          const requestedAction = batchAction.value;
 
           fetch('/batch-update', {{
             method: 'POST',
@@ -1576,8 +1682,13 @@ def _render_index(
           }})
             .catch(() => {{}})
             .finally(() => {{
+              applyBatchActionLocally(requestedAction, selectedRows);
               if (batchAction) batchAction.value = '';
-              refreshLibraryViewWithoutReload();
+              if (isMediaPlaybackActive()) {{
+                scheduleDeferredLibraryRefresh();
+              }} else {{
+                refreshLibraryViewWithoutReload();
+              }}
             }});
         }});
       }}
@@ -1643,6 +1754,7 @@ def _render_index(
         if (prev.timeupdate) el.removeEventListener('timeupdate', prev.timeupdate);
         if (prev.pause) el.removeEventListener('pause', prev.pause);
         if (prev.play) el.removeEventListener('play', prev.play);
+        if (prev.volumechange) el.removeEventListener('volumechange', prev.volumechange);
         if (prev.ended) el.removeEventListener('ended', prev.ended);
         if (prev.subtitleTrack && prev.subtitleLoad) prev.subtitleTrack.removeEventListener('load', prev.subtitleLoad);
         if (prev.textTrack && prev.cuechange) prev.textTrack.removeEventListener('cuechange', prev.cuechange);
@@ -1787,6 +1899,7 @@ def _render_index(
 
         const active = state.kind === 'video' ? miniVideo : miniAudio;
         active.style.display = 'block';
+        applyStoredMediaSettings(active);
         const source = document.createElement('source');
         source.src = state.src;
         active.appendChild(source);
@@ -1829,6 +1942,9 @@ def _render_index(
         const playHandler = () => {{
           persist();
         }};
+        const volumeHandler = () => {{
+          persistMediaSettings(active);
+        }};
         const endedHandler = () => {{
           postMiniProgress(state, 0, true, 'mini-ended');
           closeMiniPlayer();
@@ -1838,12 +1954,14 @@ def _render_index(
           timeupdate: timeupdateHandler,
           pause: pauseHandler,
           play: playHandler,
+          volumechange: volumeHandler,
           ended: endedHandler,
         }};
 
         active.addEventListener('timeupdate', timeupdateHandler);
         active.addEventListener('pause', pauseHandler);
         active.addEventListener('play', playHandler);
+        active.addEventListener('volumechange', volumeHandler);
         active.addEventListener('ended', endedHandler);
 
         miniPlayer.classList.add('is-visible');
@@ -2210,6 +2328,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const player = document.getElementById('player');
       const backToLibrary = document.getElementById('back-to-library');
       const shouldAutoPlay = new URLSearchParams(window.location.search).get('autoplay') === '1';
+      const mediaSettingsStorageKey = 'getofflineMediaElementSettings';
       const resumeLabel = document.getElementById('resume-label');
       const transcript = document.getElementById('transcript');
       const subtitleTrackEl = document.getElementById('subtitle-track');
@@ -2227,6 +2346,36 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let playbackCompleted = false;
 
       if (!player) return;
+
+      function readStoredMediaSettings() {{
+        const raw = window.localStorage.getItem(mediaSettingsStorageKey);
+        if (!raw) return null;
+        try {{
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object') return null;
+          const volume = Number(parsed.volume);
+          return {{
+            volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : null,
+            muted: !!parsed.muted,
+          }};
+        }} catch (_) {{
+          return null;
+        }}
+      }}
+
+      function applyStoredMediaSettings() {{
+        const stored = readStoredMediaSettings();
+        if (!stored) return;
+        if (stored.volume !== null) player.volume = stored.volume;
+        player.muted = !!stored.muted;
+      }}
+
+      function persistMediaSettings() {{
+        window.localStorage.setItem(mediaSettingsStorageKey, JSON.stringify({{
+          volume: Number(player.volume),
+          muted: !!player.muted,
+        }}));
+      }}
 
       function updateLabel(seconds) {{
         if (!resumeLabel) return;
@@ -2422,10 +2571,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
       player.addEventListener('loadedmetadata', applyInitialSeek);
       player.addEventListener('canplay', applyInitialSeek);
+      player.addEventListener('loadedmetadata', applyStoredMediaSettings);
       player.addEventListener('canplay', () => {{
         if (shouldAutoPlay) player.play().catch(() => {{}});
       }});
       player.addEventListener('playing', applyInitialSeek);
+      player.addEventListener('volumechange', persistMediaSettings);
       player.addEventListener('loadeddata', scheduleTranscriptInit);
       window.addEventListener('pageshow', scheduleTranscriptInit);
       if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', scheduleTranscriptInit);
