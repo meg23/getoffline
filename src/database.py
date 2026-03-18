@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from logger import get_logger
 
@@ -55,16 +55,24 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def resolve_database_path(defaults: Dict[str, Any]) -> str:
+def _resolve_path(value: Any, *, base_dir: Optional[str] = None) -> str:
+    raw = os.path.expandvars(os.path.expanduser(str(value or "").strip()))
+    candidate = Path(raw)
+    if not candidate.is_absolute() and base_dir:
+        candidate = Path(base_dir).expanduser() / candidate
+    return str(candidate.resolve())
+
+
+def resolve_database_path(defaults: Dict[str, Any], *, base_dir: Optional[str] = None) -> str:
     configured = defaults.get("database_path")
     if configured:
-        return os.path.abspath(os.path.expandvars(os.path.expanduser(str(configured).strip())))
-    return os.path.abspath(
-        os.path.join(
-            os.path.expandvars(os.path.expanduser(str(defaults["output_root"]).strip())),
-            "downloads.sqlite3",
-        )
+        return _resolve_path(configured, base_dir=base_dir)
+    return _resolve_path(
+        Path(str(defaults["output_root"]).strip()) / "downloads.sqlite3",
+        base_dir=base_dir,
     )
+
+
 
 
 def build_item_uid(*, item_id: Optional[str], item_url: Optional[str], media_url: Optional[str], title: Optional[str]) -> str:
@@ -205,6 +213,19 @@ def _migration_0006_add_favorite_column(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0007_add_relative_media_paths(db_path: str) -> None:
+    expected_columns = {
+        "file_path_relative": "ALTER TABLE downloads ADD COLUMN file_path_relative TEXT",
+        "subtitle_path_relative": "ALTER TABLE downloads ADD COLUMN subtitle_path_relative TEXT",
+    }
+    columns = _table_columns_sqlite(db_path, "downloads")
+    with sqlite3.connect(db_path) as conn:
+        for name, ddl in expected_columns.items():
+            if name not in columns:
+                conn.execute(ddl)
+        conn.commit()
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
@@ -223,6 +244,10 @@ MIGRATIONS = [
     (
         "0006_add_favorite_column",
         lambda db_path: _migration_0006_add_favorite_column(db_path),
+    ),
+    (
+        "0007_add_relative_media_paths",
+        lambda db_path: _migration_0007_add_relative_media_paths(db_path),
     ),
 ]
 
@@ -647,6 +672,35 @@ def _init_database_sqlite(db_path: str) -> None:
 def _ensure_downloads_columns_sqlite(db_path: str) -> None:
     _migration_0002_add_playback_columns(db_path)
     _migration_0006_add_favorite_column(db_path)
+    _migration_0007_add_relative_media_paths(db_path)
+
+
+def _compute_relative_storage_paths(payload: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    storage_root = payload.get("storage_root")
+    if not storage_root:
+        return None, None
+
+    root = Path(str(storage_root)).expanduser().resolve()
+
+    def _relativize(candidate: Any) -> Optional[str]:
+        if not candidate:
+            return None
+        path = Path(str(candidate)).expanduser().resolve()
+        try:
+            return str(path.relative_to(root))
+        except ValueError:
+            return None
+
+    return _relativize(payload.get("file_path")), _relativize(payload.get("subtitle_path"))
+
+
+def resolve_download_artifact_path(output_root: str, stored_path: Optional[str], relative_path: Optional[str]) -> Optional[str]:
+    root = Path(str(output_root)).expanduser().resolve()
+    if relative_path:
+        return str((root / str(relative_path)).resolve())
+    if stored_path:
+        return str(Path(str(stored_path)).expanduser().resolve())
+    return None
 
 
 def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
@@ -682,6 +736,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "upload_date": payload.get("upload_date"),
         "duration_seconds": payload.get("duration_seconds"),
         "file_path": payload.get("file_path"),
+        "file_path_relative": None,
         "file_ext": payload.get("file_ext"),
         "file_size_bytes": payload.get("file_size_bytes"),
         "expected_bytes": payload.get("expected_bytes"),
@@ -693,6 +748,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "fps": payload.get("fps"),
         "subtitle_enabled": 1 if payload.get("subtitle_enabled", True) else 0,
         "subtitle_path": payload.get("subtitle_path"),
+        "subtitle_path_relative": None,
         "download_status": payload.get("download_status", "downloaded"),
         "error_message": payload.get("error_message"),
         "raw_metadata_json": _coerce_json(payload.get("raw_metadata")),
@@ -703,6 +759,9 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "favorite": 1 if payload.get("favorite", False) else 0,
         "played_at": payload.get("played_at"),
     }
+    file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(payload)
+    values["file_path_relative"] = file_path_relative
+    values["subtitle_path_relative"] = subtitle_path_relative
 
     try:
         with sqlite3.connect(db_path) as conn:
@@ -711,16 +770,16 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
             INSERT INTO downloads (
                 source_type, source_name, source_url, item_uid, item_id, item_url, media_url,
                 title, description, uploader, channel, extractor, playlist_id, playlist_title,
-                upload_date, duration_seconds, file_path, file_ext, file_size_bytes, expected_bytes,
+                upload_date, duration_seconds, file_path, file_path_relative, file_ext, file_size_bytes, expected_bytes,
                 format_id, format_note, audio_codec, video_codec, resolution, fps,
-                subtitle_enabled, subtitle_path, download_status, error_message, raw_metadata_json,
+                subtitle_enabled, subtitle_path, subtitle_path_relative, download_status, error_message, raw_metadata_json,
                 first_seen_at, last_seen_at, completed_at, played, favorite, played_at
             ) VALUES (
                 :source_type, :source_name, :source_url, :item_uid, :item_id, :item_url, :media_url,
                 :title, :description, :uploader, :channel, :extractor, :playlist_id, :playlist_title,
-                :upload_date, :duration_seconds, :file_path, :file_ext, :file_size_bytes, :expected_bytes,
+                :upload_date, :duration_seconds, :file_path, :file_path_relative, :file_ext, :file_size_bytes, :expected_bytes,
                 :format_id, :format_note, :audio_codec, :video_codec, :resolution, :fps,
-                :subtitle_enabled, :subtitle_path, :download_status, :error_message, :raw_metadata_json,
+                :subtitle_enabled, :subtitle_path, :subtitle_path_relative, :download_status, :error_message, :raw_metadata_json,
                 :first_seen_at, :last_seen_at, :completed_at, :played, :favorite, :played_at
             )
             ON CONFLICT(source_type, source_name, item_uid) DO UPDATE SET
@@ -738,6 +797,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 upload_date=excluded.upload_date,
                 duration_seconds=excluded.duration_seconds,
                 file_path=excluded.file_path,
+                file_path_relative=excluded.file_path_relative,
                 file_ext=excluded.file_ext,
                 file_size_bytes=excluded.file_size_bytes,
                 expected_bytes=excluded.expected_bytes,
@@ -749,6 +809,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
                 fps=excluded.fps,
                 subtitle_enabled=excluded.subtitle_enabled,
                 subtitle_path=excluded.subtitle_path,
+                subtitle_path_relative=excluded.subtitle_path_relative,
                 download_status=excluded.download_status,
                 error_message=excluded.error_message,
                 raw_metadata_json=excluded.raw_metadata_json,
@@ -795,6 +856,7 @@ if HAS_SQLALCHEMY:
         upload_date: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
         duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
         file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+        file_path_relative: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
         file_ext: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
         file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
         expected_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -806,6 +868,7 @@ if HAS_SQLALCHEMY:
         fps: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
         subtitle_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
         subtitle_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+        subtitle_path_relative: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
         download_status: Mapped[str] = mapped_column(String(32), nullable=False, default="downloaded")
         error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
         raw_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -878,6 +941,7 @@ if HAS_SQLALCHEMY:
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
         now = _utcnow()
+        file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(payload)
         try:
             with Session(_engine_for(db_path)) as session:
                 stmt = select(DownloadRecord).where(
@@ -898,12 +962,14 @@ if HAS_SQLALCHEMY:
 
                 for key in [
                     "item_id", "item_url", "media_url", "title", "description", "uploader", "channel", "extractor",
-                    "playlist_id", "playlist_title", "upload_date", "duration_seconds", "file_path", "file_ext",
+                    "playlist_id", "playlist_title", "upload_date", "duration_seconds", "file_path", "file_path_relative", "file_ext",
                     "file_size_bytes", "expected_bytes", "format_id", "format_note", "audio_codec", "video_codec",
-                    "resolution", "fps", "subtitle_path", "download_status", "error_message",
+                    "resolution", "fps", "subtitle_path", "subtitle_path_relative", "download_status", "error_message",
                 ]:
                     setattr(existing, key, payload.get(key))
+                existing.file_path_relative = file_path_relative
                 existing.subtitle_enabled = bool(payload.get("subtitle_enabled", True))
+                existing.subtitle_path_relative = subtitle_path_relative
                 existing.raw_metadata_json = _coerce_json(payload.get("raw_metadata"))
                 existing.last_seen_at = now
                 if existing.download_status == "downloaded":

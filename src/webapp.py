@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
 from database import (
+    resolve_download_artifact_path,
     add_source_config,
     delete_source_config,
     delete_download_entry,
@@ -267,15 +268,18 @@ def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             stale_rows = conn.execute(
                 """
-                SELECT id, file_path
+                SELECT id, file_path, file_path_relative
                 FROM downloads
-                WHERE download_status = 'downloaded' AND COALESCE(file_path, '') != ''
+                WHERE download_status = 'downloaded' AND (COALESCE(file_path, '') != '' OR COALESCE(file_path_relative, '') != '')
                 """
             ).fetchall()
 
             updates = []
-            for row_id, file_path in stale_rows:
-                if _resolve_safe_media_path(root, file_path):
+            for row_id, file_path, file_path_relative in stale_rows:
+                resolved_reference = resolve_download_artifact_path(str(root), file_path, file_path_relative)
+                if resolved_reference and _resolve_safe_media_path(root, resolved_reference):
+                    continue
+                if not file_path:
                     continue
 
                 raw = Path(file_path).expanduser()
@@ -294,10 +298,14 @@ def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
                         break
 
                 if repaired_path:
-                    updates.append((repaired_path, int(row_id)))
+                    try:
+                        repaired_relative = str(Path(repaired_path).resolve().relative_to(root))
+                    except ValueError:
+                        repaired_relative = None
+                    updates.append((repaired_path, repaired_relative, int(row_id)))
 
             if updates:
-                conn.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", updates)
+                conn.executemany("UPDATE downloads SET file_path = ?, file_path_relative = ? WHERE id = ?", updates)
                 conn.commit()
     except sqlite3.OperationalError as exc:
         _log_sqlite_lock("repairing downloaded file paths", exc)
@@ -331,9 +339,9 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             rows = conn.execute(
                 """
-                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, '')
                 FROM downloads
                 WHERE download_status = 'downloaded'
                 ORDER BY last_seen_at DESC, id DESC
@@ -352,15 +360,15 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             source_name=row[2],
             item_url=row[3],
             title=row[4],
-            file_path=row[5],
-            file_ext=row[6],
-            file_size_bytes=row[7],
-            upload_date=row[8],
-            played=bool(row[9]),
-            favorite=bool(row[10]),
-            played_at=row[11],
-            last_position_seconds=float(row[12] or 0.0),
-            subtitle_path=row[13],
+            file_path=resolve_download_artifact_path(str(repair_root), row[5], row[6]) or row[5] or row[6],
+            file_ext=row[7],
+            file_size_bytes=row[8],
+            upload_date=row[9],
+            played=bool(row[10]),
+            favorite=bool(row[11]),
+            played_at=row[12],
+            last_position_seconds=float(row[13] or 0.0),
+            subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
         )
         for row in rows
     ]
@@ -383,9 +391,9 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             row = conn.execute(
                 """
-                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''),
+                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, '')
                 FROM downloads
                 WHERE id = ? AND download_status = 'downloaded'
                 LIMIT 1
@@ -407,15 +415,15 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         source_name=row[2],
         item_url=row[3],
         title=row[4],
-        file_path=row[5],
-        file_ext=row[6],
-        file_size_bytes=row[7],
-        upload_date=row[8],
-        played=bool(row[9]),
-        favorite=bool(row[10]),
-        played_at=row[11],
-        last_position_seconds=float(row[12] or 0.0),
-        subtitle_path=row[13],
+        file_path=resolve_download_artifact_path(str(db_path.parent), row[5], row[6]) or row[5] or row[6],
+        file_ext=row[7],
+        file_size_bytes=row[8],
+        upload_date=row[9],
+        played=bool(row[10]),
+        favorite=bool(row[11]),
+        played_at=row[12],
+        last_position_seconds=float(row[13] or 0.0),
+        subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
     )
 
 

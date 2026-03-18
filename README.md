@@ -13,7 +13,7 @@
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams
 - Browser cookie support for private or age-restricted YouTube videos
-- Database-backed runtime configuration (no `config.yaml` required)
+- Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
 
 ## Requirements
@@ -31,10 +31,18 @@ If `deno` is available on `PATH`, GetOffline automatically enables yt-dlp's reco
 
 ## Configuration
 
-GetOffline no longer depends on `config.yaml`.
-
 On startup, defaults are seeded in SQLite automatically and can be edited at `/settings`.
-Initial bootstrap values come from built-in defaults, with optional environment overrides:
+Initial bootstrap values come from built-in defaults, an optional `config.yml`, and optional environment overrides:
+
+```yaml
+defaults:
+  output_root: ./downloads
+  database_path: ./downloads/downloads.sqlite3
+```
+
+If `config.yml` is present in the current working directory, relative paths are resolved from that directory. Without a config file, both paths default under a `downloads/` folder in the current working directory.
+
+Environment variables still override the file when needed:
 
 - `GETOFFLINE_OUTPUT_ROOT`
 - `GETOFFLINE_DATABASE_PATH`
@@ -82,6 +90,8 @@ Clean up generated files:
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
 
 Download tracking and app settings are stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`). This includes media metadata plus key/value defaults and a dedicated download-settings row for persisted YouTube cookie text.
+
+Media rows now keep a relative path reference alongside the resolved file path so you can move the downloads directory and keep database-backed playback references working after updating `output_root`.
 
 For newly downloaded YouTube/podcast audio media, subtitles are generated with Whisper when `subtitles: true` (YouTube-provided captions are not downloaded, and video items do not get subtitles).
 A per-entry timing adjustment can be set with `subtitle_offset_seconds` to keep SRT timing in sync:

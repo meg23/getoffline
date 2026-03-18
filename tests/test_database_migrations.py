@@ -15,6 +15,7 @@ from database import (  # noqa: E402
     get_download_position_seconds,
     get_stored_config,
     init_database,
+    resolve_download_artifact_path,
     resolve_database_path,
     update_download_position_seconds,
     replace_sources,
@@ -75,12 +76,15 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0004_add_source_configs",
                     "0005_add_source_enabled",
                     "0006_add_favorite_column",
+                    "0007_add_relative_media_paths",
                 ],
             )
             self.assertIn("played", columns)
             self.assertIn("last_position_seconds", columns)
             self.assertIn("total_listened_seconds", columns)
             self.assertIn("favorite", columns)
+            self.assertIn("file_path_relative", columns)
+            self.assertIn("subtitle_path_relative", columns)
 
     def test_apply_migrations_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -92,7 +96,14 @@ class DatabaseMigrationsTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
-            self.assertEqual(count, 6)
+            self.assertEqual(count, 7)
+
+    def test_download_artifact_path_prefers_relative_reference(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = os.path.join(tmpdir, "downloads")
+            os.makedirs(output_root, exist_ok=True)
+            resolved = resolve_download_artifact_path(output_root, "/tmp/old/location/item.mp3", "channel/item.mp3")
+            self.assertEqual(resolved, os.path.join(output_root, "channel", "item.mp3"))
 
     def test_config_settings_round_trip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
