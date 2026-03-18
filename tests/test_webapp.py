@@ -378,7 +378,12 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('selectAllRows.indeterminate = selectedCount > 0 && selectedCount < rowSelectors.length;', body)
             self.assertIn("batchForm.addEventListener('submit'", body)
             self.assertIn('if (!batchAction || !batchAction.value || selectedRows.length === 0)', body)
-            self.assertIn("hiddenInput.name = 'ids';", body)
+            self.assertIn("fetch('/batch-update', {", body)
+            self.assertIn("'X-Requested-With': 'fetch'", body)
+            self.assertIn("let rowSelectors = [];", body)
+            self.assertIn("rowSelectors = Array.from(document.querySelectorAll('.row-selector[name=\"ids\"]'));", body)
+            self.assertIn("bindBatchControls();", body)
+            self.assertIn("bindPlayLinks();", body)
             self.assertIn('persistedMiniPlayerState.paused === false', body)
 
 
