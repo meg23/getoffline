@@ -233,6 +233,11 @@ def _is_playback_completion_reason(reason: str) -> bool:
     return value in {"ended", "mini-ended"}
 
 
+def _is_async_request(handler) -> bool:
+    requested_with = str(handler.headers.get("X-Requested-With") or "").strip().lower()
+    return requested_with == "fetch"
+
+
 def _resolve_safe_media_path(output_root: Path, candidate_path: str) -> Optional[Path]:
     root = output_root.expanduser().resolve()
     raw = Path(candidate_path).expanduser()
@@ -1433,6 +1438,8 @@ def _render_index(
         if (iconUse) iconUse.setAttribute('href', '#bi-download');
       }};
 
+      let rowSelectors = [];
+
       const refreshLibraryViewWithoutReload = () => {{
         return fetch(window.location.pathname + window.location.search, {{ cache: 'no-store' }})
           .then((response) => response.ok ? response.text() : null)
@@ -1446,6 +1453,8 @@ def _render_index(
 
             if (currentSummary && nextSummary) currentSummary.innerHTML = nextSummary.innerHTML;
             if (currentTableBody && nextTableBody) currentTableBody.innerHTML = nextTableBody.innerHTML;
+            bindBatchControls();
+            bindPlayLinks();
           }})
           .catch(() => {{}})
           .finally(() => {{
@@ -1506,7 +1515,6 @@ def _render_index(
       const batchAction = document.getElementById('batch-action');
       const batchApply = document.getElementById('batch-apply');
       const selectAllRows = document.getElementById('select-all-rows');
-      const rowSelectors = Array.from(document.querySelectorAll('.row-selector'));
 
       const updateBatchState = () => {{
         const selectedCount = rowSelectors.filter((input) => input.checked).length;
@@ -1518,18 +1526,34 @@ def _render_index(
         }}
       }};
 
-      if (selectAllRows) {{
-        selectAllRows.addEventListener('change', () => {{
-          const checked = !!selectAllRows.checked;
-          rowSelectors.forEach((input) => {{ input.checked = checked; }});
-          updateBatchState();
+      const buildBatchRequestBody = (selectedRows) => {{
+        const formBody = new window.URLSearchParams();
+        formBody.set('batch_action', batchAction.value);
+        selectedRows.forEach((input) => {{
+          formBody.append('ids', input.value);
         }});
-      }}
+        return formBody;
+      }};
 
-      rowSelectors.forEach((input) => {{
-        input.addEventListener('change', updateBatchState);
-      }});
-      if (batchAction) batchAction.addEventListener('change', updateBatchState);
+      const bindBatchControls = () => {{
+        rowSelectors = Array.from(document.querySelectorAll('.row-selector[name="ids"]'));
+
+        if (selectAllRows) {{
+          selectAllRows.onchange = () => {{
+            const checked = !!selectAllRows.checked;
+            rowSelectors.forEach((input) => {{ input.checked = checked; }});
+            updateBatchState();
+          }};
+        }}
+
+        rowSelectors.forEach((input) => {{
+          input.onchange = updateBatchState;
+        }});
+
+        if (batchAction) batchAction.onchange = updateBatchState;
+        updateBatchState();
+      }};
+
       if (batchForm) {{
         batchForm.addEventListener('submit', (event) => {{
           const selectedRows = rowSelectors.filter((input) => input.checked);
@@ -1538,18 +1562,26 @@ def _render_index(
             return;
           }}
 
-          batchForm.querySelectorAll('input[name="ids"][data-generated="1"]').forEach((input) => input.remove());
-          selectedRows.forEach((input) => {{
-            const hiddenInput = document.createElement('input');
-            hiddenInput.type = 'hidden';
-            hiddenInput.name = 'ids';
-            hiddenInput.value = input.value;
-            hiddenInput.setAttribute('data-generated', '1');
-            batchForm.appendChild(hiddenInput);
-          }});
+          event.preventDefault();
+          if (batchApply) batchApply.disabled = true;
+
+          fetch('/batch-update', {{
+            method: 'POST',
+            body: buildBatchRequestBody(selectedRows).toString(),
+            headers: {{
+              'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+              'X-Requested-With': 'fetch',
+            }},
+            keepalive: true,
+          }})
+            .catch(() => {{}})
+            .finally(() => {{
+              if (batchAction) batchAction.value = '';
+              refreshLibraryViewWithoutReload();
+            }});
         }});
       }}
-      updateBatchState();
+      bindBatchControls();
 
       const miniBackdrop = document.getElementById('mini-player-backdrop');
       const miniPlayer = document.getElementById('mini-player');
@@ -1833,28 +1865,33 @@ def _render_index(
         setMiniExpanded(false);
       }}
 
-      document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
-        link.addEventListener('click', (event) => {{
-          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          const rowId = Number(link.dataset.rowId || 0);
-          if (!rowId) return;
-          const resumeSeconds = Math.max(0, Number(link.dataset.resumeSeconds || 0));
-          const state = {{
-            rowId,
-            title: link.dataset.title || '',
-            source: link.dataset.source || '',
-            kind: link.dataset.kind || 'audio',
-            hasSubtitles: link.dataset.hasSubtitles === '1',
-            src: '/media?id=' + rowId,
-            playUrl: '/play?id=' + rowId,
-            currentTime: resumeSeconds,
-            paused: false,
-          }};
-          localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
-          renderMiniPlayer(state);
+      const bindPlayLinks = () => {{
+        document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
+          if (link.dataset.miniPlayerBound === '1') return;
+          link.dataset.miniPlayerBound = '1';
+          link.addEventListener('click', (event) => {{
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            const rowId = Number(link.dataset.rowId || 0);
+            if (!rowId) return;
+            const resumeSeconds = Math.max(0, Number(link.dataset.resumeSeconds || 0));
+            const state = {{
+              rowId,
+              title: link.dataset.title || '',
+              source: link.dataset.source || '',
+              kind: link.dataset.kind || 'audio',
+              hasSubtitles: link.dataset.hasSubtitles === '1',
+              src: '/media?id=' + rowId,
+              playUrl: '/play?id=' + rowId,
+              currentTime: resumeSeconds,
+              paused: false,
+            }};
+            localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
+            renderMiniPlayer(state);
+          }});
         }});
-      }});
+      }};
+      bindPlayLinks();
 
       if (miniOpen) {{
         miniOpen.addEventListener('click', () => {{
@@ -3087,6 +3124,11 @@ def make_handler(state: AppState):
 
                     if batch_action == "download" and should_trigger_podcast_redownload:
                         trigger_background_update(state)
+
+                if _is_async_request(self):
+                    self.send_response(204)
+                    self.end_headers()
+                    return
 
                 self.send_response(303)
                 self.send_header("Location", "/")
