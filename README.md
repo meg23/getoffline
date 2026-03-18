@@ -9,6 +9,7 @@
 - Automatic audio extraction to MP3
 - Configurable FFmpeg audio filter for automatic volume/loudness normalization on extracted audio and YouTube video audio tracks
 - Automatic Whisper subtitle (`.srt`) generation for new audio downloads when `subtitles: true`
+- YouTube Whisper subtitle generation is serialized to one worker for runtime stability on current Python/Whisper stacks
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams

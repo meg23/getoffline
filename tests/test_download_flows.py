@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -207,6 +208,56 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertNotIn("writeautomaticsub", opts)
             self.assertNotIn("subtitlesformat", opts)
             self.assertNotIn("subtitleslangs", opts)
+
+    def test_youtube_subtitle_processing_is_forced_to_single_worker_for_stability(self):
+        class RecordingExecutor:
+            instances = []
+
+            def __init__(self, max_workers):
+                self.max_workers = max_workers
+                self.submitted = []
+                RecordingExecutor.instances.append(self)
+
+            def submit(self, fn, *args, **kwargs):
+                future = Future()
+                try:
+                    result = fn(*args, **kwargs)
+                except Exception as exc:
+                    future.set_exception(exc)
+                else:
+                    future.set_result(result)
+                self.submitted.append((fn, args, kwargs))
+                return future
+
+            def shutdown(self, wait=True):
+                _ = wait
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 4,
+                },
+                "youtube": [{
+                    "name": "Sample",
+                    "url": "https://youtube.com/watch?v=video-1",
+                    "type": "audio",
+                    "subtitles": True,
+                }],
+            }
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "youtube.ThreadPoolExecutor", RecordingExecutor
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+                youtube.download_youtube_items(config, [])
+
+            self.assertEqual(len(RecordingExecutor.instances), 1)
+            self.assertEqual(RecordingExecutor.instances[0].max_workers, 1)
 
 
     def test_youtube_download_enables_ejs_remote_component_when_deno_available(self):
