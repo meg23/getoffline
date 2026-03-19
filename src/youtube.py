@@ -310,6 +310,11 @@ def _process_media_file(
     return downloaded_summary_items
 
 
+def _resolve_subtitle_worker_count(configured_workers: int) -> int:
+    """Serialize Whisper subtitle work to avoid unstable multi-worker crashes."""
+    return 1
+
+
 def _build_youtube_payload(
     *,
     source_name: str,
@@ -729,8 +734,15 @@ def download_youtube_items(config, downloaded_items):
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 
-            subtitle_worker_count = int(defaults.get("processing_workers", 2))
-            subtitle_worker_count = max(1, subtitle_worker_count)
+            configured_subtitle_workers = int(defaults.get("processing_workers", 2))
+            configured_subtitle_workers = max(1, configured_subtitle_workers)
+            subtitle_worker_count = _resolve_subtitle_worker_count(configured_subtitle_workers)
+            if subtitle_worker_count < configured_subtitle_workers:
+                log.warning(
+                    "Configured %d processing worker(s), but YouTube subtitle generation is limited to %d worker for stability.",
+                    configured_subtitle_workers,
+                    subtitle_worker_count,
+                )
 
             subtitle_executor = ThreadPoolExecutor(max_workers=subtitle_worker_count)
             with YoutubeDL(ydl_opts) as ydl:
