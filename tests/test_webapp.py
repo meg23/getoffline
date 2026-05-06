@@ -935,7 +935,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
 
 
 class WebAppRenderVisibilityTests(unittest.TestCase):
-    def test_index_hides_played_items_from_table(self):
+    def test_index_includes_played_items_in_markup_for_client_filtering(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             row_new = SimpleNamespace(
@@ -980,7 +980,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
 
             self.assertIn("New Item", body)
-            self.assertNotIn("Played Item", body)
+            self.assertIn("Played Item", body)
+            self.assertIn('option value="unplayed" selected', body)
 
     def test_index_can_show_played_items_with_toggle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1330,7 +1331,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertEqual(resolved, subtitle.resolve())
 
 
-    def test_index_hides_missing_file_by_default_and_shows_with_everything_toggle(self):
+    def test_index_includes_missing_rows_in_markup_for_client_filtering(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             row = SimpleNamespace(
@@ -1358,22 +1359,6 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                     "last_error": "none",
                     "last_items_count": "0",
                 },
-            )
-            self.assertNotIn('>MISSING</span>', body)
-
-            body = _render_index(
-                rows=[row],
-                output_root=root,
-                database_path=root / "downloads.sqlite3",
-                status={
-                    "is_running": "no",
-                    "last_started_at": "never",
-                    "last_finished_at": "never",
-                    "last_result": "idle",
-                    "last_error": "none",
-                    "last_items_count": "0",
-                },
-                show_played=True,
             )
             self.assertIn('>MISSING</span>', body)
             self.assertIn('/redownload?id=1', body)
