@@ -951,6 +951,8 @@ def _render_index(
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
+    .library-filter-wrap {{ display: inline-flex; align-items: center; gap: .4rem; min-width: min(24rem, 100%); }}
+    .library-filter-input {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .62rem; font: inherit; min-width: min(20rem, 100%); }}
     .quick-add-backdrop {{
       position: fixed;
       inset: 0;
@@ -1304,6 +1306,9 @@ def _render_index(
         <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <span class="toolbar-spacer" aria-hidden="true"></span>
+        <div class="library-filter-wrap">
+          <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
+        </div>
         <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
           <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
             <option value="">Choose action</option>
@@ -1497,6 +1502,7 @@ def _render_index(
             if (currentTableBody && nextTableBody) currentTableBody.innerHTML = nextTableBody.innerHTML;
             bindBatchControls();
             bindPlayLinks();
+            applyLibraryFilter();
           }})
           .catch(() => {{}})
           .finally(() => {{
@@ -1525,8 +1531,29 @@ def _render_index(
         }};
       }};
 
+
+      const libraryFilterInput = document.getElementById('library-filter');
+
+      const getFilterText = () => String((libraryFilterInput && libraryFilterInput.value) || '').trim().toLowerCase();
+
+      const applyLibraryFilter = () => {{
+        const filterText = getFilterText();
+        const rows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]'));
+        rows.forEach((row) => {{
+          const channelText = String((row.querySelector('.channel-col') && row.querySelector('.channel-col').textContent) || '').toLowerCase();
+          const titleText = String((row.querySelector('.episode-link') && row.querySelector('.episode-link').textContent) || '').toLowerCase();
+          const isMatch = !filterText || channelText.includes(filterText) || titleText.includes(filterText);
+          row.style.display = isMatch ? '' : 'none';
+          if (!isMatch) {{
+            const selector = row.querySelector('.row-selector[name="ids"]');
+            if (selector) selector.checked = false;
+          }}
+        }});
+        updateBatchState();
+        renderVisibleSummaryCounts();
+      }};
       const renderVisibleSummaryCounts = () => {{
-        const renderedRows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]'));
+        const renderedRows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]')).filter((row) => row.style.display !== 'none');
         const visibleCountEl = document.getElementById('summary-visible-items');
         const playedCountEl = document.getElementById('summary-played-items');
         const newCountEl = document.getElementById('summary-new-items');
@@ -1701,6 +1728,8 @@ def _render_index(
         }});
       }}
       bindBatchControls();
+      if (libraryFilterInput) libraryFilterInput.addEventListener('input', applyLibraryFilter);
+      applyLibraryFilter();
 
       const miniBackdrop = document.getElementById('mini-player-backdrop');
       const miniPlayer = document.getElementById('mini-player');
