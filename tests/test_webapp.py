@@ -347,8 +347,9 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="downloads-table-body"', body)
             self.assertIn("setSyncButtonRunning", body)
             self.assertIn("refreshLibraryViewWithoutReload", body)
-            self.assertIn("Show everything", body)
-            self.assertIn("Show favorites", body)
+            self.assertIn('id="library-filter"', body)
+            self.assertIn('id="library-filter-mode"', body)
+            self.assertIn('id="library-filter-clear"', body)
             self.assertIn('<th class="channel-col">Channel</th>', body)
             self.assertIn('<th class="episode-col">Episode</th>', body)
             self.assertIn('name="batch_action"', body)
@@ -388,6 +389,8 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("rowSelectors = Array.from(document.querySelectorAll('.row-selector[name=\"ids\"]'));", body)
             self.assertIn("bindBatchControls();", body)
             self.assertIn("bindPlayLinks();", body)
+            self.assertIn("const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'unplayed');", body)
+            self.assertIn("libraryFilterClear.addEventListener('click'", body)
             self.assertIn("applyBatchActionLocally(requestedAction, selectedRows);", body)
             self.assertIn("scheduleDeferredLibraryRefresh();", body)
             self.assertIn("const mediaSettingsStorageKey = 'getofflineMediaElementSettings';", body)
@@ -932,7 +935,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
 
 
 class WebAppRenderVisibilityTests(unittest.TestCase):
-    def test_index_hides_played_items_from_table(self):
+    def test_index_includes_played_items_in_markup_for_client_filtering(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             row_new = SimpleNamespace(
@@ -977,7 +980,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
 
             self.assertIn("New Item", body)
-            self.assertNotIn("Played Item", body)
+            self.assertIn("Played Item", body)
+            self.assertIn('option value="unplayed" selected', body)
 
     def test_index_can_show_played_items_with_toggle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1025,7 +1029,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
 
             self.assertIn("Played Item", body)
-            self.assertIn("Show default", body)
+            self.assertIn('id="library-filter-mode"', body)
 
     def test_index_marks_started_items_with_started_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1166,9 +1170,11 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn('title="Sync downloads"', body)
             self.assertIn('href="#bi-download"', body)
-            self.assertIn('title="Show everything"', body)
-            self.assertIn('aria-label="Show everything"', body)
-            self.assertIn('href="#bi-eye"', body)
+            self.assertIn('id="library-filter-mode"', body)
+            self.assertIn('option value="unplayed" selected', body)
+            self.assertIn('option value="played"', body)
+            self.assertIn('option value="favorites"', body)
+            self.assertIn('option value="all"', body)
             self.assertIn('title="Settings"', body)
             self.assertIn('aria-label="Settings"', body)
             self.assertIn('href="#bi-gear"', body)
@@ -1325,7 +1331,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertEqual(resolved, subtitle.resolve())
 
 
-    def test_index_hides_missing_file_by_default_and_shows_with_everything_toggle(self):
+    def test_index_includes_missing_rows_in_markup_for_client_filtering(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             row = SimpleNamespace(
@@ -1353,22 +1359,6 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
                     "last_error": "none",
                     "last_items_count": "0",
                 },
-            )
-            self.assertNotIn('>MISSING</span>', body)
-
-            body = _render_index(
-                rows=[row],
-                output_root=root,
-                database_path=root / "downloads.sqlite3",
-                status={
-                    "is_running": "no",
-                    "last_started_at": "never",
-                    "last_finished_at": "never",
-                    "last_result": "idle",
-                    "last_error": "none",
-                    "last_items_count": "0",
-                },
-                show_played=True,
             )
             self.assertIn('>MISSING</span>', body)
             self.assertIn('/redownload?id=1', body)

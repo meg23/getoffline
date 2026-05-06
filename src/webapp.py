@@ -774,8 +774,6 @@ def _render_index(
         is_started = bool(position_seconds > 0 and not row.played)
 
         visible_rows.append(row)
-        if not favorites_only and not show_played and (row.played or not file_exists):
-            continue
 
         title = html.escape(row.title or path.name or "Unknown title")
         channel = html.escape(row.source_name or "?")
@@ -951,6 +949,13 @@ def _render_index(
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
+    .library-filter-wrap {{ display: inline-flex; align-items: stretch; width: min(30rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
+    .library-filter-input {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .7rem; font: inherit; min-width: 12rem; flex: 1 1 12rem; }}
+    .library-filter-select {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .95rem .5rem .65rem; font: inherit; background: #fff; color: #243251; min-width: 7.6rem; }}
+    .library-filter-clear {{ border: 0; border-radius: 0; padding: .5rem .75rem; min-width: 5.5rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; font-weight: 600; text-align: center; display: inline-flex; align-items: center; justify-content: center; }}
+    .library-filter-clear:hover {{ background: #dfe8ff; }}
+    .library-filter-input:focus, .library-filter-select:focus, .library-filter-clear:focus {{ outline: none; }}
+    .library-filter-wrap:focus-within {{ box-shadow: 0 0 0 2px rgba(47, 98, 242, .22); border-color: #2f62f2; }}
     .quick-add-backdrop {{
       position: fixed;
       inset: 0;
@@ -1300,9 +1305,17 @@ def _render_index(
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
       <button id="spotlight-open" class="icon-button" type="button" title="YouTube spotlight" aria-label="YouTube spotlight">{_icon_use("bi-search")}</button>
-        <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
-        <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
+        <div class="library-filter-wrap" role="group" aria-label="Library filters">
+          <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
+          <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
+            <option value="unplayed" selected>Unplayed</option>
+            <option value="played">Played</option>
+            <option value="favorites">Favorites</option>
+            <option value="all">All</option>
+          </select>
+          <button id="library-filter-clear" class="library-filter-clear" type="button">Clear</button>
+        </div>
         <span class="toolbar-spacer" aria-hidden="true"></span>
         <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
           <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
@@ -1482,6 +1495,11 @@ def _render_index(
 
       let rowSelectors = [];
 
+      const getVisibleRowSelectors = () => rowSelectors.filter((input) => {{
+        const row = input.closest('tr[data-row-id]');
+        return !!row && row.style.display !== 'none';
+      }});
+
       const refreshLibraryViewWithoutReload = () => {{
         return fetch(window.location.pathname + window.location.search, {{ cache: 'no-store' }})
           .then((response) => response.ok ? response.text() : null)
@@ -1497,6 +1515,7 @@ def _render_index(
             if (currentTableBody && nextTableBody) currentTableBody.innerHTML = nextTableBody.innerHTML;
             bindBatchControls();
             bindPlayLinks();
+            applyLibraryFilter();
           }})
           .catch(() => {{}})
           .finally(() => {{
@@ -1525,8 +1544,35 @@ def _render_index(
         }};
       }};
 
+
+      const libraryFilterInput = document.getElementById('library-filter');
+      const libraryFilterMode = document.getElementById('library-filter-mode');
+      const libraryFilterClear = document.getElementById('library-filter-clear');
+
+      const getFilterText = () => String((libraryFilterInput && libraryFilterInput.value) || '').trim().toLowerCase();
+      const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'unplayed');
+
+      const applyLibraryFilter = () => {{
+        const filterText = getFilterText();
+        const rows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]'));
+        rows.forEach((row) => {{
+          const channelText = String((row.querySelector('.channel-col') && row.querySelector('.channel-col').textContent) || '').toLowerCase();
+          const titleText = String((row.querySelector('.episode-link') && row.querySelector('.episode-link').textContent) || '').toLowerCase();
+          const matchesText = !filterText || channelText.includes(filterText) || titleText.includes(filterText);
+          const mode = getFilterMode();
+          const matchesMode = mode === 'all' || (mode === 'unplayed' && row.dataset.played !== '1') || (mode === 'played' && row.dataset.played === '1') || (mode === 'favorites' && row.dataset.favorite === '1');
+          const isMatch = matchesText && matchesMode;
+          row.style.display = isMatch ? '' : 'none';
+          if (!isMatch) {{
+            const selector = row.querySelector('.row-selector[name="ids"]');
+            if (selector) selector.checked = false;
+          }}
+        }});
+        updateBatchState();
+        renderVisibleSummaryCounts();
+      }};
       const renderVisibleSummaryCounts = () => {{
-        const renderedRows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]'));
+        const renderedRows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]')).filter((row) => row.style.display !== 'none');
         const visibleCountEl = document.getElementById('summary-visible-items');
         const playedCountEl = document.getElementById('summary-played-items');
         const newCountEl = document.getElementById('summary-new-items');
@@ -1630,12 +1676,14 @@ def _render_index(
       const selectAllRows = document.getElementById('select-all-rows');
 
       const updateBatchState = () => {{
-        const selectedCount = rowSelectors.filter((input) => input.checked).length;
+        const visibleRowSelectors = getVisibleRowSelectors();
+        const selectedCount = visibleRowSelectors.filter((input) => input.checked).length;
         const hasAction = batchAction && batchAction.value;
         if (batchApply) batchApply.disabled = !(selectedCount > 0 && hasAction);
         if (selectAllRows) {{
-          selectAllRows.checked = rowSelectors.length > 0 && selectedCount === rowSelectors.length;
+          selectAllRows.checked = visibleRowSelectors.length > 0 && selectedCount === visibleRowSelectors.length;
           selectAllRows.indeterminate = selectedCount > 0 && selectedCount < rowSelectors.length;
+          selectAllRows.indeterminate = selectedCount > 0 && selectedCount < visibleRowSelectors.length;
         }}
       }};
 
@@ -1654,7 +1702,7 @@ def _render_index(
         if (selectAllRows) {{
           selectAllRows.onchange = () => {{
             const checked = !!selectAllRows.checked;
-            rowSelectors.forEach((input) => {{ input.checked = checked; }});
+            getVisibleRowSelectors().forEach((input) => {{ input.checked = checked; }});
             updateBatchState();
           }};
         }}
@@ -1669,7 +1717,7 @@ def _render_index(
 
       if (batchForm) {{
         batchForm.addEventListener('submit', (event) => {{
-          const selectedRows = rowSelectors.filter((input) => input.checked);
+          const selectedRows = getVisibleRowSelectors().filter((input) => input.checked);
           if (!batchAction || !batchAction.value || selectedRows.length === 0) {{
             event.preventDefault();
             return;
@@ -1701,6 +1749,16 @@ def _render_index(
         }});
       }}
       bindBatchControls();
+      if (libraryFilterInput) libraryFilterInput.addEventListener('input', applyLibraryFilter);
+      if (libraryFilterMode) libraryFilterMode.addEventListener('change', applyLibraryFilter);
+      if (libraryFilterClear) {{
+        libraryFilterClear.addEventListener('click', () => {{
+          if (libraryFilterInput) libraryFilterInput.value = '';
+          if (libraryFilterMode) libraryFilterMode.value = 'unplayed';
+          applyLibraryFilter();
+        }});
+      }}
+      applyLibraryFilter();
 
       const miniBackdrop = document.getElementById('mini-player-backdrop');
       const miniPlayer = document.getElementById('mini-player');
