@@ -951,11 +951,13 @@ def _render_index(
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
-    .library-filter-wrap {{ display: inline-flex; align-items: center; gap: .4rem; min-width: min(34rem, 100%); flex-wrap: wrap; }}
-    .library-filter-input {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .62rem; font: inherit; min-width: min(20rem, 100%); }}
-    .library-filter-select {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .5rem; font: inherit; background: #fff; color: #243251; }}
-    .library-filter-clear {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .62rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
+    .library-filter-wrap {{ display: inline-flex; align-items: stretch; min-width: min(40rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
+    .library-filter-input {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .7rem; font: inherit; min-width: min(20rem, 100%); flex: 1 1 20rem; }}
+    .library-filter-select {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .65rem; font: inherit; background: #fff; color: #243251; min-width: 8.2rem; }}
+    .library-filter-clear {{ border: 0; border-radius: 0; padding: .5rem .75rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; font-weight: 600; }}
     .library-filter-clear:hover {{ background: #dfe8ff; }}
+    .library-filter-input:focus, .library-filter-select:focus, .library-filter-clear:focus {{ outline: none; }}
+    .library-filter-wrap:focus-within {{ box-shadow: 0 0 0 2px rgba(47, 98, 242, .22); border-color: #2f62f2; }}
     .quick-add-backdrop {{
       position: fixed;
       inset: 0;
@@ -1306,7 +1308,7 @@ def _render_index(
       <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
       <button id="spotlight-open" class="icon-button" type="button" title="YouTube spotlight" aria-label="YouTube spotlight">{_icon_use("bi-search")}</button>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
-        <div class="library-filter-wrap">
+        <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
           <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
             <option value="all" selected>All</option>
