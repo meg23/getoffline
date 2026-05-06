@@ -1305,10 +1305,10 @@ def _render_index(
         <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
         <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
-        <span class="toolbar-spacer" aria-hidden="true"></span>
         <div class="library-filter-wrap">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
         </div>
+        <span class="toolbar-spacer" aria-hidden="true"></span>
         <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
           <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
             <option value="">Choose action</option>
@@ -1487,6 +1487,11 @@ def _render_index(
 
       let rowSelectors = [];
 
+      const getVisibleRowSelectors = () => rowSelectors.filter((input) => {{
+        const row = input.closest('tr[data-row-id]');
+        return !!row && row.style.display !== 'none';
+      }});
+
       const refreshLibraryViewWithoutReload = () => {{
         return fetch(window.location.pathname + window.location.search, {{ cache: 'no-store' }})
           .then((response) => response.ok ? response.text() : null)
@@ -1657,12 +1662,14 @@ def _render_index(
       const selectAllRows = document.getElementById('select-all-rows');
 
       const updateBatchState = () => {{
-        const selectedCount = rowSelectors.filter((input) => input.checked).length;
+        const visibleRowSelectors = getVisibleRowSelectors();
+        const selectedCount = visibleRowSelectors.filter((input) => input.checked).length;
         const hasAction = batchAction && batchAction.value;
         if (batchApply) batchApply.disabled = !(selectedCount > 0 && hasAction);
         if (selectAllRows) {{
-          selectAllRows.checked = rowSelectors.length > 0 && selectedCount === rowSelectors.length;
+          selectAllRows.checked = visibleRowSelectors.length > 0 && selectedCount === visibleRowSelectors.length;
           selectAllRows.indeterminate = selectedCount > 0 && selectedCount < rowSelectors.length;
+          selectAllRows.indeterminate = selectedCount > 0 && selectedCount < visibleRowSelectors.length;
         }}
       }};
 
@@ -1681,7 +1688,7 @@ def _render_index(
         if (selectAllRows) {{
           selectAllRows.onchange = () => {{
             const checked = !!selectAllRows.checked;
-            rowSelectors.forEach((input) => {{ input.checked = checked; }});
+            getVisibleRowSelectors().forEach((input) => {{ input.checked = checked; }});
             updateBatchState();
           }};
         }}
@@ -1696,7 +1703,7 @@ def _render_index(
 
       if (batchForm) {{
         batchForm.addEventListener('submit', (event) => {{
-          const selectedRows = rowSelectors.filter((input) => input.checked);
+          const selectedRows = getVisibleRowSelectors().filter((input) => input.checked);
           if (!batchAction || !batchAction.value || selectedRows.length === 0) {{
             event.preventDefault();
             return;
