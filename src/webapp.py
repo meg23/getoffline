@@ -949,10 +949,10 @@ def _render_index(
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
-    .library-filter-wrap {{ display: inline-flex; align-items: stretch; width: min(32rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
-    .library-filter-input {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .7rem; font: inherit; min-width: min(20rem, 100%); flex: 1 1 20rem; }}
-    .library-filter-select {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .95rem .5rem .65rem; font: inherit; background: #fff; color: #243251; min-width: 8.2rem; }}
-    .library-filter-clear {{ border: 0; border-radius: 0; padding: .5rem .75rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; font-weight: 600; text-align: center; display: inline-flex; align-items: center; justify-content: center; }}
+    .library-filter-wrap {{ display: inline-flex; align-items: stretch; width: min(30rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
+    .library-filter-input {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .7rem; font: inherit; min-width: 12rem; flex: 1 1 12rem; }}
+    .library-filter-select {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .95rem .5rem .65rem; font: inherit; background: #fff; color: #243251; min-width: 7.6rem; }}
+    .library-filter-clear {{ border: 0; border-radius: 0; padding: .5rem .75rem; min-width: 5.5rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; font-weight: 600; text-align: center; display: inline-flex; align-items: center; justify-content: center; }}
     .library-filter-clear:hover {{ background: #dfe8ff; }}
     .library-filter-input:focus, .library-filter-select:focus, .library-filter-clear:focus {{ outline: none; }}
     .library-filter-wrap:focus-within {{ box-shadow: 0 0 0 2px rgba(47, 98, 242, .22); border-color: #2f62f2; }}
