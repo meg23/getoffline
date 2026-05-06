@@ -347,8 +347,9 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn('id="downloads-table-body"', body)
             self.assertIn("setSyncButtonRunning", body)
             self.assertIn("refreshLibraryViewWithoutReload", body)
-            self.assertIn("Show everything", body)
-            self.assertIn("Show favorites", body)
+            self.assertIn('id="library-filter"', body)
+            self.assertIn('id="library-filter-mode"', body)
+            self.assertIn('id="library-filter-clear"', body)
             self.assertIn('<th class="channel-col">Channel</th>', body)
             self.assertIn('<th class="episode-col">Episode</th>', body)
             self.assertIn('name="batch_action"', body)
@@ -388,6 +389,8 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("rowSelectors = Array.from(document.querySelectorAll('.row-selector[name=\"ids\"]'));", body)
             self.assertIn("bindBatchControls();", body)
             self.assertIn("bindPlayLinks();", body)
+            self.assertIn("const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'all');", body)
+            self.assertIn("libraryFilterClear.addEventListener('click'", body)
             self.assertIn("applyBatchActionLocally(requestedAction, selectedRows);", body)
             self.assertIn("scheduleDeferredLibraryRefresh();", body)
             self.assertIn("const mediaSettingsStorageKey = 'getofflineMediaElementSettings';", body)
@@ -1025,7 +1028,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             )
 
             self.assertIn("Played Item", body)
-            self.assertIn("Show default", body)
+            self.assertIn('id="library-filter-mode"', body)
 
     def test_index_marks_started_items_with_started_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1166,9 +1169,9 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('<th><input type="checkbox" id="select-all-rows" class="row-selector select-all-selector" aria-label="Select all rows" /></th>', body)
             self.assertIn('title="Sync downloads"', body)
             self.assertIn('href="#bi-download"', body)
-            self.assertIn('title="Show everything"', body)
-            self.assertIn('aria-label="Show everything"', body)
-            self.assertIn('href="#bi-eye"', body)
+            self.assertIn('id="library-filter-mode"', body)
+            self.assertIn('option value="unplayed"', body)
+            self.assertIn('option value="favorites"', body)
             self.assertIn('title="Settings"', body)
             self.assertIn('aria-label="Settings"', body)
             self.assertIn('href="#bi-gear"', body)

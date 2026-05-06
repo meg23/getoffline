@@ -951,8 +951,11 @@ def _render_index(
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
-    .library-filter-wrap {{ display: inline-flex; align-items: center; gap: .4rem; min-width: min(24rem, 100%); }}
+    .library-filter-wrap {{ display: inline-flex; align-items: center; gap: .4rem; min-width: min(34rem, 100%); flex-wrap: wrap; }}
     .library-filter-input {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .62rem; font: inherit; min-width: min(20rem, 100%); }}
+    .library-filter-select {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .5rem; font: inherit; background: #fff; color: #243251; }}
+    .library-filter-clear {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .38rem .62rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
+    .library-filter-clear:hover {{ background: #dfe8ff; }}
     .quick-add-backdrop {{
       position: fixed;
       inset: 0;
@@ -1302,11 +1305,15 @@ def _render_index(
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
       <button id="spotlight-open" class="icon-button" type="button" title="YouTube spotlight" aria-label="YouTube spotlight">{_icon_use("bi-search")}</button>
-        <a class="icon-button" href="{toggle_href}" title="{toggle_label}" aria-label="{toggle_label}">{_icon_use(toggle_icon)}</a>
-        <a class="icon-button" href="{favorites_href}" title="{favorites_label}" aria-label="{favorites_label}">{_icon_use(favorites_icon)}</a>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
+          <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
+            <option value="all" selected>All</option>
+            <option value="unplayed">Unplayed</option>
+            <option value="favorites">Favorites</option>
+          </select>
+          <button id="library-filter-clear" class="library-filter-clear" type="button">Clear</button>
         </div>
         <span class="toolbar-spacer" aria-hidden="true"></span>
         <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
@@ -1538,8 +1545,11 @@ def _render_index(
 
 
       const libraryFilterInput = document.getElementById('library-filter');
+      const libraryFilterMode = document.getElementById('library-filter-mode');
+      const libraryFilterClear = document.getElementById('library-filter-clear');
 
       const getFilterText = () => String((libraryFilterInput && libraryFilterInput.value) || '').trim().toLowerCase();
+      const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'all');
 
       const applyLibraryFilter = () => {{
         const filterText = getFilterText();
@@ -1547,7 +1557,10 @@ def _render_index(
         rows.forEach((row) => {{
           const channelText = String((row.querySelector('.channel-col') && row.querySelector('.channel-col').textContent) || '').toLowerCase();
           const titleText = String((row.querySelector('.episode-link') && row.querySelector('.episode-link').textContent) || '').toLowerCase();
-          const isMatch = !filterText || channelText.includes(filterText) || titleText.includes(filterText);
+          const matchesText = !filterText || channelText.includes(filterText) || titleText.includes(filterText);
+          const mode = getFilterMode();
+          const matchesMode = mode === 'all' || (mode === 'unplayed' && row.dataset.played !== '1') || (mode === 'favorites' && row.dataset.favorite === '1');
+          const isMatch = matchesText && matchesMode;
           row.style.display = isMatch ? '' : 'none';
           if (!isMatch) {{
             const selector = row.querySelector('.row-selector[name="ids"]');
@@ -1736,6 +1749,14 @@ def _render_index(
       }}
       bindBatchControls();
       if (libraryFilterInput) libraryFilterInput.addEventListener('input', applyLibraryFilter);
+      if (libraryFilterMode) libraryFilterMode.addEventListener('change', applyLibraryFilter);
+      if (libraryFilterClear) {{
+        libraryFilterClear.addEventListener('click', () => {{
+          if (libraryFilterInput) libraryFilterInput.value = '';
+          if (libraryFilterMode) libraryFilterMode.value = 'all';
+          applyLibraryFilter();
+        }});
+      }}
       applyLibraryFilter();
 
       const miniBackdrop = document.getElementById('mini-player-backdrop');
