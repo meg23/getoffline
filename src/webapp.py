@@ -1311,9 +1311,10 @@ def _render_index(
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
           <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
-            <option value="all" selected>All</option>
-            <option value="unplayed">Unplayed</option>
+            <option value="unplayed" selected>Unplayed</option>
+            <option value="played">Played</option>
             <option value="favorites">Favorites</option>
+            <option value="all">All</option>
           </select>
           <button id="library-filter-clear" class="library-filter-clear" type="button">Clear</button>
         </div>
@@ -1551,7 +1552,7 @@ def _render_index(
       const libraryFilterClear = document.getElementById('library-filter-clear');
 
       const getFilterText = () => String((libraryFilterInput && libraryFilterInput.value) || '').trim().toLowerCase();
-      const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'all');
+      const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'unplayed');
 
       const applyLibraryFilter = () => {{
         const filterText = getFilterText();
@@ -1561,7 +1562,7 @@ def _render_index(
           const titleText = String((row.querySelector('.episode-link') && row.querySelector('.episode-link').textContent) || '').toLowerCase();
           const matchesText = !filterText || channelText.includes(filterText) || titleText.includes(filterText);
           const mode = getFilterMode();
-          const matchesMode = mode === 'all' || (mode === 'unplayed' && row.dataset.played !== '1') || (mode === 'favorites' && row.dataset.favorite === '1');
+          const matchesMode = mode === 'all' || (mode === 'unplayed' && row.dataset.played !== '1') || (mode === 'played' && row.dataset.played === '1') || (mode === 'favorites' && row.dataset.favorite === '1');
           const isMatch = matchesText && matchesMode;
           row.style.display = isMatch ? '' : 'none';
           if (!isMatch) {{
@@ -1755,7 +1756,7 @@ def _render_index(
       if (libraryFilterClear) {{
         libraryFilterClear.addEventListener('click', () => {{
           if (libraryFilterInput) libraryFilterInput.value = '';
-          if (libraryFilterMode) libraryFilterMode.value = 'all';
+          if (libraryFilterMode) libraryFilterMode.value = 'unplayed';
           applyLibraryFilter();
         }});
       }}
