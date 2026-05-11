@@ -514,6 +514,73 @@ def _resolve_safe_subtitle_path(output_root: Path, row: MediaRow, media_path: Pa
     return None
 
 
+def _subtitle_segments_from_path(subtitle_path: Path) -> List[Tuple[float, float, str]]:
+    subtitle_text = subtitle_path.read_text(encoding="utf-8", errors="replace")
+    if subtitle_path.suffix.lower() == ".srt":
+        subtitle_text = _srt_to_vtt(subtitle_text)
+    lines = subtitle_text.splitlines()
+    segments: List[Tuple[float, float, str]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if "-->" not in line:
+            i += 1
+            continue
+        time_bits = line.split("-->")
+        if len(time_bits) != 2:
+            i += 1
+            continue
+        start = _parse_vtt_timecode(time_bits[0].strip())
+        end = _parse_vtt_timecode(time_bits[1].strip().split(" ")[0])
+        i += 1
+        cue_lines = []
+        while i < len(lines) and lines[i].strip():
+            cue_lines.append(lines[i].strip())
+            i += 1
+        cue_text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", " ".join(cue_lines)))).strip()
+        if cue_text:
+            segments.append((start, end, cue_text))
+    return segments
+
+
+def _search_transcript_segments(db_path: Path, row: MediaRow, subtitle_path: Path, query_text: str) -> List[Dict[str, object]]:
+    like_term = f"%{query_text.lower()}%"
+    results: List[Tuple[float, float, str]] = []
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        existing = conn.execute(
+            """
+            SELECT start_seconds, COALESCE(end_seconds, start_seconds), text
+            FROM transcript_segments
+            WHERE download_id = ? AND subtitle_path = ? AND lower(text) LIKE ?
+            ORDER BY start_seconds ASC
+            LIMIT 50
+            """,
+            (row.row_id, str(subtitle_path), like_term),
+        ).fetchall()
+        if existing:
+            results = [(float(r[0]), float(r[1]), str(r[2])) for r in existing]
+        else:
+            parsed_segments = _subtitle_segments_from_path(subtitle_path)
+            conn.execute(
+                "DELETE FROM transcript_segments WHERE download_id = ? AND subtitle_path = ?",
+                (row.row_id, str(subtitle_path)),
+            )
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO transcript_segments (download_id, subtitle_path, start_seconds, end_seconds, text)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [(row.row_id, str(subtitle_path), s, e, t) for s, e, t in parsed_segments],
+            )
+            conn.commit()
+            for s, e, t in parsed_segments:
+                if query_text.lower() in t.lower():
+                    results.append((s, e, t))
+            results = results[:50]
+
+    return [{"start_seconds": s, "end_seconds": e, "text": t} for s, e, t in results]
+
+
 def _format_timestamp(ts: Optional[float]) -> str:
     if ts is None:
         return "never"
@@ -1333,6 +1400,7 @@ def _render_index(
         <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg></button>
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}</button>
+      <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}</button>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
@@ -1357,6 +1425,14 @@ def _render_index(
           </select>
           <button id="batch-apply" class="batch-apply" type="submit" title="Apply batch action" aria-label="Apply batch action" disabled>Apply</button>
         </form>
+      </div>
+    </div>
+    <div id="transcript-search-backdrop" class="quick-add-backdrop" aria-hidden="true">
+      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="transcript-search-title">
+        <h2 id="transcript-search-title">Search transcripts</h2>
+        <input id="transcript-search-input" class="quick-add-input" type="search" placeholder="Search words in transcripts..." />
+        <div id="transcript-search-results" class="quick-add-results" aria-live="polite"></div>
+        <div class="quick-add-actions"><button id="transcript-search-close" type="button">Close</button></div>
       </div>
     </div>
 
@@ -2161,6 +2237,11 @@ def _render_index(
 
       const quickAddSearchInput = document.getElementById('quick-add-search');
       const quickAddResults = document.getElementById('quick-add-results');
+      const transcriptSearchOpen = document.getElementById('transcript-search-open');
+      const transcriptSearchBackdrop = document.getElementById('transcript-search-backdrop');
+      const transcriptSearchClose = document.getElementById('transcript-search-close');
+      const transcriptSearchInput = document.getElementById('transcript-search-input');
+      const transcriptSearchResults = document.getElementById('transcript-search-results');
 
       const closeQuickAddModal = () => {{
         if (!backdrop) return;
@@ -2263,6 +2344,49 @@ def _render_index(
             event.preventDefault();
             runQuickAddSearch();
           }}
+        }});
+      }}
+      if (transcriptSearchOpen && transcriptSearchBackdrop && transcriptSearchInput && transcriptSearchResults) {{
+        const closeTranscriptSearch = () => {{
+          transcriptSearchBackdrop.classList.remove('is-open');
+          transcriptSearchBackdrop.setAttribute('aria-hidden', 'true');
+        }};
+        transcriptSearchOpen.addEventListener('click', () => {{
+          transcriptSearchBackdrop.classList.add('is-open');
+          transcriptSearchBackdrop.setAttribute('aria-hidden', 'false');
+          transcriptSearchInput.focus();
+          transcriptSearchResults.innerHTML = '<div class="quick-add-empty">Type words to search transcripts.</div>';
+        }});
+        if (transcriptSearchClose) transcriptSearchClose.addEventListener('click', closeTranscriptSearch);
+        transcriptSearchBackdrop.addEventListener('click', (event) => {{
+          if (event.target === transcriptSearchBackdrop) closeTranscriptSearch();
+        }});
+        transcriptSearchInput.addEventListener('input', () => {{
+          const q = String(transcriptSearchInput.value || '').trim();
+          if (!q) return;
+          fetch('/transcript-search?q=' + encodeURIComponent(q), {{ cache: 'no-store' }})
+            .then((response) => response.ok ? response.json() : null)
+            .then((payload) => {{
+              const results = payload && payload.results ? payload.results : [];
+              if (!results.length) {{
+                transcriptSearchResults.innerHTML = '<div class="quick-add-empty">No matches found.</div>';
+                return;
+              }}
+              transcriptSearchResults.innerHTML = results.map((item) =>
+                '<button type="button" class="quick-add-result" data-row-id="' + item.row_id + '" data-start="' + item.start_seconds + '">' +
+                '<strong>' + escapeHtml(item.title || '') + '</strong><div>' + escapeHtml(item.text || '') + '</div></button>'
+              ).join('');
+              transcriptSearchResults.querySelectorAll('button[data-row-id]').forEach((btn) => {{
+                btn.addEventListener('click', () => {{
+                  const rowId = btn.getAttribute('data-row-id');
+                  const start = btn.getAttribute('data-start');
+                  window.location.href = '/play?id=' + encodeURIComponent(rowId) + '&t=' + encodeURIComponent(start) + '&autoplay=1';
+                }});
+              }});
+            }})
+            .catch(() => {{
+              transcriptSearchResults.innerHTML = '<div class="quick-add-empty">Search failed.</div>';
+            }});
         }});
       }}
       if (quickAddResults) {{
@@ -3100,6 +3224,41 @@ def make_handler(state: AppState):
                 self.wfile.write(body_bytes)
                 return
 
+            if path == "/transcript-search":
+                query_text = str((query.get("q") or [""])[0]).strip()
+                results: List[Dict[str, object]] = []
+                if query_text:
+                    for row in _rows():
+                        media_path = _resolve_safe_media_path(state.output_root, row.file_path)
+                        if media_path is None:
+                            continue
+                        subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
+                        if subtitle_path is None:
+                            continue
+                        try:
+                            hits = _search_transcript_segments(state.database_path, row, subtitle_path, query_text)
+                        except Exception:
+                            continue
+                        for hit in hits[:5]:
+                            results.append(
+                                {
+                                    "row_id": row.row_id,
+                                    "title": row.title,
+                                    "start_seconds": hit["start_seconds"],
+                                    "text": hit["text"],
+                                }
+                            )
+                        if len(results) >= 50:
+                            break
+                body_bytes = json.dumps({"results": results[:50]}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
             if path in {"/mark-played", "/mark-unplay"}:
                 raw_id = (query.get("id") or [None])[0]
                 if raw_id is None or not str(raw_id).isdigit():
@@ -3191,7 +3350,13 @@ def make_handler(state: AppState):
                     return
 
                 if path == "/play":
+                    requested_start = (query.get("t") or [None])[0]
                     resume_seconds = get_download_position_seconds(str(state.database_path), row.row_id)
+                    if requested_start is not None:
+                        try:
+                            resume_seconds = max(0.0, float(requested_start))
+                        except (TypeError, ValueError):
+                            pass
                     subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
                     body = _render_player(row, media_path, resume_seconds, subtitle_path is not None)
                     body_bytes = body.encode("utf-8")

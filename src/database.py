@@ -226,6 +226,31 @@ def _migration_0007_add_relative_media_paths(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0008_add_transcript_search_tables(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transcript_segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                download_id INTEGER NOT NULL,
+                subtitle_path TEXT NOT NULL,
+                start_seconds REAL NOT NULL,
+                end_seconds REAL,
+                text TEXT NOT NULL,
+                UNIQUE(download_id, subtitle_path, start_seconds, text)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_transcript_segments_download_id
+            ON transcript_segments(download_id)
+            """
+        )
+        conn.commit()
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
@@ -248,6 +273,10 @@ MIGRATIONS = [
     (
         "0007_add_relative_media_paths",
         lambda db_path: _migration_0007_add_relative_media_paths(db_path),
+    ),
+    (
+        "0008_add_transcript_search_tables",
+        lambda db_path: _migration_0008_add_transcript_search_tables(db_path),
     ),
 ]
 
