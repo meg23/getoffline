@@ -546,6 +546,7 @@ def _subtitle_segments_from_path(subtitle_path: Path) -> List[Tuple[float, float
 def _search_transcript_segments(db_path: Path, row: MediaRow, subtitle_path: Path, query_text: str) -> List[Dict[str, object]]:
     like_term = f"%{query_text.lower()}%"
     results: List[Tuple[float, float, str]] = []
+    _ensure_transcript_index_for_row(db_path, row, subtitle_path)
     with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
         existing = conn.execute(
             """
@@ -559,26 +560,57 @@ def _search_transcript_segments(db_path: Path, row: MediaRow, subtitle_path: Pat
         ).fetchall()
         if existing:
             results = [(float(r[0]), float(r[1]), str(r[2])) for r in existing]
-        else:
-            parsed_segments = _subtitle_segments_from_path(subtitle_path)
-            conn.execute(
-                "DELETE FROM transcript_segments WHERE download_id = ? AND subtitle_path = ?",
-                (row.row_id, str(subtitle_path)),
-            )
-            conn.executemany(
-                """
-                INSERT OR IGNORE INTO transcript_segments (download_id, subtitle_path, start_seconds, end_seconds, text)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                [(row.row_id, str(subtitle_path), s, e, t) for s, e, t in parsed_segments],
-            )
-            conn.commit()
-            for s, e, t in parsed_segments:
-                if query_text.lower() in t.lower():
-                    results.append((s, e, t))
-            results = results[:50]
 
     return [{"start_seconds": s, "end_seconds": e, "text": t} for s, e, t in results]
+
+
+def _ensure_transcript_index_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -> int:
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        existing_count = conn.execute(
+            "SELECT COUNT(*) FROM transcript_segments WHERE download_id = ? AND subtitle_path = ?",
+            (row.row_id, str(subtitle_path)),
+        ).fetchone()[0]
+        if existing_count:
+            return int(existing_count)
+
+        parsed_segments = _subtitle_segments_from_path(subtitle_path)
+        if not parsed_segments:
+            return 0
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO transcript_segments (download_id, subtitle_path, start_seconds, end_seconds, text)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [(row.row_id, str(subtitle_path), s, e, t) for s, e, t in parsed_segments],
+        )
+        conn.commit()
+        return len(parsed_segments)
+
+
+def _index_transcripts_on_startup(state: AppState) -> None:
+    try:
+        rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
+    except Exception as exc:
+        log.warning("Transcript startup indexing skipped (rows unavailable): %s", exc)
+        return
+    indexed_rows = 0
+    indexed_segments = 0
+    for row in rows:
+        media_path = _resolve_safe_media_path(state.output_root, row.file_path)
+        if media_path is None:
+            continue
+        subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
+        if subtitle_path is None:
+            continue
+        try:
+            loaded = _ensure_transcript_index_for_row(state.database_path, row, subtitle_path)
+        except Exception:
+            continue
+        if loaded:
+            indexed_rows += 1
+            indexed_segments += loaded
+    if indexed_rows:
+        log.info("Transcript startup indexing complete: rows=%s segments=%s", indexed_rows, indexed_segments)
 
 
 def _format_timestamp(ts: Optional[float]) -> str:
@@ -3672,6 +3704,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
+    _index_transcripts_on_startup(state)
     auto_update_stop_event = threading.Event()
     auto_update_thread = threading.Thread(
         target=_auto_update_loop,
