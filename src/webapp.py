@@ -3294,33 +3294,44 @@ def make_handler(state: AppState):
                 return
 
             if path == "/transcript-search":
-                query_text = str((query.get("q") or [""])[0]).strip()
-                results: List[Dict[str, object]] = []
-                if query_text:
-                    for row in _rows():
-                        media_path = _resolve_safe_media_path(state.output_root, row.file_path)
-                        if media_path is None:
-                            continue
-                        subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
-                        if subtitle_path is None:
-                            continue
-                        try:
-                            hits = _search_transcript_segments(state.database_path, row, subtitle_path, query_text)
-                        except Exception:
-                            continue
-                        for hit in hits[:5]:
-                            results.append(
-                                {
-                                    "row_id": row.row_id,
-                                    "title": row.title,
-                                    "start_seconds": hit["start_seconds"],
-                                    "text": hit["text"],
-                                }
-                            )
-                        if len(results) >= 50:
-                            break
-                body_bytes = json.dumps({"results": results[:50]}).encode("utf-8")
-                self.send_response(200)
+                try:
+                    query_text = str((query.get("q") or [""])[0]).strip()
+                    results: List[Dict[str, object]] = []
+                    if query_text:
+                        for row in _rows():
+                            try:
+                                media_path = _resolve_safe_media_path(state.output_root, row.file_path)
+                            except Exception as exc:
+                                log.warning("Transcript search skipped row id=%s due to media path error: %s", row.row_id, exc)
+                                continue
+                            if media_path is None:
+                                continue
+                            subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
+                            if subtitle_path is None:
+                                continue
+                            try:
+                                hits = _search_transcript_segments(state.database_path, row, subtitle_path, query_text)
+                            except Exception as exc:
+                                log.warning("Transcript search failed row id=%s subtitle=%s error=%s", row.row_id, subtitle_path, exc)
+                                continue
+                            for hit in hits[:5]:
+                                results.append(
+                                    {
+                                        "row_id": row.row_id,
+                                        "title": row.title,
+                                        "start_seconds": hit["start_seconds"],
+                                        "text": hit["text"],
+                                    }
+                                )
+                            if len(results) >= 50:
+                                break
+                    body_bytes = json.dumps({"results": results[:50]}).encode("utf-8")
+                    status = 200
+                except Exception as exc:
+                    log.exception("Transcript search request failed: %s", exc)
+                    body_bytes = json.dumps({"results": [], "error": "search_failed"}).encode("utf-8")
+                    status = 200
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body_bytes)))
