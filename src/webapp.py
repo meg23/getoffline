@@ -468,6 +468,28 @@ def _parse_srt_timestamp(value: str) -> Optional[float]:
     return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
 
 
+def _parse_vtt_timecode(value: str) -> Optional[float]:
+    token = str(value or "").strip()
+    if not token:
+        return None
+    token = token.replace(",", ".")
+    parts = token.split(":")
+    if len(parts) == 3:
+        hh, mm, ss = parts
+    elif len(parts) == 2:
+        hh = "0"
+        mm, ss = parts
+    else:
+        return None
+    try:
+        hours = int(hh)
+        minutes = int(mm)
+        seconds = float(ss)
+    except ValueError:
+        return None
+    return max(0.0, hours * 3600 + minutes * 60 + seconds)
+
+
 def _srt_to_vtt(content: str) -> str:
     lines = content.replace("\ufeff", "").splitlines()
     timestamp_re = re.compile(
