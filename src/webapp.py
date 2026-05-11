@@ -595,6 +595,8 @@ def _index_transcripts_on_startup(state: AppState) -> None:
         return
     indexed_rows = 0
     indexed_segments = 0
+    unindexed_candidates = 0
+    log.info("Scanning for downloaded but unindexed transcripts...")
     for row in rows:
         media_path = _resolve_safe_media_path(state.output_root, row.file_path)
         if media_path is None:
@@ -602,6 +604,16 @@ def _index_transcripts_on_startup(state: AppState) -> None:
         subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
         if subtitle_path is None:
             continue
+        try:
+            with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+                existing_count = conn.execute(
+                    "SELECT COUNT(*) FROM transcript_segments WHERE download_id = ? AND subtitle_path = ?",
+                    (row.row_id, str(subtitle_path)),
+                ).fetchone()[0]
+        except Exception:
+            existing_count = 0
+        if not existing_count:
+            unindexed_candidates += 1
         try:
             loaded = _ensure_transcript_index_for_row(state.database_path, row, subtitle_path)
         except Exception:
@@ -611,6 +623,9 @@ def _index_transcripts_on_startup(state: AppState) -> None:
             indexed_segments += loaded
     if indexed_rows:
         log.info("Transcript startup indexing complete: rows=%s segments=%s", indexed_rows, indexed_segments)
+    else:
+        log.info("Transcript startup indexing found no new rows to index.")
+    log.info("Downloaded unindexed transcript candidates detected: %s", unindexed_candidates)
 
 
 def _format_timestamp(ts: Optional[float]) -> str:
