@@ -1560,7 +1560,7 @@ def _render_index(
           const titleText = String((row.querySelector('.episode-link') && row.querySelector('.episode-link').textContent) || '').toLowerCase();
           const matchesText = !filterText || channelText.includes(filterText) || titleText.includes(filterText);
           const mode = getFilterMode();
-          const matchesMode = mode === 'all' || (mode === 'unplayed' && row.dataset.played !== '1') || (mode === 'played' && row.dataset.played === '1') || (mode === 'favorites' && row.dataset.favorite === '1');
+          const matchesMode = mode === 'all' || (mode === 'unplayed' && row.dataset.played !== '1' && row.dataset.fileExists === '1') || (mode === 'played' && row.dataset.played === '1') || (mode === 'favorites' && row.dataset.favorite === '1');
           const isMatch = matchesText && matchesMode;
           row.style.display = isMatch ? '' : 'none';
           if (!isMatch) {{
