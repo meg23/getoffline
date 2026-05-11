@@ -390,6 +390,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("bindBatchControls();", body)
             self.assertIn("bindPlayLinks();", body)
             self.assertIn("const getFilterMode = () => String((libraryFilterMode && libraryFilterMode.value) || 'unplayed');", body)
+            self.assertIn("mode === 'unplayed' && row.dataset.played !== '1' && row.dataset.fileExists === '1'", body)
             self.assertIn("libraryFilterClear.addEventListener('click'", body)
             self.assertIn("applyBatchActionLocally(requestedAction, selectedRows);", body)
             self.assertIn("scheduleDeferredLibraryRefresh();", body)
