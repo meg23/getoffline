@@ -1332,8 +1332,7 @@ def _render_index(
       <form id="sync-form" method="post" action="/update" class="toolbar-form">
         <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg></button>
       </form>
-      <button id="quick-add-open" class="icon-button" type="button" title="Add single YouTube link" aria-label="Add single YouTube link">{_icon_use("bi-plus-lg")}</button>
-      <button id="spotlight-open" class="icon-button" type="button" title="YouTube spotlight" aria-label="YouTube spotlight">{_icon_use("bi-search")}</button>
+      <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}</button>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
@@ -1366,6 +1365,11 @@ def _render_index(
         <h2 id="quick-add-title">Add single YouTube link</h2>
         <form id="quick-add-form" method="post" action="/quick-add-youtube" class="quick-add-form">
           <div>
+            <label for="quick-add-search">Search YouTube (press Enter)</label>
+            <input id="quick-add-search" class="quick-add-input" type="search" name="q" placeholder="Search videos..." autocomplete="off" />
+          </div>
+          <div id="quick-add-results" class="quick-add-results" aria-live="polite"></div>
+          <div>
             <label for="quick-add-url">YouTube URL</label>
             <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
           </div>
@@ -1381,32 +1385,6 @@ def _render_index(
             <button type="submit" class="primary">Add</button>
           </div>
         </form>
-      </div>
-    </div>
-
-    <div id="spotlight-backdrop" class="quick-add-backdrop" aria-hidden="true">
-      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="spotlight-title">
-        <h2 id="spotlight-title">YouTube spotlight</h2>
-        <div class="quick-add-form">
-          <div>
-            <label for="spotlight-search">Search YouTube</label>
-            <div class="quick-add-search-row">
-              <input id="spotlight-search" class="quick-add-input" type="search" name="q" placeholder="Search videos..." autocomplete="off" />
-              <button id="spotlight-search-button" type="button" class="primary">Search</button>
-            </div>
-          </div>
-          <div>
-            <label for="spotlight-media-type">Download type</label>
-            <select id="spotlight-media-type" class="quick-add-select" name="media_type">
-              <option value="video" selected>video</option>
-              <option value="audio">audio</option>
-            </select>
-          </div>
-          <div id="spotlight-results" class="quick-add-results" aria-live="polite"></div>
-          <div class="quick-add-actions">
-            <button id="spotlight-cancel" type="button">Close</button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -2181,24 +2159,13 @@ def _render_index(
       const quickAddForm = document.getElementById('quick-add-form');
       const quickMediaTypeSelect = document.getElementById('quick-add-media-type');
 
-      const spotlightOpenBtn = document.getElementById('spotlight-open');
-      const spotlightBackdrop = document.getElementById('spotlight-backdrop');
-      const spotlightCancelBtn = document.getElementById('spotlight-cancel');
-      const spotlightInput = document.getElementById('spotlight-search');
-      const spotlightSearchButton = document.getElementById('spotlight-search-button');
-      const spotlightResults = document.getElementById('spotlight-results');
-      const spotlightMediaType = document.getElementById('spotlight-media-type');
+      const quickAddSearchInput = document.getElementById('quick-add-search');
+      const quickAddResults = document.getElementById('quick-add-results');
 
       const closeQuickAddModal = () => {{
         if (!backdrop) return;
         backdrop.classList.remove('is-open');
         backdrop.setAttribute('aria-hidden', 'true');
-      }};
-
-      const closeSpotlightModal = () => {{
-        if (!spotlightBackdrop) return;
-        spotlightBackdrop.classList.remove('is-open');
-        spotlightBackdrop.setAttribute('aria-hidden', 'true');
       }};
 
       const submitQuickDownload = (url, mediaType, onDone) => {{
@@ -2223,14 +2190,14 @@ def _render_index(
           }});
       }};
 
-      const renderSpotlightResults = (items) => {{
-        if (!spotlightResults) return;
+      const renderQuickAddResults = (items) => {{
+        if (!quickAddResults) return;
         if (!Array.isArray(items) || items.length === 0) {{
-          spotlightResults.innerHTML = '<div class="quick-add-empty">No videos found.</div>';
+          quickAddResults.innerHTML = '<div class="quick-add-empty">No videos found.</div>';
           return;
         }}
 
-        spotlightResults.innerHTML = items.map((item) => {{
+        quickAddResults.innerHTML = items.map((item) => {{
           const title = String(item.title || 'Untitled');
           const channel = String(item.channel || '');
           const duration = String(item.duration || '');
@@ -2251,22 +2218,22 @@ def _render_index(
         }}).join('');
       }};
 
-      const runSpotlightSearch = () => {{
-        if (!spotlightInput || !spotlightResults) return;
-        const q = String(spotlightInput.value || '').trim();
+      const runQuickAddSearch = () => {{
+        if (!quickAddSearchInput || !quickAddResults) return;
+        const q = String(quickAddSearchInput.value || '').trim();
         if (!q) {{
-          spotlightResults.innerHTML = '<div class="quick-add-empty">Type a query to search YouTube.</div>';
+          quickAddResults.innerHTML = '<div class="quick-add-empty">Type a query to search YouTube.</div>';
           return;
         }}
 
-        spotlightResults.innerHTML = '<div class="quick-add-empty">Searching...</div>';
+        quickAddResults.innerHTML = '<div class="quick-add-empty">Searching...</div>';
         fetch('/youtube-search?q=' + encodeURIComponent(q), {{ cache: 'no-store' }})
           .then((response) => response.ok ? response.json() : null)
           .then((payload) => {{
-            renderSpotlightResults(payload && payload.results ? payload.results : []);
+            renderQuickAddResults(payload && payload.results ? payload.results : []);
           }})
           .catch(() => {{
-            spotlightResults.innerHTML = '<div class="quick-add-empty">Search failed. Try again.</div>';
+            quickAddResults.innerHTML = '<div class="quick-add-empty">Search failed. Try again.</div>';
           }});
       }};
 
@@ -2274,52 +2241,39 @@ def _render_index(
         openBtn.addEventListener('click', () => {{
           backdrop.classList.add('is-open');
           backdrop.setAttribute('aria-hidden', 'false');
-          if (urlInput) urlInput.focus();
+          if (quickAddSearchInput) quickAddSearchInput.focus();
+          if (quickAddResults) quickAddResults.innerHTML = '<div class="quick-add-empty">Paste a YouTube URL or press Enter to search.</div>';
         }});
       }}
       if (cancelBtn) cancelBtn.addEventListener('click', closeQuickAddModal);
-
-      if (spotlightOpenBtn && spotlightBackdrop) {{
-        spotlightOpenBtn.addEventListener('click', () => {{
-          spotlightBackdrop.classList.add('is-open');
-          spotlightBackdrop.setAttribute('aria-hidden', 'false');
-          if (spotlightInput) spotlightInput.focus();
-          if (spotlightResults) spotlightResults.innerHTML = '<div class="quick-add-empty">Type a query to search YouTube.</div>';
-        }});
-      }}
-      if (spotlightCancelBtn) spotlightCancelBtn.addEventListener('click', closeSpotlightModal);
-
-      [backdrop, spotlightBackdrop].forEach((modalBackdrop) => {{
+      [backdrop].forEach((modalBackdrop) => {{
         if (!modalBackdrop) return;
         modalBackdrop.addEventListener('click', (event) => {{
           if (event.target !== modalBackdrop) return;
           if (modalBackdrop === backdrop) closeQuickAddModal();
-          if (modalBackdrop === spotlightBackdrop) closeSpotlightModal();
         }});
       }});
       document.addEventListener('keydown', (event) => {{
         if (event.key !== 'Escape') return;
         if (backdrop && backdrop.classList.contains('is-open')) closeQuickAddModal();
-        if (spotlightBackdrop && spotlightBackdrop.classList.contains('is-open')) closeSpotlightModal();
       }});
-
-      if (spotlightSearchButton) spotlightSearchButton.addEventListener('click', runSpotlightSearch);
-      if (spotlightInput) {{
-        spotlightInput.addEventListener('keydown', (event) => {{
+      if (quickAddSearchInput) {{
+        quickAddSearchInput.addEventListener('keydown', (event) => {{
           if (event.key === 'Enter') {{
             event.preventDefault();
-            runSpotlightSearch();
+            runQuickAddSearch();
           }}
         }});
       }}
-      if (spotlightResults) {{
-        spotlightResults.addEventListener('click', (event) => {{
+      if (quickAddResults) {{
+        quickAddResults.addEventListener('click', (event) => {{
           const target = event.target;
           if (!(target instanceof HTMLElement)) return;
           const downloadUrl = target.getAttribute('data-download-url');
           if (!downloadUrl) return;
-          closeSpotlightModal();
-          submitQuickDownload(downloadUrl, spotlightMediaType ? spotlightMediaType.value : 'video');
+          if (urlInput) urlInput.value = downloadUrl;
+          submitQuickDownload(downloadUrl, quickMediaTypeSelect ? quickMediaTypeSelect.value : 'video');
+          closeQuickAddModal();
         }});
       }};
 
