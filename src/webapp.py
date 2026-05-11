@@ -951,8 +951,37 @@ def _render_index(
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
     .library-filter-wrap {{ display: inline-flex; align-items: stretch; width: min(30rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
     .library-filter-input {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .7rem; font: inherit; min-width: 12rem; flex: 1 1 12rem; }}
-    .library-filter-select {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .95rem .5rem .65rem; font: inherit; background: #fff; color: #243251; min-width: 7.6rem; }}
-    .library-filter-clear {{ border: 0; border-radius: 0; padding: .5rem .75rem; min-width: 5.5rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; font-weight: 600; text-align: center; display: inline-flex; align-items: center; justify-content: center; }}
+    .library-filter-select {{
+      border: 0;
+      border-right: 1px solid #dbe3f3;
+      border-radius: 0;
+      padding: .5rem 1.85rem .5rem .65rem;
+      font: inherit;
+      background: #fff;
+      color: #243251;
+      min-width: 8.4rem;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23243251' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.8' d='m3.25 6.5 4.75 4.75L12.75 6.5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right .6rem center;
+    }}
+    .library-filter-clear {{
+      border: 0;
+      border-radius: 0;
+      padding: .5rem .6rem;
+      min-width: 2.35rem;
+      font: inherit;
+      font-size: 1rem;
+      line-height: 1;
+      background: #eef3ff;
+      color: #2c3e74;
+      cursor: pointer;
+      font-weight: 700;
+      text-align: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }}
     .library-filter-clear:hover {{ background: #dfe8ff; }}
     .library-filter-input:focus, .library-filter-select:focus, .library-filter-clear:focus {{ outline: none; }}
     .library-filter-wrap:focus-within {{ box-shadow: 0 0 0 2px rgba(47, 98, 242, .22); border-color: #2f62f2; }}
@@ -1314,7 +1343,7 @@ def _render_index(
             <option value="favorites">Favorites</option>
             <option value="all">All</option>
           </select>
-          <button id="library-filter-clear" class="library-filter-clear" type="button">Clear</button>
+          <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">×</button>
         </div>
         <span class="toolbar-spacer" aria-hidden="true"></span>
         <form id="batch-form" method="post" action="/batch-update" class="batch-toolbar-form">
@@ -1554,6 +1583,7 @@ def _render_index(
 
       const applyLibraryFilter = () => {{
         const filterText = getFilterText();
+        const mode = getFilterMode();
         const rows = Array.from(document.querySelectorAll('#downloads-table-body tr[data-row-id]'));
         rows.forEach((row) => {{
           const channelText = String((row.querySelector('.channel-col') && row.querySelector('.channel-col').textContent) || '').toLowerCase();
@@ -1568,6 +1598,10 @@ def _render_index(
             if (selector) selector.checked = false;
           }}
         }});
+        if (libraryFilterClear) {{
+          const hasFilters = Boolean(filterText) || mode !== 'unplayed';
+          libraryFilterClear.style.opacity = hasFilters ? '1' : '.55';
+        }}
         updateBatchState();
         renderVisibleSummaryCounts();
       }};
