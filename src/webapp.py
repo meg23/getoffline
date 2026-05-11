@@ -586,6 +586,28 @@ def _search_transcript_segments(db_path: Path, row: MediaRow, subtitle_path: Pat
     return [{"start_seconds": s, "end_seconds": e, "text": t} for s, e, t in results]
 
 
+def _search_transcripts_index(db_path: Path, query_text: str, limit: int = 50) -> List[Dict[str, object]]:
+    if not query_text:
+        return []
+    like_term = f"%{query_text.lower()}%"
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        rows = conn.execute(
+            """
+            SELECT ts.download_id, COALESCE(d.title, ''), ts.start_seconds, ts.text
+            FROM transcript_segments ts
+            JOIN downloads d ON d.id = ts.download_id
+            WHERE lower(ts.text) LIKE ?
+            ORDER BY ts.download_id DESC, ts.start_seconds ASC
+            LIMIT ?
+            """,
+            (like_term, int(limit)),
+        ).fetchall()
+    return [
+        {"row_id": int(row_id), "title": str(title), "start_seconds": float(start_seconds), "text": str(text)}
+        for row_id, title, start_seconds, text in rows
+    ]
+
+
 def _ensure_transcript_index_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -> int:
     with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
         existing_count = conn.execute(
@@ -3296,8 +3318,9 @@ def make_handler(state: AppState):
             if path == "/transcript-search":
                 try:
                     query_text = str((query.get("q") or [""])[0]).strip()
-                    results: List[Dict[str, object]] = []
-                    if query_text:
+                    results: List[Dict[str, object]] = _search_transcripts_index(state.database_path, query_text, limit=50)
+                    if query_text and not results:
+                        log.info("Transcript search index miss for query=%r; falling back to disk/index scan", query_text)
                         for row in _rows():
                             try:
                                 media_path = _resolve_safe_media_path(state.output_root, row.file_path)
@@ -3315,14 +3338,7 @@ def make_handler(state: AppState):
                                 log.warning("Transcript search failed row id=%s subtitle=%s error=%s", row.row_id, subtitle_path, exc)
                                 continue
                             for hit in hits[:5]:
-                                results.append(
-                                    {
-                                        "row_id": row.row_id,
-                                        "title": row.title,
-                                        "start_seconds": hit["start_seconds"],
-                                        "text": hit["text"],
-                                    }
-                                )
+                                results.append({"row_id": row.row_id, "title": row.title, "start_seconds": hit["start_seconds"], "text": hit["text"]})
                             if len(results) >= 50:
                                 break
                     body_bytes = json.dumps({"results": results[:50]}).encode("utf-8")
