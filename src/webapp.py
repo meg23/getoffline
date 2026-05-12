@@ -38,6 +38,7 @@ from database import (
     update_download_settings,
     update_stored_defaults,
     update_download_position_seconds,
+    update_download_positions_batch,
     close_cached_descriptors,
     get_checked_out_connection_count,
 )
@@ -61,8 +62,8 @@ VIDEO_EXTENSIONS = {"mp4", "mkv", "webm", "mov"}
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
-PROGRESS_FLUSH_COALESCE_SECONDS = 0.35
-PROGRESS_FLUSH_POLL_SECONDS = 0.5
+PROGRESS_FLUSH_COALESCE_SECONDS = 5.0
+PROGRESS_FLUSH_POLL_SECONDS = 1.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 
@@ -792,14 +793,18 @@ def _flush_pending_progress_updates(state: AppState) -> int:
         return 0
 
     flush_started_at = time.monotonic()
-    updated_count = 0
+    batch_payload: Dict[int, float] = {}
     for row_id, progress_payload in pending.items():
         seconds = float(progress_payload[0]) if isinstance(progress_payload, tuple) else float(progress_payload)
-        updated = update_download_position_seconds(str(state.database_path), int(row_id), seconds)
-        if not updated:
-            log.warning("Progress update skipped for id=%s (db busy or row missing)", row_id)
-        else:
-            updated_count += 1
+        batch_payload[int(row_id)] = seconds
+
+    updated_count = update_download_positions_batch(str(state.database_path), batch_payload)
+    if updated_count < len(batch_payload):
+        log.warning(
+            "Progress batch update partial: attempted=%s updated=%s",
+            len(batch_payload),
+            updated_count,
+        )
 
     with state.progress_metrics_lock:
         state.progress_flush_count += 1

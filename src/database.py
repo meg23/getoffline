@@ -19,9 +19,12 @@ try:
         String,
         Text,
         UniqueConstraint,
+        bindparam,
         create_engine,
         event,
+        func,
         select,
+        update,
     )
     from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
     from sqlalchemy.pool import NullPool
@@ -912,6 +915,23 @@ if HAS_SQLALCHEMY:
         last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+    _UPDATE_PROGRESS_STMT = update(DownloadRecord).where(
+        DownloadRecord.id == bindparam("row_id_param")
+    ).values(
+        last_position_seconds=bindparam("safe_position_param"),
+        total_listened_seconds=func.max(
+            0.0,
+            func.coalesce(DownloadRecord.total_listened_seconds, 0.0)
+            + func.max(
+                0.0,
+                bindparam("safe_position_param") - func.coalesce(DownloadRecord.last_position_seconds, 0.0),
+            ),
+        ),
+        last_position_updated_at=bindparam("updated_at_param"),
+        last_seen_at=bindparam("updated_at_param"),
+    )
+
+
     _ENGINE_LOCK = threading.Lock()
     _COUNTER_LOCK = threading.Lock()
     _ENGINE_REGISTRY: Dict[str, Any] = {}
@@ -1177,6 +1197,29 @@ if HAS_SQLALCHEMY:
                 return False
             raise
 
+    def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> int:
+        payload = []
+        now = _utcnow()
+        for row_id, raw_seconds in updates.items():
+            payload.append(
+                {
+                    "row_id_param": int(row_id),
+                    "safe_position_param": max(0.0, float(raw_seconds or 0.0)),
+                    "updated_at_param": now,
+                }
+            )
+        if not payload:
+            return 0
+        try:
+            with _engine_for(db_path).begin() as conn:
+                result = conn.execute(_UPDATE_PROGRESS_STMT, payload)
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "batch updating download playback positions", exc)
+            if _is_sqlite_lock_error_message(str(exc)):
+                return 0
+            raise
+
     def get_total_listened_seconds(db_path: str) -> float:
         with Session(_engine_for(db_path)) as session:
             stmt = select(DownloadRecord.total_listened_seconds)
@@ -1196,6 +1239,13 @@ else:
 
     def close_cached_descriptors() -> int:
         return 0
+
+    def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> int:
+        updated = 0
+        for row_id, seconds in updates.items():
+            if update_download_position_seconds(db_path, int(row_id), float(seconds)):
+                updated += 1
+        return updated
 
     def get_checked_out_connection_count() -> int:
         return 0
