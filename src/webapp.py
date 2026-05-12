@@ -38,6 +38,7 @@ from database import (
     update_stored_defaults,
     update_download_position_seconds,
     close_cached_descriptors,
+    get_checked_out_connection_count,
 )
 
 
@@ -2047,7 +2048,7 @@ def _render_index(
           btn.type = 'button';
           btn.className = 'mini-player-transcript-line';
           btn.dataset.idx = String(idx);
-          btn.textContent = (cue.text || '').replace(/\s+/g, ' ').trim();
+          btn.textContent = (cue.text || '').replace(/\\s+/g, ' ').trim();
           btn.addEventListener('click', () => {{
             player.currentTime = Math.max(0, cue.startTime || 0);
             player.play().catch(() => {{}});
@@ -3370,6 +3371,7 @@ def make_handler(state: AppState):
 
         def do_GET(self):  # noqa: N802
             self.close_connection = True
+            checkout_baseline = get_checked_out_connection_count()
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
@@ -3603,9 +3605,11 @@ def make_handler(state: AppState):
                 return
 
             self.send_error(404, "Not found")
+            self._log_checkout_balance_if_leaking(checkout_baseline, "POST", path)
 
         def do_POST(self):  # noqa: N802
             self.close_connection = True
+            checkout_baseline = get_checked_out_connection_count()
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
 
@@ -3850,6 +3854,13 @@ def make_handler(state: AppState):
                 return
 
             self.send_error(404, "Not found")
+            self._log_checkout_balance_if_leaking(checkout_baseline, "GET", path)
+
+
+        def _log_checkout_balance_if_leaking(self, baseline: int, method: str, path: str) -> None:
+            current = get_checked_out_connection_count()
+            if current > baseline:
+                log.warning("SQLAlchemy checked-out connections grew during %s %s baseline=%s current=%s", method, path, baseline, current)
 
         def log_message(self, fmt, *args):
             _ = fmt, args

@@ -912,9 +912,12 @@ if HAS_SQLALCHEMY:
         last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-    _DB_LOCK = threading.Lock()
+    _ENGINE_LOCK = threading.Lock()
+    _COUNTER_LOCK = threading.Lock()
     _ENGINE_REGISTRY: Dict[str, Any] = {}
     _INITIALIZED_PATHS: set[str] = set()
+    _CHECKOUT_COUNT = 0
+    _CHECKIN_COUNT = 0
 
 
     def _normalize_db_path(db_path: str) -> str:
@@ -926,15 +929,33 @@ if HAS_SQLALCHEMY:
         def _log_checkout_trace(dbapi_conn, conn_record, conn_proxy):  # pragma: no cover - temporary diagnostics
             del dbapi_conn, conn_record, conn_proxy
             import traceback
+            global _CHECKOUT_COUNT
+
+            with _COUNTER_LOCK:
+                _CHECKOUT_COUNT += 1
+                checked_out = _CHECKOUT_COUNT - _CHECKIN_COUNT
 
             stack = " | ".join(line.strip() for line in traceback.format_stack(limit=12)[:-1])
-            log.warning("SQLAlchemy checkout trace db=%s stack=%s", db_path, stack)
+            log.warning("SQLAlchemy checkout db=%s checked_out=%s stack=%s", db_path, checked_out, stack)
+
+        @event.listens_for(engine, "checkin")
+        def _log_checkin_trace(dbapi_conn, conn_record):  # pragma: no cover - temporary diagnostics
+            del dbapi_conn, conn_record
+            import traceback
+            global _CHECKIN_COUNT
+
+            with _COUNTER_LOCK:
+                _CHECKIN_COUNT += 1
+                checked_out = _CHECKOUT_COUNT - _CHECKIN_COUNT
+
+            stack = " | ".join(line.strip() for line in traceback.format_stack(limit=8)[:-1])
+            log.warning("SQLAlchemy checkin db=%s checked_out=%s stack=%s", db_path, checked_out, stack)
 
 
     def _engine_for(db_path: str):
         normalized_db_path = _normalize_db_path(db_path)
         Path(normalized_db_path).parent.mkdir(parents=True, exist_ok=True)
-        with _DB_LOCK:
+        with _ENGINE_LOCK:
             engine = _ENGINE_REGISTRY.get(normalized_db_path)
             if engine is not None:
                 return engine
@@ -951,9 +972,15 @@ if HAS_SQLALCHEMY:
             return engine
 
 
+
+    def get_checked_out_connection_count() -> int:
+        with _COUNTER_LOCK:
+            return _CHECKOUT_COUNT - _CHECKIN_COUNT
+
+
     def close_cached_descriptors() -> int:
         """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
-        with _DB_LOCK:
+        with _ENGINE_LOCK:
             count = len(_ENGINE_REGISTRY)
             engines = list(_ENGINE_REGISTRY.values())
             _ENGINE_REGISTRY.clear()
@@ -971,13 +998,17 @@ if HAS_SQLALCHEMY:
         apply_migrations(normalized_db_path)
         engine = _engine_for(normalized_db_path)
 
-        with _DB_LOCK:
-            if normalized_db_path in _INITIALIZED_PATHS:
-                log.debug("Skipping create_all; already initialized db=%s", normalized_db_path)
-                return
-            Base.metadata.create_all(engine)
+        with _ENGINE_LOCK:
+            already_initialized = normalized_db_path in _INITIALIZED_PATHS
+        if already_initialized:
+            log.debug("Skipping create_all; already initialized db=%s", normalized_db_path)
+            return
+
+        Base.metadata.create_all(engine)
+
+        with _ENGINE_LOCK:
             _INITIALIZED_PATHS.add(normalized_db_path)
-            log.info("Ran create_all for db=%s", normalized_db_path)
+        log.info("Ran create_all for db=%s", normalized_db_path)
 
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
@@ -1157,7 +1188,16 @@ else:
     def init_database(db_path: str) -> None:
         _init_database_sqlite(db_path)
 
+
+    def get_checked_out_connection_count() -> int:
+        with _COUNTER_LOCK:
+            return _CHECKOUT_COUNT - _CHECKIN_COUNT
+
+
     def close_cached_descriptors() -> int:
+        return 0
+
+    def get_checked_out_connection_count() -> int:
         return 0
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
