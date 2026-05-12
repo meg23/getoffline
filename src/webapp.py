@@ -3355,6 +3355,8 @@ def _log_stream_disconnect(media_path: Path) -> None:
 
 def make_handler(state: AppState):
     class _Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.0"
+
         def setup(self):
             super().setup()
             try:
@@ -3362,7 +3364,12 @@ def make_handler(state: AppState):
             except OSError:
                 pass
 
+        def end_headers(self):
+            self.send_header("Connection", "close")
+            super().end_headers()
+
         def do_GET(self):  # noqa: N802
+            self.close_connection = True
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
@@ -3598,6 +3605,7 @@ def make_handler(state: AppState):
             self.send_error(404, "Not found")
 
         def do_POST(self):  # noqa: N802
+            self.close_connection = True
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
 
