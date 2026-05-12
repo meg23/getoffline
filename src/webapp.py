@@ -4,6 +4,8 @@ import mimetypes
 import os
 import posixpath
 import re
+import gc
+import resource
 import sqlite3
 import threading
 import time
@@ -3027,6 +3029,13 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     youtube_table = "".join(youtube_rows) or "<tr><td colspan='7'>No YouTube sources configured.</td></tr>"
     podcast_table = "".join(podcast_rows) or "<tr><td colspan='6'>No podcast sources configured.</td></tr>"
+    runtime_stats = _collect_runtime_stats()
+    runtime_rows = []
+    for label, value in runtime_stats:
+        runtime_rows.append(
+            f"<tr><th>{html.escape(label)}</th><td>{html.escape(value)}</td></tr>"
+        )
+    runtime_stats_table = "".join(runtime_rows)
 
     return f"""<!doctype html>
 <html>
@@ -3167,10 +3176,38 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       </form>
     </div>
 
+    <div class="section">
+      <h2>Runtime stats</h2>
+      <p>Live process-level diagnostics useful for performance tuning.</p>
+      <table>
+        <tbody>{runtime_stats_table}</tbody>
+      </table>
+    </div>
+
     <div class="actions"><a href="/">Back to library</a></div>
   </div>
 </body>
 </html>"""
+
+
+def _collect_runtime_stats() -> List[Tuple[str, str]]:
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    try:
+        open_fd_count = len(os.listdir("/proc/self/fd"))
+    except OSError:
+        open_fd_count = -1
+
+    stats: List[Tuple[str, str]] = [
+        ("Process ID", str(os.getpid())),
+        ("Resident memory (ru_maxrss)", f"{usage.ru_maxrss:,} KB"),
+        ("User CPU time", f"{usage.ru_utime:.3f} s"),
+        ("System CPU time", f"{usage.ru_stime:.3f} s"),
+        ("Open file descriptors", "unavailable" if open_fd_count < 0 else str(open_fd_count)),
+        ("Python tracked objects", f"{len(gc.get_objects()):,}"),
+        ("GC generation counters", str(gc.get_count())),
+        ("Active threads", str(threading.active_count())),
+    ]
+    return stats
 
 
 def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str, int]]:
