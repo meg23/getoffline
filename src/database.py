@@ -255,6 +255,29 @@ def _migration_0008_add_transcript_search_tables(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0009_add_media_summaries_table(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media_summaries (
+                download_id INTEGER PRIMARY KEY,
+                summary_text TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                source_segment_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_media_summaries_updated_at
+            ON media_summaries(updated_at)
+            """
+        )
+        conn.commit()
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
@@ -281,6 +304,10 @@ MIGRATIONS = [
     (
         "0008_add_transcript_search_tables",
         lambda db_path: _migration_0008_add_transcript_search_tables(db_path),
+    ),
+    (
+        "0009_add_media_summaries_table",
+        lambda db_path: _migration_0009_add_media_summaries_table(db_path),
     ),
 ]
 

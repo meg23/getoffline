@@ -78,6 +78,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0006_add_favorite_column",
                     "0007_add_relative_media_paths",
                     "0008_add_transcript_search_tables",
+                    "0009_add_media_summaries_table",
                 ],
             )
             self.assertIn("played", columns)
@@ -97,7 +98,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
-            self.assertEqual(count, 8)
+            self.assertEqual(count, 9)
 
     def test_download_artifact_path_prefers_relative_reference(self):
         with tempfile.TemporaryDirectory() as tmpdir:

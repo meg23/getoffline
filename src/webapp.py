@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
+from summarization import summarize_segments
 from database import (
     resolve_download_artifact_path,
     add_source_config,
@@ -94,6 +95,7 @@ class MediaRow:
     played_at: Optional[str] = None
     last_position_seconds: float = 0.0
     subtitle_path: Optional[str] = None
+    summary_text: Optional[str] = None
 
 
 @dataclass
@@ -354,12 +356,13 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             rows = conn.execute(
                 """
-                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(file_path_relative, ''),
+                SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, '')
-                FROM downloads
-                WHERE download_status = 'downloaded'
-                ORDER BY last_seen_at DESC, id DESC
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                FROM downloads d
+                LEFT JOIN media_summaries ms ON ms.download_id = d.id
+                WHERE d.download_status = 'downloaded'
+                ORDER BY d.last_seen_at DESC, d.id DESC
                 """
             ).fetchall()
     except sqlite3.OperationalError as exc:
@@ -384,6 +387,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             played_at=row[12],
             last_position_seconds=float(row[13] or 0.0),
             subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
+            summary_text=row[16] or None,
         )
         for row in rows
     ]
@@ -406,11 +410,12 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             row = conn.execute(
                 """
-                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(file_path_relative, ''),
+                SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, '')
-                FROM downloads
-                WHERE id = ? AND download_status = 'downloaded'
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                FROM downloads d
+                LEFT JOIN media_summaries ms ON ms.download_id = d.id
+                WHERE d.id = ? AND d.download_status = 'downloaded'
                 LIMIT 1
                 """,
                 (int(row_id),),
@@ -439,6 +444,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         played_at=row[12],
         last_position_seconds=float(row[13] or 0.0),
         subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
+        summary_text=row[16] or None,
     )
 
 
@@ -646,6 +652,52 @@ def _ensure_transcript_index_for_row(db_path: Path, row: MediaRow, subtitle_path
         return len(parsed_segments)
 
 
+def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -> Optional[str]:
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        existing = conn.execute(
+            "SELECT summary_text FROM media_summaries WHERE download_id = ?",
+            (row.row_id,),
+        ).fetchone()
+        if existing and existing[0]:
+            return str(existing[0])
+        segment_rows = conn.execute(
+            """
+            SELECT text FROM transcript_segments
+            WHERE download_id = ? AND subtitle_path = ?
+            ORDER BY start_seconds
+            """,
+            (row.row_id, str(subtitle_path)),
+        ).fetchall()
+    segment_texts = [str(item[0]) for item in segment_rows if item and item[0]]
+    if not segment_texts:
+        return None
+    result = summarize_segments(segment_texts, model_name="extractive-local", mode="subprocess")
+    summary_text = str(result.get("summary_text") or "").strip()
+    if not summary_text:
+        return None
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        conn.execute(
+            """
+            INSERT INTO media_summaries (download_id, summary_text, model_name, source_segment_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(download_id) DO UPDATE SET
+              summary_text = excluded.summary_text,
+              model_name = excluded.model_name,
+              source_segment_count = excluded.source_segment_count,
+              updated_at = excluded.updated_at
+            """,
+            (
+                row.row_id,
+                summary_text,
+                str(result.get("model_name") or "extractive-local"),
+                len(segment_texts),
+                str(result.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            ),
+        )
+        conn.commit()
+    return summary_text
+
+
 def _index_transcripts_on_startup(state: AppState) -> None:
     try:
         rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
@@ -677,6 +729,10 @@ def _index_transcripts_on_startup(state: AppState) -> None:
             loaded = _ensure_transcript_index_for_row(state.database_path, row, subtitle_path)
         except Exception:
             continue
+        try:
+            _ensure_summary_for_row(state.database_path, row, subtitle_path)
+        except Exception as exc:
+            log.debug("Summary generation skipped for row id=%s: %s", row.row_id, exc)
         if loaded:
             indexed_rows += 1
             indexed_segments += loaded
@@ -966,7 +1022,10 @@ def _render_index(
 
         visible_rows.append(row)
 
-        title = html.escape(row.title or path.name or "Unknown title")
+        title_text = row.title or path.name or "Unknown title"
+        title = html.escape(title_text)
+        summary_hover = str(getattr(row, "summary_text", "") or "").strip() or title_text
+        title_hover = html.escape(summary_hover)
         channel = html.escape(row.source_name or "?")
         source_kind = html.escape((row.source_type or "?").strip())
         size = html.escape(_human_size(row.file_size_bytes))
@@ -1005,7 +1064,7 @@ def _render_index(
             f"""
             <tr data-row-id="{row.row_id}" data-played="{'1' if row.played else '0'}" data-favorite="{'1' if row_is_favorite else '0'}" data-file-exists="{'1' if file_exists else '0'}">
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
+                <td class="title-cell episode-col" data-label="Episode" title="{title_hover}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
