@@ -1587,6 +1587,13 @@ def _render_index(
   </div>
   <script>
     (() => {{
+      const escapeHtml = (value) => String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
       let syncReloadTimer = null;
