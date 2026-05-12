@@ -34,6 +34,13 @@ log = get_logger("youtube")
 
 _YTDLP_REMOTE_COMPONENT = "ejs:github"
 
+def _normalize_ytdlp_message(message: str) -> str:
+    text = str(message or "").strip()
+    if text.startswith("[youtube] "):
+        return text[len("[youtube] "):].strip()
+    return text
+
+
 
 def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bool:
     source = Path(media_file).expanduser().resolve()
@@ -76,9 +83,10 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
 
 
 def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
-    """Enable yt-dlp's YouTube EJS remote component when a JS runtime is available."""
+    """Enable yt-dlp's YouTube EJS remote component when deno is available."""
     deno_binary = shutil.which("deno")
     if not deno_binary:
+        log.warning("deno was not found on PATH; skipping yt-dlp EJS remote component for %s. If challenge solving fails, upgrade with: pip install -U 'yt-dlp[default]'", context_label)
         return
 
     existing_value = ydl_opts.get("remote_components")
@@ -94,14 +102,25 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
 
     components.append(_YTDLP_REMOTE_COMPONENT)
     ydl_opts["remote_components"] = components
+    log.info("Enabled yt-dlp remote component %s for %s (runtime: %s)", _YTDLP_REMOTE_COMPONENT, context_label, deno_binary)
 
-    log.info(
-        "Enabled yt-dlp remote component %s for %s (runtime: %s)",
-        _YTDLP_REMOTE_COMPONENT,
-        context_label,
-        deno_binary,
-    )
 
+
+
+
+def _apply_ytdlp_player_js_variant_workaround(ydl_opts: Dict):
+    """Work around yt-dlp issue #16256 by forcing youtube:player_js_variant=main."""
+    extractor_args = ydl_opts.get("extractor_args")
+    if not isinstance(extractor_args, dict):
+        extractor_args = {}
+
+    youtube_args = extractor_args.get("youtube")
+    if not isinstance(youtube_args, dict):
+        youtube_args = {}
+
+    youtube_args["player_js_variant"] = ["main"]
+    extractor_args["youtube"] = youtube_args
+    ydl_opts["extractor_args"] = extractor_args
 
 def _clean_log_title(value: str) -> str:
     text = str(value or "").strip()
@@ -170,6 +189,7 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
     if cookie_file:
         ydl_opts["cookiefile"] = cookie_file
     _enable_youtube_ejs_remote_component(ydl_opts, "source-name resolution")
+    _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     with _get_youtubedl()(ydl_opts) as ydl:
         info = ydl.extract_info(source_url, download=False)
@@ -209,6 +229,7 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
         "logger": _YoutubeDlQuietLogger(),
     }
     _enable_youtube_ejs_remote_component(ydl_opts, "search")
+    _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     try:
         with _get_youtubedl()(ydl_opts) as ydl:
@@ -265,7 +286,7 @@ class _YoutubeDlQuietLogger:
     def debug(self, msg):
         if not msg:
             return
-        message = str(msg).strip()
+        message = _normalize_ytdlp_message(msg)
         if not message:
             return
 
@@ -278,7 +299,7 @@ class _YoutubeDlQuietLogger:
 
     def warning(self, msg):
         if msg:
-            message = str(msg).strip()
+            message = _normalize_ytdlp_message(msg)
             if message:
                 self._record_message(message)
                 self._count("warnings")
@@ -286,7 +307,7 @@ class _YoutubeDlQuietLogger:
 
     def error(self, msg):
         if msg:
-            message = str(msg).strip()
+            message = _normalize_ytdlp_message(msg)
             if message:
                 self._record_message(message)
                 self._count("errors")
@@ -721,6 +742,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
             _enable_youtube_ejs_remote_component(ydl_opts, f"download source {name}")
+            _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
             ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
 
@@ -982,7 +1004,8 @@ def download_youtube_items(config, downloaded_items):
         proc = subprocess.run(
             [sys.executable, str(worker_script)],
             input=json.dumps(payload),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=None,
             text=True,
             check=False,
         )
