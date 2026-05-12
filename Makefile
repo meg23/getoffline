@@ -1,4 +1,4 @@
-.PHONY: build run test clean check-system-deps venv
+.PHONY: build run run-no-pex test clean check-system-deps venv
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -39,6 +39,10 @@ build: venv check-system-deps
 run: build
 	@echo "Running $(APP_NAME) from $(BUILD_OUTPUT)..."
 	./$(BUILD_OUTPUT)
+
+run-no-pex: venv check-system-deps
+	@echo "Running $(APP_NAME) directly with Python (no pex)..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m main
 
 test: clean build
 	@echo "Running unit tests in virtual environment..."
