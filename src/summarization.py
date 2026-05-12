@@ -61,14 +61,16 @@ def _truncate_for_prompt(text: str, max_chars: int = 6000) -> str:
 
 def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -> Optional[str]:
     prompt = (
-        "Summarize this transcript in 1-2 concise sentences (max 280 chars). "
-        "Focus on the main topic and key takeaway. No preamble.\n\n"
+        "Return strict JSON: {\"summary\": \"...\"}. "
+        "Write a concise 1-2 sentence paraphrased summary (max 220 chars). "
+        "Focus on topic + takeaway. Avoid filler, quotes, and transcript-style wording.\n\n"
         f"Transcript:\n{_truncate_for_prompt(text)}"
     )
     payload = {
         "model": model_name,
         "prompt": prompt,
         "stream": False,
+        "format": "json",
         "options": {"num_predict": 120, "temperature": 0.2},
     }
     req = request.Request(
@@ -81,8 +83,11 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
         with request.urlopen(req, timeout=20) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         parsed = json.loads(body)
-        response_text = str(parsed.get("response") or "").strip()
+        raw_response = str(parsed.get("response") or "").strip()
+        parsed_response = json.loads(raw_response) if raw_response.startswith("{") else {"summary": raw_response}
+        response_text = str(parsed_response.get("summary") or "").strip()
         if response_text:
+            response_text = re.sub(r"\s+", " ", response_text)
             if len(response_text) > 280:
                 response_text = response_text[:279].rstrip() + "…"
             return response_text

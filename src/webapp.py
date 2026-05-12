@@ -659,6 +659,7 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
             (row.row_id,),
         ).fetchone()
         if existing and existing[0]:
+            log.info("Summary cache hit for row id=%s", row.row_id)
             return str(existing[0])
         segment_rows = conn.execute(
             """
@@ -674,7 +675,16 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     result = summarize_segments(segment_texts, mode="subprocess")
     summary_text = str(result.get("summary_text") or "").strip()
     if not summary_text:
+        log.warning("Summary generation returned empty output for row id=%s", row.row_id)
         return None
+    model_name = str(result.get("model_name") or "unknown")
+    log.info(
+        "Generated summary for row id=%s using model=%s segments=%s chars=%s",
+        row.row_id,
+        model_name,
+        len(segment_texts),
+        len(summary_text),
+    )
     with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
         conn.execute(
             """
@@ -689,7 +699,7 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
             (
                 row.row_id,
                 summary_text,
-                str(result.get("model_name") or "extractive-local"),
+                model_name,
                 len(segment_texts),
                 str(result.get("updated_at") or datetime.now(timezone.utc).isoformat()),
             ),
