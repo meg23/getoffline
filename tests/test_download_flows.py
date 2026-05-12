@@ -154,6 +154,20 @@ class DownloadFlowTests(unittest.TestCase):
 
 
 
+    def test_podcast_parent_process_invokes_short_lived_subprocess_and_tracks_rss(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            downloaded_items = []
+
+            fake_stdout = '{"downloaded_items":["Podcast: Test Podcast Source – Episode 1"]}'
+            with patch("podcasts.subprocess.run") as run_mock, patch("podcasts._parent_rss_mb", side_effect=[220.0, 221.0]):
+                run_mock.return_value = SimpleNamespace(returncode=0, stdout=fake_stdout, stderr="")
+                podcasts.download_podcasts(config, downloaded_items)
+
+            self.assertEqual(run_mock.call_count, 1)
+            self.assertEqual(downloaded_items, ["Podcast: Test Podcast Source – Episode 1"])
+
+
     def test_downloads_are_tracked_in_sqlite_database(self):
         import sqlite3
 
