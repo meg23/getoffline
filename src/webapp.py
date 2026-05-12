@@ -22,6 +22,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
+from summarization import ensure_local_summary_model, summarize_segments
+from summary_tasks import clear_all_summaries, generate_missing_summaries
 from database import (
     resolve_download_artifact_path,
     add_source_config,
@@ -94,6 +96,7 @@ class MediaRow:
     played_at: Optional[str] = None
     last_position_seconds: float = 0.0
     subtitle_path: Optional[str] = None
+    summary_text: Optional[str] = None
 
 
 @dataclass
@@ -354,12 +357,13 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             rows = conn.execute(
                 """
-                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(file_path_relative, ''),
+                SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, '')
-                FROM downloads
-                WHERE download_status = 'downloaded'
-                ORDER BY last_seen_at DESC, id DESC
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                FROM downloads d
+                LEFT JOIN media_summaries ms ON ms.download_id = d.id
+                WHERE d.download_status = 'downloaded'
+                ORDER BY d.last_seen_at DESC, d.id DESC
                 """
             ).fetchall()
     except sqlite3.OperationalError as exc:
@@ -384,6 +388,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             played_at=row[12],
             last_position_seconds=float(row[13] or 0.0),
             subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
+            summary_text=row[16] or None,
         )
         for row in rows
     ]
@@ -406,11 +411,12 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             row = conn.execute(
                 """
-                SELECT id, source_type, source_name, item_url, COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(file_path_relative, ''),
+                SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, '')
-                FROM downloads
-                WHERE id = ? AND download_status = 'downloaded'
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                FROM downloads d
+                LEFT JOIN media_summaries ms ON ms.download_id = d.id
+                WHERE d.id = ? AND d.download_status = 'downloaded'
                 LIMIT 1
                 """,
                 (int(row_id),),
@@ -439,6 +445,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         played_at=row[12],
         last_position_seconds=float(row[13] or 0.0),
         subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
+        summary_text=row[16] or None,
     )
 
 
@@ -646,6 +653,62 @@ def _ensure_transcript_index_for_row(db_path: Path, row: MediaRow, subtitle_path
         return len(parsed_segments)
 
 
+def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -> Optional[str]:
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        existing = conn.execute(
+            "SELECT summary_text FROM media_summaries WHERE download_id = ?",
+            (row.row_id,),
+        ).fetchone()
+        if existing and existing[0]:
+            log.info("Summary cache hit for row id=%s", row.row_id)
+            return str(existing[0])
+        segment_rows = conn.execute(
+            """
+            SELECT text FROM transcript_segments
+            WHERE download_id = ? AND subtitle_path = ?
+            ORDER BY start_seconds
+            """,
+            (row.row_id, str(subtitle_path)),
+        ).fetchall()
+    segment_texts = [str(item[0]) for item in segment_rows if item and item[0]]
+    if not segment_texts:
+        return None
+    result = summarize_segments(segment_texts, mode="subprocess")
+    summary_text = str(result.get("summary_text") or "").strip()
+    if not summary_text:
+        log.warning("Summary generation returned empty output for row id=%s", row.row_id)
+        return None
+    model_name = str(result.get("model_name") or "unknown")
+    log.info(
+        "Generated summary for row id=%s using model=%s segments=%s chars=%s",
+        row.row_id,
+        model_name,
+        len(segment_texts),
+        len(summary_text),
+    )
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        conn.execute(
+            """
+            INSERT INTO media_summaries (download_id, summary_text, model_name, source_segment_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(download_id) DO UPDATE SET
+              summary_text = excluded.summary_text,
+              model_name = excluded.model_name,
+              source_segment_count = excluded.source_segment_count,
+              updated_at = excluded.updated_at
+            """,
+            (
+                row.row_id,
+                summary_text,
+                model_name,
+                len(segment_texts),
+                str(result.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            ),
+        )
+        conn.commit()
+    return summary_text
+
+
 def _index_transcripts_on_startup(state: AppState) -> None:
     try:
         rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
@@ -677,6 +740,10 @@ def _index_transcripts_on_startup(state: AppState) -> None:
             loaded = _ensure_transcript_index_for_row(state.database_path, row, subtitle_path)
         except Exception:
             continue
+        try:
+            _ensure_summary_for_row(state.database_path, row, subtitle_path)
+        except Exception as exc:
+            log.debug("Summary generation skipped for row id=%s: %s", row.row_id, exc)
         if loaded:
             indexed_rows += 1
             indexed_segments += loaded
@@ -966,7 +1033,10 @@ def _render_index(
 
         visible_rows.append(row)
 
-        title = html.escape(row.title or path.name or "Unknown title")
+        title_text = row.title or path.name or "Unknown title"
+        title = html.escape(title_text)
+        summary_hover = str(getattr(row, "summary_text", "") or "").strip() or title_text
+        title_hover = html.escape(summary_hover)
         channel = html.escape(row.source_name or "?")
         source_kind = html.escape((row.source_type or "?").strip())
         size = html.escape(_human_size(row.file_size_bytes))
@@ -1005,7 +1075,7 @@ def _render_index(
             f"""
             <tr data-row-id="{row.row_id}" data-played="{'1' if row.played else '0'}" data-favorite="{'1' if row_is_favorite else '0'}" data-file-exists="{'1' if file_exists else '0'}">
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell episode-col" data-label="Episode" title="{title}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
+                <td class="title-cell episode-col" data-label="Episode"><a class="episode-link" href="{play_or_download_href}" aria-label="{play_or_download_label}" data-summary="{title_hover}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
@@ -1300,6 +1370,25 @@ def _render_index(
 
     .episode-link {{ color: inherit; text-decoration: none; }}
     .episode-link:hover {{ color: var(--accent); text-decoration: underline; }}
+    .summary-tooltip {{
+      position: fixed;
+      z-index: 9999;
+      pointer-events: none;
+      background: rgba(20, 28, 46, 0.96);
+      color: #eef3ff;
+      border: 1px solid rgba(121, 149, 214, 0.55);
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(11, 18, 35, 0.28);
+      padding: .55rem .7rem;
+      font-size: .88rem;
+      line-height: 1.35;
+      max-width: min(34rem, 80vw);
+      opacity: 0;
+      transform: translateY(2px);
+      transition: opacity .08s ease-out, transform .08s ease-out;
+      white-space: normal;
+    }}
+    .summary-tooltip.is-visible {{ opacity: 1; transform: translateY(0); }}
     .selection-cell {{ text-align: right; }}
     .row-selector {{ width: 1.05rem; height: 1.05rem; cursor: pointer; accent-color: var(--accent); }}
     .select-all-selector {{ display: inline-block; vertical-align: middle; }}
@@ -1559,6 +1648,7 @@ def _render_index(
         <div class="quick-add-actions"><button id="transcript-search-close" type="button">Close</button></div>
       </div>
     </div>
+    <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
 
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
@@ -1629,6 +1719,7 @@ def _render_index(
 
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
+      const summaryTooltip = document.getElementById('summary-tooltip');
       let syncReloadTimer = null;
       let syncStatusPollTimer = null;
       let deferredLibraryRefreshTimer = null;
@@ -2269,9 +2360,40 @@ def _render_index(
       }}
 
       const bindPlayLinks = () => {{
+        const hideSummaryTooltip = () => {{
+          if (!summaryTooltip) return;
+          summaryTooltip.classList.remove('is-visible');
+          summaryTooltip.setAttribute('aria-hidden', 'true');
+        }};
+        const placeSummaryTooltip = (event) => {{
+          if (!summaryTooltip) return;
+          const pad = 12;
+          const rect = summaryTooltip.getBoundingClientRect();
+          let x = event.clientX + 14;
+          let y = event.clientY + 14;
+          if (x + rect.width > window.innerWidth - pad) x = Math.max(pad, event.clientX - rect.width - 14);
+          if (y + rect.height > window.innerHeight - pad) y = Math.max(pad, event.clientY - rect.height - 14);
+          summaryTooltip.style.left = x + 'px';
+          summaryTooltip.style.top = y + 'px';
+        }};
         document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
           if (link.dataset.miniPlayerBound === '1') return;
           link.dataset.miniPlayerBound = '1';
+          if (link.dataset.summaryBound !== '1') {{
+            link.dataset.summaryBound = '1';
+            link.addEventListener('mouseenter', (event) => {{
+              if (!summaryTooltip) return;
+              const summaryText = String(link.dataset.summary || '').trim();
+              if (!summaryText) return;
+              summaryTooltip.textContent = summaryText;
+              summaryTooltip.classList.add('is-visible');
+              summaryTooltip.setAttribute('aria-hidden', 'false');
+              placeSummaryTooltip(event);
+            }});
+            link.addEventListener('mousemove', placeSummaryTooltip);
+            link.addEventListener('mouseleave', hideSummaryTooltip);
+            link.addEventListener('blur', hideSummaryTooltip);
+          }}
           link.addEventListener('click', (event) => {{
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -2291,6 +2413,7 @@ def _render_index(
             }};
             localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
             renderMiniPlayer(state);
+            hideSummaryTooltip();
           }});
         }});
       }};
@@ -3160,6 +3283,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     </div>
 
     <div class="section">
+      <h2>Summaries</h2>
+      <form method="post" action="/settings" onsubmit="return confirm('Clear all stored summaries? They will be regenerated later.');">
+        <input type="hidden" name="settings_action" value="clear_summaries" />
+        <div class="actions">
+          <button type="submit" class="danger">Clear summaries</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
       <h2>YouTube sources</h2>
     <table>
         <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
@@ -3870,6 +4003,10 @@ def make_handler(state: AppState):
                         log.warning("Telemetry thread dump request ignored because telemetry dumps are disabled.")
                     else:
                         threaddump_path = _write_python_threaddump()
+                        log.warning("Captured Python threaddump to %s", threaddump_path)
+                elif settings_action == "clear_summaries":
+                    deleted = clear_all_summaries(str(state.database_path))
+                    log.warning("Cleared summaries from settings page rows=%s", deleted)
                         log.warning("Captured telemetry thread dump to %s", threaddump_path)
 
                 elif settings_action == "add_source":
@@ -3979,9 +4116,12 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
+    ensure_local_summary_model()
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)
+        regenerated = generate_missing_summaries(str(state.database_path), limit=500)
+        log.info("Startup summary regeneration complete regenerated=%s", regenerated)
     else:
         log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
     auto_update_stop_event = threading.Event()
