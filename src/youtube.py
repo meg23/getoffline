@@ -32,9 +32,6 @@ _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
 log = get_logger("youtube")
 
-_YTDLP_REMOTE_COMPONENT = "ejs:github"
-
-
 def _normalize_ytdlp_message(message: str) -> str:
     text = str(message or "").strip()
     if text.startswith("[youtube] "):
@@ -42,18 +39,6 @@ def _normalize_ytdlp_message(message: str) -> str:
     return text
 
 
-
-def _find_deno_binary() -> Optional[str]:
-    deno_binary = shutil.which("deno")
-    if deno_binary:
-        return deno_binary
-
-    # Common Homebrew install locations (often missing from PATH in launch agents/services).
-    for candidate in ("/opt/homebrew/bin/deno", "/usr/local/bin/deno"):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-
-    return None
 
 def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bool:
     source = Path(media_file).expanduser().resolve()
@@ -96,50 +81,8 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
 
 
 def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
-    """Enable yt-dlp's YouTube EJS remote component when explicitly opted-in and a JS runtime is available."""
-    enable_remote_component = str(os.getenv("GETOFFLINE_YTDLP_ENABLE_EJS", "0")).strip().lower() in {"1", "true", "yes", "on"}
-    if not enable_remote_component:
-        # Hard-disable JS challenge runtimes and remote EJS components unless explicitly opted in.
-        ydl_opts["js_runtimes"] = {}
-
-        existing_value = ydl_opts.get("remote_components")
-        if isinstance(existing_value, list):
-            ydl_opts["remote_components"] = [component for component in existing_value if component != _YTDLP_REMOTE_COMPONENT]
-        elif isinstance(existing_value, str) and existing_value.strip():
-            components = [part.strip() for part in existing_value.split(",") if part.strip() and part.strip() != _YTDLP_REMOTE_COMPONENT]
-            if components:
-                ydl_opts["remote_components"] = components
-            else:
-                ydl_opts.pop("remote_components", None)
-        return
-
-    deno_binary = _find_deno_binary()
-    if not deno_binary:
-        log.warning("GETOFFLINE_YTDLP_ENABLE_EJS is enabled but deno was not found (PATH=%s); skipping remote component for %s", os.getenv("PATH", ""), context_label)
-        return
-
-    ydl_opts["js_runtimes"] = {"deno": deno_binary}
-
-    existing_value = ydl_opts.get("remote_components")
-    if isinstance(existing_value, list):
-        components = existing_value
-    elif isinstance(existing_value, str) and existing_value.strip():
-        components = [part.strip() for part in existing_value.split(",") if part.strip()]
-    else:
-        components = []
-
-    if _YTDLP_REMOTE_COMPONENT in components:
-        return
-
-    components.append(_YTDLP_REMOTE_COMPONENT)
-    ydl_opts["remote_components"] = components
-
-    log.info(
-        "Enabled yt-dlp remote component %s for %s (runtime: %s)",
-        _YTDLP_REMOTE_COMPONENT,
-        context_label,
-        deno_binary,
-    )
+    """Remote EJS component support is disabled pending upstream runtime stability fixes."""
+    return
 
 
 
