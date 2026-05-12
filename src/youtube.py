@@ -35,6 +35,12 @@ log = get_logger("youtube")
 _YTDLP_REMOTE_COMPONENT = "ejs:github"
 
 
+def _normalize_ytdlp_message(message: str) -> str:
+    text = str(message or "").strip()
+    if text.startswith("[youtube] "):
+        return text[len("[youtube] "):].strip()
+    return text
+
 
 
 def _find_deno_binary() -> Optional[str]:
@@ -93,6 +99,15 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
     """Enable yt-dlp's YouTube EJS remote component when explicitly opted-in and a JS runtime is available."""
     enable_remote_component = str(os.getenv("GETOFFLINE_YTDLP_ENABLE_EJS", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if not enable_remote_component:
+        existing_value = ydl_opts.get("remote_components")
+        if isinstance(existing_value, list):
+            ydl_opts["remote_components"] = [component for component in existing_value if component != _YTDLP_REMOTE_COMPONENT]
+        elif isinstance(existing_value, str) and existing_value.strip():
+            components = [part.strip() for part in existing_value.split(",") if part.strip() and part.strip() != _YTDLP_REMOTE_COMPONENT]
+            if components:
+                ydl_opts["remote_components"] = components
+            else:
+                ydl_opts.pop("remote_components", None)
         return
 
     deno_binary = _find_deno_binary()
@@ -284,7 +299,7 @@ class _YoutubeDlQuietLogger:
     def debug(self, msg):
         if not msg:
             return
-        message = str(msg).strip()
+        message = _normalize_ytdlp_message(msg)
         if not message:
             return
 
@@ -297,7 +312,7 @@ class _YoutubeDlQuietLogger:
 
     def warning(self, msg):
         if msg:
-            message = str(msg).strip()
+            message = _normalize_ytdlp_message(msg)
             if message:
                 self._record_message(message)
                 self._count("warnings")
@@ -305,7 +320,7 @@ class _YoutubeDlQuietLogger:
 
     def error(self, msg):
         if msg:
-            message = str(msg).strip()
+            message = _normalize_ytdlp_message(msg)
             if message:
                 self._record_message(message)
                 self._count("errors")
