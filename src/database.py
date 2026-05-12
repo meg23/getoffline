@@ -4,7 +4,6 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
-from collections import OrderedDict
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -913,9 +912,15 @@ if HAS_SQLALCHEMY:
         last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-    _ENGINE_CACHE_MAXSIZE = 4
-    _ENGINE_CACHE_LOCK = threading.Lock()
-    _ENGINE_REGISTRY: "OrderedDict[str, Any]" = OrderedDict()
+    _DB_LOCK = threading.Lock()
+    _ENGINE_REGISTRY: Dict[str, Any] = {}
+    _INITIALIZED_PATHS: set[str] = set()
+
+
+    def _normalize_db_path(db_path: str) -> str:
+        return str(Path(db_path).expanduser().resolve())
+
+
     def _attach_checkout_trace_listener(engine, db_path: str) -> None:
         @event.listens_for(engine, "checkout")
         def _log_checkout_trace(dbapi_conn, conn_record, conn_proxy):  # pragma: no cover - temporary diagnostics
@@ -927,12 +932,11 @@ if HAS_SQLALCHEMY:
 
 
     def _engine_for(db_path: str):
-        normalized_db_path = str(Path(db_path).expanduser().resolve())
+        normalized_db_path = _normalize_db_path(db_path)
         Path(normalized_db_path).parent.mkdir(parents=True, exist_ok=True)
-        with _ENGINE_CACHE_LOCK:
+        with _DB_LOCK:
             engine = _ENGINE_REGISTRY.get(normalized_db_path)
             if engine is not None:
-                _ENGINE_REGISTRY.move_to_end(normalized_db_path)
                 return engine
 
             engine = create_engine(
@@ -943,22 +947,17 @@ if HAS_SQLALCHEMY:
             )
             _attach_checkout_trace_listener(engine, normalized_db_path)
             _ENGINE_REGISTRY[normalized_db_path] = engine
-
-            while len(_ENGINE_REGISTRY) > _ENGINE_CACHE_MAXSIZE:
-                _, stale_engine = _ENGINE_REGISTRY.popitem(last=False)
-                try:
-                    stale_engine.dispose()
-                except Exception:  # pragma: no cover - defensive cleanup only
-                    pass
+            log.info("Created SQLAlchemy engine db=%s", normalized_db_path)
             return engine
 
 
     def close_cached_descriptors() -> int:
         """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
-        with _ENGINE_CACHE_LOCK:
+        with _DB_LOCK:
             count = len(_ENGINE_REGISTRY)
             engines = list(_ENGINE_REGISTRY.values())
             _ENGINE_REGISTRY.clear()
+            _INITIALIZED_PATHS.clear()
         for engine in engines:
             try:
                 engine.dispose()
@@ -968,8 +967,17 @@ if HAS_SQLALCHEMY:
 
 
     def init_database(db_path: str) -> None:
-        apply_migrations(db_path)
-        Base.metadata.create_all(_engine_for(db_path))
+        normalized_db_path = _normalize_db_path(db_path)
+        apply_migrations(normalized_db_path)
+        engine = _engine_for(normalized_db_path)
+
+        with _DB_LOCK:
+            if normalized_db_path in _INITIALIZED_PATHS:
+                log.debug("Skipping create_all; already initialized db=%s", normalized_db_path)
+                return
+            Base.metadata.create_all(engine)
+            _INITIALIZED_PATHS.add(normalized_db_path)
+            log.info("Ran create_all for db=%s", normalized_db_path)
 
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
