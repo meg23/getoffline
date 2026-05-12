@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
 from summarization import summarize_segments
+from summary_tasks import clear_all_summaries, generate_missing_summaries
 from database import (
     resolve_download_artifact_path,
     add_source_config,
@@ -3223,6 +3224,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     </div>
 
     <div class="section">
+      <h2>Summaries</h2>
+      <form method="post" action="/settings" onsubmit="return confirm('Clear all stored summaries? They will be regenerated later.');">
+        <input type="hidden" name="settings_action" value="clear_summaries" />
+        <div class="actions">
+          <button type="submit" class="danger">Clear summaries</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
       <h2>YouTube sources</h2>
     <table>
         <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
@@ -3932,6 +3943,9 @@ def make_handler(state: AppState):
                     else:
                         threaddump_path = _write_python_threaddump()
                         log.warning("Captured Python threaddump to %s", threaddump_path)
+                elif settings_action == "clear_summaries":
+                    deleted = clear_all_summaries(str(state.database_path))
+                    log.warning("Cleared summaries from settings page rows=%s", deleted)
 
                 elif settings_action == "add_source":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
@@ -4043,6 +4057,8 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)
+        regenerated = generate_missing_summaries(str(state.database_path), limit=500)
+        log.info("Startup summary regeneration complete regenerated=%s", regenerated)
     else:
         log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
     auto_update_stop_event = threading.Event()

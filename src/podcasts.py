@@ -8,6 +8,7 @@ import feedparser
 from database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
+from summary_tasks import generate_missing_summaries
 from utils import ensure_dir, sanitize, sanitize_channel_name
 
 
@@ -267,6 +268,7 @@ def download_podcasts(config, downloaded_items):
                             download_status="downloaded",
                         ),
                     )
+                    generate_missing_summaries(db_path, limit=5)
 
                     downloaded_items.append(f"Podcast: {job['name']} – {job['episode_title']}")
 

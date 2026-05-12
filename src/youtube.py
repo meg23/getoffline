@@ -21,6 +21,7 @@ from database import (
 )
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
+from summary_tasks import generate_missing_summaries
 from utils import ensure_dir, normalize_media_filename, sanitize, sanitize_channel_name
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
@@ -942,6 +943,7 @@ def download_youtube_items(config, downloaded_items):
                 record.clear()
                 del info
             finished_download_info.clear()
+            generate_missing_summaries(db_path, limit=10)
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
