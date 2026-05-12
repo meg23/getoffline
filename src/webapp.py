@@ -6,12 +6,15 @@ import posixpath
 import re
 import gc
 import resource
+import tracemalloc
 import sqlite3
 import sys
 import threading
+import traceback
 import time
 from collections import Counter
 from datetime import datetime, timezone
+from io import StringIO
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -65,6 +68,7 @@ PROGRESS_FLUSH_POLL_SECONDS = 1.0
 PROGRESS_MIN_DELTA_SECONDS = 5.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
+HEAPDUMP_TOP_ALLOCATIONS = 250
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -3202,6 +3206,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     <div class="section">
       <h2>Runtime stats</h2>
       <p>Live process-level diagnostics useful for performance tuning.</p>
+      <div class="actions">
+        <form method="post" action="/settings" style="display:inline-block">
+          <input type="hidden" name="settings_action" value="take_heapdump" />
+          <button type="submit">Take Python heapdump</button>
+        </form>
+        <form method="post" action="/settings" style="display:inline-block">
+          <input type="hidden" name="settings_action" value="take_threaddump" />
+          <button type="submit">Take Python threaddump</button>
+        </form>
+      </div>
       <table>
         <tbody>{runtime_stats_table}</tbody>
       </table>
@@ -3283,6 +3297,54 @@ def _write_runtime_diagnostics_snapshot(
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception as exc:
         log.warning("Unable to persist runtime diagnostics snapshot: %s", exc)
+
+
+def _write_python_heapdump() -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    heapdump_path = Path.cwd() / f"python_heapdump_{timestamp}.txt"
+
+    if not tracemalloc.is_tracing():
+        tracemalloc.start(25)
+
+    snapshot = tracemalloc.take_snapshot()
+    top_stats = snapshot.statistics("lineno")
+    with heapdump_path.open("w", encoding="utf-8") as handle:
+        handle.write(f"captured_at={datetime.now(timezone.utc).isoformat()}\n")
+        handle.write(f"pid={os.getpid()}\n")
+        handle.write(f"python_tracked_objects={len(gc.get_objects())}\n")
+        handle.write(f"active_threads={threading.active_count()}\n\n")
+        handle.write(f"Top {HEAPDUMP_TOP_ALLOCATIONS} allocations by lineno:\n")
+        for idx, stat in enumerate(top_stats[:HEAPDUMP_TOP_ALLOCATIONS], start=1):
+            handle.write(f"{idx:>4}. {stat}\n")
+
+        total_size = sum(stat.size for stat in top_stats)
+        handle.write(f"\nTotal traced allocation size: {total_size / (1024 * 1024):.2f} MiB\n")
+
+    return heapdump_path
+
+
+def _write_python_threaddump() -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    threaddump_path = Path.cwd() / f"python_threaddump_{timestamp}.txt"
+
+    with threaddump_path.open("w", encoding="utf-8") as handle:
+        handle.write(f"captured_at={datetime.now(timezone.utc).isoformat()}\n")
+        handle.write(f"pid={os.getpid()}\n")
+        handle.write(f"active_threads={threading.active_count()}\n\n")
+        for thread in threading.enumerate():
+            handle.write(f"Thread name={thread.name!r} ident={thread.ident} daemon={thread.daemon} alive={thread.is_alive()}\n")
+
+        handle.write("\n=== Stack traces ===\n")
+        frames = sys._current_frames()
+        for thread in threading.enumerate():
+            frame = frames.get(thread.ident)
+            handle.write(f"\n--- Thread {thread.name!r} ident={thread.ident} ---\n")
+            if frame is None:
+                handle.write("No frame available.\n")
+                continue
+            handle.write("".join(traceback.format_stack(frame)))
+
+    return threaddump_path
 
 
 def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str, int]]:
@@ -3783,6 +3845,14 @@ def make_handler(state: AppState):
                     raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
                     cookie_text = str(raw_cookie).strip()
                     update_download_settings(str(state.database_path), cookie_text or None)
+
+                elif settings_action == "take_heapdump":
+                    heapdump_path = _write_python_heapdump()
+                    log.warning("Captured Python heapdump to %s", heapdump_path)
+
+                elif settings_action == "take_threaddump":
+                    threaddump_path = _write_python_threaddump()
+                    log.warning("Captured Python threaddump to %s", threaddump_path)
 
                 elif settings_action == "add_source":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
