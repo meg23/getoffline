@@ -4,7 +4,8 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
-from functools import lru_cache
+from collections import OrderedDict
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -857,8 +858,6 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
 
 
 if HAS_SQLALCHEMY:
-    _ENGINE_REGISTRY: Dict[str, Any] = {}
-
     class Base(DeclarativeBase):
         pass
 
@@ -912,26 +911,49 @@ if HAS_SQLALCHEMY:
         last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-    @lru_cache(maxsize=4)
+    _ENGINE_CACHE_MAXSIZE = 4
+    _ENGINE_CACHE_LOCK = threading.Lock()
+    _ENGINE_REGISTRY: "OrderedDict[str, Any]" = OrderedDict()
+
+
     def _engine_for(db_path: str):
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
-        _ENGINE_REGISTRY[str(db_path)] = engine
-        return engine
+        normalized_db_path = str(Path(db_path).expanduser().resolve())
+        Path(normalized_db_path).parent.mkdir(parents=True, exist_ok=True)
+        with _ENGINE_CACHE_LOCK:
+            engine = _ENGINE_REGISTRY.get(normalized_db_path)
+            if engine is not None:
+                _ENGINE_REGISTRY.move_to_end(normalized_db_path)
+                return engine
+
+            engine = create_engine(
+                f"sqlite:///{normalized_db_path}",
+                future=True,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+            )
+            _ENGINE_REGISTRY[normalized_db_path] = engine
+
+            while len(_ENGINE_REGISTRY) > _ENGINE_CACHE_MAXSIZE:
+                _, stale_engine = _ENGINE_REGISTRY.popitem(last=False)
+                try:
+                    stale_engine.dispose()
+                except Exception:  # pragma: no cover - defensive cleanup only
+                    pass
+            return engine
 
 
     def close_cached_descriptors() -> int:
         """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
-        cache_info = _engine_for.cache_info()
-        engines = list(_ENGINE_REGISTRY.values())
+        with _ENGINE_CACHE_LOCK:
+            count = len(_ENGINE_REGISTRY)
+            engines = list(_ENGINE_REGISTRY.values())
+            _ENGINE_REGISTRY.clear()
         for engine in engines:
             try:
                 engine.dispose()
             except Exception:  # pragma: no cover - defensive cleanup only
                 pass
-        _ENGINE_REGISTRY.clear()
-        _engine_for.cache_clear()
-        return int(cache_info.currsize)
+        return count
 
 
     def init_database(db_path: str) -> None:
