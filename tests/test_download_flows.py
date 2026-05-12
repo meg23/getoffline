@@ -139,6 +139,19 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("Podcast: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
 
+    def test_youtube_parent_process_invokes_short_lived_subprocess_and_tracks_rss(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            downloaded_items = []
+
+            fake_stdout = '{"downloaded_items":["YouTube: Test YouTube Source – Test Video"]}'
+            with patch("youtube.subprocess.run") as run_mock, patch("youtube._parent_rss_mb", side_effect=[120.0, 121.0]):
+                run_mock.return_value = SimpleNamespace(returncode=0, stdout=fake_stdout, stderr="")
+                youtube.download_youtube_items(config, downloaded_items)
+
+            self.assertEqual(run_mock.call_count, 1)
+            self.assertEqual(downloaded_items, ["YouTube: Test YouTube Source – Test Video"])
+
 
 
     def test_downloads_are_tracked_in_sqlite_database(self):
