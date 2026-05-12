@@ -2483,7 +2483,9 @@ def _render_index(
                 btn.addEventListener('click', () => {{
                   const rowId = btn.getAttribute('data-row-id');
                   const start = btn.getAttribute('data-start');
-                  window.location.href = '/play?id=' + encodeURIComponent(rowId) + '&t=' + encodeURIComponent(start) + '&autoplay=1';
+                  const rawStart = Number(start || 0);
+                  const seekStart = Math.max(0, rawStart - 2.0);
+                  window.location.href = '/play?id=' + encodeURIComponent(rowId) + '&t=' + encodeURIComponent(seekStart) + '&autoplay=1';
                 }});
               }});
             }})
