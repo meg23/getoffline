@@ -2,6 +2,9 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import json
+import resource
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -405,7 +408,7 @@ def _build_youtube_payload(
     }
 
 
-def download_youtube_items(config, downloaded_items):
+def _download_youtube_items_in_process(config, downloaded_items):
     defaults = config["defaults"]
     db_path = defaults.get("database_path") or resolve_database_path(defaults)
     init_database(db_path)
@@ -947,6 +950,51 @@ def download_youtube_items(config, downloaded_items):
 
         except Exception as e:
             log.error(f"Failed to download YouTube: {entry}: {e}")
+
+
+def _download_youtube_entry_in_subprocess(payload: Dict) -> Dict:
+    config = payload["config"]
+    downloaded_items: List[str] = []
+    _download_youtube_items_in_process(config, downloaded_items)
+    return {"downloaded_items": downloaded_items}
+
+
+def _parent_rss_mb() -> float:
+    rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return float(rss_kb) / 1024.0
+
+
+def download_youtube_items(config, downloaded_items):
+    if YoutubeDL is not None or str(os.getenv("GETOFFLINE_YTDLP_SUBPROCESS", "1")).strip().lower() in {"0", "false", "no", "off"}:
+        _download_youtube_items_in_process(config, downloaded_items)
+        return
+
+    base_config = dict(config)
+    youtube_entries = list(config.get("youtube", []))
+    before_all = _parent_rss_mb()
+    for entry in youtube_entries:
+        single_config = dict(base_config)
+        single_config["youtube"] = [entry]
+        payload = {"config": single_config}
+        worker_script = Path(__file__).with_name("youtube_subprocess.py")
+        proc = subprocess.run(
+            [sys.executable, str(worker_script)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            log.error("YouTube subprocess failed for %s: %s", entry.get("name"), (proc.stderr or "").strip())
+            continue
+        try:
+            response = json.loads(proc.stdout or "{}")
+        except Exception as exc:
+            log.error("Invalid YouTube subprocess response for %s: %s", entry.get("name"), exc)
+            continue
+        downloaded_items.extend(response.get("downloaded_items") or [])
+    after_all = _parent_rss_mb()
+    log.info("YouTube parent RSS before=%.2fMB after=%.2fMB delta=%.2fMB", before_all, after_all, after_all - before_all)
 YoutubeDL = None
 
 
