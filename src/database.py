@@ -295,7 +295,7 @@ DEFAULT_APP_CONFIG = {
     "processing_workers": "2",
     "auto_update_minutes": "20",
     "subtitle_transcription_mode": "subprocess",
-    "heapdump_enabled": "0",
+    "telemetry_dumps_enabled": "0",
 }
 
 
@@ -452,7 +452,9 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "processing_workers": _coerce_int(defaults.get("processing_workers"), 2),
             "auto_update_minutes": _coerce_int(defaults.get("auto_update_minutes"), 20),
             "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
-            "heapdump_enabled": str(defaults.get("heapdump_enabled") or "0").strip().lower() in {"1", "true", "yes", "on"},
+            "telemetry_dumps_enabled": str(
+                defaults.get("telemetry_dumps_enabled", defaults.get("heapdump_enabled", "0")) or "0"
+            ).strip().lower() in {"1", "true", "yes", "on"},
             "database_path": db_path,
         },
         "download_settings": {
