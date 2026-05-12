@@ -671,7 +671,7 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     segment_texts = [str(item[0]) for item in segment_rows if item and item[0]]
     if not segment_texts:
         return None
-    result = summarize_segments(segment_texts, model_name="extractive-local", mode="subprocess")
+    result = summarize_segments(segment_texts, mode="subprocess")
     summary_text = str(result.get("summary_text") or "").strip()
     if not summary_text:
         return None

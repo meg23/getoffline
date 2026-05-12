@@ -1,16 +1,24 @@
 import gc
 import json
+import os
 import re
 import subprocess
 import sys
 import traceback
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
+from urllib import error, request
 
 STOP_WORDS = {
-    "a","an","and","are","as","at","be","by","for","from","has","he","in","is","it","its","of","on","that","the","to","was","were","will","with","you","your","we","they","this","those","these","or","if","but"
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it", "its",
+    "of", "on", "that", "the", "to", "was", "were", "will", "with", "you", "your", "we", "they", "this", "those",
+    "these", "or", "if", "but",
 }
+
+
+DEFAULT_OLLAMA_MODEL = os.getenv("GETOFFLINE_SUMMARY_MODEL", "qwen2.5:0.5b")
+DEFAULT_OLLAMA_URL = os.getenv("GETOFFLINE_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
 
 
 def _utcnow_iso() -> str:
@@ -44,14 +52,52 @@ def _extractive_summary(text: str, max_sentences: int = 2, max_chars: int = 280)
     return summary
 
 
-def summarize_segments(segments: List[str], model_name: str = "extractive-local", mode: str = "subprocess") -> Dict[str, str]:
+def _truncate_for_prompt(text: str, max_chars: int = 6000) -> str:
+    stripped = re.sub(r"\s+", " ", text).strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    return stripped[:max_chars].rstrip() + "…"
+
+
+def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -> Optional[str]:
+    prompt = (
+        "Summarize this transcript in 1-2 concise sentences (max 280 chars). "
+        "Focus on the main topic and key takeaway. No preamble.\n\n"
+        f"Transcript:\n{_truncate_for_prompt(text)}"
+    )
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"num_predict": 120, "temperature": 0.2},
+    }
+    req = request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        parsed = json.loads(body)
+        response_text = str(parsed.get("response") or "").strip()
+        if response_text:
+            if len(response_text) > 280:
+                response_text = response_text[:279].rstrip() + "…"
+            return response_text
+    except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "subprocess") -> Dict[str, str]:
     joined_text = " ".join((s or "").strip() for s in segments if (s or "").strip())
     if mode == "in_process":
-        return {
-            "summary_text": _extractive_summary(joined_text),
-            "model_name": model_name,
-            "updated_at": _utcnow_iso(),
-        }
+        llm_summary = _ollama_summary(joined_text, model_name=model_name)
+        summary_text = llm_summary or _extractive_summary(joined_text)
+        used_model = model_name if llm_summary else "extractive-local"
+        return {"summary_text": summary_text, "model_name": used_model, "updated_at": _utcnow_iso()}
     payload = {"text": joined_text, "model_name": model_name}
     cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -61,13 +107,14 @@ def summarize_segments(segments: List[str], model_name: str = "extractive-local"
     return json.loads(completed.stdout)
 
 
-def _worker_once(text: str, model_name: str = "extractive-local") -> Dict[str, str]:
+def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str, str]:
     try:
-        return {
-            "summary_text": _extractive_summary(text),
-            "model_name": model_name,
-            "updated_at": _utcnow_iso(),
-        }
+        summary = _ollama_summary(text, model_name=model_name)
+        used_model = model_name
+        if not summary:
+            summary = _extractive_summary(text)
+            used_model = "extractive-local"
+        return {"summary_text": summary, "model_name": used_model, "updated_at": _utcnow_iso()}
     finally:
         gc.collect()
 
@@ -76,7 +123,10 @@ if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
         try:
             args = json.loads(sys.argv[2])
-            result = _worker_once(text=str(args.get("text") or ""), model_name=str(args.get("model_name") or "extractive-local"))
+            result = _worker_once(
+                text=str(args.get("text") or ""),
+                model_name=str(args.get("model_name") or DEFAULT_OLLAMA_MODEL),
+            )
             sys.stdout.write(json.dumps(result))
         except Exception:
             sys.stderr.write(traceback.format_exc())
