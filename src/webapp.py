@@ -2955,6 +2955,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
     auto_update_minutes = html.escape(str(defaults.get("auto_update_minutes") or str(DEFAULT_AUTO_UPDATE_MINUTES)))
+    heapdump_enabled = bool(defaults.get("heapdump_enabled"))
+    heapdump_checked = " checked" if heapdump_enabled else ""
     cookie_value = html.escape(cookie_text)
 
     youtube_rows = []
@@ -3134,6 +3136,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
         <label for="auto_update_minutes">Auto update interval (minutes)</label>
         <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
+        <label style="display:flex; align-items:center; gap:.5rem; font-weight:500; margin-top:.9rem;">
+          <input type="checkbox" name="heapdump_enabled" value="1" style="width:auto;"{heapdump_checked} />
+          Enable manual Python heapdump capture (may impact performance)
+        </label>
 
         <div class="actions">
           <button type="submit" class="primary">Save defaults</button>
@@ -3828,6 +3834,7 @@ def make_handler(state: AppState):
                 settings_action = (form.get("settings_action") or [""])[0]
 
                 if settings_action == "update_defaults":
+                    heapdump_enabled = (form.get("heapdump_enabled") or ["0"])[0] in {"1", "true", "yes", "on"}
                     updates = {
                         "output_root": (form.get("output_root") or [""])[0],
                         "audio_format": (form.get("audio_format") or [""])[0],
@@ -3837,6 +3844,7 @@ def make_handler(state: AppState):
                         "playlist_end": (form.get("playlist_end") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                        "heapdump_enabled": "1" if heapdump_enabled else "0",
                     }
                     sanitized_updates = {
                         k: str(v).strip()
@@ -3851,8 +3859,8 @@ def make_handler(state: AppState):
                     update_download_settings(str(state.database_path), cookie_text or None)
 
                 elif settings_action == "take_heapdump":
-                    if not DEBUG_MEMORY_ENABLED:
-                        log.warning("Heapdump request ignored because DEBUG_MEMORY is not enabled.")
+                    if not bool(state.config.get("defaults", {}).get("heapdump_enabled")):
+                        log.warning("Heapdump request ignored because heapdumps are disabled.")
                     else:
                         heapdump_path = _write_python_heapdump()
                         log.warning("Captured Python heapdump to %s", heapdump_path)
