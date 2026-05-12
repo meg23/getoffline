@@ -4006,8 +4006,6 @@ def make_handler(state: AppState):
                         log.warning("Captured Python threaddump to %s", threaddump_path)
                 elif settings_action == "clear_summaries":
                     deleted = clear_all_summaries(str(state.database_path))
-                    log.warning("Cleared summaries from settings page rows=%s", deleted)
-                        log.warning("Captured telemetry thread dump to %s", threaddump_path)
 
                 elif settings_action == "add_source":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
