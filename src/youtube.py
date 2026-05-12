@@ -436,6 +436,8 @@ def download_youtube_items(config, downloaded_items):
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             should_generate_subtitles = entry_subtitles_enabled
+            if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+                should_generate_subtitles = False
             is_forced_redownload = bool(entry.get("redownload", False))
 
             extracted_audio_files: List[Path] = []

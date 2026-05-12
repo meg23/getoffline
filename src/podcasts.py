@@ -137,6 +137,8 @@ def download_podcasts(config, downloaded_items):
             name = sanitize_channel_name(entry["name"])
             url = entry["url"]
             entry_subtitles_enabled = entry.get("subtitles", True)
+            if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+                entry_subtitles_enabled = False
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)

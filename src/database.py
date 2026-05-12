@@ -948,28 +948,24 @@ if HAS_SQLALCHEMY:
         @event.listens_for(engine, "checkout")
         def _log_checkout_trace(dbapi_conn, conn_record, conn_proxy):  # pragma: no cover - temporary diagnostics
             del dbapi_conn, conn_record, conn_proxy
-            import traceback
             global _CHECKOUT_COUNT
 
             with _COUNTER_LOCK:
                 _CHECKOUT_COUNT += 1
                 checked_out = _CHECKOUT_COUNT - _CHECKIN_COUNT
 
-            stack = " | ".join(line.strip() for line in traceback.format_stack(limit=12)[:-1])
-            log.warning("SQLAlchemy checkout db=%s checked_out=%s stack=%s", db_path, checked_out, stack)
+            log.debug("SQLAlchemy checkout db=%s checked_out=%s", db_path, checked_out)
 
         @event.listens_for(engine, "checkin")
         def _log_checkin_trace(dbapi_conn, conn_record):  # pragma: no cover - temporary diagnostics
             del dbapi_conn, conn_record
-            import traceback
             global _CHECKIN_COUNT
 
             with _COUNTER_LOCK:
                 _CHECKIN_COUNT += 1
                 checked_out = _CHECKOUT_COUNT - _CHECKIN_COUNT
 
-            stack = " | ".join(line.strip() for line in traceback.format_stack(limit=8)[:-1])
-            log.warning("SQLAlchemy checkin db=%s checked_out=%s stack=%s", db_path, checked_out, stack)
+            log.debug("SQLAlchemy checkin db=%s checked_out=%s", db_path, checked_out)
 
 
     def _engine_for(db_path: str):

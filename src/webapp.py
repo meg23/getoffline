@@ -62,8 +62,9 @@ VIDEO_EXTENSIONS = {"mp4", "mkv", "webm", "mov"}
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
-PROGRESS_FLUSH_COALESCE_SECONDS = 5.0
+PROGRESS_FLUSH_COALESCE_SECONDS = 30.0
 PROGRESS_FLUSH_POLL_SECONDS = 1.0
+PROGRESS_MIN_DELTA_SECONDS = 5.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 
@@ -753,6 +754,10 @@ def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: flo
 
     with state.pending_progress_lock:
         existing = state.pending_progress.get(int(row_id))
+        is_timeupdate = str(reason or "").strip().lower() in {"timeupdate", "mini-timeupdate"}
+        if existing and not completion and not forced and is_timeupdate:
+            if abs(float(existing[0]) - safe_seconds) < PROGRESS_MIN_DELTA_SECONDS:
+                return
         if existing and existing[1] and not completion:
             # Keep completion resets sticky until they are flushed to storage.
             safe_seconds = float(existing[0])
@@ -784,6 +789,15 @@ def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: flo
 
 
 def _flush_pending_progress_updates(state: AppState) -> int:
+    if str(os.getenv("GETOFFLINE_ENABLE_PROGRESS_PERSISTENCE", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+        with state.pending_progress_lock:
+            dropped = len(state.pending_progress)
+            state.pending_progress.clear()
+            state.pending_progress_event.clear()
+        if dropped:
+            log.info("Progress persistence disabled; dropped %s pending updates.", dropped)
+        return 0
+
     with state.pending_progress_lock:
         pending = dict(state.pending_progress)
         state.pending_progress.clear()
@@ -930,6 +944,19 @@ def _memory_diagnostics_loop(state: AppState, stop_event: threading.Event) -> No
             if objgraph is not None:
                 growth_types = objgraph.most_common_types(limit=20)
                 log.info("Memory diagnostics objgraph common=%s", growth_types)
+            largest_containers = []
+            for obj in gc.get_objects():
+                if isinstance(obj, (dict, list, set, tuple)):
+                    try:
+                        size = len(obj)
+                    except Exception:
+                        continue
+                    if size <= 1000:
+                        continue
+                    largest_containers.append((type(obj).__name__, size, id(obj)))
+            largest_containers.sort(key=lambda item: item[1], reverse=True)
+            if largest_containers:
+                log.info("Memory diagnostics largest_containers=%s", largest_containers[:20])
 
             log.info(
                 "Memory diagnostics transcript_state indexed_rows=%s indexed_segments=%s pending_progress=%s",
@@ -3992,7 +4019,11 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
-    _index_transcripts_on_startup(state)
+    transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    if transcript_indexing_enabled:
+        _index_transcripts_on_startup(state)
+    else:
+        log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
     auto_update_stop_event = threading.Event()
     auto_update_thread = threading.Thread(
         target=_auto_update_loop,
