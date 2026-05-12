@@ -3138,7 +3138,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
         <label style="display:flex; align-items:center; gap:.5rem; font-weight:500; margin-top:.9rem;">
           <input type="checkbox" name="heapdump_enabled" value="1" style="width:auto;"{heapdump_checked} />
-          Enable manual Python heapdump capture (may impact performance)
+          Enable manual telemetry dumps (may impact performance)
         </label>
 
         <div class="actions">
@@ -3218,11 +3218,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       <div class="actions">
         <form method="post" action="/settings" style="display:inline-block">
           <input type="hidden" name="settings_action" value="take_heapdump" />
-          <button type="submit">Take Python heapdump</button>
+          <button type="submit">Take telemetry memory dump</button>
         </form>
         <form method="post" action="/settings" style="display:inline-block">
           <input type="hidden" name="settings_action" value="take_threaddump" />
-          <button type="submit">Take Python threaddump</button>
+          <button type="submit">Take telemetry thread dump</button>
         </form>
       </div>
       <table>
@@ -3860,17 +3860,17 @@ def make_handler(state: AppState):
 
                 elif settings_action == "take_heapdump":
                     if not bool(state.config.get("defaults", {}).get("heapdump_enabled")):
-                        log.warning("Heapdump request ignored because heapdumps are disabled.")
+                        log.warning("Telemetry memory dump request ignored because telemetry dumps are disabled.")
                     else:
                         heapdump_path = _write_python_heapdump()
-                        log.warning("Captured Python heapdump to %s", heapdump_path)
+                        log.warning("Captured telemetry memory dump to %s", heapdump_path)
 
                 elif settings_action == "take_threaddump":
                     if not bool(state.config.get("defaults", {}).get("heapdump_enabled")):
-                        log.warning("Threaddump request ignored because heapdumps are disabled.")
+                        log.warning("Telemetry thread dump request ignored because telemetry dumps are disabled.")
                     else:
                         threaddump_path = _write_python_threaddump()
-                        log.warning("Captured Python threaddump to %s", threaddump_path)
+                        log.warning("Captured telemetry thread dump to %s", threaddump_path)
 
                 elif settings_action == "add_source":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
