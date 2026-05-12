@@ -7,6 +7,7 @@ import re
 import gc
 import resource
 import sqlite3
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -3192,14 +3193,22 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
 def _collect_runtime_stats() -> List[Tuple[str, str]]:
     usage = resource.getrusage(resource.RUSAGE_SELF)
-    try:
-        open_fd_count = len(os.listdir("/proc/self/fd"))
-    except OSError:
-        open_fd_count = -1
+    open_fd_count = -1
+    for fd_dir in ("/proc/self/fd", "/dev/fd"):
+        try:
+            open_fd_count = len(os.listdir(fd_dir))
+            break
+        except OSError:
+            continue
+
+    # On Linux, ru_maxrss is reported in KB. On macOS/BSD, it is bytes.
+    memory_mb = float(usage.ru_maxrss) / 1024.0
+    if sys.platform == "darwin":
+        memory_mb /= 1024.0
 
     stats: List[Tuple[str, str]] = [
         ("Process ID", str(os.getpid())),
-        ("Resident memory (ru_maxrss)", f"{usage.ru_maxrss:,} KB"),
+        ("Resident memory (ru_maxrss)", f"{memory_mb:,.2f} MB"),
         ("User CPU time", f"{usage.ru_utime:.3f} s"),
         ("System CPU time", f"{usage.ru_stime:.3f} s"),
         ("Open file descriptors", "unavailable" if open_fd_count < 0 else str(open_fd_count)),
