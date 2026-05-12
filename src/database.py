@@ -21,9 +21,11 @@ try:
         Text,
         UniqueConstraint,
         create_engine,
+        event,
         select,
     )
     from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+    from sqlalchemy.pool import QueuePool
 
     HAS_SQLALCHEMY = True
 except ModuleNotFoundError:  # pragma: no cover
@@ -914,6 +916,44 @@ if HAS_SQLALCHEMY:
     _ENGINE_CACHE_MAXSIZE = 4
     _ENGINE_CACHE_LOCK = threading.Lock()
     _ENGINE_REGISTRY: "OrderedDict[str, Any]" = OrderedDict()
+    _POOL_METRICS_LOCK = threading.Lock()
+    _POOL_CHECKOUT_COUNT = 0
+    _POOL_CHECKIN_COUNT = 0
+
+
+    def _pool_status_snapshot(engine) -> str:
+        try:
+            return str(engine.pool.status())
+        except Exception:
+            return "pool-status-unavailable"
+
+
+    def _log_pool_status(db_path: str, phase: str) -> None:
+        engine = _engine_for(db_path)
+        log.debug("SQLAlchemy pool status db=%s phase=%s status=%s", db_path, phase, _pool_status_snapshot(engine))
+
+
+    def _attach_pool_debug_listeners(engine, db_path: str) -> None:
+        @event.listens_for(engine, "checkout")
+        def _on_checkout(dbapi_conn, conn_record, conn_proxy):  # pragma: no cover - debug instrumentation
+            del dbapi_conn, conn_record, conn_proxy
+            import traceback
+
+            with _POOL_METRICS_LOCK:
+                global _POOL_CHECKOUT_COUNT
+                _POOL_CHECKOUT_COUNT += 1
+                outstanding = _POOL_CHECKOUT_COUNT - _POOL_CHECKIN_COUNT
+            stack = " | ".join(line.strip() for line in traceback.format_stack(limit=8)[:-1])
+            log.warning("SQLAlchemy checkout db=%s outstanding=%s stack=%s", db_path, outstanding, stack)
+
+        @event.listens_for(engine, "checkin")
+        def _on_checkin(dbapi_conn, conn_record):  # pragma: no cover - debug instrumentation
+            del dbapi_conn, conn_record
+            with _POOL_METRICS_LOCK:
+                global _POOL_CHECKIN_COUNT
+                _POOL_CHECKIN_COUNT += 1
+                outstanding = _POOL_CHECKOUT_COUNT - _POOL_CHECKIN_COUNT
+            log.debug("SQLAlchemy checkin db=%s outstanding=%s", db_path, outstanding)
 
 
     def _engine_for(db_path: str):
@@ -928,9 +968,14 @@ if HAS_SQLALCHEMY:
             engine = create_engine(
                 f"sqlite:///{normalized_db_path}",
                 future=True,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=5,
+                pool_timeout=30,
                 pool_pre_ping=True,
                 pool_recycle=1800,
             )
+            _attach_pool_debug_listeners(engine, normalized_db_path)
             _ENGINE_REGISTRY[normalized_db_path] = engine
 
             while len(_ENGINE_REGISTRY) > _ENGINE_CACHE_MAXSIZE:
@@ -962,6 +1007,7 @@ if HAS_SQLALCHEMY:
 
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
+        _log_pool_status(db_path, "before-session")
         with Session(_engine_for(db_path)) as session:
             stmt = select(DownloadRecord.id).where(
                 DownloadRecord.source_type == source_type,
@@ -971,6 +1017,7 @@ if HAS_SQLALCHEMY:
             )
             row_id = session.execute(stmt).scalar_one_or_none()
             return row_id is not None
+        
 
 
     def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
@@ -978,6 +1025,7 @@ if HAS_SQLALCHEMY:
         if not normalized:
             return False
 
+        _log_pool_status(db_path, "before-session")
         with Session(_engine_for(db_path)) as session:
             rows = session.execute(
                 select(DownloadRecord.title).where(
@@ -994,6 +1042,7 @@ if HAS_SQLALCHEMY:
         now = _utcnow()
         file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(payload)
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 stmt = select(DownloadRecord).where(
                     DownloadRecord.source_type == payload["source_type"],
@@ -1033,6 +1082,7 @@ if HAS_SQLALCHEMY:
     def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
         now = _utcnow() if played else None
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 record = session.get(DownloadRecord, int(row_id))
                 if record is None:
@@ -1049,6 +1099,7 @@ if HAS_SQLALCHEMY:
     def mark_all_downloads_played(db_path: str) -> int:
         now = _utcnow()
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 updated = session.query(DownloadRecord).filter(DownloadRecord.played.is_(False)).update(
                     {
@@ -1066,6 +1117,7 @@ if HAS_SQLALCHEMY:
 
     def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 record = session.get(DownloadRecord, int(row_id))
                 if record is None:
@@ -1080,6 +1132,7 @@ if HAS_SQLALCHEMY:
 
     def delete_download_entry(db_path: str, row_id: int) -> bool:
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 record = session.get(DownloadRecord, int(row_id))
                 if record is None:
@@ -1093,6 +1146,7 @@ if HAS_SQLALCHEMY:
 
     def get_download_position_seconds(db_path: str, row_id: int) -> float:
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 record = session.get(DownloadRecord, int(row_id))
                 if record is None:
@@ -1108,6 +1162,7 @@ if HAS_SQLALCHEMY:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow()
         try:
+            _log_pool_status(db_path, "before-session")
             with Session(_engine_for(db_path)) as session:
                 record = session.get(DownloadRecord, int(row_id))
                 if record is None:
@@ -1127,6 +1182,7 @@ if HAS_SQLALCHEMY:
             raise
 
     def get_total_listened_seconds(db_path: str) -> float:
+        _log_pool_status(db_path, "before-session")
         with Session(_engine_for(db_path)) as session:
             stmt = select(DownloadRecord.total_listened_seconds)
             values = session.execute(stmt).scalars().all()
