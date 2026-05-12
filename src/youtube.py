@@ -76,9 +76,14 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
 
 
 def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
-    """Enable yt-dlp's YouTube EJS remote component when a JS runtime is available."""
+    """Enable yt-dlp's YouTube EJS remote component when explicitly opted-in and a JS runtime is available."""
+    enable_remote_component = str(os.getenv("GETOFFLINE_YTDLP_ENABLE_EJS", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if not enable_remote_component:
+        return
+
     deno_binary = shutil.which("deno")
     if not deno_binary:
+        log.warning("GETOFFLINE_YTDLP_ENABLE_EJS is enabled but deno is not installed; skipping remote component for %s", context_label)
         return
 
     existing_value = ydl_opts.get("remote_components")

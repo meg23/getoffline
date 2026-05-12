@@ -23,12 +23,12 @@ Install the following system tools first:
 
 - `make`
 - `ffmpeg` (includes `ffprobe`)
-- `deno` (used by yt-dlp's YouTube challenge solver runtime)
+- `deno` (optional, only needed if enabling yt-dlp's YouTube challenge solver runtime)
 - Python 3.8+
 
 Python dependencies are installed automatically by the Makefile.
 
-If `deno` is available on `PATH`, GetOffline automatically enables yt-dlp's recommended YouTube remote component (`ejs:github`) to improve signature/challenge solving for protected formats.
+GetOffline leaves yt-dlp's YouTube remote component disabled by default. Set `GETOFFLINE_YTDLP_ENABLE_EJS=1` to opt in to yt-dlp's recommended `ejs:github` component (requires `deno` on `PATH`).
 
 ## Configuration
 
