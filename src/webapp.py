@@ -2456,7 +2456,12 @@ def _render_index(
           const q = String(transcriptSearchInput.value || '').trim();
           if (!q) return;
           fetch('/transcript-search?q=' + encodeURIComponent(q), {{ cache: 'no-store' }})
-            .then((response) => response.ok ? response.json() : null)
+            .then((response) => {{
+              if (!response.ok) {{
+                throw new Error('transcript-search http ' + response.status);
+              }}
+              return response.json();
+            }})
             .then((payload) => {{
               const results = payload && payload.results ? payload.results : [];
               if (!results.length) {{
@@ -2475,7 +2480,8 @@ def _render_index(
                 }});
               }});
             }})
-            .catch(() => {{
+            .catch((error) => {{
+              try {{ console.error('Transcript search failed', {{ query: q, error }}); }} catch (_) {{}}
               transcriptSearchResults.innerHTML = '<div class="quick-add-empty">Search failed.</div>';
             }});
         }});
@@ -3316,8 +3322,10 @@ def make_handler(state: AppState):
                 return
 
             if path == "/transcript-search":
+                request_started_at = time.monotonic()
                 try:
                     query_text = str((query.get("q") or [""])[0]).strip()
+                    log.info("GET /transcript-search q=%r", query_text)
                     results: List[Dict[str, object]] = _search_transcripts_index(state.database_path, query_text, limit=50)
                     if query_text and not results:
                         log.info("Transcript search index miss for query=%r; falling back to disk/index scan", query_text)
@@ -3347,6 +3355,14 @@ def make_handler(state: AppState):
                     log.exception("Transcript search request failed: %s", exc)
                     body_bytes = json.dumps({"results": [], "error": "search_failed"}).encode("utf-8")
                     status = 200
+                elapsed_ms = (time.monotonic() - request_started_at) * 1000.0
+                log.info(
+                    "GET /transcript-search q=%r status=%s results=%s elapsed_ms=%.1f",
+                    str((query.get("q") or [""])[0]).strip(),
+                    status,
+                    len(json.loads(body_bytes.decode("utf-8")).get("results", [])),
+                    elapsed_ms,
+                )
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
