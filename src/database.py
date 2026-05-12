@@ -21,6 +21,7 @@ try:
         Text,
         UniqueConstraint,
         create_engine,
+        event,
         select,
     )
     from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -915,6 +916,16 @@ if HAS_SQLALCHEMY:
     _ENGINE_CACHE_MAXSIZE = 4
     _ENGINE_CACHE_LOCK = threading.Lock()
     _ENGINE_REGISTRY: "OrderedDict[str, Any]" = OrderedDict()
+    def _attach_checkout_trace_listener(engine, db_path: str) -> None:
+        @event.listens_for(engine, "checkout")
+        def _log_checkout_trace(dbapi_conn, conn_record, conn_proxy):  # pragma: no cover - temporary diagnostics
+            del dbapi_conn, conn_record, conn_proxy
+            import traceback
+
+            stack = " | ".join(line.strip() for line in traceback.format_stack(limit=12)[:-1])
+            log.warning("SQLAlchemy checkout trace db=%s stack=%s", db_path, stack)
+
+
     def _engine_for(db_path: str):
         normalized_db_path = str(Path(db_path).expanduser().resolve())
         Path(normalized_db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -930,6 +941,7 @@ if HAS_SQLALCHEMY:
                 poolclass=NullPool,
                 pool_pre_ping=True,
             )
+            _attach_checkout_trace_listener(engine, normalized_db_path)
             _ENGINE_REGISTRY[normalized_db_path] = engine
 
             while len(_ENGINE_REGISTRY) > _ENGINE_CACHE_MAXSIZE:
