@@ -22,7 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
-from summarization import summarize_segments
+from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
 from database import (
     resolve_download_artifact_path,
@@ -4054,6 +4054,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
+    ensure_local_summary_model()
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)

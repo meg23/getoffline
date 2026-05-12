@@ -4,11 +4,14 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import traceback
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from urllib import error, request
+
+from logger import get_logger
 
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it", "its",
@@ -19,6 +22,9 @@ STOP_WORDS = {
 
 DEFAULT_OLLAMA_MODEL = os.getenv("GETOFFLINE_SUMMARY_MODEL", "qwen2.5:0.5b")
 DEFAULT_OLLAMA_URL = os.getenv("GETOFFLINE_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
+log = get_logger("summarization")
+_MODEL_READY_LOCK = threading.Lock()
+_MODEL_READY = False
 
 
 def _utcnow_iso() -> str:
@@ -96,8 +102,33 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
     return None
 
 
+def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL) -> bool:
+    global _MODEL_READY
+    with _MODEL_READY_LOCK:
+        if _MODEL_READY:
+            return True
+        try:
+            check = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=False)
+            if check.returncode != 0:
+                log.warning("Ollama not ready for summaries (list failed): %s", (check.stderr or check.stdout).strip())
+                return False
+            if model_name not in (check.stdout or ""):
+                log.info("Downloading local summary model via Ollama: %s", model_name)
+                pull = subprocess.run(["ollama", "pull", model_name], capture_output=True, text=True, check=False)
+                if pull.returncode != 0:
+                    log.warning("Failed to download Ollama summary model %s: %s", model_name, (pull.stderr or pull.stdout).strip())
+                    return False
+                log.info("Downloaded Ollama summary model: %s", model_name)
+            _MODEL_READY = True
+            return True
+        except FileNotFoundError:
+            log.warning("Ollama CLI not installed; summary generation will use extractive fallback.")
+            return False
+
+
 def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "subprocess") -> Dict[str, str]:
     joined_text = " ".join((s or "").strip() for s in segments if (s or "").strip())
+    ensure_local_summary_model(model_name=model_name)
     if mode == "in_process":
         llm_summary = _ollama_summary(joined_text, model_name=model_name)
         summary_text = llm_summary or _extractive_summary(joined_text)
