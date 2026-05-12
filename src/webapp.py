@@ -1075,7 +1075,7 @@ def _render_index(
             f"""
             <tr data-row-id="{row.row_id}" data-played="{'1' if row.played else '0'}" data-favorite="{'1' if row_is_favorite else '0'}" data-file-exists="{'1' if file_exists else '0'}">
                 <td class="channel-col" data-label="Channel" title="{channel}">{channel}</td>
-                <td class="title-cell episode-col" data-label="Episode" title="{title_hover}"><a class="episode-link" href="{play_or_download_href}" title="{play_or_download_label}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
+                <td class="title-cell episode-col" data-label="Episode"><a class="episode-link" href="{play_or_download_href}" aria-label="{play_or_download_label}" data-summary="{title_hover}" data-play-link="1" data-row-id="{row.row_id}" data-title="{title}" data-source="{channel}" data-kind="{media_kind}" data-has-subtitles="{'1' if has_subtitles else '0'}" data-resume-seconds="{max(0.0, float(resume_seconds)):.3f}">{title}</a></td>
                 <td data-label="Source"><span class="pill status-new" title="Source: {source_kind}">{source_kind}</span></td>
                 <td data-label="Type"><span class="pill">{ext}</span></td>
                 <td data-label="Size">{size}</td>
@@ -1370,6 +1370,25 @@ def _render_index(
 
     .episode-link {{ color: inherit; text-decoration: none; }}
     .episode-link:hover {{ color: var(--accent); text-decoration: underline; }}
+    .summary-tooltip {{
+      position: fixed;
+      z-index: 9999;
+      pointer-events: none;
+      background: rgba(20, 28, 46, 0.96);
+      color: #eef3ff;
+      border: 1px solid rgba(121, 149, 214, 0.55);
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(11, 18, 35, 0.28);
+      padding: .55rem .7rem;
+      font-size: .88rem;
+      line-height: 1.35;
+      max-width: min(34rem, 80vw);
+      opacity: 0;
+      transform: translateY(2px);
+      transition: opacity .08s ease-out, transform .08s ease-out;
+      white-space: normal;
+    }}
+    .summary-tooltip.is-visible {{ opacity: 1; transform: translateY(0); }}
     .selection-cell {{ text-align: right; }}
     .row-selector {{ width: 1.05rem; height: 1.05rem; cursor: pointer; accent-color: var(--accent); }}
     .select-all-selector {{ display: inline-block; vertical-align: middle; }}
@@ -1629,6 +1648,7 @@ def _render_index(
         <div class="quick-add-actions"><button id="transcript-search-close" type="button">Close</button></div>
       </div>
     </div>
+    <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
 
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
@@ -1699,6 +1719,7 @@ def _render_index(
 
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
+      const summaryTooltip = document.getElementById('summary-tooltip');
       let syncReloadTimer = null;
       let syncStatusPollTimer = null;
       let deferredLibraryRefreshTimer = null;
@@ -2339,9 +2360,40 @@ def _render_index(
       }}
 
       const bindPlayLinks = () => {{
+        const hideSummaryTooltip = () => {{
+          if (!summaryTooltip) return;
+          summaryTooltip.classList.remove('is-visible');
+          summaryTooltip.setAttribute('aria-hidden', 'true');
+        }};
+        const placeSummaryTooltip = (event) => {{
+          if (!summaryTooltip) return;
+          const pad = 12;
+          const rect = summaryTooltip.getBoundingClientRect();
+          let x = event.clientX + 14;
+          let y = event.clientY + 14;
+          if (x + rect.width > window.innerWidth - pad) x = Math.max(pad, event.clientX - rect.width - 14);
+          if (y + rect.height > window.innerHeight - pad) y = Math.max(pad, event.clientY - rect.height - 14);
+          summaryTooltip.style.left = x + 'px';
+          summaryTooltip.style.top = y + 'px';
+        }};
         document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {{
           if (link.dataset.miniPlayerBound === '1') return;
           link.dataset.miniPlayerBound = '1';
+          if (link.dataset.summaryBound !== '1') {{
+            link.dataset.summaryBound = '1';
+            link.addEventListener('mouseenter', (event) => {{
+              if (!summaryTooltip) return;
+              const summaryText = String(link.dataset.summary || '').trim();
+              if (!summaryText) return;
+              summaryTooltip.textContent = summaryText;
+              summaryTooltip.classList.add('is-visible');
+              summaryTooltip.setAttribute('aria-hidden', 'false');
+              placeSummaryTooltip(event);
+            }});
+            link.addEventListener('mousemove', placeSummaryTooltip);
+            link.addEventListener('mouseleave', hideSummaryTooltip);
+            link.addEventListener('blur', hideSummaryTooltip);
+          }}
           link.addEventListener('click', (event) => {{
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -2361,6 +2413,7 @@ def _render_index(
             }};
             localStorage.setItem('getofflineMiniPlayerState', JSON.stringify(state));
             renderMiniPlayer(state);
+            hideSummaryTooltip();
           }});
         }});
       }};
