@@ -1,6 +1,4 @@
 import re
-import shutil
-import tempfile
 from pathlib import Path
 
 from logger import get_logger
@@ -146,11 +144,6 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         )
         return None
 
-    try:
-        from whisper.utils import get_writer
-    except ImportError as exc:
-        raise RuntimeError("openai-whisper is required for subtitle generation.") from exc
-
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     subtitle_language = settings.get("subtitle_language", "en")
     log.info("Generating subtitles: %s (%s, language=%s)", input_file.name, model_name, subtitle_language)
@@ -172,22 +165,20 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
             return None
         raise
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_dir_path = Path(tmp_dir)
-        temp_stem = "subtitle_output"
-        writer = get_writer("srt", str(tmp_dir_path))
-        writer(result, temp_stem)
-
-        generated_subtitle_path = tmp_dir_path / f"{temp_stem}.srt"
-        if not generated_subtitle_path.exists():
-            srt_candidates = sorted(tmp_dir_path.glob("*.srt"))
-            if srt_candidates:
-                generated_subtitle_path = srt_candidates[0]
-            else:
-                raise RuntimeError(f"Whisper did not produce subtitle file in {tmp_dir_path}")
-
-        subtitle_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(generated_subtitle_path, subtitle_path)
+    segments = result.get("segments", [])
+    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+    with subtitle_path.open("w", encoding="utf-8") as srt_file:
+        for index, segment in enumerate(segments, start=1):
+            start = float(segment.get("start", 0.0))
+            end = float(segment.get("end", start + 0.01))
+            text = str(segment.get("text", "")).strip()
+            if not text:
+                continue
+            if end <= start:
+                end = start + 0.01
+            srt_file.write(f"{index}\n")
+            srt_file.write(f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}\n")
+            srt_file.write(f"{text}\n\n")
 
     if not subtitle_path.exists():
         raise RuntimeError(f"Subtitle output file was not created: {subtitle_path}")
