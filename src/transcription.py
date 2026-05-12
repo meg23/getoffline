@@ -1,4 +1,9 @@
+import gc
+import json
+import subprocess
+import sys
 import threading
+import traceback
 from pathlib import Path
 
 from logger import get_logger
@@ -32,15 +37,7 @@ def _normalize_faster_whisper_result(segments_iterable):
     return {"text": " ".join(text_parts).strip(), "segments": segments}
 
 
-def transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str, language: str = None):
-    input_file = Path(input_file).resolve()
-    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name, language)
-    with _TRANSCRIPTION_CACHE_LOCK:
-        cached = _TRANSCRIPTION_CACHE.get(cache_key)
-    if cached is not None:
-        log.info("Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
-        return cached
-
+def _transcribe_in_process(input_file: Path, model_name: str, language: str = None):
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -52,12 +49,61 @@ def transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str, 
             model = WhisperModel(model_name, device="cpu", compute_type="int8")
             _WHISPER_MODEL_CACHE[model_name] = model
 
+    transcribe_kwargs = {"vad_filter": True}
+    if language:
+        transcribe_kwargs["language"] = language
+    segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
+    return _normalize_faster_whisper_result(segments)
+
+
+def _transcribe_worker_once(input_file: str, model_name: str, language: str = None):
+    model = None
+    segments = None
     try:
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
         transcribe_kwargs = {"vad_filter": True}
         if language:
             transcribe_kwargs["language"] = language
         segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
-        result = _normalize_faster_whisper_result(segments)
+        return _normalize_faster_whisper_result(segments)
+    finally:
+        del segments
+        if model is not None:
+            del model
+        gc.collect()
+
+
+def _transcribe_in_subprocess(input_file: Path, model_name: str, language: str = None):
+    payload = {"input_file": str(input_file), "model_name": model_name, "language": language}
+    cmd = [sys.executable, "-m", "transcription", "--worker", json.dumps(payload)]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
+        raise RuntimeError(f"faster-whisper subprocess failed: {details}")
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("faster-whisper subprocess returned invalid JSON output") from exc
+
+
+def transcribe_with_whisper(
+    input_file: Path, model_name: str, log_prefix: str, language: str = None, mode: str = "subprocess"
+):
+    input_file = Path(input_file).resolve()
+    cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name, language)
+    with _TRANSCRIPTION_CACHE_LOCK:
+        cached = _TRANSCRIPTION_CACHE.get(cache_key)
+    if cached is not None:
+        log.info("Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
+        return cached
+
+    try:
+        if mode == "in_process":
+            result = _transcribe_in_process(input_file, model_name, language=language)
+        else:
+            result = _transcribe_in_subprocess(input_file, model_name, language=language)
     except Exception as exc:
         raise TranscriptionError(
             f"Transcription failed for {input_file.name} ({model_name}): {exc}"
@@ -66,3 +112,18 @@ def transcribe_with_whisper(input_file: Path, model_name: str, log_prefix: str, 
     with _TRANSCRIPTION_CACHE_LOCK:
         _TRANSCRIPTION_CACHE[cache_key] = result
     return result
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
+        try:
+            args = json.loads(sys.argv[2])
+            result = _transcribe_worker_once(
+                input_file=str(args["input_file"]),
+                model_name=str(args["model_name"]),
+                language=args.get("language"),
+            )
+            sys.stdout.write(json.dumps(result))
+        except Exception:
+            sys.stderr.write(traceback.format_exc())
+            sys.exit(1)

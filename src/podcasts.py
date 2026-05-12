@@ -244,6 +244,7 @@ def download_podcasts(config, downloaded_items):
                         media_file=job["final_audio"],
                         subtitle_offset_seconds=job["subtitle_offset_seconds"],
                         entry_subtitles_enabled=job["entry_subtitles_enabled"],
+                        subtitle_transcription_mode=defaults.get("subtitle_transcription_mode", "subprocess"),
                         logger=log,
                         context_name=f"podcast {job['name']}",
                         context_label="podcast",

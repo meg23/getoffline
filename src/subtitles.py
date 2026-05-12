@@ -146,9 +146,24 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     subtitle_language = settings.get("subtitle_language", "en")
-    log.info("Generating subtitles: %s (%s, language=%s)", input_file.name, model_name, subtitle_language)
+    transcription_mode = str(settings.get("subtitle_transcription_mode", "subprocess")).strip().lower()
+    if transcription_mode not in {"subprocess", "in_process"}:
+        transcription_mode = "subprocess"
+    log.info(
+        "Generating subtitles: %s (%s, language=%s, mode=%s)",
+        input_file.name,
+        model_name,
+        subtitle_language,
+        transcription_mode,
+    )
     try:
-        result = transcribe_with_whisper(input_file, model_name, "subtitle-generation", language=subtitle_language)
+        result = transcribe_with_whisper(
+            input_file,
+            model_name,
+            "subtitle-generation",
+            language=subtitle_language,
+            mode=transcription_mode,
+        )
     except Exception as exc:
         error_message = str(exc)
         if any(pattern in error_message for pattern in _KNOWN_EMPTY_AUDIO_FAILURE_PATTERNS):
@@ -201,12 +216,15 @@ def create_subtitles(
     logger,
     context_name: str,
     context_label: str,
+    subtitle_transcription_mode: str = "subprocess",
 ):
     if entry_subtitles_enabled and media_file.exists():
         try:
             subtitle_settings = {"subtitle_language": "en"}
             if subtitle_offset_seconds is not None:
                 subtitle_settings["subtitle_time_offset_seconds"] = float(subtitle_offset_seconds)
+            if subtitle_transcription_mode:
+                subtitle_settings["subtitle_transcription_mode"] = str(subtitle_transcription_mode)
 
             subtitle_path = _find_existing_whisper_subtitle(media_file)
             if subtitle_path is None:

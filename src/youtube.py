@@ -295,6 +295,7 @@ def _process_media_file(
     name: str,
     entry_subtitles_enabled: bool,
     subtitle_offset_seconds,
+    subtitle_transcription_mode: str,
 ):
     downloaded_summary_items = []
 
@@ -302,6 +303,7 @@ def _process_media_file(
         media_file=media_file,
         subtitle_offset_seconds=subtitle_offset_seconds,
         entry_subtitles_enabled=entry_subtitles_enabled,
+        subtitle_transcription_mode=subtitle_transcription_mode,
         logger=log,
         context_name=name,
         context_label="YouTube",
@@ -436,6 +438,7 @@ def download_youtube_items(config, downloaded_items):
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             should_generate_subtitles = entry_subtitles_enabled
+            subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "subprocess"))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 should_generate_subtitles = False
             is_forced_redownload = bool(entry.get("redownload", False))
@@ -649,6 +652,7 @@ def download_youtube_items(config, downloaded_items):
                                 name,
                                 should_generate_subtitles,
                                 subtitle_offset_seconds,
+                                subtitle_transcription_mode,
                             )
 
             def record_postprocess_file(d):
@@ -681,6 +685,7 @@ def download_youtube_items(config, downloaded_items):
                             name,
                             should_generate_subtitles,
                             subtitle_offset_seconds,
+                            subtitle_transcription_mode,
                         )
                 else:
                     resolved_path = path.resolve()
@@ -893,6 +898,7 @@ def download_youtube_items(config, downloaded_items):
                     name,
                     should_generate_subtitles,
                     subtitle_offset_seconds,
+                    subtitle_transcription_mode,
                 )
 
             for future in as_completed(list(subtitle_futures_by_media.values())):
