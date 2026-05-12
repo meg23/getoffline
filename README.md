@@ -32,6 +32,14 @@ If `deno` is available on `PATH`, GetOffline enables yt-dlp's recommended YouTub
 
 GetOffline applies the yt-dlp `youtube:player_js_variant=main` workaround for known challenge-solver instability (see yt-dlp issue #16256).
 
+When upgrading yt-dlp from PyPI/pip, install with the default extra so EJS support is present:
+
+```bash
+pip install -U "yt-dlp[default]"
+```
+
+GetOffline sets `--remote-components ejs:github` automatically when `deno` is available, matching yt-dlp guidance for non-GitHub-release installs.
+
 
 ## Configuration
 

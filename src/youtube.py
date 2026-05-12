@@ -86,7 +86,7 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
     """Enable yt-dlp's YouTube EJS remote component when deno is available."""
     deno_binary = shutil.which("deno")
     if not deno_binary:
-        log.warning("deno was not found on PATH; skipping yt-dlp EJS remote component for %s", context_label)
+        log.warning("deno was not found on PATH; skipping yt-dlp EJS remote component for %s. If challenge solving fails, upgrade with: pip install -U 'yt-dlp[default]'", context_label)
         return
 
     existing_value = ydl_opts.get("remote_components")
