@@ -982,7 +982,8 @@ def download_youtube_items(config, downloaded_items):
         proc = subprocess.run(
             [sys.executable, str(worker_script)],
             input=json.dumps(payload),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=None,
             text=True,
             check=False,
         )
