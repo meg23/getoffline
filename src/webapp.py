@@ -701,6 +701,7 @@ def _run_update_job(state: AppState) -> None:
 
     try:
         state.update_runner(state.config, downloaded_items)
+        _index_transcripts_on_startup(state)
         with state.update_status.lock:
             state.update_status.last_result = "ok"
             state.update_status.last_items_count = len(downloaded_items)
@@ -3336,28 +3337,6 @@ def make_handler(state: AppState):
                     query_text = str((query.get("q") or [""])[0]).strip()
                     log.info("GET /transcript-search q=%r", query_text)
                     results: List[Dict[str, object]] = _search_transcripts_index(state.database_path, query_text, limit=50)
-                    if query_text and not results:
-                        log.info("Transcript search index miss for query=%r; falling back to disk/index scan", query_text)
-                        for row in _rows():
-                            try:
-                                media_path = _resolve_safe_media_path(state.output_root, row.file_path)
-                            except Exception as exc:
-                                log.warning("Transcript search skipped row id=%s due to media path error: %s", row.row_id, exc)
-                                continue
-                            if media_path is None:
-                                continue
-                            subtitle_path = _resolve_safe_subtitle_path(state.output_root, row, media_path)
-                            if subtitle_path is None:
-                                continue
-                            try:
-                                hits = _search_transcript_segments(state.database_path, row, subtitle_path, query_text)
-                            except Exception as exc:
-                                log.warning("Transcript search failed row id=%s subtitle=%s error=%s", row.row_id, subtitle_path, exc)
-                                continue
-                            for hit in hits[:5]:
-                                results.append({"row_id": row.row_id, "title": row.title, "start_seconds": hit["start_seconds"], "text": hit["text"]})
-                            if len(results) >= 50:
-                                break
                     body_bytes = json.dumps({"results": results[:50]}).encode("utf-8")
                     status = 200
                 except Exception as exc:
