@@ -29,6 +29,7 @@ Install the following system tools first:
 Python dependencies are installed automatically by the Makefile.
 
 GetOffline leaves yt-dlp's YouTube remote component disabled by default. Set `GETOFFLINE_YTDLP_ENABLE_EJS=1` to opt in to yt-dlp's recommended `ejs:github` component (requires `deno` on `PATH`).
+If you installed `deno` with Homebrew and run GetOffline via a service/GUI, `PATH` may omit Homebrew bins; GetOffline also checks `/opt/homebrew/bin/deno` and `/usr/local/bin/deno`.
 
 ## Configuration
 

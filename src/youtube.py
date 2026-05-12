@@ -35,6 +35,20 @@ log = get_logger("youtube")
 _YTDLP_REMOTE_COMPONENT = "ejs:github"
 
 
+
+
+def _find_deno_binary() -> Optional[str]:
+    deno_binary = shutil.which("deno")
+    if deno_binary:
+        return deno_binary
+
+    # Common Homebrew install locations (often missing from PATH in launch agents/services).
+    for candidate in ("/opt/homebrew/bin/deno", "/usr/local/bin/deno"):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    return None
+
 def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bool:
     source = Path(media_file).expanduser().resolve()
     if not source.exists() or not source.is_file():
@@ -81,9 +95,9 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
     if not enable_remote_component:
         return
 
-    deno_binary = shutil.which("deno")
+    deno_binary = _find_deno_binary()
     if not deno_binary:
-        log.warning("GETOFFLINE_YTDLP_ENABLE_EJS is enabled but deno is not installed; skipping remote component for %s", context_label)
+        log.warning("GETOFFLINE_YTDLP_ENABLE_EJS is enabled but deno was not found (PATH=%s); skipping remote component for %s", os.getenv("PATH", ""), context_label)
         return
 
     existing_value = ydl_opts.get("remote_components")
