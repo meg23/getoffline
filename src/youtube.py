@@ -99,6 +99,9 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
     """Enable yt-dlp's YouTube EJS remote component when explicitly opted-in and a JS runtime is available."""
     enable_remote_component = str(os.getenv("GETOFFLINE_YTDLP_ENABLE_EJS", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if not enable_remote_component:
+        # Hard-disable JS challenge runtimes and remote EJS components unless explicitly opted in.
+        ydl_opts["js_runtimes"] = {}
+
         existing_value = ydl_opts.get("remote_components")
         if isinstance(existing_value, list):
             ydl_opts["remote_components"] = [component for component in existing_value if component != _YTDLP_REMOTE_COMPONENT]
@@ -114,6 +117,8 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
     if not deno_binary:
         log.warning("GETOFFLINE_YTDLP_ENABLE_EJS is enabled but deno was not found (PATH=%s); skipping remote component for %s", os.getenv("PATH", ""), context_label)
         return
+
+    ydl_opts["js_runtimes"] = {"deno": deno_binary}
 
     existing_value = ydl_opts.get("remote_components")
     if isinstance(existing_value, list):
@@ -135,6 +140,7 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
         context_label,
         deno_binary,
     )
+
 
 
 def _clean_log_title(value: str) -> str:
