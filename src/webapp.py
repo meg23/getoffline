@@ -10,6 +10,8 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import Counter
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -3194,9 +3196,17 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 def _collect_runtime_stats() -> List[Tuple[str, str]]:
     usage = resource.getrusage(resource.RUSAGE_SELF)
     open_fd_count = -1
+    open_fd_targets: List[str] = []
     for fd_dir in ("/proc/self/fd", "/dev/fd"):
         try:
-            open_fd_count = len(os.listdir(fd_dir))
+            fd_entries = os.listdir(fd_dir)
+            open_fd_count = len(fd_entries)
+            for fd_name in fd_entries:
+                fd_path = f"{fd_dir}/{fd_name}"
+                try:
+                    open_fd_targets.append(f"{fd_name}: {os.readlink(fd_path)}")
+                except OSError:
+                    open_fd_targets.append(f"{fd_name}: <unreadable>")
             break
         except OSError:
             continue
@@ -3216,7 +3226,43 @@ def _collect_runtime_stats() -> List[Tuple[str, str]]:
         ("GC generation counters", str(gc.get_count())),
         ("Active threads", str(threading.active_count())),
     ]
+    _write_runtime_diagnostics_snapshot(
+        memory_mb=memory_mb,
+        usage=usage,
+        open_fd_count=open_fd_count,
+        open_fd_targets=open_fd_targets,
+    )
     return stats
+
+
+def _write_runtime_diagnostics_snapshot(
+    *,
+    memory_mb: float,
+    usage,
+    open_fd_count: int,
+    open_fd_targets: List[str],
+) -> None:
+    try:
+        object_type_counts = Counter(type(obj).__name__ for obj in gc.get_objects())
+        payload = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "cwd": str(Path.cwd()),
+            "resident_memory_mb": round(memory_mb, 2),
+            "cpu_user_seconds": round(float(usage.ru_utime), 6),
+            "cpu_system_seconds": round(float(usage.ru_stime), 6),
+            "open_file_descriptors": open_fd_count,
+            "open_file_descriptor_targets": open_fd_targets,
+            "python_tracked_objects": len(gc.get_objects()),
+            "gc_generation_counters": list(gc.get_count()),
+            "active_threads": threading.active_count(),
+            "object_type_counts": dict(object_type_counts.most_common()),
+        }
+        diagnostics_path = Path.cwd() / "runtime_stats_debug.jsonl"
+        with diagnostics_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        log.warning("Unable to persist runtime diagnostics snapshot: %s", exc)
 
 
 def _parse_range_header(range_header: str, file_size: int) -> Optional[Dict[str, int]]:
