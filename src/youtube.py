@@ -32,6 +32,8 @@ _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
 log = get_logger("youtube")
 
+_YTDLP_REMOTE_COMPONENT = "ejs:github"
+
 def _normalize_ytdlp_message(message: str) -> str:
     text = str(message or "").strip()
     if text.startswith("[youtube] "):
@@ -81,8 +83,26 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
 
 
 def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
-    """Remote EJS component support is disabled pending upstream runtime stability fixes."""
-    return
+    """Enable yt-dlp's YouTube EJS remote component when deno is available."""
+    deno_binary = shutil.which("deno")
+    if not deno_binary:
+        log.warning("deno was not found on PATH; skipping yt-dlp EJS remote component for %s", context_label)
+        return
+
+    existing_value = ydl_opts.get("remote_components")
+    if isinstance(existing_value, list):
+        components = existing_value
+    elif isinstance(existing_value, str) and existing_value.strip():
+        components = [part.strip() for part in existing_value.split(",") if part.strip()]
+    else:
+        components = []
+
+    if _YTDLP_REMOTE_COMPONENT in components:
+        return
+
+    components.append(_YTDLP_REMOTE_COMPONENT)
+    ydl_opts["remote_components"] = components
+    log.info("Enabled yt-dlp remote component %s for %s (runtime: %s)", _YTDLP_REMOTE_COMPONENT, context_label, deno_binary)
 
 
 
