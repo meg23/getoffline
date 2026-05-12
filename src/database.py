@@ -4,7 +4,7 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
-from functools import lru_cache
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,10 +19,14 @@ try:
         String,
         Text,
         UniqueConstraint,
+        bindparam,
         create_engine,
+        func,
         select,
+        update,
     )
     from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+    from sqlalchemy.pool import NullPool
 
     HAS_SQLALCHEMY = True
 except ModuleNotFoundError:  # pragma: no cover
@@ -857,8 +861,6 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
 
 
 if HAS_SQLALCHEMY:
-    _ENGINE_REGISTRY: Dict[str, Any] = {}
-
     class Base(DeclarativeBase):
         pass
 
@@ -912,31 +914,80 @@ if HAS_SQLALCHEMY:
         last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-    @lru_cache(maxsize=4)
-    def _engine_for(db_path: str):
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
-        _ENGINE_REGISTRY[str(db_path)] = engine
-        return engine
+    _UPDATE_PROGRESS_STMT = update(DownloadRecord).where(
+        DownloadRecord.id == bindparam("row_id_param")
+    ).values(
+        last_position_seconds=bindparam("safe_position_param"),
+        total_listened_seconds=func.max(
+            0.0,
+            func.coalesce(DownloadRecord.total_listened_seconds, 0.0)
+            + func.max(
+                0.0,
+                bindparam("safe_position_param") - func.coalesce(DownloadRecord.last_position_seconds, 0.0),
+            ),
+        ),
+        last_position_updated_at=bindparam("updated_at_param"),
+        last_seen_at=bindparam("updated_at_param"),
+    )
 
+
+    _ENGINE_LOCK = threading.Lock()
+    _ENGINE_REGISTRY: Dict[str, Any] = {}
+    _INITIALIZED_PATHS: set[str] = set()
+
+
+    def _normalize_db_path(db_path: str) -> str:
+        return str(Path(db_path).expanduser().resolve())
+
+    def _engine_for(db_path: str):
+        normalized_db_path = _normalize_db_path(db_path)
+        Path(normalized_db_path).parent.mkdir(parents=True, exist_ok=True)
+        with _ENGINE_LOCK:
+            engine = _ENGINE_REGISTRY.get(normalized_db_path)
+            if engine is not None:
+                return engine
+
+            engine = create_engine(
+                f"sqlite:///{normalized_db_path}",
+                future=True,
+                poolclass=NullPool,
+                pool_pre_ping=True,
+            )
+            _ENGINE_REGISTRY[normalized_db_path] = engine
+            log.info("Created SQLAlchemy engine db=%s", normalized_db_path)
+            return engine
 
     def close_cached_descriptors() -> int:
         """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
-        cache_info = _engine_for.cache_info()
-        engines = list(_ENGINE_REGISTRY.values())
+        with _ENGINE_LOCK:
+            count = len(_ENGINE_REGISTRY)
+            engines = list(_ENGINE_REGISTRY.values())
+            _ENGINE_REGISTRY.clear()
+            _INITIALIZED_PATHS.clear()
         for engine in engines:
             try:
                 engine.dispose()
             except Exception:  # pragma: no cover - defensive cleanup only
                 pass
-        _ENGINE_REGISTRY.clear()
-        _engine_for.cache_clear()
-        return int(cache_info.currsize)
+        return count
 
 
     def init_database(db_path: str) -> None:
-        apply_migrations(db_path)
-        Base.metadata.create_all(_engine_for(db_path))
+        normalized_db_path = _normalize_db_path(db_path)
+        apply_migrations(normalized_db_path)
+        engine = _engine_for(normalized_db_path)
+
+        with _ENGINE_LOCK:
+            already_initialized = normalized_db_path in _INITIALIZED_PATHS
+        if already_initialized:
+            log.debug("Skipping create_all; already initialized db=%s", normalized_db_path)
+            return
+
+        Base.metadata.create_all(engine)
+
+        with _ENGINE_LOCK:
+            _INITIALIZED_PATHS.add(normalized_db_path)
+        log.info("Ran create_all for db=%s", normalized_db_path)
 
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
@@ -949,6 +1000,7 @@ if HAS_SQLALCHEMY:
             )
             row_id = session.execute(stmt).scalar_one_or_none()
             return row_id is not None
+        
 
 
     def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
@@ -1104,6 +1156,29 @@ if HAS_SQLALCHEMY:
                 return False
             raise
 
+    def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> int:
+        payload = []
+        now = _utcnow()
+        for row_id, raw_seconds in updates.items():
+            payload.append(
+                {
+                    "row_id_param": int(row_id),
+                    "safe_position_param": max(0.0, float(raw_seconds or 0.0)),
+                    "updated_at_param": now,
+                }
+            )
+        if not payload:
+            return 0
+        try:
+            with _engine_for(db_path).begin() as conn:
+                result = conn.execute(_UPDATE_PROGRESS_STMT, payload)
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "batch updating download playback positions", exc)
+            if _is_sqlite_lock_error_message(str(exc)):
+                return 0
+            raise
+
     def get_total_listened_seconds(db_path: str) -> float:
         with Session(_engine_for(db_path)) as session:
             stmt = select(DownloadRecord.total_listened_seconds)
@@ -1117,6 +1192,14 @@ else:
 
     def close_cached_descriptors() -> int:
         return 0
+
+    def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> int:
+        updated = 0
+        for row_id, seconds in updates.items():
+            if update_download_position_seconds(db_path, int(row_id), float(seconds)):
+                updated += 1
+        return updated
+
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
         return _is_downloaded_sqlite(db_path, source_type, source_name, item_uid)

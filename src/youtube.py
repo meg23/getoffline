@@ -345,6 +345,29 @@ def _build_youtube_payload(
         item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
     title = str(info.get("title") or "").strip() or None
 
+    compact_metadata = {
+        "id": info.get("id"),
+        "title": info.get("title"),
+        "webpage_url": info.get("webpage_url"),
+        "uploader": info.get("uploader"),
+        "channel": info.get("channel"),
+        "duration": info.get("duration"),
+        "upload_date": info.get("upload_date"),
+        "extractor": info.get("extractor"),
+        "extractor_key": info.get("extractor_key"),
+        "playlist_id": info.get("playlist_id"),
+        "playlist_title": info.get("playlist_title"),
+        "format_id": info.get("format_id"),
+        "format_note": info.get("format_note"),
+        "fps": info.get("fps"),
+        "width": info.get("width"),
+        "height": info.get("height"),
+        "filesize": info.get("filesize"),
+        "filesize_approx": info.get("filesize_approx"),
+        "acodec": info.get("acodec"),
+        "vcodec": info.get("vcodec"),
+    }
+
     return {
         "source_type": "youtube",
         "source_name": source_name,
@@ -377,7 +400,7 @@ def _build_youtube_payload(
         "subtitle_path": None,
         "download_status": download_status,
         "error_message": error_message,
-        "raw_metadata": info,
+        "raw_metadata": compact_metadata,
     }
 
 
@@ -413,6 +436,8 @@ def download_youtube_items(config, downloaded_items):
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             should_generate_subtitles = entry_subtitles_enabled
+            if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+                should_generate_subtitles = False
             is_forced_redownload = bool(entry.get("redownload", False))
 
             extracted_audio_files: List[Path] = []
@@ -909,6 +934,9 @@ def download_youtube_items(config, downloaded_items):
                         download_status="downloaded",
                     ),
                 )
+                record.clear()
+                del info
+            finished_download_info.clear()
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 

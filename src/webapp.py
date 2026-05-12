@@ -37,6 +37,7 @@ from database import (
     update_download_settings,
     update_stored_defaults,
     update_download_position_seconds,
+    update_download_positions_batch,
     close_cached_descriptors,
 )
 
@@ -59,9 +60,11 @@ VIDEO_EXTENSIONS = {"mp4", "mkv", "webm", "mov"}
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
 SQLITE_PLAYBACK_TIMEOUT_SECONDS = 0.1
-PROGRESS_FLUSH_COALESCE_SECONDS = 0.35
-PROGRESS_FLUSH_POLL_SECONDS = 0.5
+PROGRESS_FLUSH_COALESCE_SECONDS = 30.0
+PROGRESS_FLUSH_POLL_SECONDS = 1.0
+PROGRESS_MIN_DELTA_SECONDS = 5.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
+MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -738,6 +741,10 @@ def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: flo
 
     with state.pending_progress_lock:
         existing = state.pending_progress.get(int(row_id))
+        is_timeupdate = str(reason or "").strip().lower() in {"timeupdate", "mini-timeupdate"}
+        if existing and not completion and not forced and is_timeupdate:
+            if abs(float(existing[0]) - safe_seconds) < PROGRESS_MIN_DELTA_SECONDS:
+                return
         if existing and existing[1] and not completion:
             # Keep completion resets sticky until they are flushed to storage.
             safe_seconds = float(existing[0])
@@ -769,6 +776,15 @@ def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: flo
 
 
 def _flush_pending_progress_updates(state: AppState) -> int:
+    if str(os.getenv("GETOFFLINE_ENABLE_PROGRESS_PERSISTENCE", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+        with state.pending_progress_lock:
+            dropped = len(state.pending_progress)
+            state.pending_progress.clear()
+            state.pending_progress_event.clear()
+        if dropped:
+            log.info("Progress persistence disabled; dropped %s pending updates.", dropped)
+        return 0
+
     with state.pending_progress_lock:
         pending = dict(state.pending_progress)
         state.pending_progress.clear()
@@ -778,14 +794,18 @@ def _flush_pending_progress_updates(state: AppState) -> int:
         return 0
 
     flush_started_at = time.monotonic()
-    updated_count = 0
+    batch_payload: Dict[int, float] = {}
     for row_id, progress_payload in pending.items():
         seconds = float(progress_payload[0]) if isinstance(progress_payload, tuple) else float(progress_payload)
-        updated = update_download_position_seconds(str(state.database_path), int(row_id), seconds)
-        if not updated:
-            log.warning("Progress update skipped for id=%s (db busy or row missing)", row_id)
-        else:
-            updated_count += 1
+        batch_payload[int(row_id)] = seconds
+
+    updated_count = update_download_positions_batch(str(state.database_path), batch_payload)
+    if updated_count < len(batch_payload):
+        log.warning(
+            "Progress batch update partial: attempted=%s updated=%s",
+            len(batch_payload),
+            updated_count,
+        )
 
     with state.progress_metrics_lock:
         state.progress_flush_count += 1
@@ -2047,7 +2067,7 @@ def _render_index(
           btn.type = 'button';
           btn.className = 'mini-player-transcript-line';
           btn.dataset.idx = String(idx);
-          btn.textContent = (cue.text || '').replace(/\s+/g, ' ').trim();
+          btn.textContent = (cue.text || '').replace(/\\s+/g, ' ').trim();
           btn.addEventListener('click', () => {{
             player.currentTime = Math.max(0, cue.startTime || 0);
             player.play().catch(() => {{}});
@@ -3355,6 +3375,8 @@ def _log_stream_disconnect(media_path: Path) -> None:
 
 def make_handler(state: AppState):
     class _Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.0"
+
         def setup(self):
             super().setup()
             try:
@@ -3362,7 +3384,12 @@ def make_handler(state: AppState):
             except OSError:
                 pass
 
+        def end_headers(self):
+            self.send_header("Connection", "close")
+            super().end_headers()
+
         def do_GET(self):  # noqa: N802
+            self.close_connection = True
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
@@ -3598,6 +3625,7 @@ def make_handler(state: AppState):
             self.send_error(404, "Not found")
 
         def do_POST(self):  # noqa: N802
+            self.close_connection = True
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
 
@@ -3842,7 +3870,6 @@ def make_handler(state: AppState):
                 return
 
             self.send_error(404, "Not found")
-
         def log_message(self, fmt, *args):
             _ = fmt, args
 
@@ -3864,7 +3891,11 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
-    _index_transcripts_on_startup(state)
+    transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    if transcript_indexing_enabled:
+        _index_transcripts_on_startup(state)
+    else:
+        log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
     auto_update_stop_event = threading.Event()
     auto_update_thread = threading.Thread(
         target=_auto_update_loop,
@@ -3882,12 +3913,16 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     progress_flush_thread.start()
 
     descriptor_cleanup_stop_event = threading.Event()
-    descriptor_cleanup_thread = threading.Thread(
-        target=_descriptor_cleanup_loop,
-        args=(state, descriptor_cleanup_stop_event),
-        daemon=True,
-    )
-    descriptor_cleanup_thread.start()
+    descriptor_cleanup_enabled = str(os.getenv("GETOFFLINE_ENABLE_DESCRIPTOR_CLEANUP", "")).strip().lower() in {"1", "true", "yes", "on"}
+    if descriptor_cleanup_enabled:
+        descriptor_cleanup_thread = threading.Thread(
+            target=_descriptor_cleanup_loop,
+            args=(state, descriptor_cleanup_stop_event),
+            daemon=True,
+        )
+        descriptor_cleanup_thread.start()
+    else:
+        log.info("Descriptor cleanup loop disabled (set GETOFFLINE_ENABLE_DESCRIPTOR_CLEANUP=1 to enable).")
 
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
