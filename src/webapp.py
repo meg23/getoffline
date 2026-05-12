@@ -865,6 +865,20 @@ def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> No
             log.info("Descriptor cleanup: disposed %s cached database engine(s)", closed_count)
 
 
+def _log_cache_diagnostics(state: AppState) -> None:
+    cache_entries: List[str] = []
+    for name, value in globals().items():
+        info_fn = getattr(value, "cache_info", None)
+        if callable(info_fn):
+            try:
+                cache_entries.append(f"{name}:{info_fn()}")
+            except Exception:
+                continue
+    cache_text = ", ".join(cache_entries) if cache_entries else "no-explicit-lru-caches"
+    log.info("Memory diagnostics cache_info=%s", cache_text)
+    log.info("Memory diagnostics sql_checked_out=%s pending_progress=%s", get_checked_out_connection_count(), len(state.pending_progress))
+
+
 def _memory_diagnostics_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         if stop_event.wait(MEMORY_DIAGNOSTICS_INTERVAL_SECONDS):
@@ -917,6 +931,24 @@ def _memory_diagnostics_loop(state: AppState, stop_event: threading.Event) -> No
                 transcript_rows,
                 transcript_segments,
                 len(state.pending_progress),
+            )
+            _log_cache_diagnostics(state)
+
+            rss_before_gc = rss_mb
+            gc_before = tracemalloc.get_traced_memory()[0] if tracemalloc.is_tracing() else 0
+            freed = gc.collect()
+            usage_after = resource.getrusage(resource.RUSAGE_SELF)
+            rss_after_gc = float(usage_after.ru_maxrss) / 1024.0
+            if sys.platform == "darwin":
+                rss_after_gc /= 1024.0
+            gc_after = tracemalloc.get_traced_memory()[0] if tracemalloc.is_tracing() else 0
+            log.info(
+                "Memory diagnostics forced_gc freed=%s rss_mb_before=%.2f rss_mb_after=%.2f traced_before_mb=%.2f traced_after_mb=%.2f",
+                freed,
+                rss_before_gc,
+                rss_after_gc,
+                gc_before / (1024 * 1024),
+                gc_after / (1024 * 1024),
             )
         except Exception as exc:
             log.warning("Memory diagnostics loop error: %s", exc)
@@ -3973,12 +4005,16 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     progress_flush_thread.start()
 
     descriptor_cleanup_stop_event = threading.Event()
-    descriptor_cleanup_thread = threading.Thread(
-        target=_descriptor_cleanup_loop,
-        args=(state, descriptor_cleanup_stop_event),
-        daemon=True,
-    )
-    descriptor_cleanup_thread.start()
+    descriptor_cleanup_enabled = str(os.getenv("GETOFFLINE_ENABLE_DESCRIPTOR_CLEANUP", "")).strip().lower() in {"1", "true", "yes", "on"}
+    if descriptor_cleanup_enabled:
+        descriptor_cleanup_thread = threading.Thread(
+            target=_descriptor_cleanup_loop,
+            args=(state, descriptor_cleanup_stop_event),
+            daemon=True,
+        )
+        descriptor_cleanup_thread.start()
+    else:
+        log.info("Descriptor cleanup loop disabled (set GETOFFLINE_ENABLE_DESCRIPTOR_CLEANUP=1 to enable).")
 
     memory_diagnostics_stop_event = threading.Event()
     memory_diagnostics_thread = threading.Thread(
