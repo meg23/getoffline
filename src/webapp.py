@@ -660,7 +660,6 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
             (row.row_id,),
         ).fetchone()
         if existing and existing[0]:
-            log.info("Summary cache hit for row id=%s", row.row_id)
             return str(existing[0])
         segment_rows = conn.execute(
             """
