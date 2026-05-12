@@ -21,7 +21,6 @@ try:
         UniqueConstraint,
         bindparam,
         create_engine,
-        event,
         func,
         select,
         update,
@@ -933,40 +932,12 @@ if HAS_SQLALCHEMY:
 
 
     _ENGINE_LOCK = threading.Lock()
-    _COUNTER_LOCK = threading.Lock()
     _ENGINE_REGISTRY: Dict[str, Any] = {}
     _INITIALIZED_PATHS: set[str] = set()
-    _CHECKOUT_COUNT = 0
-    _CHECKIN_COUNT = 0
 
 
     def _normalize_db_path(db_path: str) -> str:
         return str(Path(db_path).expanduser().resolve())
-
-
-    def _attach_checkout_trace_listener(engine, db_path: str) -> None:
-        @event.listens_for(engine, "checkout")
-        def _log_checkout_trace(dbapi_conn, conn_record, conn_proxy):  # pragma: no cover - temporary diagnostics
-            del dbapi_conn, conn_record, conn_proxy
-            global _CHECKOUT_COUNT
-
-            with _COUNTER_LOCK:
-                _CHECKOUT_COUNT += 1
-                checked_out = _CHECKOUT_COUNT - _CHECKIN_COUNT
-
-            log.debug("SQLAlchemy checkout db=%s checked_out=%s", db_path, checked_out)
-
-        @event.listens_for(engine, "checkin")
-        def _log_checkin_trace(dbapi_conn, conn_record):  # pragma: no cover - temporary diagnostics
-            del dbapi_conn, conn_record
-            global _CHECKIN_COUNT
-
-            with _COUNTER_LOCK:
-                _CHECKIN_COUNT += 1
-                checked_out = _CHECKOUT_COUNT - _CHECKIN_COUNT
-
-            log.debug("SQLAlchemy checkin db=%s checked_out=%s", db_path, checked_out)
-
 
     def _engine_for(db_path: str):
         normalized_db_path = _normalize_db_path(db_path)
@@ -982,17 +953,9 @@ if HAS_SQLALCHEMY:
                 poolclass=NullPool,
                 pool_pre_ping=True,
             )
-            _attach_checkout_trace_listener(engine, normalized_db_path)
             _ENGINE_REGISTRY[normalized_db_path] = engine
             log.info("Created SQLAlchemy engine db=%s", normalized_db_path)
             return engine
-
-
-
-    def get_checked_out_connection_count() -> int:
-        with _COUNTER_LOCK:
-            return _CHECKOUT_COUNT - _CHECKIN_COUNT
-
 
     def close_cached_descriptors() -> int:
         """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
@@ -1227,12 +1190,6 @@ else:
     def init_database(db_path: str) -> None:
         _init_database_sqlite(db_path)
 
-
-    def get_checked_out_connection_count() -> int:
-        with _COUNTER_LOCK:
-            return _CHECKOUT_COUNT - _CHECKIN_COUNT
-
-
     def close_cached_descriptors() -> int:
         return 0
 
@@ -1243,8 +1200,6 @@ else:
                 updated += 1
         return updated
 
-    def get_checked_out_connection_count() -> int:
-        return 0
 
     def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
         return _is_downloaded_sqlite(db_path, source_type, source_name, item_uid)

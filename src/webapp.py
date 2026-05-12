@@ -10,7 +10,6 @@ import sqlite3
 import sys
 import threading
 import time
-import tracemalloc
 from collections import Counter
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
@@ -40,7 +39,6 @@ from database import (
     update_download_position_seconds,
     update_download_positions_batch,
     close_cached_descriptors,
-    get_checked_out_connection_count,
 )
 
 
@@ -69,10 +67,6 @@ DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 
 log = get_logger("webapp")
-try:  # pragma: no cover - optional dependency
-    import objgraph
-except ModuleNotFoundError:  # pragma: no cover
-    objgraph = None
 _DISCONNECT_LOG_LOCK = threading.Lock()
 _LAST_DISCONNECT_LOGGED_AT: Dict[str, float] = {}
 
@@ -122,10 +116,6 @@ class AppState:
     progress_last_log_at: float = 0.0
     progress_last_reason: str = "unknown"
     progress_last_forced: bool = False
-    diagnostics_lock: threading.Lock = field(default_factory=threading.Lock)
-    last_object_type_counts: Dict[str, int] = field(default_factory=dict)
-    transcript_indexed_rows: int = 0
-    transcript_indexed_segments: int = 0
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -688,9 +678,6 @@ def _index_transcripts_on_startup(state: AppState) -> None:
     else:
         log.info("Transcript startup indexing found no new rows to index.")
     log.info("Downloaded unindexed transcript candidates detected: %s", unindexed_candidates)
-    with state.diagnostics_lock:
-        state.transcript_indexed_rows = indexed_rows
-        state.transcript_indexed_segments = indexed_segments
 
 
 def _format_timestamp(ts: Optional[float]) -> str:
@@ -882,108 +869,6 @@ def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> No
         closed_count = close_cached_descriptors()
         if closed_count:
             log.info("Descriptor cleanup: disposed %s cached database engine(s)", closed_count)
-
-
-def _log_cache_diagnostics(state: AppState) -> None:
-    cache_entries: List[str] = []
-    for name, value in globals().items():
-        info_fn = getattr(value, "cache_info", None)
-        if callable(info_fn):
-            try:
-                cache_entries.append(f"{name}:{info_fn()}")
-            except Exception:
-                continue
-    cache_text = ", ".join(cache_entries) if cache_entries else "no-explicit-lru-caches"
-    log.info("Memory diagnostics cache_info=%s", cache_text)
-    log.info("Memory diagnostics sql_checked_out=%s pending_progress=%s", get_checked_out_connection_count(), len(state.pending_progress))
-
-
-def _memory_diagnostics_loop(state: AppState, stop_event: threading.Event) -> None:
-    while not stop_event.is_set():
-        if stop_event.wait(MEMORY_DIAGNOSTICS_INTERVAL_SECONDS):
-            break
-        try:
-            usage = resource.getrusage(resource.RUSAGE_SELF)
-            rss_mb = float(usage.ru_maxrss) / 1024.0
-            if sys.platform == "darwin":
-                rss_mb /= 1024.0
-
-            object_counts = Counter(type(obj).__name__ for obj in gc.get_objects())
-            top_types = object_counts.most_common(30)
-            with state.diagnostics_lock:
-                previous = dict(state.last_object_type_counts)
-                state.last_object_type_counts = dict(object_counts)
-                transcript_rows = state.transcript_indexed_rows
-                transcript_segments = state.transcript_indexed_segments
-
-            growth = []
-            for name, count in top_types:
-                delta = count - int(previous.get(name, 0))
-                if delta:
-                    growth.append((name, count, delta))
-            growth_text = ", ".join(f"{n}:{c} ({d:+d})" for n, c, d in growth[:15]) or "no-growth"
-            log.info("Memory diagnostics object growth: %s", growth_text)
-
-            if tracemalloc.is_tracing():
-                snapshot = tracemalloc.take_snapshot()
-                stats = snapshot.statistics("lineno")[:30]
-                total_bytes = sum(stat.size for stat in stats)
-                top_lines = "; ".join(
-                    f"{stat.traceback[0].filename}:{stat.traceback[0].lineno} size={stat.size/1024:.1f}KiB count={stat.count}"
-                    for stat in stats[:10]
-                )
-                log.info(
-                    "Memory diagnostics tracemalloc rss_mb=%.2f top30_total_mb=%.2f top=%s",
-                    rss_mb,
-                    total_bytes / (1024 * 1024),
-                    top_lines,
-                )
-            else:
-                log.info("Memory diagnostics tracemalloc disabled rss_mb=%.2f", rss_mb)
-
-            if objgraph is not None:
-                growth_types = objgraph.most_common_types(limit=20)
-                log.info("Memory diagnostics objgraph common=%s", growth_types)
-            largest_containers = []
-            for obj in gc.get_objects():
-                if isinstance(obj, (dict, list, set, tuple)):
-                    try:
-                        size = len(obj)
-                    except Exception:
-                        continue
-                    if size <= 1000:
-                        continue
-                    largest_containers.append((type(obj).__name__, size, id(obj)))
-            largest_containers.sort(key=lambda item: item[1], reverse=True)
-            if largest_containers:
-                log.info("Memory diagnostics largest_containers=%s", largest_containers[:20])
-
-            log.info(
-                "Memory diagnostics transcript_state indexed_rows=%s indexed_segments=%s pending_progress=%s",
-                transcript_rows,
-                transcript_segments,
-                len(state.pending_progress),
-            )
-            _log_cache_diagnostics(state)
-
-            rss_before_gc = rss_mb
-            gc_before = tracemalloc.get_traced_memory()[0] if tracemalloc.is_tracing() else 0
-            freed = gc.collect()
-            usage_after = resource.getrusage(resource.RUSAGE_SELF)
-            rss_after_gc = float(usage_after.ru_maxrss) / 1024.0
-            if sys.platform == "darwin":
-                rss_after_gc /= 1024.0
-            gc_after = tracemalloc.get_traced_memory()[0] if tracemalloc.is_tracing() else 0
-            log.info(
-                "Memory diagnostics forced_gc freed=%s rss_mb_before=%.2f rss_mb_after=%.2f traced_before_mb=%.2f traced_after_mb=%.2f",
-                freed,
-                rss_before_gc,
-                rss_after_gc,
-                gc_before / (1024 * 1024),
-                gc_after / (1024 * 1024),
-            )
-        except Exception as exc:
-            log.warning("Memory diagnostics loop error: %s", exc)
 
 
 def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
@@ -3505,7 +3390,6 @@ def make_handler(state: AppState):
 
         def do_GET(self):  # noqa: N802
             self.close_connection = True
-            checkout_baseline = get_checked_out_connection_count()
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
@@ -3739,11 +3623,9 @@ def make_handler(state: AppState):
                 return
 
             self.send_error(404, "Not found")
-            self._log_checkout_balance_if_leaking(checkout_baseline, "POST", path)
 
         def do_POST(self):  # noqa: N802
             self.close_connection = True
-            checkout_baseline = get_checked_out_connection_count()
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
 
@@ -3988,14 +3870,6 @@ def make_handler(state: AppState):
                 return
 
             self.send_error(404, "Not found")
-            self._log_checkout_balance_if_leaking(checkout_baseline, "GET", path)
-
-
-        def _log_checkout_balance_if_leaking(self, baseline: int, method: str, path: str) -> None:
-            current = get_checked_out_connection_count()
-            if current > baseline:
-                log.warning("SQLAlchemy checked-out connections grew during %s %s baseline=%s current=%s", method, path, baseline, current)
-
         def log_message(self, fmt, *args):
             _ = fmt, args
 
@@ -4003,8 +3877,6 @@ def make_handler(state: AppState):
 
 
 def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
-    if not tracemalloc.is_tracing():
-        tracemalloc.start(25)
     defaults = config["defaults"]
     init_database(str(defaults["database_path"]))
     stored = get_stored_config(str(defaults["database_path"]))
@@ -4052,14 +3924,6 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     else:
         log.info("Descriptor cleanup loop disabled (set GETOFFLINE_ENABLE_DESCRIPTOR_CLEANUP=1 to enable).")
 
-    memory_diagnostics_stop_event = threading.Event()
-    memory_diagnostics_thread = threading.Thread(
-        target=_memory_diagnostics_loop,
-        args=(state, memory_diagnostics_stop_event),
-        daemon=True,
-    )
-    memory_diagnostics_thread.start()
-
     server = ThreadingHTTPServer((host, int(port)), make_handler(state))
     print(f"Web app running at http://{host}:{port}")
     print("Automatic download checks are enabled. Adjust the interval in Settings (minutes).")
@@ -4071,6 +3935,5 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         auto_update_stop_event.set()
         progress_flush_stop_event.set()
         descriptor_cleanup_stop_event.set()
-        memory_diagnostics_stop_event.set()
         state.pending_progress_event.set()
         server.server_close()
