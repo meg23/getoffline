@@ -69,6 +69,9 @@ PROGRESS_MIN_DELTA_SECONDS = 5.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 HEAPDUMP_TOP_ALLOCATIONS = 250
+IDLE_RSS_LOG_INTERVAL_SECONDS = 300
+DEBUG_MEMORY_ENABLED = str(os.getenv("DEBUG_MEMORY", "")).strip().lower() in {"1", "true", "yes", "on"}
+MEMORY_CEILING_MB = float(os.getenv("GETOFFLINE_MEMORY_CEILING_MB", "0") or "0")
 
 log = get_logger("webapp")
 _DISCONNECT_LOG_LOCK = threading.Lock()
@@ -3260,12 +3263,13 @@ def _collect_runtime_stats() -> List[Tuple[str, str]]:
         ("GC generation counters", str(gc.get_count())),
         ("Active threads", str(threading.active_count())),
     ]
-    _write_runtime_diagnostics_snapshot(
-        memory_mb=memory_mb,
-        usage=usage,
-        open_fd_count=open_fd_count,
-        open_fd_targets=open_fd_targets,
-    )
+    if DEBUG_MEMORY_ENABLED:
+        _write_runtime_diagnostics_snapshot(
+            memory_mb=memory_mb,
+            usage=usage,
+            open_fd_count=open_fd_count,
+            open_fd_targets=open_fd_targets,
+        )
     return stats
 
 
@@ -3847,12 +3851,18 @@ def make_handler(state: AppState):
                     update_download_settings(str(state.database_path), cookie_text or None)
 
                 elif settings_action == "take_heapdump":
-                    heapdump_path = _write_python_heapdump()
-                    log.warning("Captured Python heapdump to %s", heapdump_path)
+                    if not DEBUG_MEMORY_ENABLED:
+                        log.warning("Heapdump request ignored because DEBUG_MEMORY is not enabled.")
+                    else:
+                        heapdump_path = _write_python_heapdump()
+                        log.warning("Captured Python heapdump to %s", heapdump_path)
 
                 elif settings_action == "take_threaddump":
-                    threaddump_path = _write_python_threaddump()
-                    log.warning("Captured Python threaddump to %s", threaddump_path)
+                    if not DEBUG_MEMORY_ENABLED:
+                        log.warning("Threaddump request ignored because DEBUG_MEMORY is not enabled.")
+                    else:
+                        threaddump_path = _write_python_threaddump()
+                        log.warning("Captured Python threaddump to %s", threaddump_path)
 
                 elif settings_action == "add_source":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
@@ -3982,6 +3992,20 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     )
     progress_flush_thread.start()
 
+    def _idle_rss_loop(stop_event: threading.Event) -> None:
+        while not stop_event.wait(IDLE_RSS_LOG_INTERVAL_SECONDS):
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            rss_mb = float(usage.ru_maxrss) / 1024.0
+            if sys.platform == "darwin":
+                rss_mb /= 1024.0
+            log.info("Idle RSS: %.2f MB", rss_mb)
+            if MEMORY_CEILING_MB > 0 and rss_mb > MEMORY_CEILING_MB:
+                log.warning("Memory ceiling exceeded: rss=%.2f MB ceiling=%.2f MB", rss_mb, MEMORY_CEILING_MB)
+
+    rss_stop_event = threading.Event()
+    rss_thread = threading.Thread(target=_idle_rss_loop, args=(rss_stop_event,), daemon=True)
+    rss_thread.start()
+
     descriptor_cleanup_stop_event = threading.Event()
     descriptor_cleanup_enabled = str(os.getenv("GETOFFLINE_ENABLE_DESCRIPTOR_CLEANUP", "")).strip().lower() in {"1", "true", "yes", "on"}
     if descriptor_cleanup_enabled:
@@ -4004,6 +4028,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     finally:
         auto_update_stop_event.set()
         progress_flush_stop_event.set()
+        rss_stop_event.set()
         descriptor_cleanup_stop_event.set()
         state.pending_progress_event.set()
         server.server_close()

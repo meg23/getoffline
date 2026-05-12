@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from yt_dlp import YoutubeDL
 
 from database import (
     build_item_uid,
@@ -168,7 +167,7 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
         ydl_opts["cookiefile"] = cookie_file
     _enable_youtube_ejs_remote_component(ydl_opts, "source-name resolution")
 
-    with YoutubeDL(ydl_opts) as ydl:
+    with _get_youtubedl()(ydl_opts) as ydl:
         info = ydl.extract_info(source_url, download=False)
 
     if info and isinstance(info, dict):
@@ -208,7 +207,7 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
     _enable_youtube_ejs_remote_component(ydl_opts, "search")
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with _get_youtubedl()(ydl_opts) as ydl:
             payload = ydl.extract_info(f"ytsearch{bounded_limit}:{search_query}", download=False) or {}
     except Exception as exc:
         log.warning("YouTube search failed for query=%r: %s", search_query, exc)
@@ -295,6 +294,7 @@ def _process_media_file(
     name: str,
     entry_subtitles_enabled: bool,
     subtitle_offset_seconds,
+    subtitle_transcription_mode: str,
 ):
     downloaded_summary_items = []
 
@@ -302,6 +302,7 @@ def _process_media_file(
         media_file=media_file,
         subtitle_offset_seconds=subtitle_offset_seconds,
         entry_subtitles_enabled=entry_subtitles_enabled,
+        subtitle_transcription_mode=subtitle_transcription_mode,
         logger=log,
         context_name=name,
         context_label="YouTube",
@@ -436,6 +437,7 @@ def download_youtube_items(config, downloaded_items):
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             should_generate_subtitles = entry_subtitles_enabled
+            subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "subprocess"))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 should_generate_subtitles = False
             is_forced_redownload = bool(entry.get("redownload", False))
@@ -649,6 +651,7 @@ def download_youtube_items(config, downloaded_items):
                                 name,
                                 should_generate_subtitles,
                                 subtitle_offset_seconds,
+                                subtitle_transcription_mode,
                             )
 
             def record_postprocess_file(d):
@@ -681,6 +684,7 @@ def download_youtube_items(config, downloaded_items):
                             name,
                             should_generate_subtitles,
                             subtitle_offset_seconds,
+                            subtitle_transcription_mode,
                         )
                 else:
                     resolved_path = path.resolve()
@@ -770,7 +774,7 @@ def download_youtube_items(config, downloaded_items):
                 )
 
             subtitle_executor = ThreadPoolExecutor(max_workers=subtitle_worker_count)
-            with YoutubeDL(ydl_opts) as ydl:
+            with _get_youtubedl()(ydl_opts) as ydl:
                 ydl.download([url])
 
             after_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
@@ -893,6 +897,7 @@ def download_youtube_items(config, downloaded_items):
                     name,
                     should_generate_subtitles,
                     subtitle_offset_seconds,
+                    subtitle_transcription_mode,
                 )
 
             for future in as_completed(list(subtitle_futures_by_media.values())):
@@ -942,3 +947,12 @@ def download_youtube_items(config, downloaded_items):
 
         except Exception as e:
             log.error(f"Failed to download YouTube: {entry}: {e}")
+YoutubeDL = None
+
+
+def _get_youtubedl():
+    global YoutubeDL
+    if YoutubeDL is None:
+        from yt_dlp import YoutubeDL as _YoutubeDL
+        YoutubeDL = _YoutubeDL
+    return YoutubeDL

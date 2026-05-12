@@ -294,6 +294,7 @@ DEFAULT_APP_CONFIG = {
     "playlist_end": "3",
     "processing_workers": "2",
     "auto_update_minutes": "20",
+    "subtitle_transcription_mode": "subprocess",
 }
 
 
@@ -449,6 +450,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "playlist_end": _coerce_int(defaults["playlist_end"], 3),
             "processing_workers": _coerce_int(defaults.get("processing_workers"), 2),
             "auto_update_minutes": _coerce_int(defaults.get("auto_update_minutes"), 20),
+            "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
             "database_path": db_path,
         },
         "download_settings": {

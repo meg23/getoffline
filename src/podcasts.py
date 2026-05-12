@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import feedparser
-from yt_dlp import YoutubeDL
 
 from database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
 from logger import get_logger
@@ -40,7 +39,7 @@ def _download_episode_media(episode_job: dict):
     last_download_error = None
     for attempt in range(1, PODCAST_DOWNLOAD_RETRIES + 1):
         try:
-            with YoutubeDL(ydl_opts) as ydl:
+            with _get_youtubedl()(ydl_opts) as ydl:
                 ydl.download([mp3_url])
             last_download_error = None
             break
@@ -244,6 +243,7 @@ def download_podcasts(config, downloaded_items):
                         media_file=job["final_audio"],
                         subtitle_offset_seconds=job["subtitle_offset_seconds"],
                         entry_subtitles_enabled=job["entry_subtitles_enabled"],
+                        subtitle_transcription_mode=defaults.get("subtitle_transcription_mode", "subprocess"),
                         logger=log,
                         context_name=f"podcast {job['name']}",
                         context_label="podcast",
@@ -274,3 +274,12 @@ def download_podcasts(config, downloaded_items):
 
         except Exception as e:
             log.error(f"Failed to process podcast {entry}: {e}")
+YoutubeDL = None
+
+
+def _get_youtubedl():
+    global YoutubeDL
+    if YoutubeDL is None:
+        from yt_dlp import YoutubeDL as _YoutubeDL
+        YoutubeDL = _YoutubeDL
+    return YoutubeDL
