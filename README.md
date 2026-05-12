@@ -30,6 +30,8 @@ Python dependencies are installed automatically by the Makefile.
 
 If `deno` is available on `PATH`, GetOffline enables yt-dlp's recommended YouTube remote component (`ejs:github`) for challenge solving.
 
+GetOffline applies the yt-dlp `youtube:player_js_variant=main` workaround for known challenge-solver instability (see yt-dlp issue #16256).
+
 
 ## Configuration
 

@@ -106,6 +106,22 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
 
 
 
+
+
+def _apply_ytdlp_player_js_variant_workaround(ydl_opts: Dict):
+    """Work around yt-dlp issue #16256 by forcing youtube:player_js_variant=main."""
+    extractor_args = ydl_opts.get("extractor_args")
+    if not isinstance(extractor_args, dict):
+        extractor_args = {}
+
+    youtube_args = extractor_args.get("youtube")
+    if not isinstance(youtube_args, dict):
+        youtube_args = {}
+
+    youtube_args["player_js_variant"] = ["main"]
+    extractor_args["youtube"] = youtube_args
+    ydl_opts["extractor_args"] = extractor_args
+
 def _clean_log_title(value: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -173,6 +189,7 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
     if cookie_file:
         ydl_opts["cookiefile"] = cookie_file
     _enable_youtube_ejs_remote_component(ydl_opts, "source-name resolution")
+    _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     with _get_youtubedl()(ydl_opts) as ydl:
         info = ydl.extract_info(source_url, download=False)
@@ -212,6 +229,7 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
         "logger": _YoutubeDlQuietLogger(),
     }
     _enable_youtube_ejs_remote_component(ydl_opts, "search")
+    _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     try:
         with _get_youtubedl()(ydl_opts) as ydl:
@@ -724,6 +742,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
             _enable_youtube_ejs_remote_component(ydl_opts, f"download source {name}")
+            _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
             ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
 
