@@ -3866,8 +3866,8 @@ def make_handler(state: AppState):
                         log.warning("Captured Python heapdump to %s", heapdump_path)
 
                 elif settings_action == "take_threaddump":
-                    if not DEBUG_MEMORY_ENABLED:
-                        log.warning("Threaddump request ignored because DEBUG_MEMORY is not enabled.")
+                    if not bool(state.config.get("defaults", {}).get("heapdump_enabled")):
+                        log.warning("Threaddump request ignored because heapdumps are disabled.")
                     else:
                         threaddump_path = _write_python_threaddump()
                         log.warning("Captured Python threaddump to %s", threaddump_path)
