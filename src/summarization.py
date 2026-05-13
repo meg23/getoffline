@@ -36,7 +36,12 @@ def _split_sentences(text: str) -> List[str]:
     if not normalized:
         return []
     parts = re.split(r"(?<=[.!?])\s+", normalized)
-    return [p.strip() for p in parts if p.strip()]
+    sentences: List[str] = []
+    for part in parts:
+        stripped_part = part.strip()
+        if stripped_part:
+            sentences.append(stripped_part)
+    return sentences
 
 
 def _extractive_summary(text: str, max_sentences: int = 2, max_chars: int = 280) -> str:
@@ -44,15 +49,30 @@ def _extractive_summary(text: str, max_sentences: int = 2, max_chars: int = 280)
     if not sentences:
         return "No transcript content available yet."
     words = re.findall(r"[a-zA-Z']+", text.lower())
-    freq = Counter(w for w in words if w not in STOP_WORDS and len(w) > 2)
+    filtered_words: List[str] = []
+    for word in words:
+        if word not in STOP_WORDS and len(word) > 2:
+            filtered_words.append(word)
+    freq = Counter(filtered_words)
     scored = []
     for idx, sentence in enumerate(sentences):
         tokens = re.findall(r"[a-zA-Z']+", sentence.lower())
-        score = sum(freq.get(tok, 0) for tok in tokens)
+        score = 0
+        for token in tokens:
+            score += int(freq.get(token, 0))
         scored.append((score, idx, sentence))
-    top = sorted(scored, key=lambda item: (-item[0], item[1]))[:max_sentences]
-    ordered = sorted(top, key=lambda item: item[1])
-    summary = " ".join(item[2] for item in ordered).strip()
+    def _score_key(item: tuple) -> tuple:
+        return (-item[0], item[1])
+
+    top = sorted(scored, key=_score_key)[:max_sentences]
+    def _order_key(item: tuple) -> int:
+        return int(item[1])
+
+    ordered = sorted(top, key=_order_key)
+    ordered_sentences: List[str] = []
+    for ordered_item in ordered:
+        ordered_sentences.append(str(ordered_item[2]))
+    summary = " ".join(ordered_sentences).strip()
     if len(summary) > max_chars:
         summary = summary[: max_chars - 1].rstrip() + "…"
     return summary
@@ -127,7 +147,12 @@ def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL) -> bool:
 
 
 def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "subprocess") -> Dict[str, str]:
-    joined_text = " ".join((s or "").strip() for s in segments if (s or "").strip())
+    cleaned_segments: List[str] = []
+    for segment in segments:
+        cleaned_segment = str(segment or "").strip()
+        if cleaned_segment:
+            cleaned_segments.append(cleaned_segment)
+    joined_text = " ".join(cleaned_segments)
     ensure_local_summary_model(model_name=model_name)
     if mode == "in_process":
         llm_summary = _ollama_summary(joined_text, model_name=model_name)

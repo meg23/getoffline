@@ -34,6 +34,10 @@ class _YoutubeDlQuietLogger:
 log = get_logger("podcast")
 
 
+def _http_retry_backoff(retry_count: int) -> int:
+    return min(2 ** int(retry_count), 10)
+
+
 def _download_episode_media(episode_job: dict):
     ydl_opts = episode_job["ydl_opts"]
     mp3_url = episode_job["mp3_url"]
@@ -125,6 +129,26 @@ def _episode_payload(
     }
 
 
+
+
+def _entry_title(entry: object) -> str:
+    if isinstance(entry, dict):
+        return str(entry.get("title") or "").strip()
+    try:
+        return str(entry.title or "").strip()
+    except AttributeError:
+        return ""
+
+
+def _entry_summary(entry: object):
+    if isinstance(entry, dict):
+        return entry.get("summary")
+    try:
+        return entry.summary
+    except AttributeError:
+        return None
+
+
 def _download_podcasts_in_process(config, downloaded_items):
     defaults = config["defaults"]
     db_path = defaults.get("database_path") or resolve_database_path(defaults)
@@ -156,7 +180,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                     continue
 
                 mp3_url = ep.enclosures[0].href
-                episode_title = str(getattr(ep, "title", "")).strip() or "Untitled Episode"
+                episode_title = _entry_title(ep) or "Untitled Episode"
                 safe_episode_title = sanitize(episode_title)
                 item_uid = build_item_uid(
                     item_id=None,
@@ -182,7 +206,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                     "file_access_retries": 3,
                     "fragment_retries": 10,
                     "retry_sleep_functions": {
-                        "http": lambda n: min(2**n, 10),
+                        "http": _http_retry_backoff,
                     },
                     "socket_timeout": 30,
                     "quiet": True,
@@ -201,7 +225,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                         "entry_subtitles_enabled": entry_subtitles_enabled,
                         "subtitle_offset_seconds": subtitle_offset_seconds,
                         "episode_title": episode_title,
-                        "description": getattr(ep, "summary", None),
+                        "description": _entry_summary(ep),
                         "mp3_url": mp3_url,
                         "final_audio": Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}",
                         "ydl_opts": ydl_opts,
@@ -212,7 +236,10 @@ def _download_podcasts_in_process(config, downloaded_items):
             worker_count = max(1, min(worker_count, len(episode_jobs) or 1))
 
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                future_by_job = {executor.submit(_download_episode_media, job): job for job in episode_jobs}
+                future_by_job = {}
+                for job in episode_jobs:
+                    future = executor.submit(_download_episode_media, job)
+                    future_by_job[future] = job
                 for future in as_completed(future_by_job):
                     job = future_by_job[future]
                     last_download_error = future.result()
