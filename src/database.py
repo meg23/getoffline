@@ -399,7 +399,7 @@ def _coerce_int(value: Any, fallback: int) -> int:
 
 
 def ensure_config_seeded(db_path: str, defaults: Optional[Dict[str, Any]] = None) -> None:
-    init_database(db_path)
+    # Database initialization/migrations are expected to run during process startup.
     now = _utcnow().isoformat()
     seed = dict(DEFAULT_APP_CONFIG)
     if defaults:

@@ -3619,7 +3619,12 @@ def make_handler(state: AppState):
                 return
 
             if path == "/settings":
-                stored = get_stored_config(str(state.database_path))
+                try:
+                    stored = get_stored_config(str(state.database_path))
+                except (sqlite3.OperationalError, OSError) as exc:
+                    log.exception("GET /settings failed to load config db=%s: %s", state.database_path, exc)
+                    self.send_error(503, "Database unavailable")
+                    return
                 body = _render_settings(stored)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
@@ -4078,7 +4083,12 @@ def make_handler(state: AppState):
                                 subtitle_offset_seconds=subtitle_offset,
                             )
 
-                stored = get_stored_config(str(state.database_path))
+                try:
+                    stored = get_stored_config(str(state.database_path))
+                except (sqlite3.OperationalError, OSError) as exc:
+                    log.exception("POST /settings failed to refresh stored config db=%s: %s", state.database_path, exc)
+                    self.send_error(503, "Database unavailable")
+                    return
                 state.config["defaults"] = stored["defaults"]
                 state.config["download_settings"] = stored["download_settings"]
                 state.config["youtube"] = stored["youtube"]
