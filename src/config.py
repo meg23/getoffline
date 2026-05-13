@@ -6,6 +6,7 @@ from database import (
     DEFAULT_APP_CONFIG,
     ensure_config_seeded,
     get_stored_config,
+    init_database,
     materialize_youtube_cookie_file,
     resolve_database_path,
 )
@@ -78,6 +79,7 @@ def _build_bootstrap_defaults(config_path: Optional[Path] = None):
 
 def load_config(config_path: Optional[Path] = None):
     defaults = _build_bootstrap_defaults(config_path)
+    init_database(defaults["database_path"])
     ensure_config_seeded(defaults["database_path"], defaults)
 
     materialize_youtube_cookie_file(defaults["database_path"])

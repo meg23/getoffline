@@ -14,7 +14,11 @@ def _parse_srt_segments(subtitle_path: Path) -> List[Tuple[float, float, str]]:
     blocks = re.split(r"\n\s*\n", text.strip())
     segments: List[Tuple[float, float, str]] = []
     for block in blocks:
-        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        lines: List[str] = []
+        for raw_line in block.splitlines():
+            stripped_line = raw_line.strip()
+            if stripped_line:
+                lines.append(stripped_line)
         if len(lines) < 2:
             continue
         ts_line = lines[1] if re.search(r"-->", lines[1]) else lines[0]
@@ -29,7 +33,12 @@ def _parse_srt_segments(subtitle_path: Path) -> List[Tuple[float, float, str]]:
 def _load_segments_from_subtitle(path: Path) -> List[str]:
     if not path.exists() or path.suffix.lower() != ".srt":
         return []
-    return [seg[2] for seg in _parse_srt_segments(path) if seg[2]]
+    segments: List[str] = []
+    for segment in _parse_srt_segments(path):
+        text_value = segment[2]
+        if text_value:
+            segments.append(text_value)
+    return segments
 
 
 def clear_all_summaries(db_path: str) -> int:

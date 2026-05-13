@@ -126,6 +126,7 @@ def _is_revision_applied(db_path: str, revision: str) -> bool:
 
 
 def _record_revision(db_path: str, revision: str) -> None:
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute(
@@ -278,36 +279,64 @@ def _migration_0009_add_media_summaries_table(db_path: str) -> None:
         conn.commit()
 
 
+def _run_migration_0003(db_path: str) -> None:
+    _migration_0003_add_config_tables(db_path)
+
+
+def _run_migration_0004(db_path: str) -> None:
+    _migration_0004_add_source_configs(db_path)
+
+
+def _run_migration_0005(db_path: str) -> None:
+    _migration_0005_add_source_enabled(db_path)
+
+
+def _run_migration_0006(db_path: str) -> None:
+    _migration_0006_add_favorite_column(db_path)
+
+
+def _run_migration_0007(db_path: str) -> None:
+    _migration_0007_add_relative_media_paths(db_path)
+
+
+def _run_migration_0008(db_path: str) -> None:
+    _migration_0008_add_transcript_search_tables(db_path)
+
+
+def _run_migration_0009(db_path: str) -> None:
+    _migration_0009_add_media_summaries_table(db_path)
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
     (
         "0003_add_config_tables",
-        lambda db_path: _migration_0003_add_config_tables(db_path),
+        _run_migration_0003,
     ),
     (
         "0004_add_source_configs",
-        lambda db_path: _migration_0004_add_source_configs(db_path),
+        _run_migration_0004,
     ),
     (
         "0005_add_source_enabled",
-        lambda db_path: _migration_0005_add_source_enabled(db_path),
+        _run_migration_0005,
     ),
     (
         "0006_add_favorite_column",
-        lambda db_path: _migration_0006_add_favorite_column(db_path),
+        _run_migration_0006,
     ),
     (
         "0007_add_relative_media_paths",
-        lambda db_path: _migration_0007_add_relative_media_paths(db_path),
+        _run_migration_0007,
     ),
     (
         "0008_add_transcript_search_tables",
-        lambda db_path: _migration_0008_add_transcript_search_tables(db_path),
+        _run_migration_0008,
     ),
     (
         "0009_add_media_summaries_table",
-        lambda db_path: _migration_0009_add_media_summaries_table(db_path),
+        _run_migration_0009,
     ),
 ]
 
@@ -407,6 +436,7 @@ def ensure_config_seeded(db_path: str, defaults: Optional[Dict[str, Any]] = None
             if key in defaults and defaults.get(key) is not None:
                 seed[key] = str(defaults[key])
 
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             for key, value in seed.items():
@@ -497,6 +527,7 @@ def update_stored_defaults(db_path: str, updates: Dict[str, Any]) -> None:
         return
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             for key, value in updates.items():
@@ -519,6 +550,7 @@ def update_stored_defaults(db_path: str, updates: Dict[str, Any]) -> None:
 def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute(
@@ -560,6 +592,7 @@ def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = N
 def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[Dict[str, Any]]) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute("DELETE FROM source_configs")
@@ -631,6 +664,7 @@ def add_source_config(
 ) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             current_position = conn.execute(
@@ -663,6 +697,7 @@ def add_source_config(
 
 def delete_source_config(db_path: str, row_id: int) -> bool:
     ensure_config_seeded(db_path)
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             cur = conn.execute("DELETE FROM source_configs WHERE id = ?", (int(row_id),))
@@ -675,6 +710,7 @@ def delete_source_config(db_path: str, row_id: int) -> bool:
 
 def set_source_enabled(db_path: str, row_id: int, enabled: bool) -> bool:
     ensure_config_seeded(db_path)
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             cur = conn.execute(
@@ -700,6 +736,7 @@ def update_source_config(
 ) -> bool:
     ensure_config_seeded(db_path)
     normalized_media_type = (str(media_type).strip().lower() if media_type is not None else None)
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             cur = conn.execute(
@@ -829,6 +866,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
     values["file_path_relative"] = file_path_relative
     values["subtitle_path_relative"] = subtitle_path_relative
 
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute(
