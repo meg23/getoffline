@@ -3121,18 +3121,18 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
                     <input type="hidden" name="source_action" value="edit" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="source_type" value="youtube" />
-                    <button type="submit" class="primary">Save</button>
+                    <button type="submit" class="primary table-action">Save</button>
                   </form>
                   <form method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="toggle" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="enabled" value="{toggle_to}" />
-                    <button type="submit">{toggle_label}</button>
+                    <button type="submit" class="table-action">{toggle_label}</button>
                   </form>
                   <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
                     <input type="hidden" name="source_action" value="delete" />
                     <input type="hidden" name="source_id" value="{row_id}" />
-                    <button type="submit" class="danger">Delete</button>
+                    <button type="submit" class="danger table-action">Delete</button>
                   </form>
                 </div>
               </td>
@@ -3169,18 +3169,18 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
                     <input type="hidden" name="source_action" value="edit" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="source_type" value="podcast" />
-                    <button type="submit" class="primary">Save</button>
+                    <button type="submit" class="primary table-action">Save</button>
                   </form>
                   <form method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="toggle" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="enabled" value="{toggle_to}" />
-                    <button type="submit">{toggle_label}</button>
+                    <button type="submit" class="table-action">{toggle_label}</button>
                   </form>
                   <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
                     <input type="hidden" name="source_action" value="delete" />
                     <input type="hidden" name="source_id" value="{row_id}" />
-                    <button type="submit" class="danger">Delete</button>
+                    <button type="submit" class="danger table-action">Delete</button>
                   </form>
                 </div>
               </td>
@@ -3282,10 +3282,21 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     .section table input, .section table select {{ width: 100%; min-width: 0; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }}
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
     .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
+    .source-table td {{ padding-top: .85rem; padding-bottom: .85rem; }}
+    .source-table input, .source-table select {{ padding: .46rem .56rem; border-radius: 9px; }}
+    .source-table td:nth-child(1) {{ min-width: 190px; }}
+    .source-table td:nth-child(2) {{ min-width: 280px; }}
+    .source-table td:nth-child(3),
+    .source-table td:nth-child(4) {{ min-width: 90px; }}
+    .source-table td:nth-child(5) {{ min-width: 190px; }}
+    .source-table td:nth-child(6) {{ min-width: 110px; }}
+    .source-table td:last-child {{ min-width: 210px; }}
+    .table-action {{ padding: .35rem .72rem; font-size: .88rem; }}
+    .table-wrap {{ overflow-x: auto; padding-bottom: .2rem; }}
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
@@ -3382,10 +3393,12 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>YouTube sources</h2>
-    <table>
+      <div class="table-wrap">
+    <table class="source-table">
         <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{youtube_table}</tbody>
       </table>
+      </div>
 
       <h3>Add YouTube source</h3>
       <form method="post" action="/settings">
@@ -3411,10 +3424,12 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>Podcast sources</h2>
-    <table>
+      <div class="table-wrap">
+    <table class="source-table">
         <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{podcast_table}</tbody>
       </table>
+      </div>
 
       <h3>Add podcast source</h3>
       <form method="post" action="/settings">
