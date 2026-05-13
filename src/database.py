@@ -352,6 +352,9 @@ DEFAULT_APP_CONFIG = {
     "auto_update_minutes": "20",
     "subtitle_transcription_mode": "subprocess",
     "telemetry_dumps_enabled": "0",
+    "summary_model": "qwen2.5:0.5b",
+    "ollama_path": "ollama",
+    "deno_path": "deno",
 }
 
 

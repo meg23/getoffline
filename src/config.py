@@ -64,14 +64,6 @@ def _build_bootstrap_defaults(config_path: Optional[Path] = None):
         if configured_value is not None:
             defaults[key] = configured_value
 
-    env_output_root = os.getenv("GETOFFLINE_OUTPUT_ROOT")
-    if env_output_root:
-        defaults["output_root"] = env_output_root
-
-    env_database_path = os.getenv("GETOFFLINE_DATABASE_PATH")
-    if env_database_path:
-        defaults["database_path"] = env_database_path
-
     defaults["output_root"] = _resolve_path(defaults["output_root"], base_dir=config_dir)
     defaults["database_path"] = resolve_database_path(defaults, base_dir=str(config_dir))
     return defaults

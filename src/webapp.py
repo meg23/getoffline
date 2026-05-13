@@ -6,6 +6,7 @@ import posixpath
 import re
 import gc
 import resource
+import shutil
 import tracemalloc
 import sqlite3
 import sys
@@ -672,7 +673,8 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     segment_texts = [str(item[0]) for item in segment_rows if item and item[0]]
     if not segment_texts:
         return None
-    result = summarize_segments(segment_texts, mode="subprocess")
+    summary_model = str(state.config.get("defaults", {}).get("summary_model") or "qwen2.5:0.5b")
+    result = summarize_segments(segment_texts, model_name=summary_model, mode="subprocess")
     summary_text = str(result.get("summary_text") or "").strip()
     if not summary_text:
         log.warning("Summary generation returned empty output for row id=%s", row.row_id)
@@ -3077,6 +3079,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
     auto_update_minutes = html.escape(str(defaults.get("auto_update_minutes") or str(DEFAULT_AUTO_UPDATE_MINUTES)))
+    summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
+    ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
+    deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
+    resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
+    resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
     cookie_value = html.escape(cookie_text)
@@ -3253,11 +3260,29 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           </div>
         </div>
 
-        <label for="processing_workers">Processing workers</label>
-        <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
-
-        <label for="auto_update_minutes">Auto update interval (minutes)</label>
-        <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
+        <div class="grid">
+          <div>
+            <label for="processing_workers">Processing workers</label>
+            <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
+          </div>
+          <div>
+            <label for="auto_update_minutes">Auto update interval (minutes)</label>
+            <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
+          </div>
+          <div>
+            <label for="summary_model">Ollama summary model</label>
+            <input id="summary_model" name="summary_model" value="{summary_model}" required />
+          </div>
+          <div>
+            <label for="ollama_path">Ollama executable</label>
+            <input id="ollama_path" name="ollama_path" value="{ollama_path}" required />
+          </div>
+          <div>
+            <label for="deno_path">Deno executable</label>
+            <input id="deno_path" name="deno_path" value="{deno_path}" required />
+          </div>
+        </div>
+        <p><strong>Resolved paths:</strong> Ollama <code>{resolved_ollama_path}</code> · Deno <code>{resolved_deno_path}</code></p>
         <label style="display:flex; align-items:center; gap:.5rem; font-weight:500; margin-top:.9rem;">
           <input type="checkbox" name="telemetry_dumps_enabled" value="1" style="width:auto;"{telemetry_dumps_checked} />
           Enable manual telemetry dumps (may impact performance)
@@ -3986,6 +4011,9 @@ def make_handler(state: AppState):
                         "playlist_end": (form.get("playlist_end") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                        "summary_model": (form.get("summary_model") or [""])[0],
+                        "ollama_path": (form.get("ollama_path") or [""])[0],
+                        "deno_path": (form.get("deno_path") or [""])[0],
                         "telemetry_dumps_enabled": "1" if telemetry_dumps_enabled else "0",
                     }
                     sanitized_updates = {
@@ -4128,7 +4156,11 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         config=config,
         update_runner=_default_update_runner,
     )
-    ensure_local_summary_model()
+    configured_defaults = config.get("defaults") or {}
+    ensure_local_summary_model(
+        model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
+        ollama_path=str(configured_defaults.get("ollama_path") or "ollama"),
+    )
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)
