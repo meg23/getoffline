@@ -3115,8 +3115,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
               <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
               <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
               <td><span class="row-status">{status}</span></td>
-              <td>
-                <div class="row-actions">
+              <td></td>
+            </tr>
+            <tr class="source-row-actions-row">
+              <td colspan="7" class="source-row-actions-cell">
+                <div class="row-actions source-row-actions">
                   <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="edit" />
                     <input type="hidden" name="source_id" value="{row_id}" />
@@ -3163,8 +3166,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
               <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
               <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
               <td><span class="row-status">{status}</span></td>
-              <td>
-                <div class="row-actions">
+              <td></td>
+            </tr>
+            <tr class="source-row-actions-row">
+              <td colspan="6" class="source-row-actions-cell">
+                <div class="row-actions source-row-actions">
                   <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="edit" />
                     <input type="hidden" name="source_id" value="{row_id}" />
@@ -3287,6 +3293,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .compact-form {{ display: inline-block; }}
     .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
     .source-table td {{ padding-top: .7rem; padding-bottom: .7rem; }}
+    .source-table tr:not(.source-row-actions-row) td {{ border-bottom: 0; }}
     .source-table input, .source-table select {{ padding: .46rem .56rem; border-radius: 9px; }}
     .source-table th, .source-table td {{ overflow: hidden; }}
     .source-table td:nth-child(1), .source-table th:nth-child(1) {{ width: 18%; }}
@@ -3300,6 +3307,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-table td:nth-child(2) input, .source-table td:nth-child(5) input {{ text-overflow: ellipsis; }}
     .table-action {{ min-width: 7.25rem; padding: .35rem .72rem; font-size: .88rem; text-align: center; }}
     .table-wrap {{ overflow: visible; }}
+    .source-row-actions-row td {{ border-bottom: 1px solid var(--border-soft); }}
+    .source-row-actions-cell {{ padding-top: 0; padding-bottom: .8rem; }}
+    .source-row-actions {{ justify-content: flex-end; }}
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
