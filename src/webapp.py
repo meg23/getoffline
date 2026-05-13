@@ -3298,7 +3298,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-table td:last-child, .source-table th:last-child {{ width: 10%; }}
     .source-table td:nth-child(2) input {{ font-size: .95rem; }}
     .source-table td:nth-child(2) input, .source-table td:nth-child(5) input {{ text-overflow: ellipsis; }}
-    .table-action {{ padding: .35rem .72rem; font-size: .88rem; }}
+    .table-action {{ min-width: 7.25rem; padding: .35rem .72rem; font-size: .88rem; text-align: center; }}
     .table-wrap {{ overflow: visible; }}
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
