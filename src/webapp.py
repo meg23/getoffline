@@ -3205,25 +3205,93 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GetOffline Settings</title>
   <style>
-    body {{ font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 1rem; background: #f5f7fb; color: #17213a; }}
-    .wrap {{ max-width: 1100px; margin: 0 auto; background: #fff; border: 1px solid #dbe3f3; border-radius: 12px; padding: 1rem; }}
-    h1, h2, h3 {{ margin-top: 0; }}
-    label {{ display: block; margin: .7rem 0 .2rem; font-weight: 600; }}
-    input, select, textarea {{ width: 100%; padding: .55rem; border: 1px solid #cbd6ee; border-radius: 8px; font: inherit; }}
+    :root {{
+      color-scheme: light;
+      --bg: #f3f6fc;
+      --text: #12203a;
+      --card-bg: #ffffff;
+      --border: #dbe5f6;
+      --border-soft: #e9eef9;
+      --primary: #275df0;
+      --primary-strong: #1d4fd1;
+      --danger: #be123c;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 1.5rem 1rem 2rem;
+      background: radial-gradient(circle at top, #f8fbff 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.45;
+    }}
+    .wrap {{
+      max-width: 1120px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.4rem;
+      box-shadow: 0 16px 40px rgba(15, 35, 80, 0.08);
+    }}
+    h1, h2, h3 {{ margin-top: 0; letter-spacing: -0.01em; }}
+    h1 {{ margin-bottom: 1.2rem; }}
+    h2 {{ margin-bottom: .4rem; font-size: 1.24rem; }}
+    h3 {{ margin: 1rem 0 .4rem; font-size: 1.03rem; }}
+    label {{ display: block; margin: .75rem 0 .35rem; font-weight: 600; font-size: .92rem; }}
+    input, select, textarea {{
+      width: 100%;
+      padding: .62rem .68rem;
+      border: 1px solid #cdd9f1;
+      border-radius: 10px;
+      font: inherit;
+      background: #fff;
+    }}
+    input:focus, select:focus, textarea:focus {{
+      outline: none;
+      border-color: #8eb0ff;
+      box-shadow: 0 0 0 3px rgba(39, 93, 240, 0.16);
+    }}
     textarea {{ min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
-    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; }}
-    button, a {{ border-radius: 8px; border: 1px solid #cbd6ee; padding: .45rem .8rem; text-decoration: none; color: inherit; background: #fff; cursor: pointer; }}
-    button.primary {{ background: #2f62f2; color: #fff; border-color: #2f62f2; }}
-    button.danger {{ border-color: #d66; color: #a22; }}
-    .section {{ border: 1px solid #e2e8f8; border-radius: 10px; padding: .9rem; margin-top: 1rem; }}
-    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: .6rem; }}
-    th, td {{ border-bottom: 1px solid #e9eef9; padding: .45rem; text-align: left; vertical-align: middle; }}
+    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; }}
+    button, a {{
+      border-radius: 10px;
+      border: 1px solid #c9d7f2;
+      padding: .5rem .86rem;
+      text-decoration: none;
+      color: inherit;
+      background: #fff;
+      cursor: pointer;
+      transition: all .14s ease-in-out;
+      font-weight: 600;
+    }}
+    button:hover, a:hover {{ border-color: #adbfdf; transform: translateY(-1px); }}
+    button.primary {{ background: var(--primary); color: #fff; border-color: var(--primary); }}
+    button.primary:hover {{ background: var(--primary-strong); border-color: var(--primary-strong); }}
+    button.danger {{ border-color: #f2bfca; color: var(--danger); background: #fff7f9; }}
+    .section {{
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem;
+      margin-top: 1rem;
+      background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+    }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .82rem; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: .75rem; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }}
+    thead th {{ background: #f4f7fe; font-size: .84rem; text-transform: uppercase; letter-spacing: .03em; color: #33415e; }}
+    th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
+    tr:last-child td {{ border-bottom: 0; }}
     .section table input, .section table select {{ width: 100%; min-width: 0; }}
     .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; }}
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
-    .row-status {{ font-size: .85rem; color: #445; text-transform: uppercase; font-weight: 600; }}
+    .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
+    code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
+    @media (max-width: 900px) {{
+      .grid {{ grid-template-columns: 1fr; }}
+      .wrap {{ padding: 1rem; }}
+      th, td {{ padding: .45rem; }}
+    }}
   </style>
 </head>
 <body>
