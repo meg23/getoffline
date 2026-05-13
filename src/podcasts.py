@@ -327,7 +327,6 @@ def download_podcasts(config, downloaded_items):
 
     base_config = dict(config)
     podcast_entries = list(config.get("podcasts", []))
-    before_all = _parent_rss_mb()
     for entry in podcast_entries:
         single_config = dict(base_config)
         single_config["podcasts"] = [entry]
@@ -351,8 +350,6 @@ def download_podcasts(config, downloaded_items):
             continue
         downloaded_items.extend(response.get("downloaded_items") or [])
 
-    after_all = _parent_rss_mb()
-    log.info("Podcast parent RSS before=%.2fMB after=%.2fMB delta=%.2fMB", before_all, after_all, after_all - before_all)
 
 YoutubeDL = None
 

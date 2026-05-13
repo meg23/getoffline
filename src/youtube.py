@@ -995,7 +995,6 @@ def download_youtube_items(config, downloaded_items):
 
     base_config = dict(config)
     youtube_entries = list(config.get("youtube", []))
-    before_all = _parent_rss_mb()
     for entry in youtube_entries:
         single_config = dict(base_config)
         single_config["youtube"] = [entry]
@@ -1018,8 +1017,6 @@ def download_youtube_items(config, downloaded_items):
             log.error("Invalid YouTube subprocess response for %s: %s", entry.get("name"), exc)
             continue
         downloaded_items.extend(response.get("downloaded_items") or [])
-    after_all = _parent_rss_mb()
-    log.info("YouTube parent RSS before=%.2fMB after=%.2fMB delta=%.2fMB", before_all, after_all, after_all - before_all)
 YoutubeDL = None
 
 
