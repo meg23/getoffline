@@ -3277,7 +3277,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
     }}
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .82rem; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: .75rem; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }}
+    table {{ width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: .75rem; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }}
     thead th {{ background: #f4f7fe; font-size: .84rem; text-transform: uppercase; letter-spacing: .03em; color: #33415e; }}
     th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
@@ -3286,22 +3286,31 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
     .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
-    .source-table td {{ padding-top: .85rem; padding-bottom: .85rem; }}
+    .source-table td {{ padding-top: .7rem; padding-bottom: .7rem; }}
     .source-table input, .source-table select {{ padding: .46rem .56rem; border-radius: 9px; }}
-    .source-table td:nth-child(1) {{ min-width: 190px; }}
-    .source-table td:nth-child(2) {{ min-width: 280px; }}
-    .source-table td:nth-child(3),
-    .source-table td:nth-child(4) {{ min-width: 90px; }}
-    .source-table td:nth-child(5) {{ min-width: 190px; }}
-    .source-table td:nth-child(6) {{ min-width: 110px; }}
-    .source-table td:last-child {{ min-width: 210px; }}
+    .source-table th, .source-table td {{ overflow: hidden; }}
+    .source-table td:nth-child(1), .source-table th:nth-child(1) {{ width: 18%; }}
+    .source-table td:nth-child(2), .source-table th:nth-child(2) {{ width: 28%; }}
+    .source-table td:nth-child(3), .source-table th:nth-child(3) {{ width: 9%; }}
+    .source-table td:nth-child(4), .source-table th:nth-child(4) {{ width: 9%; }}
+    .source-table td:nth-child(5), .source-table th:nth-child(5) {{ width: 16%; }}
+    .source-table td:nth-child(6), .source-table th:nth-child(6) {{ width: 10%; }}
+    .source-table td:last-child, .source-table th:last-child {{ width: 10%; }}
+    .source-table td:nth-child(2) input {{ font-size: .95rem; }}
+    .source-table td:nth-child(2) input, .source-table td:nth-child(5) input {{ text-overflow: ellipsis; }}
     .table-action {{ padding: .35rem .72rem; font-size: .88rem; }}
-    .table-wrap {{ overflow-x: auto; padding-bottom: .2rem; }}
+    .table-wrap {{ overflow: visible; }}
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
       .wrap {{ padding: 1rem; }}
       th, td {{ padding: .45rem; }}
+      .source-table, .source-table thead, .source-table tbody, .source-table tr, .source-table th, .source-table td {{ display: block; width: 100%; }}
+      .source-table thead {{ display: none; }}
+      .source-table tr {{ border-bottom: 1px solid var(--border-soft); padding: .4rem 0 .6rem; }}
+      .source-table td {{ border: 0; padding: .35rem 0; }}
+      .source-table td:last-child {{ padding-top: .2rem; }}
+      .row-actions {{ gap: .4rem; }}
     }}
   </style>
 </head>
