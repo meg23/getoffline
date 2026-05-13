@@ -3283,10 +3283,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           </div>
         </div>
         <p><strong>Resolved paths:</strong> Ollama <code>{resolved_ollama_path}</code> · Deno <code>{resolved_deno_path}</code></p>
-        <label style="display:flex; align-items:center; gap:.5rem; font-weight:500; margin-top:.9rem;">
-          <input type="checkbox" name="telemetry_dumps_enabled" value="1" style="width:auto;"{telemetry_dumps_checked} />
-          Enable manual telemetry dumps (may impact performance)
-        </label>
 
         <div class="actions">
           <button type="submit" class="primary">Save defaults</button>
@@ -3372,6 +3368,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     <div class="section">
       <h2>Runtime stats</h2>
       <p>Live process-level diagnostics useful for performance tuning.</p>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_telemetry" />
+        <label style="display:flex; align-items:center; gap:.5rem; font-weight:500; margin-top:.9rem;">
+          <input type="checkbox" name="telemetry_dumps_enabled" value="1" style="width:auto;"{telemetry_dumps_checked} />
+          Enable manual telemetry dumps (may impact performance)
+        </label>
+        <div class="actions">
+          <button type="submit" class="primary">Save telemetry setting</button>
+        </div>
+      </form>
       <div class="actions">
         <form method="post" action="/settings" style="display:inline-block">
           <input type="hidden" name="settings_action" value="take_heapdump" />
@@ -4001,7 +4007,6 @@ def make_handler(state: AppState):
                 settings_action = (form.get("settings_action") or [""])[0]
 
                 if settings_action == "update_defaults":
-                    telemetry_dumps_enabled = (form.get("telemetry_dumps_enabled") or ["0"])[0] in {"1", "true", "yes", "on"}
                     updates = {
                         "output_root": (form.get("output_root") or [""])[0],
                         "audio_format": (form.get("audio_format") or [""])[0],
@@ -4014,7 +4019,6 @@ def make_handler(state: AppState):
                         "summary_model": (form.get("summary_model") or [""])[0],
                         "ollama_path": (form.get("ollama_path") or [""])[0],
                         "deno_path": (form.get("deno_path") or [""])[0],
-                        "telemetry_dumps_enabled": "1" if telemetry_dumps_enabled else "0",
                     }
                     sanitized_updates = {
                         k: str(v).strip()
@@ -4022,6 +4026,12 @@ def make_handler(state: AppState):
                         if str(v).strip() or k == "ffmpeg_audio_filter"
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
+                elif settings_action == "update_telemetry":
+                    telemetry_dumps_enabled = (form.get("telemetry_dumps_enabled") or ["0"])[0] in {"1", "true", "yes", "on"}
+                    update_stored_defaults(
+                        str(state.database_path),
+                        {"telemetry_dumps_enabled": "1" if telemetry_dumps_enabled else "0"},
+                    )
 
                 elif settings_action == "update_cookie":
                     raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
