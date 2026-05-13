@@ -15,6 +15,7 @@ _KNOWN_EMPTY_AUDIO_FAILURE_PATTERNS = (
     "cannot reshape tensor of 0 elements",
     "Output file does not contain any stream",
     "Stream map 'a' matches no streams",
+    "No decodable audio stream found in media file",
 )
 
 
