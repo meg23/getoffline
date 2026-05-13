@@ -3282,7 +3282,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     .section table input, .section table select {{ width: 100%; min-width: 0; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center; justify-content: flex-end; }}
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
     .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
@@ -3295,7 +3295,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-table td:nth-child(4), .source-table th:nth-child(4) {{ width: 9%; }}
     .source-table td:nth-child(5), .source-table th:nth-child(5) {{ width: 16%; }}
     .source-table td:nth-child(6), .source-table th:nth-child(6) {{ width: 10%; }}
-    .source-table td:last-child, .source-table th:last-child {{ width: 10%; }}
+    .source-table td:last-child, .source-table th:last-child {{ width: 10%; text-align: right; }}
     .source-table td:nth-child(2) input {{ font-size: .95rem; }}
     .source-table td:nth-child(2) input, .source-table td:nth-child(5) input {{ text-overflow: ellipsis; }}
     .table-action {{ min-width: 7.25rem; padding: .35rem .72rem; font-size: .88rem; text-align: center; }}
@@ -3310,7 +3310,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       .source-table tr {{ border-bottom: 1px solid var(--border-soft); padding: .4rem 0 .6rem; }}
       .source-table td {{ border: 0; padding: .35rem 0; }}
       .source-table td:last-child {{ padding-top: .2rem; }}
-      .row-actions {{ gap: .4rem; }}
+      .row-actions {{ gap: .4rem; justify-content: flex-start; flex-wrap: wrap; }}
     }}
   </style>
 </head>
