@@ -3115,10 +3115,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
               <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
               <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
               <td><span class="row-status">{status}</span></td>
-              <td></td>
             </tr>
             <tr class="source-row-actions-row">
-              <td colspan="7" class="source-row-actions-cell">
+              <td colspan="6" class="source-row-actions-cell">
                 <div class="row-actions source-row-actions">
                   <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="edit" />
@@ -3166,10 +3165,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
               <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
               <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
               <td><span class="row-status">{status}</span></td>
-              <td></td>
             </tr>
             <tr class="source-row-actions-row">
-              <td colspan="6" class="source-row-actions-cell">
+              <td colspan="5" class="source-row-actions-cell">
                 <div class="row-actions source-row-actions">
                   <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="edit" />
@@ -3288,7 +3286,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     .section table input, .section table select {{ width: 100%; min-width: 0; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center; justify-content: flex-end; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center; justify-content: flex-start; }}
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
     .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
@@ -3302,14 +3300,14 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-table td:nth-child(4), .source-table th:nth-child(4) {{ width: 9%; }}
     .source-table td:nth-child(5), .source-table th:nth-child(5) {{ width: 16%; }}
     .source-table td:nth-child(6), .source-table th:nth-child(6) {{ width: 10%; }}
-    .source-table td:last-child, .source-table th:last-child {{ width: 10%; text-align: right; }}
+    .source-table td:last-child, .source-table th:last-child {{ width: 10%; text-align: left; }}
     .source-table td:nth-child(2) input {{ font-size: .95rem; }}
     .source-table td:nth-child(2) input, .source-table td:nth-child(5) input {{ text-overflow: ellipsis; }}
     .table-action {{ min-width: 7.25rem; padding: .35rem .72rem; font-size: .88rem; text-align: center; }}
     .table-wrap {{ overflow: visible; }}
     .source-row-actions-row td {{ border-bottom: 1px solid var(--border-soft); }}
     .source-row-actions-cell {{ padding-top: 0; padding-bottom: .8rem; }}
-    .source-row-actions {{ justify-content: flex-end; }}
+    .source-row-actions {{ justify-content: flex-start; }}
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
@@ -3414,7 +3412,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       <h2>YouTube sources</h2>
       <div class="table-wrap">
     <table class="source-table">
-        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th></tr></thead>
         <tbody>{youtube_table}</tbody>
       </table>
       </div>
@@ -3445,7 +3443,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       <h2>Podcast sources</h2>
       <div class="table-wrap">
     <table class="source-table">
-        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th></tr></thead>
         <tbody>{podcast_table}</tbody>
       </table>
       </div>
