@@ -3376,12 +3376,13 @@ def _collect_runtime_stats() -> List[Tuple[str, str]]:
         try:
             fd_entries = os.listdir(fd_dir)
             open_fd_count = len(fd_entries)
-            for fd_name in fd_entries:
-                fd_path = f"{fd_dir}/{fd_name}"
-                try:
-                    open_fd_targets.append(f"{fd_name}: {os.readlink(fd_path)}")
-                except OSError:
-                    open_fd_targets.append(f"{fd_name}: <unreadable>")
+            if DEBUG_MEMORY_ENABLED:
+                for fd_name in fd_entries:
+                    fd_path = f"{fd_dir}/{fd_name}"
+                    try:
+                        open_fd_targets.append(f"{fd_name}: {os.readlink(fd_path)}")
+                    except OSError:
+                        open_fd_targets.append(f"{fd_name}: <unreadable>")
             break
         except OSError:
             continue
@@ -3391,13 +3392,17 @@ def _collect_runtime_stats() -> List[Tuple[str, str]]:
     if sys.platform == "darwin":
         memory_mb /= 1024.0
 
+    tracked_objects_value = "disabled"
+    if DEBUG_MEMORY_ENABLED:
+        tracked_objects_value = f"{len(gc.get_objects()):,}"
+
     stats: List[Tuple[str, str]] = [
         ("Process ID", str(os.getpid())),
         ("Resident memory (ru_maxrss)", f"{memory_mb:,.2f} MB"),
         ("User CPU time", f"{usage.ru_utime:.3f} s"),
         ("System CPU time", f"{usage.ru_stime:.3f} s"),
         ("Open file descriptors", "unavailable" if open_fd_count < 0 else str(open_fd_count)),
-        ("Python tracked objects", f"{len(gc.get_objects()):,}"),
+        ("Python tracked objects", tracked_objects_value),
         ("GC generation counters", str(gc.get_count())),
         ("Active threads", str(threading.active_count())),
     ]
@@ -3619,7 +3624,12 @@ def make_handler(state: AppState):
                 return
 
             if path == "/settings":
-                stored = get_stored_config(str(state.database_path))
+                try:
+                    stored = get_stored_config(str(state.database_path))
+                except (sqlite3.OperationalError, OSError) as exc:
+                    log.exception("GET /settings failed to load config db=%s: %s", state.database_path, exc)
+                    self.send_error(503, "Database unavailable")
+                    return
                 body = _render_settings(stored)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
@@ -4078,7 +4088,12 @@ def make_handler(state: AppState):
                                 subtitle_offset_seconds=subtitle_offset,
                             )
 
-                stored = get_stored_config(str(state.database_path))
+                try:
+                    stored = get_stored_config(str(state.database_path))
+                except (sqlite3.OperationalError, OSError) as exc:
+                    log.exception("POST /settings failed to refresh stored config db=%s: %s", state.database_path, exc)
+                    self.send_error(503, "Database unavailable")
+                    return
                 state.config["defaults"] = stored["defaults"]
                 state.config["download_settings"] = stored["download_settings"]
                 state.config["youtube"] = stored["youtube"]
