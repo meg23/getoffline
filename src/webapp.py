@@ -3115,24 +3115,26 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
               <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
               <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
               <td><span class="row-status">{status}</span></td>
-              <td>
-                <div class="row-actions">
+            </tr>
+            <tr class="source-row-actions-row">
+              <td colspan="6" class="source-row-actions-cell">
+                <div class="row-actions source-row-actions">
                   <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="edit" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="source_type" value="youtube" />
-                    <button type="submit" class="primary">Save</button>
+                    <button type="submit" class="primary table-action">Save</button>
                   </form>
                   <form method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="toggle" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="enabled" value="{toggle_to}" />
-                    <button type="submit">{toggle_label}</button>
+                    <button type="submit" class="table-action">{toggle_label}</button>
                   </form>
                   <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
                     <input type="hidden" name="source_action" value="delete" />
                     <input type="hidden" name="source_id" value="{row_id}" />
-                    <button type="submit" class="danger">Delete</button>
+                    <button type="submit" class="danger table-action">Delete</button>
                   </form>
                 </div>
               </td>
@@ -3163,24 +3165,26 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
               <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
               <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
               <td><span class="row-status">{status}</span></td>
-              <td>
-                <div class="row-actions">
+            </tr>
+            <tr class="source-row-actions-row">
+              <td colspan="5" class="source-row-actions-cell">
+                <div class="row-actions source-row-actions">
                   <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="edit" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="source_type" value="podcast" />
-                    <button type="submit" class="primary">Save</button>
+                    <button type="submit" class="primary table-action">Save</button>
                   </form>
                   <form method="post" action="/settings" class="compact-form">
                     <input type="hidden" name="source_action" value="toggle" />
                     <input type="hidden" name="source_id" value="{row_id}" />
                     <input type="hidden" name="enabled" value="{toggle_to}" />
-                    <button type="submit">{toggle_label}</button>
+                    <button type="submit" class="table-action">{toggle_label}</button>
                   </form>
                   <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
                     <input type="hidden" name="source_action" value="delete" />
                     <input type="hidden" name="source_id" value="{row_id}" />
-                    <button type="submit" class="danger">Delete</button>
+                    <button type="submit" class="danger table-action">Delete</button>
                   </form>
                 </div>
               </td>
@@ -3205,25 +3209,117 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GetOffline Settings</title>
   <style>
-    body {{ font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 1rem; background: #f5f7fb; color: #17213a; }}
-    .wrap {{ max-width: 1100px; margin: 0 auto; background: #fff; border: 1px solid #dbe3f3; border-radius: 12px; padding: 1rem; }}
-    h1, h2, h3 {{ margin-top: 0; }}
-    label {{ display: block; margin: .7rem 0 .2rem; font-weight: 600; }}
-    input, select, textarea {{ width: 100%; padding: .55rem; border: 1px solid #cbd6ee; border-radius: 8px; font: inherit; }}
+    :root {{
+      color-scheme: light;
+      --bg: #f3f6fc;
+      --text: #12203a;
+      --card-bg: #ffffff;
+      --border: #dbe5f6;
+      --border-soft: #e9eef9;
+      --primary: #275df0;
+      --primary-strong: #1d4fd1;
+      --danger: #be123c;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 1.5rem 1rem 2rem;
+      background: radial-gradient(circle at top, #f8fbff 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.45;
+    }}
+    .wrap {{
+      max-width: 1120px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.4rem;
+      box-shadow: 0 16px 40px rgba(15, 35, 80, 0.08);
+    }}
+    h1, h2, h3 {{ margin-top: 0; letter-spacing: -0.01em; }}
+    h1 {{ margin-bottom: 1.2rem; }}
+    h2 {{ margin-bottom: .4rem; font-size: 1.24rem; }}
+    h3 {{ margin: 1rem 0 .4rem; font-size: 1.03rem; }}
+    label {{ display: block; margin: .75rem 0 .35rem; font-weight: 600; font-size: .92rem; }}
+    input, select, textarea {{
+      width: 100%;
+      padding: .62rem .68rem;
+      border: 1px solid #cdd9f1;
+      border-radius: 10px;
+      font: inherit;
+      background: #fff;
+    }}
+    input:focus, select:focus, textarea:focus {{
+      outline: none;
+      border-color: #8eb0ff;
+      box-shadow: 0 0 0 3px rgba(39, 93, 240, 0.16);
+    }}
     textarea {{ min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
-    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; }}
-    button, a {{ border-radius: 8px; border: 1px solid #cbd6ee; padding: .45rem .8rem; text-decoration: none; color: inherit; background: #fff; cursor: pointer; }}
-    button.primary {{ background: #2f62f2; color: #fff; border-color: #2f62f2; }}
-    button.danger {{ border-color: #d66; color: #a22; }}
-    .section {{ border: 1px solid #e2e8f8; border-radius: 10px; padding: .9rem; margin-top: 1rem; }}
-    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: .6rem; }}
-    th, td {{ border-bottom: 1px solid #e9eef9; padding: .45rem; text-align: left; vertical-align: middle; }}
+    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; }}
+    button, a {{
+      border-radius: 10px;
+      border: 1px solid #c9d7f2;
+      padding: .5rem .86rem;
+      text-decoration: none;
+      color: inherit;
+      background: #fff;
+      cursor: pointer;
+      transition: all .14s ease-in-out;
+      font-weight: 600;
+    }}
+    button:hover, a:hover {{ border-color: #adbfdf; transform: translateY(-1px); }}
+    button.primary {{ background: var(--primary); color: #fff; border-color: var(--primary); }}
+    button.primary:hover {{ background: var(--primary-strong); border-color: var(--primary-strong); }}
+    button.danger {{ border-color: #f2bfca; color: var(--danger); background: #fff7f9; }}
+    .section {{
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem;
+      margin-top: 1rem;
+      background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+    }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .82rem; }}
+    table {{ width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: .75rem; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }}
+    thead th {{ background: #f4f7fe; font-size: .84rem; text-transform: uppercase; letter-spacing: .03em; color: #33415e; }}
+    th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
+    tr:last-child td {{ border-bottom: 0; }}
     .section table input, .section table select {{ width: 100%; min-width: 0; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: wrap; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center; justify-content: center; }}
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
-    .row-status {{ font-size: .85rem; color: #445; text-transform: uppercase; font-weight: 600; }}
+    .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
+    .source-table td {{ padding-top: .7rem; padding-bottom: .7rem; }}
+    .source-table tr:not(.source-row-actions-row) td {{ border-bottom: 0; }}
+    .source-table input, .source-table select {{ padding: .46rem .56rem; border-radius: 9px; }}
+    .source-table th, .source-table td {{ overflow: hidden; }}
+    .source-table td:nth-child(1), .source-table th:nth-child(1) {{ width: 18%; }}
+    .source-table td:nth-child(2), .source-table th:nth-child(2) {{ width: 28%; }}
+    .source-table td:nth-child(3), .source-table th:nth-child(3) {{ width: 9%; }}
+    .source-table td:nth-child(4), .source-table th:nth-child(4) {{ width: 9%; }}
+    .source-table td:nth-child(5), .source-table th:nth-child(5) {{ width: 16%; }}
+    .source-table td:nth-child(6), .source-table th:nth-child(6) {{ width: 10%; }}
+    .source-table td:last-child, .source-table th:last-child {{ width: 10%; text-align: center; }}
+    .source-table td:nth-child(2) input {{ font-size: .95rem; }}
+    .source-table td:nth-child(2) input, .source-table td:nth-child(5) input {{ text-overflow: ellipsis; }}
+    .table-action {{ min-width: 7.25rem; padding: .35rem .72rem; font-size: .88rem; text-align: center; }}
+    .table-wrap {{ overflow: visible; }}
+    .source-row-actions-row td {{ border-bottom: 1px solid var(--border-soft); }}
+    .source-row-actions-cell {{ padding-top: 0; padding-bottom: .8rem; }}
+    .source-row-actions {{ justify-content: center; }}
+    code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
+    @media (max-width: 900px) {{
+      .grid {{ grid-template-columns: 1fr; }}
+      .wrap {{ padding: 1rem; }}
+      th, td {{ padding: .45rem; }}
+      .source-table, .source-table thead, .source-table tbody, .source-table tr, .source-table th, .source-table td {{ display: block; width: 100%; }}
+      .source-table thead {{ display: none; }}
+      .source-table tr {{ border-bottom: 1px solid var(--border-soft); padding: .4rem 0 .6rem; }}
+      .source-table td {{ border: 0; padding: .35rem 0; }}
+      .source-table td:last-child {{ padding-top: .2rem; }}
+      .row-actions {{ gap: .4rem; justify-content: center; flex-wrap: wrap; }}
+    }}
   </style>
 </head>
 <body>
@@ -3314,10 +3410,12 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>YouTube sources</h2>
-    <table>
-        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
+      <div class="table-wrap">
+    <table class="source-table">
+        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th></tr></thead>
         <tbody>{youtube_table}</tbody>
       </table>
+      </div>
 
       <h3>Add YouTube source</h3>
       <form method="post" action="/settings">
@@ -3343,10 +3441,12 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>Podcast sources</h2>
-    <table>
-        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th><th>Actions</th></tr></thead>
+      <div class="table-wrap">
+    <table class="source-table">
+        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th></tr></thead>
         <tbody>{podcast_table}</tbody>
       </table>
+      </div>
 
       <h3>Add podcast source</h3>
       <form method="post" action="/settings">
