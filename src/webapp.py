@@ -4158,7 +4158,6 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
             rss_mb = float(usage.ru_maxrss) / 1024.0
             if sys.platform == "darwin":
                 rss_mb /= 1024.0
-            log.info("Idle RSS: %.2f MB", rss_mb)
             if MEMORY_CEILING_MB > 0 and rss_mb > MEMORY_CEILING_MB:
                 log.warning("Memory ceiling exceeded: rss=%.2f MB ceiling=%.2f MB", rss_mb, MEMORY_CEILING_MB)
 
