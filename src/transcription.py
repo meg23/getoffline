@@ -52,7 +52,12 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
     transcribe_kwargs = {"vad_filter": True}
     if language:
         transcribe_kwargs["language"] = language
-    segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
+    try:
+        segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
+    except IndexError as exc:
+        if "tuple index out of range" in str(exc):
+            raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
+        raise
     return _normalize_faster_whisper_result(segments)
 
 
@@ -66,7 +71,12 @@ def _transcribe_worker_once(input_file: str, model_name: str, language: str = No
         transcribe_kwargs = {"vad_filter": True}
         if language:
             transcribe_kwargs["language"] = language
-        segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
+        try:
+            segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
+        except IndexError as exc:
+            if "tuple index out of range" in str(exc):
+                raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
+            raise
         return _normalize_faster_whisper_result(segments)
     finally:
         del segments
