@@ -1,6 +1,5 @@
 import gc
 import json
-import os
 import re
 import subprocess
 import sys
@@ -20,8 +19,8 @@ STOP_WORDS = {
 }
 
 
-DEFAULT_OLLAMA_MODEL = os.getenv("GETOFFLINE_SUMMARY_MODEL", "qwen2.5:0.5b")
-DEFAULT_OLLAMA_URL = os.getenv("GETOFFLINE_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
+DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 log = get_logger("summarization")
 _MODEL_READY_LOCK = threading.Lock()
 _MODEL_READY = False
@@ -122,19 +121,19 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
     return None
 
 
-def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL) -> bool:
+def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL, ollama_path: str = "ollama") -> bool:
     global _MODEL_READY
     with _MODEL_READY_LOCK:
         if _MODEL_READY:
             return True
         try:
-            check = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=False)
+            check = subprocess.run([ollama_path, "list"], capture_output=True, text=True, check=False)
             if check.returncode != 0:
                 log.warning("Ollama not ready for summaries (list failed): %s", (check.stderr or check.stdout).strip())
                 return False
             if model_name not in (check.stdout or ""):
                 log.info("Downloading local summary model via Ollama: %s", model_name)
-                pull = subprocess.run(["ollama", "pull", model_name], capture_output=True, text=True, check=False)
+                pull = subprocess.run([ollama_path, "pull", model_name], capture_output=True, text=True, check=False)
                 if pull.returncode != 0:
                     log.warning("Failed to download Ollama summary model %s: %s", model_name, (pull.stderr or pull.stdout).strip())
                     return False
