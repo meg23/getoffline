@@ -1939,6 +1939,10 @@ def _render_index(
     <div id="drag-drop-upload-hint" style="display:none;position:fixed;inset:1.5rem;z-index:2000;border:3px dashed #0d6efd;border-radius:16px;background:rgba(13,110,253,.12);color:#0d6efd;font-weight:700;align-items:center;justify-content:center;text-align:center;padding:2rem;">
       Drop media file to import into Downloads folder
     </div>
+    <div id="upload-progress-wrap" style="display:none;position:fixed;right:1rem;bottom:1rem;z-index:2100;background:#111827;color:#fff;padding:.7rem .8rem;border-radius:10px;min-width:280px;box-shadow:0 8px 30px rgba(0,0,0,.3);">
+      <div id="upload-progress-label" style="font-size:.85rem;margin-bottom:.35rem;">Uploading…</div>
+      <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:12px;"></progress>
+    </div>
 
     <table id="downloads-table">
       <colgroup>
@@ -2029,6 +2033,9 @@ def _render_index(
       }};
 
       const dragDropHint = document.getElementById('drag-drop-upload-hint');
+      const uploadProgressWrap = document.getElementById('upload-progress-wrap');
+      const uploadProgressBar = document.getElementById('upload-progress-bar');
+      const uploadProgressLabel = document.getElementById('upload-progress-label');
       let dragCounter = 0;
       const setDragOverlay = (isVisible) => {{
         if (!dragDropHint) return;
@@ -2063,18 +2070,36 @@ def _render_index(
         if (!files.length) return;
         const file = files[0];
         try {{
-          const resp = await fetch('/import-media', {{
-            method: 'POST',
-            headers: {{
-              'Content-Type': file.type || 'application/octet-stream',
-              'X-Upload-Filename': encodeURIComponent(file.name || 'upload.bin'),
-            }},
-            body: file,
+          const resp = await new Promise((resolve, reject) => {{
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/import-media', true);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.setRequestHeader('X-Upload-Filename', encodeURIComponent(file.name || 'upload.bin'));
+            if (uploadProgressWrap) uploadProgressWrap.style.display = 'block';
+            if (uploadProgressBar) uploadProgressBar.value = 0;
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… 0%`;
+
+            xhr.upload.onprogress = (progressEvent) => {{
+              if (!progressEvent.lengthComputable) return;
+              const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
+              if (uploadProgressBar) uploadProgressBar.value = pct;
+              if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… ${{pct}}%`;
+            }};
+            xhr.onload = () => resolve({{ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status }});
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send(file);
           }});
           if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
+          if (uploadProgressBar) uploadProgressBar.value = 100;
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload complete: ${{file.name}}`;
           window.location.reload();
         }} catch (err) {{
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed: ${{file.name}}`;
           window.alert(`Failed to import file: ${{err}}`);
+        }} finally {{
+          window.setTimeout(() => {{
+            if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
+          }}, 1200);
         }}
       }});
 
