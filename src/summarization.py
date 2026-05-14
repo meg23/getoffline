@@ -166,13 +166,20 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
         if not llm_summary:
             log.warning("Falling back to extractive summary mode=in_process model=%s transcript_chars=%s", model_name, len(joined_text))
         return {"summary_text": summary_text, "model_name": used_model, "updated_at": _utcnow_iso()}
+    log.info("Starting summary subprocess model=%s transcript_chars=%s", model_name, len(joined_text))
     payload = {"text": joined_text, "model_name": model_name}
     cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
+        log.error("Summary subprocess failed model=%s error=%s", model_name, details)
         raise RuntimeError(f"summary subprocess failed: {details}")
-    return json.loads(completed.stdout)
+    result = json.loads(completed.stdout)
+    used_model = str(result.get("model_name") or "unknown")
+    log.info("Summary subprocess completed requested_model=%s used_model=%s summary_chars=%s", model_name, used_model, len(str(result.get("summary_text") or "")))
+    if used_model == "extractive-local":
+        log.warning("Summary subprocess used extractive fallback requested_model=%s transcript_chars=%s", model_name, len(joined_text))
+    return result
 
 
 def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str, str]:

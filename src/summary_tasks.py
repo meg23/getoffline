@@ -66,6 +66,10 @@ def generate_missing_summaries(db_path: str, limit: int = 20) -> int:
             (int(limit),),
         ).fetchall()
 
+    if not rows:
+        log.info("Summary generation pass complete candidates=0 generated=0")
+        return 0
+
     for row_id, title, subtitle_path in rows:
         path = Path(str(subtitle_path)).expanduser().resolve()
         segments = _load_segments_from_subtitle(path)
