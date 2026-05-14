@@ -269,6 +269,73 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
     return None
 
 
+def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_bytes: int) -> None:
+    if not file_name:
+        raise ValueError("Missing filename")
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in MEDIA_EXTENSIONS:
+        raise ValueError("Unsupported media type")
+    if total_bytes <= 0:
+        raise ValueError("Empty file payload")
+
+    destination_root = state.output_root.expanduser().resolve()
+    destination_root.mkdir(parents=True, exist_ok=True)
+    stem = _normalize_stem(Path(file_name).stem)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    destination_path = destination_root / f"manual-{timestamp}-{stem}{suffix}"
+    counter = 1
+    while destination_path.exists():
+        destination_path = destination_root / f"manual-{timestamp}-{stem}-{counter}{suffix}"
+        counter += 1
+
+    hasher = hashlib.sha1()
+    bytes_written = 0
+    with destination_path.open("wb") as out:
+        remaining = total_bytes
+        while remaining > 0:
+            chunk = stream.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            out.write(chunk)
+            hasher.update(chunk)
+            chunk_len = len(chunk)
+            bytes_written += chunk_len
+            remaining -= chunk_len
+    if bytes_written <= 0:
+        destination_path.unlink(missing_ok=True)
+        raise ValueError("Empty file payload")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    item_uid = f"manual-{hasher.hexdigest()}-{bytes_written}"
+    metadata = {
+        "source_type": "manual",
+        "source_name": "Manual Uploads",
+        "item_uid": item_uid,
+        "item_id": item_uid,
+        "title": Path(file_name).stem,
+        "description": "Imported via browser drag-and-drop",
+        "uploader": "local",
+        "channel": "Manual Uploads",
+        "extractor": "browser-drop",
+        "upload_date": now_iso[:10],
+        "file_path": str(destination_path),
+        "file_ext": suffix.lstrip("."),
+        "file_size_bytes": int(bytes_written),
+        "expected_bytes": int(bytes_written),
+        "format_note": "manual import",
+        "subtitle_enabled": False,
+        "download_status": "downloaded",
+        "raw_metadata": {
+            "ingested_at": now_iso,
+            "ingest_method": "drag-and-drop",
+            "original_filename": file_name,
+            "sha1": hasher.hexdigest(),
+        },
+        "storage_root": str(destination_root),
+    }
+    upsert_download(str(state.database_path), metadata)
+
+
 def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> Tuple[str, bytes]:
     if "boundary=" not in content_type:
         raise ValueError("Missing multipart boundary")
@@ -1938,10 +2005,15 @@ def _render_index(
         const files = Array.from(event.dataTransfer.files || []);
         if (!files.length) return;
         const file = files[0];
-        const payload = new FormData();
-        payload.append('media_file', file, file.name);
         try {{
-          const resp = await fetch('/import-media', {{ method: 'POST', body: payload }});
+          const resp = await fetch('/import-media', {{
+            method: 'POST',
+            headers: {{
+              'Content-Type': file.type || 'application/octet-stream',
+              'X-Upload-Filename': encodeURIComponent(file.name || 'upload.bin'),
+            }},
+            body: file,
+          }});
           if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
           window.location.reload();
         }} catch (err) {{
@@ -4214,14 +4286,22 @@ def make_handler(state: AppState):
 
             if path == "/import-media":
                 content_type = self.headers.get("Content-Type") or ""
-                if "multipart/form-data" not in content_type:
-                    self.send_error(400, "Expected multipart/form-data")
-                    return
                 try:
                     content_length = int(self.headers.get("Content-Length") or 0)
-                    body = self.rfile.read(content_length) if content_length > 0 else b""
-                    file_name, payload = _extract_multipart_file(content_type, body, field_name="media_file")
-                    _import_dropped_media_file(state, file_name=file_name, payload=payload)
+                    if "multipart/form-data" in content_type:
+                        body = self.rfile.read(content_length) if content_length > 0 else b""
+                        file_name, payload = _extract_multipart_file(content_type, body, field_name="media_file")
+                        _import_dropped_media_file(state, file_name=file_name, payload=payload)
+                    else:
+                        raw_name = str(self.headers.get("X-Upload-Filename") or "").strip()
+                        file_name = raw_name
+                        if raw_name:
+                            try:
+                                from urllib.parse import unquote
+                                file_name = unquote(raw_name)
+                            except Exception:
+                                file_name = raw_name
+                        _import_dropped_media_stream(state, file_name=file_name, stream=self.rfile, total_bytes=content_length)
                 except ValueError as exc:
                     self.send_error(400, str(exc))
                     return
