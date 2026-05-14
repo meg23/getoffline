@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
+from subtitles import create_subtitles
 from database import (
     resolve_download_artifact_path,
     add_source_config,
@@ -266,6 +267,7 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
         "storage_root": str(destination_root),
     }
     upsert_download(str(state.database_path), metadata)
+    _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
     return None
 
 
@@ -334,6 +336,55 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
         "storage_root": str(destination_root),
     }
     upsert_download(str(state.database_path), metadata)
+    _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+
+
+def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path) -> None:
+    defaults = (state.config or {}).get("defaults") or {}
+    subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "subprocess")
+    subtitle_offset = defaults.get("subtitle_time_offset_seconds")
+    try:
+        subtitle_path = create_subtitles(
+            media_file=Path(media_path),
+            subtitle_offset_seconds=subtitle_offset,
+            entry_subtitles_enabled=True,
+            logger=log,
+            context_name="manual-upload",
+            context_label="manual",
+            subtitle_transcription_mode=subtitle_mode,
+        )
+    except Exception as exc:
+        log.warning("Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc)
+        subtitle_path = None
+
+    if subtitle_path:
+        with sqlite3.connect(str(state.database_path)) as conn:
+            conn.execute(
+                """
+                UPDATE downloads
+                SET subtitle_enabled = 1,
+                    subtitle_path = ?,
+                    subtitle_path_relative = ?,
+                    last_seen_at = ?
+                WHERE source_type = 'manual' AND source_name = 'Manual Uploads' AND item_uid = ?
+                """,
+                (
+                    str(subtitle_path),
+                    subtitle_path.name,
+                    datetime.now(timezone.utc).isoformat(),
+                    str(item_uid),
+                ),
+            )
+            conn.commit()
+        try:
+            generate_missing_summaries(
+                str(state.database_path),
+                limit=1,
+                model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
+                timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90),
+            )
+        except Exception as exc:
+            log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
 
 
 def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> Tuple[str, bytes]:
