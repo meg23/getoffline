@@ -85,6 +85,7 @@ def _truncate_for_prompt(text: str, max_chars: int = 6000) -> str:
 
 
 def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -> Optional[str]:
+    log.debug("Starting Ollama summary request model=%s url=%s transcript_chars=%s", model_name, url, len(text or ""))
     prompt = (
         "Return strict JSON: {\"summary\": \"...\"}. "
         "Write a concise 1-2 sentence paraphrased summary (max 220 chars). "
@@ -115,8 +116,11 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
             response_text = re.sub(r"\s+", " ", response_text)
             if len(response_text) > 280:
                 response_text = response_text[:279].rstrip() + "…"
+            log.info("Ollama summary succeeded model=%s response_chars=%s", model_name, len(response_text))
             return response_text
-    except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError):
+        log.warning("Ollama summary response missing summary field model=%s body_chars=%s", model_name, len(body))
+    except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        log.warning("Ollama summary request failed model=%s error=%s", model_name, exc)
         return None
     return None
 
@@ -152,11 +156,15 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
         if cleaned_segment:
             cleaned_segments.append(cleaned_segment)
     joined_text = " ".join(cleaned_segments)
-    ensure_local_summary_model(model_name=model_name)
+    model_ready = ensure_local_summary_model(model_name=model_name)
+    if not model_ready:
+        log.warning("Summary model readiness check failed model=%s; Ollama may still be tried and fallback may be used.", model_name)
     if mode == "in_process":
         llm_summary = _ollama_summary(joined_text, model_name=model_name)
         summary_text = llm_summary or _extractive_summary(joined_text)
         used_model = model_name if llm_summary else "extractive-local"
+        if not llm_summary:
+            log.warning("Falling back to extractive summary mode=in_process model=%s transcript_chars=%s", model_name, len(joined_text))
         return {"summary_text": summary_text, "model_name": used_model, "updated_at": _utcnow_iso()}
     payload = {"text": joined_text, "model_name": model_name}
     cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
@@ -172,6 +180,7 @@ def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str,
         summary = _ollama_summary(text, model_name=model_name)
         used_model = model_name
         if not summary:
+            log.warning("Falling back to extractive summary mode=worker model=%s transcript_chars=%s", model_name, len(text or ""))
             summary = _extractive_summary(text)
             used_model = "extractive-local"
         return {"summary_text": summary, "model_name": used_model, "updated_at": _utcnow_iso()}
