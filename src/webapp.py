@@ -2384,7 +2384,7 @@ def _render_index(
             link.dataset.summaryBound = '1';
             link.addEventListener('mouseenter', (event) => {{
               if (!summaryTooltip) return;
-              const summaryText = String(link.dataset.summary || '').trim();
+              const summaryText = String(link.dataset.summary || link.dataset.title || '').trim();
               if (!summaryText) return;
               summaryTooltip.textContent = summaryText;
               summaryTooltip.classList.add('is-visible');

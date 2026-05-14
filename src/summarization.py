@@ -84,11 +84,12 @@ def _truncate_for_prompt(text: str, max_chars: int = 6000) -> str:
     return stripped[:max_chars].rstrip() + "…"
 
 
-def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -> Optional[str]:
+def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -> str:
     prompt = (
         "Return strict JSON: {\"summary\": \"...\"}. "
         "Write a concise 1-2 sentence paraphrased summary (max 220 chars). "
-        "Focus on topic + takeaway. Avoid filler, quotes, and transcript-style wording.\n\n"
+        "Focus on topic + takeaway. Avoid filler, quotes, transcript-style wording, and any ad/promotional language. "
+        "Never mention sponsors, products, offers, discounts, or marketing claims.\n\n"
         f"Transcript:\n{_truncate_for_prompt(text)}"
     )
     payload = {
@@ -118,8 +119,8 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
             return response_text
     except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
         log.warning("Ollama summary request failed model=%s error=%s", model_name, exc)
-        return None
-    return None
+        raise RuntimeError(f"ollama summary request failed: {exc}") from exc
+    raise RuntimeError("ollama summary response did not include a usable summary")
 
 
 def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL, ollama_path: str = "ollama") -> bool:
@@ -158,11 +159,7 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
         log.debug("Summary model readiness check failed model=%s; Ollama may still be tried.", model_name)
     if mode == "in_process":
         llm_summary = _ollama_summary(joined_text, model_name=model_name)
-        summary_text = llm_summary or _extractive_summary(joined_text)
-        used_model = model_name if llm_summary else "extractive-local"
-        if not llm_summary:
-            log.warning("Falling back to extractive summary mode=in_process model=%s transcript_chars=%s", model_name, len(joined_text))
-        return {"summary_text": summary_text, "model_name": used_model, "updated_at": _utcnow_iso()}
+        return {"summary_text": llm_summary, "model_name": model_name, "updated_at": _utcnow_iso()}
     payload = {"text": joined_text, "model_name": model_name}
     cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -180,14 +177,10 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
 def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str, str]:
     try:
         summary = _ollama_summary(text, model_name=model_name)
-        used_model = model_name
-        if not summary:
-            log.warning("Falling back to extractive summary mode=worker model=%s transcript_chars=%s", model_name, len(text or ""))
-            summary = _extractive_summary(text)
-            used_model = "extractive-local"
-        return {"summary_text": summary, "model_name": used_model, "updated_at": _utcnow_iso()}
+        return {"summary_text": summary, "model_name": model_name, "updated_at": _utcnow_iso()}
     finally:
         gc.collect()
+
 
 
 if __name__ == "__main__":
