@@ -3116,6 +3116,11 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       border-radius: 12px;
       box-shadow: 0 20px 60px rgba(0,0,0,.35);
     }}
+    .player-toolbar {{ display: flex; align-items: center; gap: .6rem; margin: 0 0 .75rem 0; }}
+    .cast-button {{ background: #28457f; color: #ecf2ff; border: 1px solid #3d5ea3; border-radius: 999px; padding: .35rem .8rem; cursor: pointer; font-size: .92rem; }}
+    .cast-button:hover {{ background: #32579f; }}
+    .cast-button[hidden] {{ display: none; }}
+    .cast-status {{ color: #a9b4d0; font-size: .88rem; min-height: 1.2rem; }}
     .transcript-wrap {{ margin-top: 1rem; max-width: 1000px; }}
     .transcript-wrap h3 {{ margin: 0 0 .45rem 0; font-size: 1rem; color: #b8c4e6; }}
     .transcript {{
@@ -3148,7 +3153,11 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     <p><a id="back-to-library" href="/">← Back to Library</a></p>
     <h2>{title}</h2>
     <p class="meta">{source}</p>
-    <{media_kind} id="player" class="player" controls preload="metadata">
+    <div class="player-toolbar">
+      <button id="cast-button" type="button" class="cast-button" hidden>Cast</button>
+      <span id="cast-status" class="cast-status" aria-live="polite"></span>
+    </div>
+    <{media_kind} id="player" class="player" controls preload="metadata" x-webkit-airplay="allow" playsinline>
       <source src="/media?id={row.row_id}" />
       {subtitles_html}
       Your browser does not support this media type.
@@ -3166,6 +3175,8 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       const resumeLabel = document.getElementById('resume-label');
       const transcript = document.getElementById('transcript');
       const subtitleTrackEl = document.getElementById('subtitle-track');
+      const castButton = document.getElementById('cast-button');
+      const castStatus = document.getElementById('cast-status');
       let lastSentSeconds = -9999;
       let progressInFlight = false;
       let queuedProgressSeconds = null;
@@ -3180,6 +3191,52 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let playbackCompleted = false;
 
       if (!player) return;
+
+      function setCastStatus(message) {{
+        if (!castStatus) return;
+        castStatus.textContent = message || '';
+      }}
+
+      function initCasting() {{
+        if (!castButton || !('remote' in player) || typeof player.remote.prompt !== 'function') return;
+
+        castButton.hidden = false;
+        const updateCastAvailability = () => {{
+          const state = player.remote.state || 'disconnected';
+          if (state === 'connected') setCastStatus('Casting is active.');
+          else if (state === 'connecting') setCastStatus('Connecting to cast device…');
+          else setCastStatus('Ready to cast.');
+        }};
+
+        castButton.addEventListener('click', async () => {{
+          try {{
+            await player.remote.prompt();
+            updateCastAvailability();
+          }} catch (err) {{
+            if (err && err.name === 'NotAllowedError') {{
+              setCastStatus('Cast request was cancelled.');
+              return;
+            }}
+            setCastStatus('Unable to start casting on this browser/device.');
+          }}
+        }});
+
+        if (typeof player.remote.watchAvailability === 'function') {{
+          player.remote.watchAvailability((available) => {{
+            castButton.hidden = !available;
+            if (!available) setCastStatus('No cast devices found on this network.');
+            else updateCastAvailability();
+          }}).catch(() => {{
+            updateCastAvailability();
+          }});
+        }} else {{
+          updateCastAvailability();
+        }}
+
+        player.remote.addEventListener('connect', updateCastAvailability);
+        player.remote.addEventListener('connecting', updateCastAvailability);
+        player.remote.addEventListener('disconnect', updateCastAvailability);
+      }}
 
       function readStoredMediaSettings() {{
         const raw = window.localStorage.getItem(mediaSettingsStorageKey);
@@ -3415,6 +3472,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       window.addEventListener('pageshow', scheduleTranscriptInit);
       if (subtitleTrackEl) subtitleTrackEl.addEventListener('load', scheduleTranscriptInit);
       scheduleTranscriptInit();
+      initCasting();
 
       player.addEventListener('timeupdate', () => {{
         persistMiniPlayerState();
