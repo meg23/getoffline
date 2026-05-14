@@ -215,12 +215,11 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
     destination_root = (state.output_root.expanduser().resolve() / "manual")
     destination_root.mkdir(parents=True, exist_ok=True)
     stem = _normalize_stem(Path(file_name).stem)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    destination_name = f"manual-{timestamp}-{stem}{suffix}"
+    destination_name = f"{stem}{suffix}"
     destination_path = destination_root / destination_name
     counter = 1
     while destination_path.exists():
-        destination_path = destination_root / f"manual-{timestamp}-{stem}-{counter}{suffix}"
+        destination_path = destination_root / f"{stem}-{counter}{suffix}"
         counter += 1
 
     destination_path.write_bytes(payload)
@@ -284,11 +283,10 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
     destination_root = (state.output_root.expanduser().resolve() / "manual")
     destination_root.mkdir(parents=True, exist_ok=True)
     stem = _normalize_stem(Path(file_name).stem)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    destination_path = destination_root / f"manual-{timestamp}-{stem}{suffix}"
+    destination_path = destination_root / f"{stem}{suffix}"
     counter = 1
     while destination_path.exists():
-        destination_path = destination_root / f"manual-{timestamp}-{stem}-{counter}{suffix}"
+        destination_path = destination_root / f"{stem}-{counter}{suffix}"
         counter += 1
 
     hasher = hashlib.sha1()
@@ -1940,9 +1938,11 @@ def _render_index(
     <div id="drag-drop-upload-hint" style="display:none;position:fixed;inset:1.5rem;z-index:2000;border:3px dashed #0d6efd;border-radius:16px;background:rgba(13,110,253,.12);color:#0d6efd;font-weight:700;align-items:center;justify-content:center;text-align:center;padding:2rem;">
       Drop media file to import into Downloads folder
     </div>
-    <div id="upload-progress-wrap" style="display:none;position:fixed;right:1rem;bottom:1rem;z-index:2100;background:#111827;color:#fff;padding:.7rem .8rem;border-radius:10px;min-width:280px;box-shadow:0 8px 30px rgba(0,0,0,.3);">
-      <div id="upload-progress-label" style="font-size:.85rem;margin-bottom:.35rem;">Uploading…</div>
-      <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:12px;"></progress>
+    <div id="upload-progress-wrap" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(15,23,42,.45);align-items:center;justify-content:center;padding:1rem;">
+      <div style="background:#111827;color:#fff;padding:1rem 1rem;border-radius:12px;min-width:min(520px,95vw);box-shadow:0 12px 40px rgba(0,0,0,.35);">
+        <div id="upload-progress-label" style="font-size:.95rem;margin-bottom:.55rem;font-weight:600;">Uploading…</div>
+        <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:16px;"></progress>
+      </div>
     </div>
 
     <table id="downloads-table">
@@ -2076,7 +2076,7 @@ def _render_index(
             xhr.open('POST', '/import-media', true);
             xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
             xhr.setRequestHeader('X-Upload-Filename', encodeURIComponent(file.name || 'upload.bin'));
-            if (uploadProgressWrap) uploadProgressWrap.style.display = 'block';
+            if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
             if (uploadProgressBar) uploadProgressBar.value = 0;
             if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… 0%`;
 
