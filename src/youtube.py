@@ -354,6 +354,11 @@ def _build_youtube_payload(
 ) -> Dict:
     path = Path(output_file).expanduser().resolve() if output_file else None
     file_size = path.stat().st_size if path and path.exists() else None
+    subtitle_path = None
+    if subtitle_enabled and path is not None:
+        subtitle_candidate = path.with_suffix(".srt")
+        if subtitle_candidate.exists():
+            subtitle_path = str(subtitle_candidate)
     resolution = None
     width, height = info.get("width"), info.get("height")
     if width and height:
@@ -423,7 +428,7 @@ def _build_youtube_payload(
         "resolution": resolution,
         "fps": info.get("fps"),
         "subtitle_enabled": subtitle_enabled,
-        "subtitle_path": None,
+        "subtitle_path": subtitle_path,
         "download_status": download_status,
         "error_message": error_message,
         "raw_metadata": compact_metadata,
@@ -952,6 +957,9 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 remapped_path = normalized_path_map.get(resolved_path)
                 if remapped_path is not None:
                     resolved_file = str(remapped_path)
+
+                if should_generate_subtitles and not Path(resolved_file).expanduser().resolve().with_suffix(".srt").exists():
+                    log.warning("Expected subtitle sidecar missing before DB upsert source=%s file=%s", name, resolved_file)
 
                 upsert_download(
                     db_path,
