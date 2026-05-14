@@ -288,6 +288,21 @@ def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> 
     raise ValueError(f"Missing {field_name}")
 
 
+def _update_download_metadata(db_path: Path, row_id: int, title: str, source_name: str) -> bool:
+    cleaned_title = str(title or "").strip()
+    cleaned_source_name = str(source_name or "").strip()
+    if not cleaned_title or not cleaned_source_name:
+        return False
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(str(db_path)) as conn:
+        cur = conn.execute(
+            "UPDATE downloads SET title = ?, source_name = ?, last_seen_at = ? WHERE id = ?",
+            (cleaned_title, cleaned_source_name, now_iso, int(row_id)),
+        )
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+
+
 def _is_sqlite_lock_error(exc: Exception) -> bool:
     text = str(exc or "").lower()
     return "database is locked" in text or "database table is locked" in text
@@ -1731,6 +1746,7 @@ def _render_index(
             <option value="unplayed">unplayed</option>
             <option value="favorite">favorite</option>
             <option value="unfavorite">unfavorite</option>
+            <option value="edit-metadata">edit metadata</option>
             <option value="delete">delete</option>
             <option value="download">download</option>
           </select>
@@ -1747,6 +1763,26 @@ def _render_index(
       </div>
     </div>
     <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
+    <div id="metadata-edit-backdrop" class="quick-add-backdrop" aria-hidden="true">
+      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
+        <h2 id="metadata-edit-title">Edit media metadata</h2>
+        <form id="metadata-edit-form" class="quick-add-form">
+          <input id="metadata-edit-id" name="id" type="hidden" />
+          <div>
+            <label for="metadata-edit-item-title">Title</label>
+            <input id="metadata-edit-item-title" class="quick-add-input" name="title" type="text" required />
+          </div>
+          <div>
+            <label for="metadata-edit-source-name">Source name</label>
+            <input id="metadata-edit-source-name" class="quick-add-input" name="source_name" type="text" required />
+          </div>
+          <div class="quick-add-actions">
+            <button id="metadata-edit-cancel" type="button">Cancel</button>
+            <button class="primary" type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
@@ -2131,6 +2167,12 @@ def _render_index(
       const batchAction = document.getElementById('batch-action');
       const batchApply = document.getElementById('batch-apply');
       const selectAllRows = document.getElementById('select-all-rows');
+      const metadataEditBackdrop = document.getElementById('metadata-edit-backdrop');
+      const metadataEditForm = document.getElementById('metadata-edit-form');
+      const metadataEditIdInput = document.getElementById('metadata-edit-id');
+      const metadataEditTitleInput = document.getElementById('metadata-edit-item-title');
+      const metadataEditSourceInput = document.getElementById('metadata-edit-source-name');
+      const metadataEditCancel = document.getElementById('metadata-edit-cancel');
 
       const updateBatchState = () => {{
         const visibleRowSelectors = getVisibleRowSelectors();
@@ -2179,6 +2221,24 @@ def _render_index(
             event.preventDefault();
             return;
           }}
+          if (batchAction.value === 'edit-metadata') {{
+            event.preventDefault();
+            if (selectedRows.length !== 1) {{
+              window.alert('Select exactly one row to edit metadata.');
+              return;
+            }}
+            const row = selectedRows[0]?.closest('tr[data-row-id]');
+            const title = row?.querySelector('.episode-link')?.textContent || '';
+            const source = row?.querySelector('.channel-col')?.textContent || '';
+            if (metadataEditIdInput) metadataEditIdInput.value = selectedRows[0].value;
+            if (metadataEditTitleInput) metadataEditTitleInput.value = title.trim();
+            if (metadataEditSourceInput) metadataEditSourceInput.value = source.trim();
+            if (metadataEditBackdrop) {{
+              metadataEditBackdrop.classList.add('is-open');
+              metadataEditBackdrop.setAttribute('aria-hidden', 'false');
+            }}
+            return;
+          }}
 
           event.preventDefault();
           if (batchApply) batchApply.disabled = true;
@@ -2203,6 +2263,38 @@ def _render_index(
                 refreshLibraryViewWithoutReload();
               }}
             }});
+        }});
+      }}
+      if (metadataEditCancel && metadataEditBackdrop) {{
+        metadataEditCancel.addEventListener('click', () => {{
+          metadataEditBackdrop.classList.remove('is-open');
+          metadataEditBackdrop.setAttribute('aria-hidden', 'true');
+        }});
+      }}
+      if (metadataEditBackdrop) {{
+        metadataEditBackdrop.addEventListener('click', (event) => {{
+          if (event.target !== metadataEditBackdrop) return;
+          metadataEditBackdrop.classList.remove('is-open');
+          metadataEditBackdrop.setAttribute('aria-hidden', 'true');
+        }});
+      }}
+      if (metadataEditForm) {{
+        metadataEditForm.addEventListener('submit', async (event) => {{
+          event.preventDefault();
+          const body = new URLSearchParams();
+          if (metadataEditIdInput) body.set('id', metadataEditIdInput.value);
+          if (metadataEditTitleInput) body.set('title', metadataEditTitleInput.value);
+          if (metadataEditSourceInput) body.set('source_name', metadataEditSourceInput.value);
+          const response = await fetch('/edit-metadata', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
+            body: body.toString(),
+          }});
+          if (!response.ok) {{
+            window.alert('Failed to update metadata.');
+            return;
+          }}
+          window.location.reload();
         }});
       }}
       bindBatchControls();
@@ -4180,6 +4272,27 @@ def make_handler(state: AppState):
                 _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
                 if _is_playback_completion_reason(raw_reason):
                     mark_download_played(str(state.database_path), row_id, played=True)
+                self.send_response(204)
+                self.end_headers()
+                return
+
+            if path == "/edit-metadata":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                raw_id = (form.get("id") or [None])[0]
+                title = str((form.get("title") or [""])[0]).strip()
+                source_name = str((form.get("source_name") or [""])[0]).strip()
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+                if not title or not source_name:
+                    self.send_error(400, "Missing title/source_name")
+                    return
+                updated = _update_download_metadata(state.database_path, int(raw_id), title=title, source_name=source_name)
+                if not updated:
+                    self.send_error(404, "Item not found")
+                    return
                 self.send_response(204)
                 self.end_headers()
                 return
