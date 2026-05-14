@@ -211,7 +211,7 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
     if not payload:
         raise ValueError("Empty file payload")
 
-    destination_root = state.output_root.expanduser().resolve()
+    destination_root = (state.output_root.expanduser().resolve() / "manual")
     destination_root.mkdir(parents=True, exist_ok=True)
     stem = _normalize_stem(Path(file_name).stem)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -280,7 +280,7 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
     if total_bytes <= 0:
         raise ValueError("Empty file payload")
 
-    destination_root = state.output_root.expanduser().resolve()
+    destination_root = (state.output_root.expanduser().resolve() / "manual")
     destination_root.mkdir(parents=True, exist_ok=True)
     stem = _normalize_stem(Path(file_name).stem)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -359,6 +359,12 @@ def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path
 
     if subtitle_path:
         with sqlite3.connect(str(state.database_path)) as conn:
+            output_root = state.output_root.expanduser().resolve()
+            subtitle_relative = None
+            try:
+                subtitle_relative = str(Path(subtitle_path).resolve().relative_to(output_root))
+            except ValueError:
+                subtitle_relative = None
             conn.execute(
                 """
                 UPDATE downloads
@@ -370,7 +376,7 @@ def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path
                 """,
                 (
                     str(subtitle_path),
-                    subtitle_path.name,
+                    subtitle_relative,
                     datetime.now(timezone.utc).isoformat(),
                     str(item_uid),
                 ),
