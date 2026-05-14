@@ -2,6 +2,7 @@ import html
 import json
 import mimetypes
 import os
+import hashlib
 import posixpath
 import re
 import gc
@@ -16,6 +17,8 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from io import StringIO
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -45,6 +48,7 @@ from database import (
     update_download_position_seconds,
     update_download_positions_batch,
     close_cached_descriptors,
+    upsert_download,
 )
 
 
@@ -195,6 +199,93 @@ def _is_media_file(path: Path) -> bool:
 def _normalize_stem(value: str) -> str:
     normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
     return normalized or "item"
+
+
+def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) -> None:
+    if not file_name:
+        raise ValueError("Missing filename")
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in MEDIA_EXTENSIONS:
+        raise ValueError("Unsupported media type")
+    if not payload:
+        raise ValueError("Empty file payload")
+
+    destination_root = state.output_root.expanduser().resolve()
+    destination_root.mkdir(parents=True, exist_ok=True)
+    stem = _normalize_stem(Path(file_name).stem)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    destination_name = f"manual-{timestamp}-{stem}{suffix}"
+    destination_path = destination_root / destination_name
+    counter = 1
+    while destination_path.exists():
+        destination_path = destination_root / f"manual-{timestamp}-{stem}-{counter}{suffix}"
+        counter += 1
+
+    destination_path.write_bytes(payload)
+    stat = destination_path.stat()
+    checksum = hashlib.sha1(payload).hexdigest()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    item_uid = f"manual-{checksum}-{int(stat.st_size)}"
+    metadata = {
+        "source_type": "manual",
+        "source_name": "Manual Uploads",
+        "source_url": None,
+        "item_uid": item_uid,
+        "item_id": item_uid,
+        "item_url": None,
+        "media_url": None,
+        "title": Path(file_name).stem,
+        "description": "Imported via browser drag-and-drop",
+        "uploader": "local",
+        "channel": "Manual Uploads",
+        "extractor": "browser-drop",
+        "playlist_id": None,
+        "playlist_title": None,
+        "upload_date": now_iso[:10],
+        "duration_seconds": None,
+        "file_path": str(destination_path),
+        "file_ext": suffix.lstrip("."),
+        "file_size_bytes": int(stat.st_size),
+        "expected_bytes": int(stat.st_size),
+        "format_id": None,
+        "format_note": "manual import",
+        "audio_codec": None,
+        "video_codec": None,
+        "resolution": None,
+        "fps": None,
+        "subtitle_enabled": False,
+        "subtitle_path": None,
+        "download_status": "downloaded",
+        "error_message": None,
+        "raw_metadata": {
+            "ingested_at": now_iso,
+            "ingest_method": "drag-and-drop",
+            "original_filename": file_name,
+            "sha1": checksum,
+        },
+        "storage_root": str(destination_root),
+    }
+    upsert_download(str(state.database_path), metadata)
+    return None
+
+
+def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> Tuple[str, bytes]:
+    if "boundary=" not in content_type:
+        raise ValueError("Missing multipart boundary")
+    message_bytes = (
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
+    )
+    msg = BytesParser(policy=email_policy).parsebytes(message_bytes)
+    for part in msg.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        if part.get_param("name", header="content-disposition") != field_name:
+            continue
+        filename = str(part.get_filename() or "").strip()
+        payload = part.get_payload(decode=True) or b""
+        return filename, payload
+    raise ValueError(f"Missing {field_name}")
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -1685,6 +1776,10 @@ def _render_index(
       </div>
     </div>
 
+    <div id="drag-drop-upload-hint" style="display:none;position:fixed;inset:1.5rem;z-index:2000;border:3px dashed #0d6efd;border-radius:16px;background:rgba(13,110,253,.12);color:#0d6efd;font-weight:700;align-items:center;justify-content:center;text-align:center;padding:2rem;">
+      Drop media file to import into Downloads folder
+    </div>
+
     <table id="downloads-table">
       <colgroup>
         <col class="col-channel" />
@@ -1772,6 +1867,51 @@ def _render_index(
           muted: !!media.muted,
         }}));
       }};
+
+      const dragDropHint = document.getElementById('drag-drop-upload-hint');
+      let dragCounter = 0;
+      const setDragOverlay = (isVisible) => {{
+        if (!dragDropHint) return;
+        dragDropHint.style.display = isVisible ? 'flex' : 'none';
+      }};
+      const containsFiles = (event) => {{
+        const types = event?.dataTransfer?.types;
+        return !!(types && Array.from(types).includes('Files'));
+      }};
+      window.addEventListener('dragenter', (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+        dragCounter += 1;
+        setDragOverlay(true);
+      }});
+      window.addEventListener('dragover', (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+      }});
+      window.addEventListener('dragleave', (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+        dragCounter = Math.max(0, dragCounter - 1);
+        if (dragCounter === 0) setDragOverlay(false);
+      }});
+      window.addEventListener('drop', async (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+        dragCounter = 0;
+        setDragOverlay(false);
+        const files = Array.from(event.dataTransfer.files || []);
+        if (!files.length) return;
+        const file = files[0];
+        const payload = new FormData();
+        payload.append('media_file', file, file.name);
+        try {{
+          const resp = await fetch('/import-media', {{ method: 'POST', body: payload }});
+          if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
+          window.location.reload();
+        }} catch (err) {{
+          window.alert(`Failed to import file: ${{err}}`);
+        }}
+      }});
 
       const clearSyncReloadTimer = () => {{
         if (syncReloadTimer) {{
@@ -3979,6 +4119,28 @@ def make_handler(state: AppState):
             self.close_connection = True
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
+
+            if path == "/import-media":
+                content_type = self.headers.get("Content-Type") or ""
+                if "multipart/form-data" not in content_type:
+                    self.send_error(400, "Expected multipart/form-data")
+                    return
+                try:
+                    content_length = int(self.headers.get("Content-Length") or 0)
+                    body = self.rfile.read(content_length) if content_length > 0 else b""
+                    file_name, payload = _extract_multipart_file(content_type, body, field_name="media_file")
+                    _import_dropped_media_file(state, file_name=file_name, payload=payload)
+                except ValueError as exc:
+                    self.send_error(400, str(exc))
+                    return
+                except Exception:
+                    log.exception("POST /import-media failed")
+                    self.send_error(500, "Failed to import media")
+                    return
+
+                self.send_response(204)
+                self.end_headers()
+                return
 
             if path == "/update":
                 started = trigger_background_update(state)
