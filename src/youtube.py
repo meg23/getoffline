@@ -976,7 +976,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 record.clear()
                 del info
             finished_download_info.clear()
-            generate_missing_summaries(db_path, limit=10)
+            generate_missing_summaries(db_path, limit=10, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"))
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 

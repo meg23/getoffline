@@ -4274,7 +4274,11 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)
-        regenerated = generate_missing_summaries(str(state.database_path), limit=500)
+        regenerated = generate_missing_summaries(
+            str(state.database_path),
+            limit=500,
+            model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
+        )
         log.info("Startup summary regeneration complete regenerated=%s", regenerated)
     else:
         log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
