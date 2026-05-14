@@ -2,6 +2,7 @@ import html
 import json
 import mimetypes
 import os
+import hashlib
 import posixpath
 import re
 import gc
@@ -16,6 +17,8 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from io import StringIO
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
+from subtitles import create_subtitles
 from database import (
     resolve_download_artifact_path,
     add_source_config,
@@ -45,6 +49,7 @@ from database import (
     update_download_position_seconds,
     update_download_positions_batch,
     close_cached_descriptors,
+    upsert_download,
 )
 
 
@@ -194,7 +199,231 @@ def _is_media_file(path: Path) -> bool:
 
 def _normalize_stem(value: str) -> str:
     normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
+    normalized = re.sub(r"^(?:manual-\d{8}-\d{6}(?:-\d+)?-)+", "", normalized, flags=re.IGNORECASE)
     return normalized or "item"
+
+
+def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) -> None:
+    if not file_name:
+        raise ValueError("Missing filename")
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in MEDIA_EXTENSIONS:
+        raise ValueError("Unsupported media type")
+    if not payload:
+        raise ValueError("Empty file payload")
+
+    destination_root = (state.output_root.expanduser().resolve() / "manual")
+    destination_root.mkdir(parents=True, exist_ok=True)
+    stem = _normalize_stem(Path(file_name).stem)
+    destination_name = f"{stem}{suffix}"
+    destination_path = destination_root / destination_name
+    counter = 1
+    while destination_path.exists():
+        destination_path = destination_root / f"{stem}-{counter}{suffix}"
+        counter += 1
+
+    destination_path.write_bytes(payload)
+    stat = destination_path.stat()
+    checksum = hashlib.sha1(payload).hexdigest()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    item_uid = f"manual-{checksum}-{int(stat.st_size)}"
+    metadata = {
+        "source_type": "manual",
+        "source_name": "Manual Uploads",
+        "source_url": None,
+        "item_uid": item_uid,
+        "item_id": item_uid,
+        "item_url": None,
+        "media_url": None,
+        "title": stem,
+        "description": "Imported via browser drag-and-drop",
+        "uploader": "local",
+        "channel": "Manual Uploads",
+        "extractor": "browser-drop",
+        "playlist_id": None,
+        "playlist_title": None,
+        "upload_date": now_iso[:10],
+        "duration_seconds": None,
+        "file_path": str(destination_path),
+        "file_ext": suffix.lstrip("."),
+        "file_size_bytes": int(stat.st_size),
+        "expected_bytes": int(stat.st_size),
+        "format_id": None,
+        "format_note": "manual import",
+        "audio_codec": None,
+        "video_codec": None,
+        "resolution": None,
+        "fps": None,
+        "subtitle_enabled": False,
+        "subtitle_path": None,
+        "download_status": "downloaded",
+        "error_message": None,
+        "raw_metadata": {
+            "ingested_at": now_iso,
+            "ingest_method": "drag-and-drop",
+            "original_filename": file_name,
+            "sha1": checksum,
+        },
+        "storage_root": str(destination_root),
+    }
+    upsert_download(str(state.database_path), metadata)
+    _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+    return None
+
+
+def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_bytes: int) -> None:
+    if not file_name:
+        raise ValueError("Missing filename")
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in MEDIA_EXTENSIONS:
+        raise ValueError("Unsupported media type")
+    if total_bytes <= 0:
+        raise ValueError("Empty file payload")
+
+    destination_root = (state.output_root.expanduser().resolve() / "manual")
+    destination_root.mkdir(parents=True, exist_ok=True)
+    stem = _normalize_stem(Path(file_name).stem)
+    destination_path = destination_root / f"{stem}{suffix}"
+    counter = 1
+    while destination_path.exists():
+        destination_path = destination_root / f"{stem}-{counter}{suffix}"
+        counter += 1
+
+    hasher = hashlib.sha1()
+    bytes_written = 0
+    with destination_path.open("wb") as out:
+        remaining = total_bytes
+        while remaining > 0:
+            chunk = stream.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            out.write(chunk)
+            hasher.update(chunk)
+            chunk_len = len(chunk)
+            bytes_written += chunk_len
+            remaining -= chunk_len
+    if bytes_written <= 0:
+        destination_path.unlink(missing_ok=True)
+        raise ValueError("Empty file payload")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    item_uid = f"manual-{hasher.hexdigest()}-{bytes_written}"
+    metadata = {
+        "source_type": "manual",
+        "source_name": "Manual Uploads",
+        "item_uid": item_uid,
+        "item_id": item_uid,
+        "title": stem,
+        "description": "Imported via browser drag-and-drop",
+        "uploader": "local",
+        "channel": "Manual Uploads",
+        "extractor": "browser-drop",
+        "upload_date": now_iso[:10],
+        "file_path": str(destination_path),
+        "file_ext": suffix.lstrip("."),
+        "file_size_bytes": int(bytes_written),
+        "expected_bytes": int(bytes_written),
+        "format_note": "manual import",
+        "subtitle_enabled": False,
+        "download_status": "downloaded",
+        "raw_metadata": {
+            "ingested_at": now_iso,
+            "ingest_method": "drag-and-drop",
+            "original_filename": file_name,
+            "sha1": hasher.hexdigest(),
+        },
+        "storage_root": str(destination_root),
+    }
+    upsert_download(str(state.database_path), metadata)
+    _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+
+
+def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path) -> None:
+    defaults = (state.config or {}).get("defaults") or {}
+    subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "subprocess")
+    subtitle_offset = defaults.get("subtitle_time_offset_seconds")
+    try:
+        subtitle_path = create_subtitles(
+            media_file=Path(media_path),
+            subtitle_offset_seconds=subtitle_offset,
+            entry_subtitles_enabled=True,
+            logger=log,
+            context_name="manual-upload",
+            context_label="manual",
+            subtitle_transcription_mode=subtitle_mode,
+        )
+    except Exception as exc:
+        log.warning("Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc)
+        subtitle_path = None
+
+    if subtitle_path:
+        with sqlite3.connect(str(state.database_path)) as conn:
+            output_root = state.output_root.expanduser().resolve()
+            subtitle_relative = None
+            try:
+                subtitle_relative = str(Path(subtitle_path).resolve().relative_to(output_root))
+            except ValueError:
+                subtitle_relative = None
+            conn.execute(
+                """
+                UPDATE downloads
+                SET subtitle_enabled = 1,
+                    subtitle_path = ?,
+                    subtitle_path_relative = ?,
+                    last_seen_at = ?
+                WHERE source_type = 'manual' AND source_name = 'Manual Uploads' AND item_uid = ?
+                """,
+                (
+                    str(subtitle_path),
+                    subtitle_relative,
+                    datetime.now(timezone.utc).isoformat(),
+                    str(item_uid),
+                ),
+            )
+            conn.commit()
+        try:
+            generate_missing_summaries(
+                str(state.database_path),
+                limit=1,
+                model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
+                timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90),
+            )
+        except Exception as exc:
+            log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
+
+
+def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> Tuple[str, bytes]:
+    if "boundary=" not in content_type:
+        raise ValueError("Missing multipart boundary")
+    message_bytes = (
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
+    )
+    msg = BytesParser(policy=email_policy).parsebytes(message_bytes)
+    for part in msg.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        if part.get_param("name", header="content-disposition") != field_name:
+            continue
+        filename = str(part.get_filename() or "").strip()
+        payload = part.get_payload(decode=True) or b""
+        return filename, payload
+    raise ValueError(f"Missing {field_name}")
+
+
+def _update_download_metadata(db_path: Path, row_id: int, title: str, source_name: str) -> bool:
+    cleaned_title = str(title or "").strip()
+    cleaned_source_name = str(source_name or "").strip()
+    if not cleaned_title or not cleaned_source_name:
+        return False
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(str(db_path)) as conn:
+        cur = conn.execute(
+            "UPDATE downloads SET title = ?, source_name = ?, last_seen_at = ? WHERE id = ?",
+            (cleaned_title, cleaned_source_name, now_iso, int(row_id)),
+        )
+        conn.commit()
+        return (cur.rowcount or 0) > 0
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -1640,6 +1869,7 @@ def _render_index(
             <option value="unplayed">unplayed</option>
             <option value="favorite">favorite</option>
             <option value="unfavorite">unfavorite</option>
+            <option value="edit-metadata">edit</option>
             <option value="delete">delete</option>
             <option value="download">download</option>
           </select>
@@ -1656,6 +1886,26 @@ def _render_index(
       </div>
     </div>
     <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
+    <div id="metadata-edit-backdrop" class="quick-add-backdrop" aria-hidden="true">
+      <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
+        <h2 id="metadata-edit-title">Edit</h2>
+        <form id="metadata-edit-form" class="quick-add-form">
+          <input id="metadata-edit-id" name="id" type="hidden" />
+          <div>
+            <label for="metadata-edit-item-title">Title</label>
+            <input id="metadata-edit-item-title" class="quick-add-input" name="title" type="text" required />
+          </div>
+          <div>
+            <label for="metadata-edit-source-name">Source name</label>
+            <input id="metadata-edit-source-name" class="quick-add-input" name="source_name" type="text" required />
+          </div>
+          <div class="quick-add-actions">
+            <button id="metadata-edit-cancel" type="button">Cancel</button>
+            <button class="primary" type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
@@ -1682,6 +1932,16 @@ def _render_index(
             <button type="submit" class="primary">Add</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div id="drag-drop-upload-hint" style="display:none;position:fixed;inset:1.5rem;z-index:2000;border:3px dashed #0d6efd;border-radius:16px;background:rgba(13,110,253,.12);color:#0d6efd;font-weight:700;align-items:center;justify-content:center;text-align:center;padding:2rem;">
+      Drop media file to import into Downloads folder
+    </div>
+    <div id="upload-progress-wrap" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(15,23,42,.45);align-items:center;justify-content:center;padding:1rem;">
+      <div style="background:#111827;color:#fff;padding:1rem 1rem;border-radius:12px;min-width:min(520px,95vw);box-shadow:0 12px 40px rgba(0,0,0,.35);">
+        <div id="upload-progress-label" style="font-size:.95rem;margin-bottom:.55rem;font-weight:600;">Uploading…</div>
+        <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:16px;"></progress>
       </div>
     </div>
 
@@ -1772,6 +2032,77 @@ def _render_index(
           muted: !!media.muted,
         }}));
       }};
+
+      const dragDropHint = document.getElementById('drag-drop-upload-hint');
+      const uploadProgressWrap = document.getElementById('upload-progress-wrap');
+      const uploadProgressBar = document.getElementById('upload-progress-bar');
+      const uploadProgressLabel = document.getElementById('upload-progress-label');
+      let dragCounter = 0;
+      const setDragOverlay = (isVisible) => {{
+        if (!dragDropHint) return;
+        dragDropHint.style.display = isVisible ? 'flex' : 'none';
+      }};
+      const containsFiles = (event) => {{
+        const types = event?.dataTransfer?.types;
+        return !!(types && Array.from(types).includes('Files'));
+      }};
+      window.addEventListener('dragenter', (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+        dragCounter += 1;
+        setDragOverlay(true);
+      }});
+      window.addEventListener('dragover', (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+      }});
+      window.addEventListener('dragleave', (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+        dragCounter = Math.max(0, dragCounter - 1);
+        if (dragCounter === 0) setDragOverlay(false);
+      }});
+      window.addEventListener('drop', async (event) => {{
+        if (!containsFiles(event)) return;
+        event.preventDefault();
+        dragCounter = 0;
+        setDragOverlay(false);
+        const files = Array.from(event.dataTransfer.files || []);
+        if (!files.length) return;
+        const file = files[0];
+        try {{
+          const resp = await new Promise((resolve, reject) => {{
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/import-media', true);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.setRequestHeader('X-Upload-Filename', encodeURIComponent(file.name || 'upload.bin'));
+            if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
+            if (uploadProgressBar) uploadProgressBar.value = 0;
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… 0%`;
+
+            xhr.upload.onprogress = (progressEvent) => {{
+              if (!progressEvent.lengthComputable) return;
+              const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
+              if (uploadProgressBar) uploadProgressBar.value = pct;
+              if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… ${{pct}}%`;
+            }};
+            xhr.onload = () => resolve({{ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status }});
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send(file);
+          }});
+          if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
+          if (uploadProgressBar) uploadProgressBar.value = 100;
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload complete: ${{file.name}}`;
+          window.location.reload();
+        }} catch (err) {{
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed: ${{file.name}}`;
+          window.alert(`Failed to import file: ${{err}}`);
+        }} finally {{
+          window.setTimeout(() => {{
+            if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
+          }}, 1200);
+        }}
+      }});
 
       const clearSyncReloadTimer = () => {{
         if (syncReloadTimer) {{
@@ -1991,6 +2322,12 @@ def _render_index(
       const batchAction = document.getElementById('batch-action');
       const batchApply = document.getElementById('batch-apply');
       const selectAllRows = document.getElementById('select-all-rows');
+      const metadataEditBackdrop = document.getElementById('metadata-edit-backdrop');
+      const metadataEditForm = document.getElementById('metadata-edit-form');
+      const metadataEditIdInput = document.getElementById('metadata-edit-id');
+      const metadataEditTitleInput = document.getElementById('metadata-edit-item-title');
+      const metadataEditSourceInput = document.getElementById('metadata-edit-source-name');
+      const metadataEditCancel = document.getElementById('metadata-edit-cancel');
 
       const updateBatchState = () => {{
         const visibleRowSelectors = getVisibleRowSelectors();
@@ -2039,6 +2376,24 @@ def _render_index(
             event.preventDefault();
             return;
           }}
+          if (batchAction.value === 'edit-metadata') {{
+            event.preventDefault();
+            if (selectedRows.length !== 1) {{
+              window.alert('Select exactly one row to edit metadata.');
+              return;
+            }}
+            const row = selectedRows[0]?.closest('tr[data-row-id]');
+            const title = row?.querySelector('.episode-link')?.textContent || '';
+            const source = row?.querySelector('.channel-col')?.textContent || '';
+            if (metadataEditIdInput) metadataEditIdInput.value = selectedRows[0].value;
+            if (metadataEditTitleInput) metadataEditTitleInput.value = title.trim();
+            if (metadataEditSourceInput) metadataEditSourceInput.value = source.trim();
+            if (metadataEditBackdrop) {{
+              metadataEditBackdrop.classList.add('is-open');
+              metadataEditBackdrop.setAttribute('aria-hidden', 'false');
+            }}
+            return;
+          }}
 
           event.preventDefault();
           if (batchApply) batchApply.disabled = true;
@@ -2063,6 +2418,38 @@ def _render_index(
                 refreshLibraryViewWithoutReload();
               }}
             }});
+        }});
+      }}
+      if (metadataEditCancel && metadataEditBackdrop) {{
+        metadataEditCancel.addEventListener('click', () => {{
+          metadataEditBackdrop.classList.remove('is-open');
+          metadataEditBackdrop.setAttribute('aria-hidden', 'true');
+        }});
+      }}
+      if (metadataEditBackdrop) {{
+        metadataEditBackdrop.addEventListener('click', (event) => {{
+          if (event.target !== metadataEditBackdrop) return;
+          metadataEditBackdrop.classList.remove('is-open');
+          metadataEditBackdrop.setAttribute('aria-hidden', 'true');
+        }});
+      }}
+      if (metadataEditForm) {{
+        metadataEditForm.addEventListener('submit', async (event) => {{
+          event.preventDefault();
+          const body = new URLSearchParams();
+          if (metadataEditIdInput) body.set('id', metadataEditIdInput.value);
+          if (metadataEditTitleInput) body.set('title', metadataEditTitleInput.value);
+          if (metadataEditSourceInput) body.set('source_name', metadataEditSourceInput.value);
+          const response = await fetch('/edit-metadata', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
+            body: body.toString(),
+          }});
+          if (!response.ok) {{
+            window.alert('Failed to update metadata.');
+            return;
+          }}
+          window.location.reload();
         }});
       }}
       bindBatchControls();
@@ -3980,6 +4367,36 @@ def make_handler(state: AppState):
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
 
+            if path == "/import-media":
+                content_type = self.headers.get("Content-Type") or ""
+                try:
+                    content_length = int(self.headers.get("Content-Length") or 0)
+                    if "multipart/form-data" in content_type:
+                        body = self.rfile.read(content_length) if content_length > 0 else b""
+                        file_name, payload = _extract_multipart_file(content_type, body, field_name="media_file")
+                        _import_dropped_media_file(state, file_name=file_name, payload=payload)
+                    else:
+                        raw_name = str(self.headers.get("X-Upload-Filename") or "").strip()
+                        file_name = raw_name
+                        if raw_name:
+                            try:
+                                from urllib.parse import unquote
+                                file_name = unquote(raw_name)
+                            except Exception:
+                                file_name = raw_name
+                        _import_dropped_media_stream(state, file_name=file_name, stream=self.rfile, total_bytes=content_length)
+                except ValueError as exc:
+                    self.send_error(400, str(exc))
+                    return
+                except Exception:
+                    log.exception("POST /import-media failed")
+                    self.send_error(500, "Failed to import media")
+                    return
+
+                self.send_response(204)
+                self.end_headers()
+                return
+
             if path == "/update":
                 started = trigger_background_update(state)
                 log.info("Manual update requested (started=%s)", "yes" if started else "no")
@@ -4018,6 +4435,27 @@ def make_handler(state: AppState):
                 _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
                 if _is_playback_completion_reason(raw_reason):
                     mark_download_played(str(state.database_path), row_id, played=True)
+                self.send_response(204)
+                self.end_headers()
+                return
+
+            if path == "/edit-metadata":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                raw_id = (form.get("id") or [None])[0]
+                title = str((form.get("title") or [""])[0]).strip()
+                source_name = str((form.get("source_name") or [""])[0]).strip()
+                if raw_id is None or not str(raw_id).isdigit():
+                    self.send_error(400, "Missing or invalid id")
+                    return
+                if not title or not source_name:
+                    self.send_error(400, "Missing title/source_name")
+                    return
+                updated = _update_download_metadata(state.database_path, int(raw_id), title=title, source_name=source_name)
+                if not updated:
+                    self.send_error(404, "Item not found")
+                    return
                 self.send_response(204)
                 self.end_headers()
                 return
