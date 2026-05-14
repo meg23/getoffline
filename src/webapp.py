@@ -199,6 +199,7 @@ def _is_media_file(path: Path) -> bool:
 
 def _normalize_stem(value: str) -> str:
     normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
+    normalized = re.sub(r"^(?:manual-\d{8}-\d{6}(?:-\d+)?-)+", "", normalized, flags=re.IGNORECASE)
     return normalized or "item"
 
 
