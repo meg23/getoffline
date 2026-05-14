@@ -4,7 +4,6 @@ import re
 import subprocess
 import sys
 import threading
-import traceback
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -21,6 +20,7 @@ STOP_WORDS = {
 
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 90
 log = get_logger("summarization")
 _MODEL_READY_LOCK = threading.Lock()
 _MODEL_READY = False
@@ -84,11 +84,12 @@ def _truncate_for_prompt(text: str, max_chars: int = 6000) -> str:
     return stripped[:max_chars].rstrip() + "…"
 
 
-def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -> Optional[str]:
+def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL, timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> str:
     prompt = (
         "Return strict JSON: {\"summary\": \"...\"}. "
         "Write a concise 1-2 sentence paraphrased summary (max 220 chars). "
-        "Focus on topic + takeaway. Avoid filler, quotes, and transcript-style wording.\n\n"
+        "Focus on topic + takeaway. Avoid filler, quotes, transcript-style wording, and any ad/promotional language. "
+        "Never mention sponsors, products, offers, discounts, or marketing claims.\n\n"
         f"Transcript:\n{_truncate_for_prompt(text)}"
     )
     payload = {
@@ -105,7 +106,7 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
         method="POST",
     )
     try:
-        with request.urlopen(req, timeout=20) as resp:
+        with request.urlopen(req, timeout=max(1, int(timeout_seconds))) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         parsed = json.loads(body)
         raw_response = str(parsed.get("response") or "").strip()
@@ -118,8 +119,8 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
             return response_text
     except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
         log.warning("Ollama summary request failed model=%s error=%s", model_name, exc)
-        return None
-    return None
+        raise RuntimeError(f"ollama summary request failed model={model_name} timeout_seconds={int(timeout_seconds)} error={exc}") from exc
+    raise RuntimeError("ollama summary response did not include a usable summary")
 
 
 def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL, ollama_path: str = "ollama") -> bool:
@@ -146,7 +147,7 @@ def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL, ollama_pa
             return False
 
 
-def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "subprocess") -> Dict[str, str]:
+def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "subprocess", timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> Dict[str, str]:
     cleaned_segments: List[str] = []
     for segment in segments:
         cleaned_segment = str(segment or "").strip()
@@ -157,13 +158,9 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
     if not model_ready:
         log.debug("Summary model readiness check failed model=%s; Ollama may still be tried.", model_name)
     if mode == "in_process":
-        llm_summary = _ollama_summary(joined_text, model_name=model_name)
-        summary_text = llm_summary or _extractive_summary(joined_text)
-        used_model = model_name if llm_summary else "extractive-local"
-        if not llm_summary:
-            log.warning("Falling back to extractive summary mode=in_process model=%s transcript_chars=%s", model_name, len(joined_text))
-        return {"summary_text": summary_text, "model_name": used_model, "updated_at": _utcnow_iso()}
-    payload = {"text": joined_text, "model_name": model_name}
+        llm_summary = _ollama_summary(joined_text, model_name=model_name, timeout_seconds=timeout_seconds)
+        return {"summary_text": llm_summary, "model_name": model_name, "updated_at": _utcnow_iso()}
+    payload = {"text": joined_text, "model_name": model_name, "timeout_seconds": int(timeout_seconds)}
     cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
@@ -177,17 +174,13 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
     return result
 
 
-def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str, str]:
+def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL, timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> Dict[str, str]:
     try:
-        summary = _ollama_summary(text, model_name=model_name)
-        used_model = model_name
-        if not summary:
-            log.warning("Falling back to extractive summary mode=worker model=%s transcript_chars=%s", model_name, len(text or ""))
-            summary = _extractive_summary(text)
-            used_model = "extractive-local"
-        return {"summary_text": summary, "model_name": used_model, "updated_at": _utcnow_iso()}
+        summary = _ollama_summary(text, model_name=model_name, timeout_seconds=timeout_seconds)
+        return {"summary_text": summary, "model_name": model_name, "updated_at": _utcnow_iso()}
     finally:
         gc.collect()
+
 
 
 if __name__ == "__main__":
@@ -197,8 +190,9 @@ if __name__ == "__main__":
             result = _worker_once(
                 text=str(args.get("text") or ""),
                 model_name=str(args.get("model_name") or DEFAULT_OLLAMA_MODEL),
+                timeout_seconds=int(args.get("timeout_seconds") or DEFAULT_OLLAMA_TIMEOUT_SECONDS),
             )
             sys.stdout.write(json.dumps(result))
-        except Exception:
-            sys.stderr.write(traceback.format_exc())
+        except Exception as exc:
+            sys.stderr.write(str(exc))
             sys.exit(1)

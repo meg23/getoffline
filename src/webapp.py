@@ -674,7 +674,13 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     if not segment_texts:
         return None
     summary_model = str(state.config.get("defaults", {}).get("summary_model") or "qwen2.5:0.5b")
-    result = summarize_segments(segment_texts, model_name=summary_model, mode="subprocess")
+    summary_timeout_seconds = int((state.config.get("defaults", {}) or {}).get("summary_timeout_seconds") or 90)
+    result = summarize_segments(
+        segment_texts,
+        model_name=summary_model,
+        mode="subprocess",
+        timeout_seconds=max(1, summary_timeout_seconds),
+    )
     summary_text = str(result.get("summary_text") or "").strip()
     if not summary_text:
         log.warning("Summary generation returned empty output for row id=%s", row.row_id)
@@ -2384,7 +2390,7 @@ def _render_index(
             link.dataset.summaryBound = '1';
             link.addEventListener('mouseenter', (event) => {{
               if (!summaryTooltip) return;
-              const summaryText = String(link.dataset.summary || '').trim();
+              const summaryText = String(link.dataset.summary || link.dataset.title || '').trim();
               if (!summaryText) return;
               summaryTooltip.textContent = summaryText;
               summaryTooltip.classList.add('is-visible');
@@ -4274,7 +4280,12 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)
-        regenerated = generate_missing_summaries(str(state.database_path), limit=500)
+        regenerated = generate_missing_summaries(
+            str(state.database_path),
+            limit=500,
+            model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
+            timeout_seconds=int(configured_defaults.get("summary_timeout_seconds") or 90),
+        )
         log.info("Startup summary regeneration complete regenerated=%s", regenerated)
     else:
         log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
