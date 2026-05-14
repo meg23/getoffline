@@ -1712,15 +1712,14 @@ def _render_index(
     }}
     .mini-player-header {{
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: 1fr auto auto auto;
       align-items: start;
       gap: .35rem .5rem;
     }}
     .mini-player-title {{ grid-column: 1; font-weight: 700; color: #f0f4ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .mini-player-source {{ grid-column: 1; color: #b4c2e3; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .mini-player-open {{
+    .mini-player-cast, .mini-player-open {{
       grid-row: 1;
-      grid-column: 2;
       align-self: center;
       justify-self: end;
       font-size: .82rem;
@@ -1731,10 +1730,27 @@ def _render_index(
       background: #1a2748;
       cursor: pointer;
     }}
-    .mini-player-open:hover {{ background: #23355f; }}
+    .mini-player-cast {{
+      grid-column: 2;
+    }}
+    .mini-player-open {{
+      grid-column: 4;
+      align-self: center;
+      justify-self: end;
+      font-size: .82rem;
+      color: #d2ddff;
+      border: 1px solid #3a4e84;
+      border-radius: 999px;
+      padding: .25rem .65rem;
+      background: #1a2748;
+      cursor: pointer;
+    }}
+    .mini-player-cast:hover, .mini-player-open:hover {{ background: #23355f; }}
+    .mini-player-cast:disabled {{ opacity: .65; cursor: not-allowed; }}
+    .mini-player-cast-status {{ grid-column: 1 / span 2; color: #9fb0d8; font-size: .78rem; min-height: 1rem; }}
     .mini-player-close {{
       grid-row: 1;
-      grid-column: 3;
+      grid-column: 4;
       justify-self: end;
       width: 1.7rem;
       height: 1.7rem;
@@ -1964,8 +1980,10 @@ def _render_index(
       <div class="mini-player-header">
         <div class="mini-player-title" id="mini-player-title"></div>
         <div class="mini-player-source" id="mini-player-source"></div>
-        <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close mini player">&times;</button>
+        <button id="mini-player-cast" class="mini-player-cast" type="button" aria-label="Cast media">Cast</button>
         <button id="mini-player-open" class="mini-player-open" type="button" aria-label="Maximize player">Maximize</button>
+        <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close mini player">&times;</button>
+        <div id="mini-player-cast-status" class="mini-player-cast-status" aria-live="polite"></div>
       </div>
       <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
       <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
@@ -2473,10 +2491,52 @@ def _render_index(
       const miniTranscript = document.getElementById('mini-player-transcript');
       const miniOpen = document.getElementById('mini-player-open');
       const miniClose = document.getElementById('mini-player-close');
+      const miniCast = document.getElementById('mini-player-cast');
+      const miniCastStatus = document.getElementById('mini-player-cast-status');
       let miniLastPersistedSeconds = -9999;
       let miniOpenNavigationPending = false;
       let miniLastActiveCue = null;
       let miniTranscriptReady = false;
+
+
+      function setMiniCastStatus(message) {{
+        if (!miniCastStatus) return;
+        miniCastStatus.textContent = message || '';
+      }}
+
+      function initMiniCasting(activeMedia) {{
+        if (!miniCast) return;
+        miniCast.disabled = false;
+        miniCast.onclick = null;
+        setMiniCastStatus('');
+        if (!activeMedia || !('remote' in activeMedia) || typeof activeMedia.remote.prompt !== 'function') {{
+          miniCast.disabled = true;
+          setMiniCastStatus('Casting is not supported in this browser.');
+          return;
+        }}
+        const remote = activeMedia.remote;
+        const updateCastState = () => {{
+          const state = remote.state || 'disconnected';
+          if (state === 'connected') setMiniCastStatus('Casting is active.');
+          else if (state === 'connecting') setMiniCastStatus('Connecting to cast device…');
+          else setMiniCastStatus('Ready to cast.');
+        }};
+        miniCast.onclick = async () => {{
+          try {{
+            await remote.prompt();
+            updateCastState();
+          }} catch (err) {{
+            if (err && err.name === 'NotAllowedError') setMiniCastStatus('Cast request was cancelled.');
+            else setMiniCastStatus('Unable to start casting.');
+          }}
+        }};
+        if (typeof remote.watchAvailability === 'function') {{
+          remote.watchAvailability((available) => {{
+            if (!available) setMiniCastStatus('No cast devices found on this network.');
+            else updateCastState();
+          }}).catch(() => updateCastState());
+        }} else updateCastState();
+      }}
 
       function updatePlayLinkResumeHint(rowId, seconds) {{
         const safe = Math.max(0, Number(seconds || 0));
@@ -2734,6 +2794,7 @@ def _render_index(
         active.addEventListener('volumechange', volumeHandler);
         active.addEventListener('ended', endedHandler);
 
+        initMiniCasting(active);
         miniPlayer.classList.add('is-visible');
         setMiniExpanded(false);
       }}
