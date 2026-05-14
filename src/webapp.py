@@ -2504,6 +2504,12 @@ def _render_index(
         miniCastStatus.textContent = message || '';
       }}
 
+      function logMiniCastDebug(scope, details) {{
+        try {{
+          console.info('[getoffline][mini-cast][' + scope + ']', details || {{}});
+        }} catch (_) {{}}
+      }}
+
       function initMiniCasting(activeMedia) {{
         if (!miniCast) return;
         miniCast.disabled = false;
@@ -2511,6 +2517,7 @@ def _render_index(
         setMiniCastStatus('');
         if (!activeMedia || !('remote' in activeMedia) || typeof activeMedia.remote.prompt !== 'function') {{
           miniCast.disabled = true;
+          logMiniCastDebug('unsupported', {{ hasRemote: !!(activeMedia && ('remote' in activeMedia)), hasPrompt: !!(activeMedia && activeMedia.remote && typeof activeMedia.remote.prompt === 'function'), userAgent: navigator.userAgent, origin: window.location.origin, isSecureContext: window.isSecureContext }});
           setMiniCastStatus('Casting is not supported in this browser.');
           return;
         }}
@@ -2523,15 +2530,19 @@ def _render_index(
         }};
         miniCast.onclick = async () => {{
           try {{
+            logMiniCastDebug('prompt-start', {{ state: remote.state || 'unknown' }});
             await remote.prompt();
+            logMiniCastDebug('prompt-success', {{ state: remote.state || 'unknown' }});
             updateCastState();
           }} catch (err) {{
+            logMiniCastDebug('prompt-error', {{ name: err && err.name, message: err && err.message, state: remote && remote.state, stack: err && err.stack }});
             if (err && err.name === 'NotAllowedError') setMiniCastStatus('Cast request was cancelled.');
-            else setMiniCastStatus('Unable to start casting.');
+            else setMiniCastStatus('Unable to start casting. Open DevTools for cast diagnostics.');
           }}
         }};
         if (typeof remote.watchAvailability === 'function') {{
           remote.watchAvailability((available) => {{
+            logMiniCastDebug('availability', {{ available, state: remote.state || 'unknown' }});
             if (!available) setMiniCastStatus('No cast devices found on this network.');
             else updateCastState();
           }}).catch(() => updateCastState());
@@ -3257,10 +3268,18 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
         castStatus.textContent = message || '';
       }}
 
+      function logCastingDebug(scope, details) {{
+        try {{
+          console.info('[getoffline][cast][' + scope + ']', details || {{}});
+        }} catch (_) {{}}
+      }}
+
       function initCasting() {{
         if (!castButton) return;
         if (!('remote' in player) || typeof player.remote.prompt !== 'function') {{
           castButton.disabled = true;
+          const support = {{ hasRemote: ('remote' in player), hasPrompt: !!(player.remote && typeof player.remote.prompt === 'function'), userAgent: navigator.userAgent, origin: window.location.origin, isSecureContext: window.isSecureContext }};
+          logCastingDebug('unsupported', support);
           setCastStatus('This browser does not support direct casting from this page.');
           return;
         }}
@@ -3273,7 +3292,9 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
         castButton.addEventListener('click', async () => {{
           try {{
+            logCastingDebug('prompt-start', {{ state: player.remote.state || 'unknown' }});
             await player.remote.prompt();
+            logCastingDebug('prompt-success', {{ state: player.remote.state || 'unknown' }});
             updateCastAvailability();
           }} catch (err) {{
             if (err && err.name === 'NotAllowedError') {{
@@ -3286,6 +3307,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
         if (typeof player.remote.watchAvailability === 'function') {{
           player.remote.watchAvailability((available) => {{
+            logCastingDebug('availability', {{ available, state: player.remote.state || 'unknown' }});
             if (!available) setCastStatus('No cast devices found on this network.');
             else updateCastAvailability();
           }}).catch(() => {{
