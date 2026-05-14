@@ -118,6 +118,9 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "audio_format": "m4a",
                     "max_downloads": "7",
                     "playlist_end": "9",
+                    "summary_model": "qwen2.5:0.5b",
+                    "ollama_path": "/opt/bin/ollama",
+                    "deno_path": "/opt/bin/deno",
                 },
             )
             update_download_settings(db_path, "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\txyz")
@@ -126,6 +129,9 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(config["defaults"]["audio_format"], "m4a")
             self.assertEqual(config["defaults"]["max_downloads"], 7)
             self.assertEqual(config["defaults"]["playlist_end"], 9)
+            self.assertEqual(config["defaults"]["summary_model"], "qwen2.5:0.5b")
+            self.assertEqual(config["defaults"]["ollama_path"], "/opt/bin/ollama")
+            self.assertEqual(config["defaults"]["deno_path"], "/opt/bin/deno")
             self.assertIn("SID", config["download_settings"]["youtube_cookie_text"])
 
     def test_sources_seed_and_replace(self):
