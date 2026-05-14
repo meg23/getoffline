@@ -3119,8 +3119,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     .player-toolbar {{ display: flex; align-items: center; gap: .6rem; margin: 0 0 .75rem 0; }}
     .cast-button {{ background: #28457f; color: #ecf2ff; border: 1px solid #3d5ea3; border-radius: 999px; padding: .35rem .8rem; cursor: pointer; font-size: .92rem; }}
     .cast-button:hover {{ background: #32579f; }}
-    .cast-button[hidden] {{ display: none; }}
-    .cast-status {{ color: #a9b4d0; font-size: .88rem; min-height: 1.2rem; }}
+        .cast-status {{ color: #a9b4d0; font-size: .88rem; min-height: 1.2rem; }}
     .transcript-wrap {{ margin-top: 1rem; max-width: 1000px; }}
     .transcript-wrap h3 {{ margin: 0 0 .45rem 0; font-size: 1rem; color: #b8c4e6; }}
     .transcript {{
@@ -3154,7 +3153,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     <h2>{title}</h2>
     <p class="meta">{source}</p>
     <div class="player-toolbar">
-      <button id="cast-button" type="button" class="cast-button" hidden>Cast</button>
+      <button id="cast-button" type="button" class="cast-button">Cast</button>
       <span id="cast-status" class="cast-status" aria-live="polite"></span>
     </div>
     <{media_kind} id="player" class="player" controls preload="metadata" x-webkit-airplay="allow" playsinline>
@@ -3198,9 +3197,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function initCasting() {{
-        if (!castButton || !('remote' in player) || typeof player.remote.prompt !== 'function') return;
-
-        castButton.hidden = false;
+        if (!castButton) return;
+        if (!('remote' in player) || typeof player.remote.prompt !== 'function') {{
+          castButton.disabled = true;
+          setCastStatus('This browser does not support direct casting from this page.');
+          return;
+        }}
         const updateCastAvailability = () => {{
           const state = player.remote.state || 'disconnected';
           if (state === 'connected') setCastStatus('Casting is active.');
@@ -3223,7 +3225,6 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 
         if (typeof player.remote.watchAvailability === 'function') {{
           player.remote.watchAvailability((available) => {{
-            castButton.hidden = !available;
             if (!available) setCastStatus('No cast devices found on this network.');
             else updateCastAvailability();
           }}).catch(() => {{
