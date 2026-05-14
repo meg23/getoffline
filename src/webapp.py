@@ -1813,7 +1813,7 @@ def _render_index(
             <option value="unplayed">unplayed</option>
             <option value="favorite">favorite</option>
             <option value="unfavorite">unfavorite</option>
-            <option value="edit-metadata">edit metadata</option>
+            <option value="edit-metadata">edit</option>
             <option value="delete">delete</option>
             <option value="download">download</option>
           </select>
@@ -1832,7 +1832,7 @@ def _render_index(
     <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
     <div id="metadata-edit-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
-        <h2 id="metadata-edit-title">Edit media metadata</h2>
+        <h2 id="metadata-edit-title">Edit</h2>
         <form id="metadata-edit-form" class="quick-add-form">
           <input id="metadata-edit-id" name="id" type="hidden" />
           <div>
