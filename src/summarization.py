@@ -116,7 +116,8 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL) -
             if len(response_text) > 280:
                 response_text = response_text[:279].rstrip() + "…"
             return response_text
-    except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError):
+    except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        log.warning("Ollama summary request failed model=%s error=%s", model_name, exc)
         return None
     return None
 
@@ -152,19 +153,28 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
         if cleaned_segment:
             cleaned_segments.append(cleaned_segment)
     joined_text = " ".join(cleaned_segments)
-    ensure_local_summary_model(model_name=model_name)
+    model_ready = ensure_local_summary_model(model_name=model_name)
+    if not model_ready:
+        log.debug("Summary model readiness check failed model=%s; Ollama may still be tried.", model_name)
     if mode == "in_process":
         llm_summary = _ollama_summary(joined_text, model_name=model_name)
         summary_text = llm_summary or _extractive_summary(joined_text)
         used_model = model_name if llm_summary else "extractive-local"
+        if not llm_summary:
+            log.warning("Falling back to extractive summary mode=in_process model=%s transcript_chars=%s", model_name, len(joined_text))
         return {"summary_text": summary_text, "model_name": used_model, "updated_at": _utcnow_iso()}
     payload = {"text": joined_text, "model_name": model_name}
     cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
+        log.error("Summary subprocess failed model=%s error=%s", model_name, details)
         raise RuntimeError(f"summary subprocess failed: {details}")
-    return json.loads(completed.stdout)
+    result = json.loads(completed.stdout)
+    used_model = str(result.get("model_name") or "unknown")
+    if used_model == "extractive-local":
+        log.warning("Summary subprocess used extractive fallback requested_model=%s transcript_chars=%s", model_name, len(joined_text))
+    return result
 
 
 def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str, str]:
@@ -172,6 +182,7 @@ def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL) -> Dict[str,
         summary = _ollama_summary(text, model_name=model_name)
         used_model = model_name
         if not summary:
+            log.warning("Falling back to extractive summary mode=worker model=%s transcript_chars=%s", model_name, len(text or ""))
             summary = _extractive_summary(text)
             used_model = "extractive-local"
         return {"summary_text": summary, "model_name": used_model, "updated_at": _utcnow_iso()}

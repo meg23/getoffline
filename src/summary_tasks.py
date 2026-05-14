@@ -52,6 +52,19 @@ def clear_all_summaries(db_path: str) -> int:
 def generate_missing_summaries(db_path: str, limit: int = 20) -> int:
     generated = 0
     with sqlite3.connect(db_path) as conn:
+
+        stats_row = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN d.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
+              SUM(CASE WHEN d.download_status = 'downloaded' AND COALESCE(d.subtitle_path, '') <> '' THEN 1 ELSE 0 END) AS subtitle_count,
+              SUM(CASE WHEN d.download_status = 'downloaded' AND COALESCE(d.subtitle_path, '') <> '' AND (ms.download_id IS NULL OR COALESCE(ms.summary_text, '') = '') THEN 1 ELSE 0 END) AS missing_summary_count,
+              SUM(CASE WHEN d.download_status = 'downloaded' AND COALESCE(d.subtitle_path, '') <> '' AND (ms.download_id IS NOT NULL AND COALESCE(ms.summary_text, '') <> '') THEN 1 ELSE 0 END) AS existing_summary_count
+            FROM downloads d
+            LEFT JOIN media_summaries ms ON ms.download_id = d.id
+            """
+        ).fetchone()
+
         rows = conn.execute(
             """
             SELECT d.id, COALESCE(d.title, ''), COALESCE(d.subtitle_path, '')
@@ -65,6 +78,21 @@ def generate_missing_summaries(db_path: str, limit: int = 20) -> int:
             """,
             (int(limit),),
         ).fetchall()
+
+    downloaded_count = int((stats_row[0] if stats_row else 0) or 0)
+    subtitle_count = int((stats_row[1] if stats_row else 0) or 0)
+    missing_summary_count = int((stats_row[2] if stats_row else 0) or 0)
+    existing_summary_count = int((stats_row[3] if stats_row else 0) or 0)
+
+    if not rows:
+        log.info(
+            "Summary generation pass complete candidates=0 generated=0 downloaded=%s with_subtitles=%s missing_summary=%s existing_summary=%s",
+            downloaded_count,
+            subtitle_count,
+            missing_summary_count,
+            existing_summary_count,
+        )
+        return 0
 
     for row_id, title, subtitle_path in rows:
         path = Path(str(subtitle_path)).expanduser().resolve()
