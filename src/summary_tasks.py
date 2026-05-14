@@ -49,7 +49,7 @@ def clear_all_summaries(db_path: str) -> int:
     return int(deleted or 0)
 
 
-def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = "qwen2.5:0.5b") -> int:
+def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = "qwen2.5:0.5b", timeout_seconds: int = 90) -> int:
     generated = 0
     with sqlite3.connect(db_path) as conn:
 
@@ -101,7 +101,12 @@ def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = 
             log.info("Summary skipped id=%s title=%s reason=no_segments", row_id, title)
             continue
         try:
-            result = summarize_segments(segments, model_name=str(model_name or "qwen2.5:0.5b"), mode="subprocess")
+            result = summarize_segments(
+                segments,
+                model_name=str(model_name or "qwen2.5:0.5b"),
+                mode="subprocess",
+                timeout_seconds=max(1, int(timeout_seconds)),
+            )
         except Exception as exc:
             log.error("Summary generation failed id=%s title=%s model=%s error=%s", row_id, title, model_name, exc)
             continue

@@ -674,7 +674,13 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     if not segment_texts:
         return None
     summary_model = str(state.config.get("defaults", {}).get("summary_model") or "qwen2.5:0.5b")
-    result = summarize_segments(segment_texts, model_name=summary_model, mode="subprocess")
+    summary_timeout_seconds = int((state.config.get("defaults", {}) or {}).get("summary_timeout_seconds") or 90)
+    result = summarize_segments(
+        segment_texts,
+        model_name=summary_model,
+        mode="subprocess",
+        timeout_seconds=max(1, summary_timeout_seconds),
+    )
     summary_text = str(result.get("summary_text") or "").strip()
     if not summary_text:
         log.warning("Summary generation returned empty output for row id=%s", row.row_id)
@@ -4278,6 +4284,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
             str(state.database_path),
             limit=500,
             model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
+            timeout_seconds=int(configured_defaults.get("summary_timeout_seconds") or 90),
         )
         log.info("Startup summary regeneration complete regenerated=%s", regenerated)
     else:

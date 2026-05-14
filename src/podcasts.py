@@ -299,7 +299,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                             download_status="downloaded",
                         ),
                     )
-                    generate_missing_summaries(db_path, limit=5, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"))
+                    generate_missing_summaries(db_path, limit=5, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"), timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90))
 
                     downloaded_items.append(f"Podcast: {job['name']} – {job['episode_title']}")
 
