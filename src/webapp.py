@@ -1446,7 +1446,7 @@ def _render_index(
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
     .batch-apply:disabled {{ opacity: .55; cursor: not-allowed; }}
-    .library-filter-wrap {{ display: inline-flex; align-items: stretch; width: min(30rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
+    .library-filter-wrap {{ display: inline-flex; align-items: stretch; width: min(22.5rem, 100%); border: 1px solid #c9d5ef; border-radius: 12px; background: #fff; overflow: hidden; }}
     .library-filter-input {{ border: 0; border-right: 1px solid #dbe3f3; border-radius: 0; padding: .5rem .7rem; font: inherit; min-width: 12rem; flex: 1 1 12rem; }}
     .library-filter-select {{
       border: 0;
