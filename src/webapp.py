@@ -14,7 +14,6 @@ import sys
 import threading
 import traceback
 import time
-import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
 from io import StringIO
@@ -24,8 +23,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, quote, urlparse
-import urllib.error
+from urllib.parse import parse_qs, urlparse
 
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
@@ -207,6 +205,11 @@ def _normalize_stem(value: str) -> str:
 
 
 def _import_webpage_screenshot(state: AppState, url: str) -> None:
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        raise ValueError("Playwright is not installed. Run: pip install playwright && playwright install chromium") from exc
     safe_url = str(url or "").strip()
     if not safe_url:
         raise ValueError("Missing URL")
@@ -214,47 +217,49 @@ def _import_webpage_screenshot(state: AppState, url: str) -> None:
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http/https URLs are supported")
 
-    encoded_target_url = quote(safe_url, safe="")
-    screenshot_provider_urls = [
-        f"https://image.thum.io/get/fullpage/noanimate/{safe_url}",
-        f"https://image.thum.io/get/fullpage/noanimate/{encoded_target_url}",
-        f"https://image.thum.io/get/png/noanimate/{safe_url}",
-        f"https://image.thum.io/get/png/noanimate/{encoded_target_url}",
-    ]
     payload = b""
-    content_type = ""
-    last_error: Optional[Exception] = None
-    for screenshot_provider_url in screenshot_provider_urls:
-        request = urllib.request.Request(
-            screenshot_provider_url,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; getoffline-webapp/1.0)"},
-            method="GET",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                payload = response.read()
-                content_type = str(response.headers.get("Content-Type") or "").lower()
-            if payload and "image/" in content_type:
-                break
-        except urllib.error.HTTPError as exc:
-            last_error = exc
-            if exc.code not in {400, 403, 404, 429, 500, 502, 503, 504}:
-                raise
-        except Exception as exc:  # noqa: BLE001 - bubble details after trying fallbacks
-            last_error = exc
+    consent_patterns = [
+        "#onetrust-accept-btn-handler",
+        "button:has-text('Accept all')",
+        "button:has-text('Allow all')",
+        "button:has-text('I Agree')",
+        "button:has-text('I agree')",
+        "button:has-text('Accept')",
+        "button:has-text('Agree')",
+        "button:has-text('Consent')",
+        "button:has-text('Got it')",
+        "button:has-text('OK')",
+        "[aria-label*='accept' i]",
+        "[title*='accept' i]",
+    ]
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+            page.goto(safe_url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(1200)
+
+            for selector in consent_patterns:
+                try:
+                    locator = page.locator(selector).first
+                    if locator.count() and locator.is_visible():
+                        locator.click(timeout=1200)
+                        page.wait_for_timeout(450)
+                except Exception:
+                    continue
+            try:
+                page.wait_for_load_state("networkidle", timeout=5000)
+            except PlaywrightTimeoutError:
+                pass
+            payload = page.screenshot(full_page=True, type="png")
+            context.close()
+            browser.close()
+    except Exception as exc:
+        raise ValueError(f"Playwright screenshot failed: {exc}") from exc
     if not payload:
-        if last_error is not None:
-            raise ValueError(f"Screenshot provider request failed: {last_error}") from last_error
-        raise ValueError("Screenshot provider returned an empty response")
-    if "image/" not in content_type:
-        raise ValueError("Screenshot provider did not return an image")
+        raise ValueError("Playwright returned an empty screenshot")
     ext = "png"
-    if "jpeg" in content_type or "jpg" in content_type:
-        ext = "jpg"
-    elif "webp" in content_type:
-        ext = "webp"
-    elif "gif" in content_type:
-        ext = "gif"
 
     destination_root = (state.output_root.expanduser().resolve() / "manual")
     destination_root.mkdir(parents=True, exist_ok=True)
