@@ -256,7 +256,12 @@ def _import_webpage_screenshot(state: AppState, url: str) -> None:
             context.close()
             browser.close()
     except Exception as exc:
-        raise ValueError(f"Playwright screenshot failed: {exc}") from exc
+        detail = str(exc or "").strip()
+        if "Executable doesn't exist" in detail:
+            raise ValueError(
+                "Playwright Chromium is not installed. Run: playwright install chromium"
+            ) from exc
+        raise ValueError(f"Playwright screenshot failed: {detail}") from exc
     if not payload:
         raise ValueError("Playwright returned an empty screenshot")
     ext = "png"
@@ -4691,7 +4696,9 @@ def make_handler(state: AppState):
                     _import_webpage_screenshot(state, url)
                 except Exception as exc:
                     log.exception("Failed webpage screenshot import for %s", url)
-                    self.send_error(400, f"Screenshot failed: {exc}")
+                    safe_message = str(exc or "unknown error")
+                    safe_message = safe_message.encode("latin-1", "replace").decode("latin-1")
+                    self.send_error(400, f"Screenshot failed: {safe_message}")
                     return
                 self.send_response(303)
                 self.send_header("Location", "/")
