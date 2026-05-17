@@ -364,9 +364,10 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("/settings", body)
             self.assertIn("/quick-add-youtube", body)
             self.assertIn('id="quick-add-form"', body)
-            self.assertIn("fetch('/quick-add-youtube', {", body)
+            self.assertIn("const endpoint = safeMediaType === 'webpage_screenshot' ? '/quick-add-webpage-screenshot' : '/quick-add-youtube';", body)
+            self.assertIn("fetch(endpoint, {", body)
             self.assertIn("setSyncButtonRunning();", body)
-            self.assertIn("Add single YouTube link", body)
+            self.assertIn("Quick add", body)
             self.assertIn('id="quick-add-open"', body)
             self.assertIn('id="quick-add-backdrop"', body)
             self.assertIn('id="quick-add-url"', body)
@@ -415,7 +416,8 @@ class WebAppHelpersTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn('<option value="video" selected>video</option>', body)
+            self.assertIn('<option value="video" selected>YouTube video</option>', body)
+            self.assertIn('<option value="webpage_screenshot">Full webpage screenshot</option>', body)
 
     def test_infer_media_type_for_redownload_uses_file_path_suffix(self):
         row = SimpleNamespace(file_ext=None, file_path="/tmp/video_episode.webm")

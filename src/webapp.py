@@ -14,6 +14,7 @@ import sys
 import threading
 import traceback
 import time
+import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
 from io import StringIO
@@ -67,6 +68,7 @@ MEDIA_EXTENSIONS = {
 }
 
 VIDEO_EXTENSIONS = {"mp4", "mkv", "webm", "mov"}
+IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
 
 DEFAULT_AUTO_UPDATE_MINUTES = 20
 DISCONNECT_LOG_WINDOW_SECONDS = 30.0
@@ -201,6 +203,80 @@ def _normalize_stem(value: str) -> str:
     normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
     normalized = re.sub(r"^(?:manual-\d{8}-\d{6}(?:-\d+)?-)+", "", normalized, flags=re.IGNORECASE)
     return normalized or "item"
+
+
+def _import_webpage_screenshot(state: AppState, url: str) -> None:
+    safe_url = str(url or "").strip()
+    if not safe_url:
+        raise ValueError("Missing URL")
+    parsed = urlparse(safe_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Only http/https URLs are supported")
+
+    screenshot_provider_url = f"https://image.thum.io/get/fullpage/noanimate/{safe_url}"
+    request = urllib.request.Request(
+        screenshot_provider_url,
+        headers={"User-Agent": "getoffline-webapp/1.0"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        payload = response.read()
+        content_type = str(response.headers.get("Content-Type") or "").lower()
+    if not payload:
+        raise ValueError("Screenshot provider returned an empty response")
+    if "image/" not in content_type:
+        raise ValueError("Screenshot provider did not return an image")
+    ext = "png"
+    if "jpeg" in content_type or "jpg" in content_type:
+        ext = "jpg"
+    elif "webp" in content_type:
+        ext = "webp"
+    elif "gif" in content_type:
+        ext = "gif"
+
+    destination_root = (state.output_root.expanduser().resolve() / "manual")
+    destination_root.mkdir(parents=True, exist_ok=True)
+    host = parsed.netloc or "webpage"
+    stem = _normalize_stem(host.replace(":", "-"))
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    destination_path = destination_root / f"{stem}-{timestamp}.{ext}"
+    destination_path.write_bytes(payload)
+    stat = destination_path.stat()
+    item_uid = f"webshot-{hashlib.sha1(payload).hexdigest()}-{int(stat.st_size)}"
+    metadata = {
+        "source_type": "webpage",
+        "source_name": "Webpage Screenshots",
+        "source_url": safe_url,
+        "item_uid": item_uid,
+        "item_id": item_uid,
+        "item_url": safe_url,
+        "media_url": safe_url,
+        "title": f"Screenshot: {host}",
+        "description": f"Full-page screenshot captured from {safe_url}",
+        "uploader": "local",
+        "channel": "Webpage Screenshots",
+        "extractor": "thum.io",
+        "playlist_id": None,
+        "playlist_title": None,
+        "upload_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "duration_seconds": None,
+        "file_path": str(destination_path),
+        "file_ext": ext,
+        "file_size_bytes": int(stat.st_size),
+        "expected_bytes": int(stat.st_size),
+        "format_id": None,
+        "format_note": "webpage screenshot",
+        "audio_codec": None,
+        "video_codec": None,
+        "resolution": None,
+        "fps": None,
+        "subtitle_enabled": False,
+        "subtitle_path": None,
+        "download_status": "downloaded",
+        "error_message": None,
+        "downloaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    upsert_download(str(state.database_path), metadata)
 
 
 def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) -> None:
@@ -1909,7 +1985,7 @@ def _render_index(
 
     <div id="quick-add-backdrop" class="quick-add-backdrop" aria-hidden="true">
       <div class="quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
-        <h2 id="quick-add-title">Add single YouTube link</h2>
+        <h2 id="quick-add-title">Quick add</h2>
         <form id="quick-add-form" method="post" action="/quick-add-youtube" class="quick-add-form">
           <div>
             <label for="quick-add-search">Search YouTube (press Enter)</label>
@@ -1917,14 +1993,15 @@ def _render_index(
           </div>
           <div id="quick-add-results" class="quick-add-results" aria-live="polite"></div>
           <div>
-            <label for="quick-add-url">YouTube URL</label>
-            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required />
+            <label for="quick-add-url">Link</label>
+            <input id="quick-add-url" class="quick-add-input" type="url" name="url" placeholder="https://www.youtube.com/watch?v=... or https://example.com" required />
           </div>
           <div>
-            <label for="quick-add-media-type">Download type</label>
+            <label for="quick-add-media-type">Action</label>
             <select id="quick-add-media-type" class="quick-add-select" name="media_type">
-              <option value="video" selected>video</option>
-              <option value="audio">audio</option>
+              <option value="video" selected>YouTube video</option>
+              <option value="audio">YouTube audio</option>
+              <option value="webpage_screenshot">Full webpage screenshot</option>
             </select>
           </div>
           <div class="quick-add-actions">
@@ -2903,10 +2980,12 @@ def _render_index(
 
         const formBody = new window.URLSearchParams();
         formBody.set('url', safeUrl);
-        formBody.set('media_type', mediaType || 'video');
+        const safeMediaType = mediaType === 'audio' ? 'audio' : (mediaType === 'webpage_screenshot' ? 'webpage_screenshot' : 'video');
+        formBody.set('media_type', safeMediaType);
+        const endpoint = safeMediaType === 'webpage_screenshot' ? '/quick-add-webpage-screenshot' : '/quick-add-youtube';
 
         setSyncButtonRunning();
-        fetch('/quick-add-youtube', {{
+        fetch(endpoint, {{
           method: 'POST',
           body: formBody.toString(),
           keepalive: true,
@@ -2971,7 +3050,7 @@ def _render_index(
           backdrop.classList.add('is-open');
           backdrop.setAttribute('aria-hidden', 'false');
           if (quickAddSearchInput) quickAddSearchInput.focus();
-          if (quickAddResults) quickAddResults.innerHTML = '<div class="quick-add-empty">Paste a YouTube URL or press Enter to search.</div>';
+          if (quickAddResults) quickAddResults.innerHTML = '<div class="quick-add-empty">Paste a YouTube URL, or pick webpage screenshot for any website link.</div>';
         }});
       }}
       if (cancelBtn) cancelBtn.addEventListener('click', closeQuickAddModal);
@@ -3072,7 +3151,13 @@ def _render_index(
 
 def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_subtitles: bool) -> str:
     title = html.escape(row.title or media_path.name)
-    media_kind = "video" if media_path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"} else "audio"
+    suffix = media_path.suffix.lower().lstrip(".")
+    if suffix in VIDEO_EXTENSIONS:
+        media_kind = "video"
+    elif suffix in IMAGE_EXTENSIONS:
+        media_kind = "image"
+    else:
+        media_kind = "audio"
     has_subtitles = has_subtitles and media_kind == "audio"
     source = html.escape(f"{row.source_type}: {row.source_name}")
 
@@ -3089,6 +3174,17 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       <div id="transcript" class="transcript" aria-live="polite"></div>
     </section>
 """
+
+    player_html = f"""
+    <{media_kind} id="player" class="player" controls preload="metadata">
+      <source src="/media?id={row.row_id}" />
+      {subtitles_html}
+      Your browser does not support this media type.
+    </{media_kind}>
+    """
+    if media_kind == "image":
+        player_html = f'<img id="player" class="player" src="/media?id={row.row_id}" alt="{title}" style="height:auto;display:block;background:#0f1730;" />'
+        transcript_html = ""
 
     return f"""<!doctype html>
 <html>
@@ -3148,11 +3244,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     <p><a id="back-to-library" href="/">← Back to Library</a></p>
     <h2>{title}</h2>
     <p class="meta">{source}</p>
-    <{media_kind} id="player" class="player" controls preload="metadata">
-      <source src="/media?id={row.row_id}" />
-      {subtitles_html}
-      Your browser does not support this media type.
-    </{media_kind}>
+    {player_html}
     {transcript_html}
   </div>
   <script>
@@ -3180,6 +3272,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       let playbackCompleted = false;
 
       if (!player) return;
+      if (player.tagName.toLowerCase() === 'img') return;
 
       function readStoredMediaSettings() {{
         const raw = window.localStorage.getItem(mediaSettingsStorageKey);
@@ -4539,6 +4632,25 @@ def make_handler(state: AppState):
                     media_type=media_type,
                     subtitles_enabled=True,
                 )
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
+            if path == "/quick-add-webpage-screenshot":
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8") if length else ""
+                form = parse_qs(body)
+                url = str((form.get("url") or [""])[0]).strip()
+                if not url:
+                    self.send_error(400, "Missing url")
+                    return
+                try:
+                    _import_webpage_screenshot(state, url)
+                except Exception as exc:
+                    log.exception("Failed webpage screenshot import for %s", url)
+                    self.send_error(400, f"Screenshot failed: {exc}")
+                    return
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
