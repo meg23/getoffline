@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
@@ -213,7 +213,8 @@ def _import_webpage_screenshot(state: AppState, url: str) -> None:
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http/https URLs are supported")
 
-    screenshot_provider_url = f"https://image.thum.io/get/fullpage/noanimate/{safe_url}"
+    encoded_target_url = quote(safe_url, safe="")
+    screenshot_provider_url = f"https://image.thum.io/get/fullpage/noanimate/{encoded_target_url}"
     request = urllib.request.Request(
         screenshot_provider_url,
         headers={"User-Agent": "getoffline-webapp/1.0"},
@@ -2991,7 +2992,22 @@ def _render_index(
           keepalive: true,
           headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
         }})
-          .catch(() => {{}})
+          .then(async (response) => {{
+            if (response.ok) return;
+            let message = 'Request failed.';
+            try {{
+              const raw = await response.text();
+              if (raw) message = raw.slice(0, 300);
+            }} catch (_) {{}}
+            throw new Error(message);
+          }})
+          .catch((error) => {{
+            const msg = String((error && error.message) || 'Request failed');
+            if (quickAddResults) {{
+              quickAddResults.innerHTML = '<div class="quick-add-empty">' + escapeHtml(msg) + '</div>';
+            }}
+            try {{ window.alert(msg); }} catch (_) {{}}
+          }})
           .finally(() => {{
             if (typeof onDone === 'function') onDone();
             pollSyncStatusUntilFinished();
