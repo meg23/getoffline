@@ -234,7 +234,21 @@ def _import_webpage_screenshot(state: AppState, url: str) -> None:
     ]
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = None
+            launch_errors: List[str] = []
+            launch_options = [
+                {"headless": True},
+                {"headless": True, "channel": "chrome"},
+                {"headless": True, "channel": "msedge"},
+            ]
+            for options in launch_options:
+                try:
+                    browser = p.chromium.launch(**options)
+                    break
+                except Exception as launch_exc:
+                    launch_errors.append(str(launch_exc or "").strip())
+            if browser is None:
+                raise RuntimeError(" | ".join([msg for msg in launch_errors if msg]) or "Unable to launch browser")
             context = browser.new_context(viewport={"width": 1920, "height": 1080})
             page = context.new_page()
             page.goto(safe_url, wait_until="domcontentloaded", timeout=45000)
@@ -259,7 +273,7 @@ def _import_webpage_screenshot(state: AppState, url: str) -> None:
         detail = str(exc or "").strip()
         if "Executable doesn't exist" in detail:
             raise ValueError(
-                "Playwright Chromium is not installed. Run: playwright install chromium"
+                "No Playwright/browser executable found. Install Chromium with: playwright install chromium"
             ) from exc
         raise ValueError(f"Playwright screenshot failed: {detail}") from exc
     if not payload:
