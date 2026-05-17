@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
+import urllib.error
 
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
@@ -214,16 +215,36 @@ def _import_webpage_screenshot(state: AppState, url: str) -> None:
         raise ValueError("Only http/https URLs are supported")
 
     encoded_target_url = quote(safe_url, safe="")
-    screenshot_provider_url = f"https://image.thum.io/get/fullpage/noanimate/{encoded_target_url}"
-    request = urllib.request.Request(
-        screenshot_provider_url,
-        headers={"User-Agent": "getoffline-webapp/1.0"},
-        method="GET",
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        payload = response.read()
-        content_type = str(response.headers.get("Content-Type") or "").lower()
+    screenshot_provider_urls = [
+        f"https://image.thum.io/get/fullpage/noanimate/{safe_url}",
+        f"https://image.thum.io/get/fullpage/noanimate/{encoded_target_url}",
+        f"https://image.thum.io/get/png/noanimate/{safe_url}",
+        f"https://image.thum.io/get/png/noanimate/{encoded_target_url}",
+    ]
+    payload = b""
+    content_type = ""
+    last_error: Optional[Exception] = None
+    for screenshot_provider_url in screenshot_provider_urls:
+        request = urllib.request.Request(
+            screenshot_provider_url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; getoffline-webapp/1.0)"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                payload = response.read()
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+            if payload and "image/" in content_type:
+                break
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {400, 403, 404, 429, 500, 502, 503, 504}:
+                raise
+        except Exception as exc:  # noqa: BLE001 - bubble details after trying fallbacks
+            last_error = exc
     if not payload:
+        if last_error is not None:
+            raise ValueError(f"Screenshot provider request failed: {last_error}") from last_error
         raise ValueError("Screenshot provider returned an empty response")
     if "image/" not in content_type:
         raise ValueError("Screenshot provider did not return an image")
