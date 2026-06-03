@@ -1510,6 +1510,114 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertIn("<vlc:option>start-time=97</vlc:option>", playlist_payloads[0])
             self.assertIn("position_seconds=97.250", playlist_payloads[0])
 
+    def test_sync_items_to_android_embeds_album_art_for_podcast_audio(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        class FakeArtworkResponse:
+            headers = {"Content-Type": "image/jpeg"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size):
+                return b"fake-jpeg"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-audio", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            def fake_which(name):
+                return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
+
+            with mock.patch("android_sync.shutil.which", side_effect=fake_which), mock.patch(
+                "android_sync.urllib.request.urlopen", return_value=FakeArtworkResponse()
+            ) as urlopen_mock:
+                result = sync_items_to_android(
+                    [
+                        AndroidSyncItem(
+                            row_id=7,
+                            title="Podcast Episode",
+                            source_name="Podcast Show",
+                            file_path=media,
+                            position_seconds=12.5,
+                            artwork_url="https://example.com/art.jpg",
+                        )
+                    ],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            metadata_cmds = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertIn("artist=Podcast Show", metadata_cmds[0])
+            self.assertIn("album=Podcast Show", metadata_cmds[0])
+            self.assertIn("genre=Podcast", metadata_cmds[0])
+            self.assertIn("-disposition:v:0", metadata_cmds[0])
+            self.assertIn("attached_pic", metadata_cmds[0])
+            self.assertIn("-id3v2_version", metadata_cmds[0])
+            urlopen_mock.assert_called_once_with("https://example.com/art.jpg", timeout=20)
+
+    def test_sync_items_to_android_refreshes_existing_remote_file_when_metadata_available(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-audio", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            def fake_which(name):
+                return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
+
+            with mock.patch("android_sync.shutil.which", side_effect=fake_which):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=9, title="Existing Episode", source_name="Podcast Show", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            metadata_cmds = []
+            media_pushes = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+                if "push" in cmd and str(cmd[-1]).endswith("Existing Episode.mp3"):
+                    media_pushes.append(cmd)
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(result.skipped, 0)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertEqual(len(media_pushes), 1)
+            self.assertNotEqual(Path(media_pushes[0][-2]), media)
+
     def test_sync_items_to_android_reports_mkdir_failure(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 

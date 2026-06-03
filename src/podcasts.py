@@ -84,6 +84,7 @@ def _episode_payload(
     subtitle_path,
     download_status,
     error_message=None,
+    artwork_url=None,
 ):
     file_value = Path(file_path).expanduser().resolve() if file_path else None
     file_size = file_value.stat().st_size if file_value and file_value.exists() else None
@@ -125,10 +126,58 @@ def _episode_payload(
             "media_url": media_url,
             "title": title,
             "description": description,
+            "artwork_url": artwork_url,
+            "image_url": artwork_url,
         },
     }
 
 
+
+
+def _image_href(value: object) -> str:
+    if isinstance(value, dict):
+        return str(value.get("href") or value.get("url") or "").strip()
+    href = getattr(value, "href", None)
+    if href:
+        return str(href).strip()
+    url = getattr(value, "url", None)
+    if url:
+        return str(url).strip()
+    return ""
+
+
+def _media_thumbnail_url(value: object) -> str:
+    thumbnails = None
+    if isinstance(value, dict):
+        thumbnails = value.get("media_thumbnail") or value.get("media_thumbnail_detail")
+    if thumbnails is None:
+        thumbnails = getattr(value, "media_thumbnail", None)
+    if isinstance(thumbnails, list):
+        for thumbnail in thumbnails:
+            image_url = _image_href(thumbnail)
+            if image_url:
+                return image_url
+    return ""
+
+
+def _podcast_artwork_url(feed: object, entry: object) -> str:
+    for candidate in (entry, getattr(feed, "feed", None)):
+        if candidate is None:
+            continue
+        if isinstance(candidate, dict):
+            for key in ("image", "itunes_image"):
+                image_url = _image_href(candidate.get(key))
+                if image_url:
+                    return image_url
+        else:
+            for key in ("image", "itunes_image"):
+                image_url = _image_href(getattr(candidate, key, None))
+                if image_url:
+                    return image_url
+        image_url = _media_thumbnail_url(candidate)
+        if image_url:
+            return image_url
+    return ""
 
 
 def _entry_title(entry: object) -> str:
@@ -226,6 +275,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                         "subtitle_offset_seconds": subtitle_offset_seconds,
                         "episode_title": episode_title,
                         "description": _entry_summary(ep),
+                        "artwork_url": _podcast_artwork_url(feed, ep),
                         "mp3_url": mp3_url,
                         "final_audio": Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}",
                         "ydl_opts": ydl_opts,
@@ -260,6 +310,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                                 subtitle_path=None,
                                 download_status="failed",
                                 error_message=str(last_download_error),
+                                artwork_url=job.get("artwork_url"),
                             ),
                         )
                         log.error(
@@ -297,6 +348,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                             subtitle_enabled=job["entry_subtitles_enabled"],
                             subtitle_path=subtitle_path,
                             download_status="downloaded",
+                            artwork_url=job.get("artwork_url"),
                         ),
                     )
                     generate_missing_summaries(db_path, limit=5, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"), timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90))

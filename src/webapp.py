@@ -104,6 +104,7 @@ class MediaRow:
     last_position_seconds: float = 0.0
     subtitle_path: Optional[str] = None
     summary_text: Optional[str] = None
+    raw_metadata_json: Optional[str] = None
 
 
 @dataclass
@@ -603,7 +604,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
                 """
                 SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, '')
                 FROM downloads d
                 LEFT JOIN media_summaries ms ON ms.download_id = d.id
                 WHERE d.download_status = 'downloaded'
@@ -633,6 +634,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             last_position_seconds=float(row[13] or 0.0),
             subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
             summary_text=row[16] or None,
+            raw_metadata_json=row[17] or None,
         )
         for row in rows
     ]
@@ -657,7 +659,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
                 """
                 SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, '')
                 FROM downloads d
                 LEFT JOIN media_summaries ms ON ms.download_id = d.id
                 WHERE d.id = ? AND d.download_status = 'downloaded'
@@ -690,6 +692,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         last_position_seconds=float(row[13] or 0.0),
         subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
         summary_text=row[16] or None,
+        raw_metadata_json=row[17] or None,
     )
 
 
@@ -1071,6 +1074,29 @@ def _snapshot_android_sync_status(status: AndroidSyncStatus) -> Dict[str, str]:
         }
 
 
+
+def _extract_artwork_url_from_metadata(raw_metadata_json: Optional[str]) -> Optional[str]:
+    if not raw_metadata_json:
+        return None
+    try:
+        metadata = json.loads(raw_metadata_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("artwork_url", "image_url", "thumbnail", "thumbnail_url"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    thumbnails = metadata.get("thumbnails")
+    if isinstance(thumbnails, list):
+        for thumbnail in thumbnails:
+            if isinstance(thumbnail, dict):
+                value = str(thumbnail.get("url") or "").strip()
+                if value:
+                    return value
+    return None
+
 def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_items: int) -> List[AndroidSyncItem]:
     items: List[AndroidSyncItem] = []
     for row in rows:
@@ -1088,6 +1114,7 @@ def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_i
                 file_path=media_path,
                 subtitle_path=subtitle_path,
                 position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
+                artwork_url=_extract_artwork_url_from_metadata(getattr(row, "raw_metadata_json", None)),
             )
         )
         if len(items) >= max(1, int(max_items or 1)):

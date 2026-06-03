@@ -2,6 +2,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
@@ -14,6 +15,7 @@ log = get_logger("android_sync")
 
 MEDIA_SUBTITLE_EXTENSIONS = {".srt", ".vtt"}
 MEDIA_METADATA_EXTENSIONS = {".aac", ".flac", ".m4a", ".mkv", ".mov", ".mp3", ".mp4", ".ogg", ".wav", ".webm"}
+AUDIO_ARTWORK_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".ogg"}
 MOV_METADATA_EXTENSIONS = {".m4a", ".mov", ".mp4"}
 
 
@@ -34,6 +36,7 @@ class AndroidSyncItem:
     file_path: Path
     subtitle_path: Optional[Path] = None
     position_seconds: float = 0.0
+    artwork_url: Optional[str] = None
 
 
 @dataclass
@@ -153,7 +156,29 @@ def _metadata_comment(item: AndroidSyncItem) -> str:
     return f"GetOffline row_id={item.row_id} position_seconds={_metadata_position_text(item)}"
 
 
-def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_path: Path, item: AndroidSyncItem) -> List[str]:
+def _download_artwork(artwork_url: Optional[str]) -> Optional[Path]:
+    url = str(artwork_url or "").strip()
+    if not url:
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=20) as response:
+            payload = response.read(5 * 1024 * 1024)
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+    except Exception as exc:
+        log.warning("Android sync artwork download failed url=%s: %s", url, exc)
+        return None
+    if not payload:
+        log.warning("Android sync artwork download returned empty payload url=%s", url)
+        return None
+    suffix = ".jpg"
+    if "png" in content_type:
+        suffix = ".png"
+    with tempfile.NamedTemporaryFile("wb", suffix=suffix, delete=False) as handle:
+        handle.write(payload)
+        return Path(handle.name)
+
+
+def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_path: Path, item: AndroidSyncItem, artwork_path: Optional[Path]) -> List[str]:
     command = [
         ffmpeg_path,
         "-y",
@@ -162,8 +187,16 @@ def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_p
         "error",
         "-i",
         str(source_path),
+    ]
+    if artwork_path is not None:
+        command.extend(["-i", str(artwork_path)])
+    command.extend([
         "-map",
         "0",
+    ])
+    if artwork_path is not None:
+        command.extend(["-map", "1", "-disposition:v:0", "attached_pic"])
+    command.extend([
         "-c",
         "copy",
         "-metadata",
@@ -173,10 +206,14 @@ def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_p
         "-metadata",
         f"album_artist={item.source_name or 'GetOffline'}",
         "-metadata",
-        "album=GetOffline",
+        f"album={item.source_name or 'GetOffline'}",
+        "-metadata",
+        "genre=Podcast",
         "-metadata",
         f"comment={_metadata_comment(item)}",
-    ]
+    ])
+    if source_path.suffix.lower() == ".mp3":
+        command.extend(["-id3v2_version", "3"])
     if source_path.suffix.lower() in MOV_METADATA_EXTENSIONS:
         command.extend(["-movflags", "use_metadata_tags"])
     command.append(str(output_path))
@@ -202,8 +239,11 @@ def _copy_with_embedded_metadata(
         log.info("Android sync metadata skipped: ffmpeg not found")
         return source_path
 
+    artwork_path = None
+    if source_path.suffix.lower() in AUDIO_ARTWORK_EXTENSIONS:
+        artwork_path = _download_artwork(item.artwork_url)
     output_path = _metadata_temp_path(source_path)
-    command = _build_ffmpeg_metadata_command(ffmpeg_path, source_path, output_path, item)
+    command = _build_ffmpeg_metadata_command(ffmpeg_path, source_path, output_path, item, artwork_path)
     try:
         completed = _run_adb_command(
             command,
@@ -214,7 +254,12 @@ def _copy_with_embedded_metadata(
     except RuntimeError as exc:
         log.warning("Android sync metadata embedding failed for row_id=%s: %s", item.row_id, exc)
         output_path.unlink(missing_ok=True)
+        if artwork_path is not None:
+            artwork_path.unlink(missing_ok=True)
         return source_path
+
+    if artwork_path is not None:
+        artwork_path.unlink(missing_ok=True)
 
     if int(getattr(completed, "returncode", 1) or 0) != 0:
         log.warning(
@@ -388,6 +433,7 @@ def sync_items_to_android(
             remote_media_path,
             local_path.stat().st_size,
         )
+        remote_exists = False
         try:
             exists = _run_adb_command(
                 [adb_executable, "-s", device_serial, "shell", f"test -f {_remote_quote(remote_media_path)}"],
@@ -400,12 +446,16 @@ def sync_items_to_android(
             _append_error(result, f"unable to check existing Android file for row {item.row_id}: {exc}")
             continue
         if int(getattr(exists, "returncode", 1) or 0) == 0:
-            result.skipped += 1
-            vlc_playlist_entries.append((item, remote_media_path))
-            log.info("Android sync item skipped: row_id=%s remote file already exists", item.row_id)
-            continue
+            remote_exists = True
 
         push_source_path = _copy_with_embedded_metadata(local_path, item, runner)
+        if remote_exists and push_source_path == local_path:
+            result.skipped += 1
+            vlc_playlist_entries.append((item, remote_media_path))
+            log.info("Android sync item skipped: row_id=%s remote file already exists and metadata refresh is unavailable", item.row_id)
+            continue
+        if remote_exists:
+            log.info("Android sync item refreshing metadata on existing remote file: row_id=%s", item.row_id)
         try:
             pushed = _run_adb_command(
                 [adb_executable, "-s", device_serial, "push", str(push_source_path), remote_media_path],

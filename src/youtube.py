@@ -376,6 +376,16 @@ def _build_youtube_payload(
         item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
     title = str(info.get("title") or "").strip() or None
 
+    thumbnail_url = str(info.get("thumbnail") or "").strip()
+    if not thumbnail_url:
+        thumbnails = info.get("thumbnails") or []
+        if isinstance(thumbnails, list):
+            for thumbnail in thumbnails:
+                if isinstance(thumbnail, dict):
+                    thumbnail_url = str(thumbnail.get("url") or "").strip()
+                    if thumbnail_url:
+                        break
+
     compact_metadata = {
         "id": info.get("id"),
         "title": info.get("title"),
@@ -393,6 +403,8 @@ def _build_youtube_payload(
         "fps": info.get("fps"),
         "width": info.get("width"),
         "height": info.get("height"),
+        "thumbnail": thumbnail_url,
+        "artwork_url": thumbnail_url,
         "filesize": info.get("filesize"),
         "filesize_approx": info.get("filesize_approx"),
         "acodec": info.get("acodec"),
