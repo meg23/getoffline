@@ -1432,5 +1432,54 @@ class WebAppUpdateThreadTests(unittest.TestCase):
             self.assertEqual(calls, ["run"])
 
 
+class AndroidSyncTests(unittest.TestCase):
+    def test_android_sync_items_only_include_unplayed_existing_media(self):
+        from webapp import _android_sync_items_from_rows
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unplayed = root / "unplayed.mp4"
+            played = root / "played.mp4"
+            unplayed.write_text("video", encoding="utf-8")
+            played.write_text("video", encoding="utf-8")
+            rows = [
+                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", subtitle_path=None),
+                SimpleNamespace(row_id=2, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", subtitle_path=None),
+                SimpleNamespace(row_id=3, played=False, file_path=str(root / "missing.mp4"), title="Missing", source_name="Channel", source_type="youtube", subtitle_path=None),
+            ]
+
+            items = _android_sync_items_from_rows(rows, root, max_items=10)
+
+            self.assertEqual([item.row_id for item in items], [1])
+            self.assertEqual(items[0].file_path, unplayed.resolve())
+
+    def test_sync_items_to_android_pushes_unplayed_file(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if "test" in cmd:
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(result.device_serial, "ABC123")
+            self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "ABC123", "push"] for cmd in calls))
+
+
 if __name__ == "__main__":
     unittest.main()

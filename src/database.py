@@ -355,6 +355,11 @@ DEFAULT_APP_CONFIG = {
     "summary_model": "qwen2.5:0.5b",
     "ollama_path": "ollama",
     "deno_path": "deno",
+    "android_sync_enabled": "0",
+    "android_sync_adb_path": "adb",
+    "android_sync_destination": "/sdcard/Movies/GetOffline",
+    "android_sync_max_items": "10",
+    "android_sync_include_subtitles": "1",
 }
 
 
@@ -514,6 +519,11 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "summary_model": str(defaults.get("summary_model") or "qwen2.5:0.5b"),
             "ollama_path": str(defaults.get("ollama_path") or "ollama"),
             "deno_path": str(defaults.get("deno_path") or "deno"),
+            "android_sync_enabled": str(defaults.get("android_sync_enabled") or "0").strip().lower() in {"1", "true", "yes", "on"},
+            "android_sync_adb_path": str(defaults.get("android_sync_adb_path") or "adb"),
+            "android_sync_destination": str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"),
+            "android_sync_max_items": _coerce_int(defaults.get("android_sync_max_items"), 10),
+            "android_sync_include_subtitles": str(defaults.get("android_sync_include_subtitles") or "1").strip().lower() in {"1", "true", "yes", "on"},
             "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
             "telemetry_dumps_enabled": str(
                 defaults.get("telemetry_dumps_enabled", defaults.get("heapdump_enabled", "0")) or "0"

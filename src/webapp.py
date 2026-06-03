@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from android_sync import AndroidSyncItem, config_from_defaults, sync_items_to_android
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -117,12 +118,25 @@ class UpdateStatus:
 
 
 @dataclass
+class AndroidSyncStatus:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    is_running: bool = False
+    last_started_at: Optional[float] = None
+    last_finished_at: Optional[float] = None
+    last_result: str = "idle"
+    last_error: Optional[str] = None
+    last_copied_count: int = 0
+    last_skipped_count: int = 0
+
+
+@dataclass
 class AppState:
     output_root: Path
     database_path: Path
     config: Dict
     update_runner: Callable[[Dict, List[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
+    android_sync_status: AndroidSyncStatus = field(default_factory=AndroidSyncStatus)
     pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
     pending_progress: Dict[int, Tuple[float, bool]] = field(default_factory=dict)
     pending_progress_event: threading.Event = field(default_factory=threading.Event)
@@ -1020,6 +1034,7 @@ def _run_update_job(state: AppState) -> None:
     try:
         state.update_runner(state.config, downloaded_items)
         _index_transcripts_on_startup(state)
+        trigger_android_sync(state)
         with state.update_status.lock:
             state.update_status.last_result = "ok"
             state.update_status.last_items_count = len(downloaded_items)
@@ -1039,6 +1054,87 @@ def trigger_background_update(state: AppState) -> bool:
             return False
 
     thread = threading.Thread(target=_run_update_job, args=(state,), daemon=True)
+    thread.start()
+    return True
+
+
+def _snapshot_android_sync_status(status: AndroidSyncStatus) -> Dict[str, str]:
+    with status.lock:
+        return {
+            "is_running": "yes" if status.is_running else "no",
+            "last_started_at": _format_timestamp(status.last_started_at),
+            "last_finished_at": _format_timestamp(status.last_finished_at),
+            "last_result": status.last_result,
+            "last_error": status.last_error or "none",
+            "last_copied_count": str(status.last_copied_count),
+            "last_skipped_count": str(status.last_skipped_count),
+        }
+
+
+def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_items: int) -> List[AndroidSyncItem]:
+    items: List[AndroidSyncItem] = []
+    for row in rows:
+        if row.played:
+            continue
+        media_path = _resolve_safe_media_path(output_root, row.file_path) if row.file_path else None
+        if media_path is None:
+            continue
+        subtitle_path = _resolve_safe_subtitle_path(output_root, row, media_path)
+        items.append(
+            AndroidSyncItem(
+                row_id=row.row_id,
+                title=row.title or media_path.stem,
+                source_name=row.source_name or row.source_type or "GetOffline",
+                file_path=media_path,
+                subtitle_path=subtitle_path,
+            )
+        )
+        if len(items) >= max(1, int(max_items or 1)):
+            break
+    return items
+
+
+def _run_android_sync_job(state: AppState, force: bool = False) -> None:
+    defaults = state.config.get("defaults") or {}
+    sync_config = config_from_defaults(defaults)
+    if force:
+        sync_config.enabled = True
+    with state.android_sync_status.lock:
+        state.android_sync_status.is_running = True
+        state.android_sync_status.last_started_at = time.time()
+        state.android_sync_status.last_result = "running"
+        state.android_sync_status.last_error = None
+        state.android_sync_status.last_copied_count = 0
+        state.android_sync_status.last_skipped_count = 0
+
+    try:
+        rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
+        items = _android_sync_items_from_rows(rows, state.output_root, sync_config.max_items)
+        result = sync_items_to_android(items, sync_config)
+        with state.android_sync_status.lock:
+            state.android_sync_status.last_result = result.message
+            state.android_sync_status.last_error = "; ".join(result.errors[:3]) if result.errors else None
+            state.android_sync_status.last_copied_count = result.copied
+            state.android_sync_status.last_skipped_count = result.skipped
+    except Exception as exc:
+        with state.android_sync_status.lock:
+            state.android_sync_status.last_result = "failed"
+            state.android_sync_status.last_error = str(exc)
+    finally:
+        with state.android_sync_status.lock:
+            state.android_sync_status.is_running = False
+            state.android_sync_status.last_finished_at = time.time()
+
+
+def trigger_android_sync(state: AppState, *, force: bool = False) -> bool:
+    defaults = state.config.get("defaults") or {}
+    if not force and not config_from_defaults(defaults).enabled:
+        return False
+    with state.android_sync_status.lock:
+        if state.android_sync_status.is_running:
+            return False
+
+    thread = threading.Thread(target=_run_android_sync_job, args=(state, force), daemon=True)
     thread.start()
     return True
 
@@ -1172,6 +1268,13 @@ def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
         trigger_background_update(state)
 
 
+def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        if stop_event.wait(_auto_update_interval_seconds(state)):
+            break
+        trigger_android_sync(state)
+
+
 def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         if stop_event.wait(DESCRIPTOR_CLEANUP_INTERVAL_SECONDS):
@@ -1252,6 +1355,7 @@ def _render_index(
     status: Dict[str, str],
     show_played: bool = False,
     favorites_only: bool = False,
+    android_status: Optional[Dict[str, str]] = None,
 ) -> str:
     cards = []
     visible_rows = []
@@ -1325,6 +1429,9 @@ def _render_index(
 
     table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No media items found yet.</td></tr>"
     sync_running = status["is_running"] == "yes"
+    android_status = android_status or {"is_running": "no", "last_result": "idle", "last_copied_count": "0", "last_skipped_count": "0"}
+    android_running = android_status.get("is_running") == "yes"
+    android_button_disabled = "disabled" if android_running else ""
     button_disabled = "disabled" if sync_running else ""
     sync_icon_class = " is-spinning" if sync_running else ""
     sync_icon_href = "#bi-arrow-repeat" if sync_running else "#bi-download"
@@ -1363,6 +1470,9 @@ def _render_index(
     favorites_href = "/" + ("?" + "&".join(fav_query_bits) if fav_query_bits else "")
     favorites_label = "Show favorites" if toggle_favorites_only else "Show all"
     favorites_icon = "bi-heart" if toggle_favorites_only else "bi-heart-fill"
+    android_result = html.escape(str(android_status.get("last_result", "idle")))
+    android_copied = html.escape(str(android_status.get("last_copied_count", "0")))
+    android_skipped = html.escape(str(android_status.get("last_skipped_count", "0")))
 
     return f"""<!doctype html>
 <html>
@@ -1441,6 +1551,7 @@ def _render_index(
     }}
     .toolbar-form {{ margin: 0; }}
     .toolbar-spacer {{ flex: 1 1 auto; }}
+    .toolbar-status-note {{ font-size: .78rem; color: var(--muted); white-space: nowrap; }}
     .batch-toolbar-form {{ margin-left: auto; display: inline-flex; align-items: center; gap: .45rem; flex-wrap: nowrap; }}
     .batch-select {{ min-width: 10rem; border: 1px solid #c9d5ef; border-radius: 8px; padding: .22rem .42rem; font: inherit; color: #243251; background: #fff; }}
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
@@ -1850,6 +1961,10 @@ def _render_index(
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}</button>
       <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}</button>
+      <form id="android-sync-form" method="post" action="/android-sync" class="toolbar-form">
+        <button id="android-sync-button" class="icon-button" type="submit" title="Sync unplayed to Android" aria-label="Sync unplayed to Android" {android_button_disabled}>📱</button>
+      </form>
+      <span class="toolbar-status-note" title="Last Android sync result">Android: {android_result} · copied {android_copied} · skipped {android_skipped}</span>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
@@ -3475,6 +3590,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
     ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
     deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
+    android_sync_enabled_checked = " checked" if bool(defaults.get("android_sync_enabled")) else ""
+    android_sync_adb_path = html.escape(str(defaults.get("android_sync_adb_path") or "adb"))
+    android_sync_destination = html.escape(str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"))
+    android_sync_max_items = html.escape(str(defaults.get("android_sync_max_items") or "10"))
+    android_sync_include_subtitles_checked = " checked" if bool(defaults.get("android_sync_include_subtitles", True)) else ""
     resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
     resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
@@ -3772,6 +3892,29 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           </div>
         </div>
         <p><strong>Resolved paths:</strong> Ollama <code>{resolved_ollama_path}</code> · Deno <code>{resolved_deno_path}</code></p>
+
+        <h3>Android offline sync</h3>
+        <p>Enable this to copy unplayed media to an Android phone when it is connected and authorized with USB debugging. The app uses <code>adb push</code>.</p>
+        <div class="grid">
+          <div>
+            <label for="android_sync_enabled"><input id="android_sync_enabled" type="checkbox" name="android_sync_enabled" value="1"{android_sync_enabled_checked} /> Auto-sync to Android</label>
+          </div>
+          <div>
+            <label for="android_sync_include_subtitles"><input id="android_sync_include_subtitles" type="checkbox" name="android_sync_include_subtitles" value="1"{android_sync_include_subtitles_checked} /> Include subtitles</label>
+          </div>
+          <div>
+            <label for="android_sync_adb_path">ADB executable</label>
+            <input id="android_sync_adb_path" name="android_sync_adb_path" value="{android_sync_adb_path}" required />
+          </div>
+          <div>
+            <label for="android_sync_destination">Phone folder</label>
+            <input id="android_sync_destination" name="android_sync_destination" value="{android_sync_destination}" required />
+          </div>
+          <div>
+            <label for="android_sync_max_items">Max unplayed items per sync</label>
+            <input id="android_sync_max_items" name="android_sync_max_items" value="{android_sync_max_items}" required />
+          </div>
+        </div>
 
         <div class="actions">
           <button type="submit" class="primary">Save defaults</button>
@@ -4138,7 +4281,15 @@ def make_handler(state: AppState):
                 status = _snapshot_status(state.update_status)
                 show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
                 favorites_only = (query.get('favorites') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
-                body = _render_index(_rows(), state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
+                body = _render_index(
+                    _rows(),
+                    state.output_root,
+                    state.database_path,
+                    status,
+                    show_played=show_played,
+                    favorites_only=favorites_only,
+                    android_status=_snapshot_android_sync_status(state.android_sync_status),
+                )
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -4165,6 +4316,17 @@ def make_handler(state: AppState):
 
             if path == "/update-status":
                 status_payload = _snapshot_status(state.update_status)
+                body_bytes = json.dumps(status_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            if path == "/android-sync-status":
+                status_payload = _snapshot_android_sync_status(state.android_sync_status)
                 body_bytes = json.dumps(status_payload).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -4405,6 +4567,14 @@ def make_handler(state: AppState):
                 self.end_headers()
                 return
 
+            if path == "/android-sync":
+                started = trigger_android_sync(state, force=True)
+                log.info("Manual Android sync requested (started=%s)", "yes" if started else "no")
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
             if path == "/progress":
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length).decode("utf-8") if length else ""
@@ -4563,6 +4733,11 @@ def make_handler(state: AppState):
                         "summary_model": (form.get("summary_model") or [""])[0],
                         "ollama_path": (form.get("ollama_path") or [""])[0],
                         "deno_path": (form.get("deno_path") or [""])[0],
+                        "android_sync_enabled": "1" if (form.get("android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_adb_path": (form.get("android_sync_adb_path") or ["adb"])[0],
+                        "android_sync_destination": (form.get("android_sync_destination") or ["/sdcard/Movies/GetOffline"])[0],
+                        "android_sync_max_items": (form.get("android_sync_max_items") or ["10"])[0],
+                        "android_sync_include_subtitles": "1" if (form.get("android_sync_include_subtitles") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
                     }
                     sanitized_updates = {
                         k: str(v).strip()
@@ -4743,6 +4918,14 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     )
     progress_flush_thread.start()
 
+    android_sync_stop_event = threading.Event()
+    android_sync_thread = threading.Thread(
+        target=_android_sync_loop,
+        args=(state, android_sync_stop_event),
+        daemon=True,
+    )
+    android_sync_thread.start()
+
     def _idle_rss_loop(stop_event: threading.Event) -> None:
         while not stop_event.wait(IDLE_RSS_LOG_INTERVAL_SECONDS):
             usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -4778,6 +4961,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     finally:
         auto_update_stop_event.set()
         progress_flush_stop_event.set()
+        android_sync_stop_event.set()
         rss_stop_event.set()
         descriptor_cleanup_stop_event.set()
         state.pending_progress_event.set()
