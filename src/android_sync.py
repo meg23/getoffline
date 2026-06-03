@@ -13,6 +13,8 @@ from logger import get_logger
 log = get_logger("android_sync")
 
 MEDIA_SUBTITLE_EXTENSIONS = {".srt", ".vtt"}
+MEDIA_METADATA_EXTENSIONS = {".aac", ".flac", ".m4a", ".mkv", ".mov", ".mp3", ".mp4", ".ogg", ".wav", ".webm"}
+MOV_METADATA_EXTENSIONS = {".m4a", ".mov", ".mp4"}
 
 
 @dataclass
@@ -142,16 +144,105 @@ def _file_uri_for_android_path(remote_path: str) -> str:
     return "file://" + quote(str(remote_path), safe="/:._-()[]@!$&'+,;=")
 
 
+
+def _metadata_position_text(item: AndroidSyncItem) -> str:
+    return f"{max(0.0, float(item.position_seconds or 0.0)):.3f}"
+
+
+def _metadata_comment(item: AndroidSyncItem) -> str:
+    return f"GetOffline row_id={item.row_id} position_seconds={_metadata_position_text(item)}"
+
+
+def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_path: Path, item: AndroidSyncItem) -> List[str]:
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source_path),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-metadata",
+        f"title={item.title or source_path.stem}",
+        "-metadata",
+        f"artist={item.source_name or 'GetOffline'}",
+        "-metadata",
+        f"album_artist={item.source_name or 'GetOffline'}",
+        "-metadata",
+        "album=GetOffline",
+        "-metadata",
+        f"comment={_metadata_comment(item)}",
+    ]
+    if source_path.suffix.lower() in MOV_METADATA_EXTENSIONS:
+        command.extend(["-movflags", "use_metadata_tags"])
+    command.append(str(output_path))
+    return command
+
+
+def _metadata_temp_path(source_path: Path) -> Path:
+    with tempfile.NamedTemporaryFile("wb", suffix=source_path.suffix, delete=False) as handle:
+        return Path(handle.name)
+
+
+def _copy_with_embedded_metadata(
+    source_path: Path,
+    item: AndroidSyncItem,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> Path:
+    if source_path.suffix.lower() not in MEDIA_METADATA_EXTENSIONS:
+        log.info("Android sync metadata skipped: unsupported extension path=%s", source_path)
+        return source_path
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        log.info("Android sync metadata skipped: ffmpeg not found")
+        return source_path
+
+    output_path = _metadata_temp_path(source_path)
+    command = _build_ffmpeg_metadata_command(ffmpeg_path, source_path, output_path, item)
+    try:
+        completed = _run_adb_command(
+            command,
+            description=f"embedding VLC-visible metadata for row {item.row_id}",
+            timeout=300,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        log.warning("Android sync metadata embedding failed for row_id=%s: %s", item.row_id, exc)
+        output_path.unlink(missing_ok=True)
+        return source_path
+
+    if int(getattr(completed, "returncode", 1) or 0) != 0:
+        log.warning(
+            "Android sync metadata embedding failed for row_id=%s: %s",
+            item.row_id,
+            _combined_output(completed) or "ffmpeg returned non-zero status",
+        )
+        output_path.unlink(missing_ok=True)
+        return source_path
+
+    if not output_path.exists() or output_path.stat().st_size <= 0:
+        log.warning("Android sync metadata embedding produced no output for row_id=%s", item.row_id)
+        output_path.unlink(missing_ok=True)
+        return source_path
+
+    log.info("Android sync metadata embedded: row_id=%s temp=%s", item.row_id, output_path)
+    return output_path
+
+
 def build_vlc_xspf(entries: List[Tuple[AndroidSyncItem, str]]) -> str:
     track_lines = []
     for idx, (item, remote_path) in enumerate(entries):
         raw_position_seconds = max(0.0, float(item.position_seconds or 0.0))
         position_seconds = int(raw_position_seconds)
-        position_seconds_text = f"{raw_position_seconds:.3f}"
         title = _xml_text(item.title or item.file_path.stem)
         creator = _xml_text(item.source_name or "GetOffline")
         location = _xml_text(_file_uri_for_android_path(remote_path))
-        annotation = _xml_text(f"GetOffline row_id={item.row_id} position_seconds={position_seconds_text}")
+        annotation = _xml_text(_metadata_comment(item))
         track_lines.append(
             f"""    <track>
       <location>{location}</location>
@@ -314,9 +405,10 @@ def sync_items_to_android(
             log.info("Android sync item skipped: row_id=%s remote file already exists", item.row_id)
             continue
 
+        push_source_path = _copy_with_embedded_metadata(local_path, item, runner)
         try:
             pushed = _run_adb_command(
-                [adb_executable, "-s", device_serial, "push", str(local_path), remote_media_path],
+                [adb_executable, "-s", device_serial, "push", str(push_source_path), remote_media_path],
                 description=f"pushing media row {item.row_id}",
                 timeout=300,
                 runner=runner,
@@ -324,7 +416,11 @@ def sync_items_to_android(
         except RuntimeError as exc:
             result.failed += 1
             _append_error(result, f"push failed for row {item.row_id}: {exc}")
+            if push_source_path != local_path:
+                push_source_path.unlink(missing_ok=True)
             continue
+        if push_source_path != local_path:
+            push_source_path.unlink(missing_ok=True)
         if int(getattr(pushed, "returncode", 1) or 0) != 0:
             result.failed += 1
             _append_error(result, _combined_output(pushed) or f"push failed for row {item.row_id}: {local_path}")

@@ -1466,6 +1466,9 @@ class AndroidSyncTests(unittest.TestCase):
 
             def fake_runner(cmd, **kwargs):
                 calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-media", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
                 if cmd[-1] == "devices":
                     return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
                 if any("test -f" in str(part) for part in cmd):
@@ -1484,6 +1487,20 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(result.copied, 1)
             self.assertEqual(result.device_serial, "ABC123")
             self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "ABC123", "push"] for cmd in calls))
+            metadata_cmds = []
+            media_pushes = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+                if "push" in cmd and str(cmd[-1]).endswith("Episode.mp4"):
+                    media_pushes.append(cmd)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertIn("title=Episode", metadata_cmds[0])
+            self.assertIn("artist=Channel", metadata_cmds[0])
+            self.assertIn("album_artist=Channel", metadata_cmds[0])
+            self.assertIn("comment=GetOffline row_id=1 position_seconds=97.250", metadata_cmds[0])
+            self.assertEqual(len(media_pushes), 1)
+            self.assertNotEqual(Path(media_pushes[0][-2]), media)
             self.assertIn(["/usr/bin/adb", "-s", "ABC123", "shell", "mkdir -p '/sdcard/Movies/GetOffline'"], calls)
             self.assertFalse(any(cmd[3:6] == ["shell", "sh", "-c"] for cmd in calls))
             self.assertEqual(result.vlc_playlist_path, "/sdcard/Movies/GetOffline/GetOffline.xspf")
