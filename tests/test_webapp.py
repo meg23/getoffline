@@ -1480,6 +1480,9 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(result.copied, 1)
             self.assertEqual(result.device_serial, "ABC123")
             self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "ABC123", "push"] for cmd in calls))
+            self.assertIn(["/usr/bin/adb", "-s", "ABC123", "shell", "mkdir -p '/sdcard/Movies/GetOffline'"], calls)
+            self.assertFalse(any(cmd[3:6] == ["shell", "sh", "-c"] for cmd in calls))
+
     def test_sync_items_to_android_reports_mkdir_failure(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 

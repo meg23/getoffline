@@ -215,7 +215,7 @@ def sync_items_to_android(
     result.device_serial = device_serial
     try:
         mkdir = _run_adb_command(
-            [adb_executable, "-s", device_serial, "shell", "sh", "-c", f"mkdir -p {_remote_quote(destination)}"],
+            [adb_executable, "-s", device_serial, "shell", f"mkdir -p {_remote_quote(destination)}"],
             description=f"creating Android destination folder {destination}",
             timeout=30,
             runner=runner,
@@ -250,7 +250,7 @@ def sync_items_to_android(
         )
         try:
             exists = _run_adb_command(
-                [adb_executable, "-s", device_serial, "shell", "sh", "-c", f"test -f {_remote_quote(remote_media_path)}"],
+                [adb_executable, "-s", device_serial, "shell", f"test -f {_remote_quote(remote_media_path)}"],
                 description=f"checking existing Android file for row {item.row_id}",
                 timeout=15,
                 runner=runner,
