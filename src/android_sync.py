@@ -1,9 +1,12 @@
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from urllib.parse import quote
+from xml.sax.saxutils import escape
+from typing import Callable, Iterable, List, Optional, Tuple
 
 from logger import get_logger
 
@@ -28,6 +31,7 @@ class AndroidSyncItem:
     source_name: str
     file_path: Path
     subtitle_path: Optional[Path] = None
+    position_seconds: float = 0.0
 
 
 @dataclass
@@ -40,6 +44,7 @@ class AndroidSyncResult:
     message: str = "idle"
     copied_files: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    vlc_playlist_path: Optional[str] = None
 
 
 def _coerce_bool(value: object) -> bool:
@@ -129,6 +134,49 @@ def build_remote_media_path(destination: str, item: AndroidSyncItem) -> str:
     return f"{destination.rstrip('/')}/{source} - {title}{suffix}"
 
 
+def _xml_text(value: object) -> str:
+    return escape(str(value or ""), {"'": "&apos;", '"': "&quot;"})
+
+
+def _file_uri_for_android_path(remote_path: str) -> str:
+    return "file://" + quote(str(remote_path), safe="/:._-()[]@!$&'+,;=")
+
+
+def build_vlc_xspf(entries: List[Tuple[AndroidSyncItem, str]]) -> str:
+    track_lines = []
+    for idx, (item, remote_path) in enumerate(entries):
+        raw_position_seconds = max(0.0, float(item.position_seconds or 0.0))
+        position_seconds = int(raw_position_seconds)
+        position_seconds_text = f"{raw_position_seconds:.3f}"
+        title = _xml_text(item.title or item.file_path.stem)
+        creator = _xml_text(item.source_name or "GetOffline")
+        location = _xml_text(_file_uri_for_android_path(remote_path))
+        annotation = _xml_text(f"GetOffline row_id={item.row_id} position_seconds={position_seconds_text}")
+        track_lines.append(
+            f"""    <track>
+      <location>{location}</location>
+      <title>{title}</title>
+      <creator>{creator}</creator>
+      <annotation>{annotation}</annotation>
+      <extension application="http://www.videolan.org/vlc/playlist/0">
+        <vlc:id>{idx}</vlc:id>
+        <vlc:option>start-time={position_seconds}</vlc:option>
+      </extension>
+    </track>"""
+        )
+
+    track_list = "\n".join(track_lines)
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/" xmlns:vlc="http://www.videolan.org/vlc/playlist/ns/0/">
+  <title>GetOffline</title>
+  <creator>GetOffline</creator>
+  <trackList>
+{track_list}
+  </trackList>
+</playlist>
+"""
+
+
 def find_connected_device(adb_path: str, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Optional[str]:
     adb_executable = shutil.which(adb_path) if not Path(adb_path).is_absolute() else adb_path
     if not adb_executable:
@@ -213,6 +261,7 @@ def sync_items_to_android(
         return result
 
     result.device_serial = device_serial
+    vlc_playlist_entries: List[Tuple[AndroidSyncItem, str]] = []
     try:
         mkdir = _run_adb_command(
             [adb_executable, "-s", device_serial, "shell", f"mkdir -p {_remote_quote(destination)}"],
@@ -261,6 +310,7 @@ def sync_items_to_android(
             continue
         if int(getattr(exists, "returncode", 1) or 0) == 0:
             result.skipped += 1
+            vlc_playlist_entries.append((item, remote_media_path))
             log.info("Android sync item skipped: row_id=%s remote file already exists", item.row_id)
             continue
 
@@ -282,6 +332,7 @@ def sync_items_to_android(
 
         result.copied += 1
         result.copied_files.append(remote_media_path)
+        vlc_playlist_entries.append((item, remote_media_path))
         log.info("Android sync item copied: row_id=%s remote=%s", item.row_id, remote_media_path)
 
         if not config.include_subtitles or not item.subtitle_path:
@@ -313,6 +364,43 @@ def sync_items_to_android(
             )
         else:
             log.info("Android sync subtitle copied: row_id=%s remote=%s", item.row_id, remote_subtitle_path)
+
+
+    if vlc_playlist_entries:
+        remote_playlist_path = f"{destination}/GetOffline.xspf"
+        playlist_content = build_vlc_xspf(vlc_playlist_entries)
+        try:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".xspf", delete=False) as handle:
+                handle.write(playlist_content)
+                local_playlist_path = Path(handle.name)
+            playlist_push = _run_adb_command(
+                [adb_executable, "-s", device_serial, "push", str(local_playlist_path), remote_playlist_path],
+                description="pushing VLC playlist metadata",
+                timeout=120,
+                runner=runner,
+            )
+        except RuntimeError as exc:
+            _append_error(result, f"VLC playlist metadata push failed: {exc}")
+        except OSError as exc:
+            _append_error(result, f"VLC playlist metadata generation failed: {exc}")
+        else:
+            if int(getattr(playlist_push, "returncode", 1) or 0) != 0:
+                _append_error(
+                    result,
+                    _combined_output(playlist_push) or "VLC playlist metadata push failed",
+                )
+            else:
+                result.vlc_playlist_path = remote_playlist_path
+                log.info(
+                    "Android sync VLC playlist metadata copied: remote=%s entries=%s",
+                    remote_playlist_path,
+                    len(vlc_playlist_entries),
+                )
+        finally:
+            try:
+                local_playlist_path.unlink(missing_ok=True)
+            except (NameError, OSError):
+                pass
 
     if result.failed:
         result.message = f"copied {result.copied}, skipped {result.skipped}, failed {result.failed}"

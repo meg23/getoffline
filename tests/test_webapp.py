@@ -1444,15 +1444,16 @@ class AndroidSyncTests(unittest.TestCase):
             unplayed.write_text("video", encoding="utf-8")
             played.write_text("video", encoding="utf-8")
             rows = [
-                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", subtitle_path=None),
-                SimpleNamespace(row_id=2, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", subtitle_path=None),
-                SimpleNamespace(row_id=3, played=False, file_path=str(root / "missing.mp4"), title="Missing", source_name="Channel", source_type="youtube", subtitle_path=None),
+                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=42.5),
+                SimpleNamespace(row_id=2, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=3.0),
+                SimpleNamespace(row_id=3, played=False, file_path=str(root / "missing.mp4"), title="Missing", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=9.0),
             ]
 
             items = _android_sync_items_from_rows(rows, root, max_items=10)
 
             self.assertEqual([item.row_id for item in items], [1])
             self.assertEqual(items[0].file_path, unplayed.resolve())
+            self.assertAlmostEqual(items[0].position_seconds, 42.5)
 
     def test_sync_items_to_android_pushes_unplayed_file(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
@@ -1461,6 +1462,7 @@ class AndroidSyncTests(unittest.TestCase):
             media = Path(tmpdir) / "episode.mp4"
             media.write_text("video", encoding="utf-8")
             calls = []
+            playlist_payloads = []
 
             def fake_runner(cmd, **kwargs):
                 calls.append(cmd)
@@ -1468,11 +1470,13 @@ class AndroidSyncTests(unittest.TestCase):
                     return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
                 if any("test -f" in str(part) for part in cmd):
                     return SimpleNamespace(stdout="", stderr="", returncode=1)
+                if "push" in cmd and str(cmd[-1]).endswith("GetOffline.xspf"):
+                    playlist_payloads.append(Path(cmd[-2]).read_text(encoding="utf-8"))
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
             with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
                 result = sync_items_to_android(
-                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media, position_seconds=97.25)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
                     runner=fake_runner,
                 )
@@ -1482,6 +1486,12 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "ABC123", "push"] for cmd in calls))
             self.assertIn(["/usr/bin/adb", "-s", "ABC123", "shell", "mkdir -p '/sdcard/Movies/GetOffline'"], calls)
             self.assertFalse(any(cmd[3:6] == ["shell", "sh", "-c"] for cmd in calls))
+            self.assertEqual(result.vlc_playlist_path, "/sdcard/Movies/GetOffline/GetOffline.xspf")
+            self.assertEqual(len(playlist_payloads), 1)
+            self.assertIn("<title>Episode</title>", playlist_payloads[0])
+            self.assertIn("<creator>Channel</creator>", playlist_payloads[0])
+            self.assertIn("<vlc:option>start-time=97</vlc:option>", playlist_payloads[0])
+            self.assertIn("position_seconds=97.250", playlist_payloads[0])
 
     def test_sync_items_to_android_reports_mkdir_failure(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android

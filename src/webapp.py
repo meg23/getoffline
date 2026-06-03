@@ -1087,6 +1087,7 @@ def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_i
                 source_name=row.source_name or row.source_type or "GetOffline",
                 file_path=media_path,
                 subtitle_path=subtitle_path,
+                position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
             )
         )
         if len(items) >= max(1, int(max_items or 1)):
