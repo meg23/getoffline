@@ -156,6 +156,24 @@ def _metadata_comment(item: AndroidSyncItem) -> str:
     return f"GetOffline row_id={item.row_id} position_seconds={_metadata_position_text(item)}"
 
 
+def _metadata_values(source_path: Path, item: AndroidSyncItem) -> List[Tuple[str, str]]:
+    title = str(item.title or source_path.stem)
+    artist = str(item.source_name or "GetOffline")
+    return [
+        ("title", title),
+        ("artist", artist),
+        ("album_artist", artist),
+        ("album", artist),
+        ("genre", "Podcast"),
+        ("comment", _metadata_comment(item)),
+    ]
+
+
+def _append_metadata_args(command: List[str], metadata_values: List[Tuple[str, str]], prefix: str) -> None:
+    for key, value in metadata_values:
+        command.extend([prefix, f"{key}={value}"])
+
+
 def _download_artwork(artwork_url: Optional[str]) -> Optional[Path]:
     url = str(artwork_url or "").strip()
     if not url:
@@ -196,22 +214,10 @@ def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_p
     ])
     if artwork_path is not None:
         command.extend(["-map", "1", "-disposition:v:0", "attached_pic"])
-    command.extend([
-        "-c",
-        "copy",
-        "-metadata",
-        f"title={item.title or source_path.stem}",
-        "-metadata",
-        f"artist={item.source_name or 'GetOffline'}",
-        "-metadata",
-        f"album_artist={item.source_name or 'GetOffline'}",
-        "-metadata",
-        f"album={item.source_name or 'GetOffline'}",
-        "-metadata",
-        "genre=Podcast",
-        "-metadata",
-        f"comment={_metadata_comment(item)}",
-    ])
+    command.extend(["-c", "copy"])
+    metadata_values = _metadata_values(source_path, item)
+    _append_metadata_args(command, metadata_values, "-metadata")
+    _append_metadata_args(command, metadata_values, "-metadata:s:a:0")
     if source_path.suffix.lower() == ".mp3":
         command.extend(["-id3v2_version", "3"])
     if source_path.suffix.lower() in MOV_METADATA_EXTENSIONS:
@@ -351,6 +357,37 @@ def find_connected_device(adb_path: str, runner: Callable[..., subprocess.Comple
     return None
 
 
+def _rescan_android_media(
+    adb_executable: str,
+    device_serial: str,
+    remote_path: str,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> None:
+    media_uri = _file_uri_for_android_path(remote_path)
+    try:
+        completed = _run_adb_command(
+            [
+                adb_executable,
+                "-s",
+                device_serial,
+                "shell",
+                f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d {_remote_quote(media_uri)}",
+            ],
+            description=f"requesting Android media rescan for {remote_path}",
+            timeout=30,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        log.warning("Android sync media rescan failed for %s: %s", remote_path, exc)
+        return
+    if int(getattr(completed, "returncode", 1) or 0) != 0:
+        log.warning(
+            "Android sync media rescan returned non-zero for %s: %s",
+            remote_path,
+            _combined_output(completed) or "no output",
+        )
+
+
 def sync_items_to_android(
     items: Iterable[AndroidSyncItem],
     config: AndroidSyncConfig,
@@ -476,6 +513,7 @@ def sync_items_to_android(
             _append_error(result, _combined_output(pushed) or f"push failed for row {item.row_id}: {local_path}")
             continue
 
+        _rescan_android_media(adb_executable, device_serial, remote_media_path, runner)
         result.copied += 1
         result.copied_files.append(remote_media_path)
         vlc_playlist_entries.append((item, remote_media_path))
