@@ -1493,10 +1493,6 @@ def _render_index(
     favorites_href = "/" + ("?" + "&".join(fav_query_bits) if fav_query_bits else "")
     favorites_label = "Show favorites" if toggle_favorites_only else "Show all"
     favorites_icon = "bi-heart" if toggle_favorites_only else "bi-heart-fill"
-    android_result = html.escape(str(android_status.get("last_result", "idle")))
-    android_copied = html.escape(str(android_status.get("last_copied_count", "0")))
-    android_skipped = html.escape(str(android_status.get("last_skipped_count", "0")))
-
     return f"""<!doctype html>
 <html>
 <head>
@@ -1574,7 +1570,6 @@ def _render_index(
     }}
     .toolbar-form {{ margin: 0; }}
     .toolbar-spacer {{ flex: 1 1 auto; }}
-    .toolbar-status-note {{ font-size: .78rem; color: var(--muted); white-space: nowrap; }}
     .batch-toolbar-form {{ margin-left: auto; display: inline-flex; align-items: center; gap: .45rem; flex-wrap: nowrap; }}
     .batch-select {{ min-width: 10rem; border: 1px solid #c9d5ef; border-radius: 8px; padding: .22rem .42rem; font: inherit; color: #243251; background: #fff; }}
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
@@ -1987,7 +1982,6 @@ def _render_index(
       <form id="android-sync-form" method="post" action="/android-sync" class="toolbar-form">
         <button id="android-sync-button" class="icon-button" type="submit" title="Sync unplayed to Android" aria-label="Sync unplayed to Android" {android_button_disabled}>📱</button>
       </form>
-      <span class="toolbar-status-note" title="Last Android sync result">Android: {android_result} · copied {android_copied} · skipped {android_skipped}</span>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
