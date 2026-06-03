@@ -37,6 +37,7 @@ class AndroidSyncItem:
     subtitle_path: Optional[Path] = None
     position_seconds: float = 0.0
     artwork_url: Optional[str] = None
+    artwork_path: Optional[Path] = None
 
 
 @dataclass
@@ -180,7 +181,7 @@ def _download_artwork(artwork_url: Optional[str]) -> Optional[Path]:
         return None
     try:
         with urllib.request.urlopen(url, timeout=20) as response:
-            payload = response.read(5 * 1024 * 1024)
+            payload = response.read(20 * 1024 * 1024)
             content_type = str(response.headers.get("Content-Type") or "").lower()
     except Exception as exc:
         log.warning("Android sync artwork download failed url=%s: %s", url, exc)
@@ -214,7 +215,9 @@ def _build_ffmpeg_metadata_command(ffmpeg_path: str, source_path: Path, output_p
     ])
     if artwork_path is not None:
         command.extend(["-map", "1", "-disposition:v:0", "attached_pic"])
-    command.extend(["-c", "copy"])
+        command.extend(["-c:a", "copy", "-c:v", "mjpeg"])
+    else:
+        command.extend(["-c", "copy"])
     metadata_values = _metadata_values(source_path, item)
     _append_metadata_args(command, metadata_values, "-metadata")
     _append_metadata_args(command, metadata_values, "-metadata:s:a:0")
@@ -246,8 +249,15 @@ def _copy_with_embedded_metadata(
         return source_path
 
     artwork_path = None
+    downloaded_artwork = False
     if source_path.suffix.lower() in AUDIO_ARTWORK_EXTENSIONS:
-        artwork_path = _download_artwork(item.artwork_url)
+        if item.artwork_path is not None:
+            candidate_artwork_path = item.artwork_path.expanduser().resolve()
+            if candidate_artwork_path.exists() and candidate_artwork_path.is_file():
+                artwork_path = candidate_artwork_path
+        if artwork_path is None:
+            artwork_path = _download_artwork(item.artwork_url)
+            downloaded_artwork = artwork_path is not None
     output_path = _metadata_temp_path(source_path)
     command = _build_ffmpeg_metadata_command(ffmpeg_path, source_path, output_path, item, artwork_path)
     try:
@@ -260,11 +270,11 @@ def _copy_with_embedded_metadata(
     except RuntimeError as exc:
         log.warning("Android sync metadata embedding failed for row_id=%s: %s", item.row_id, exc)
         output_path.unlink(missing_ok=True)
-        if artwork_path is not None:
+        if artwork_path is not None and downloaded_artwork:
             artwork_path.unlink(missing_ok=True)
         return source_path
 
-    if artwork_path is not None:
+    if artwork_path is not None and downloaded_artwork:
         artwork_path.unlink(missing_ok=True)
 
     if int(getattr(completed, "returncode", 1) or 0) != 0:

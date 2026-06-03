@@ -1075,7 +1075,7 @@ def _snapshot_android_sync_status(status: AndroidSyncStatus) -> Dict[str, str]:
 
 
 
-def _extract_artwork_url_from_metadata(raw_metadata_json: Optional[str]) -> Optional[str]:
+def _metadata_dict(raw_metadata_json: Optional[str]) -> Optional[dict]:
     if not raw_metadata_json:
         return None
     try:
@@ -1084,17 +1084,62 @@ def _extract_artwork_url_from_metadata(raw_metadata_json: Optional[str]) -> Opti
         return None
     if not isinstance(metadata, dict):
         return None
+    return metadata
+
+
+def _thumbnail_score(thumbnail: dict) -> tuple:
+    try:
+        width = max(0, int(float(str(thumbnail.get("width") or "0").strip())))
+    except (TypeError, ValueError):
+        width = 0
+    try:
+        height = max(0, int(float(str(thumbnail.get("height") or "0").strip())))
+    except (TypeError, ValueError):
+        height = 0
+    area = width * height
+    if area <= 0:
+        area = max(width, height)
+    url = str(thumbnail.get("url") or "")
+    return (area, max(width, height), len(url))
+
+
+def _extract_artwork_url_from_metadata(raw_metadata_json: Optional[str]) -> Optional[str]:
+    metadata = _metadata_dict(raw_metadata_json)
+    if metadata is None:
+        return None
     for key in ("artwork_url", "image_url", "thumbnail", "thumbnail_url"):
         value = str(metadata.get(key) or "").strip()
         if value:
             return value
     thumbnails = metadata.get("thumbnails")
+    candidates = []
     if isinstance(thumbnails, list):
         for thumbnail in thumbnails:
-            if isinstance(thumbnail, dict):
-                value = str(thumbnail.get("url") or "").strip()
-                if value:
-                    return value
+            if isinstance(thumbnail, dict) and str(thumbnail.get("url") or "").strip():
+                candidates.append(thumbnail)
+    if candidates:
+        best_thumbnail = max(candidates, key=_thumbnail_score)
+        return str(best_thumbnail.get("url") or "").strip()
+    return None
+
+
+def _extract_artwork_path_from_metadata(raw_metadata_json: Optional[str], output_root: Path) -> Optional[Path]:
+    metadata = _metadata_dict(raw_metadata_json)
+    if metadata is None:
+        return None
+    for key in ("artwork_path", "thumbnail_path"):
+        value = str(metadata.get(key) or "").strip()
+        if not value:
+            continue
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = output_root / candidate
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.exists() and resolved.is_file():
+            return resolved
     return None
 
 def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_items: int) -> List[AndroidSyncItem]:
@@ -1115,6 +1160,7 @@ def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_i
                 subtitle_path=subtitle_path,
                 position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
                 artwork_url=_extract_artwork_url_from_metadata(getattr(row, "raw_metadata_json", None)),
+                artwork_path=_extract_artwork_path_from_metadata(getattr(row, "raw_metadata_json", None), output_root),
             )
         )
         if len(items) >= max(1, int(max_items or 1)):

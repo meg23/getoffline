@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import subprocess
@@ -1441,18 +1442,22 @@ class AndroidSyncTests(unittest.TestCase):
             root = Path(tmpdir)
             unplayed = root / "unplayed.mp4"
             played = root / "played.mp4"
+            artwork = root / "unplayed.webp"
             unplayed.write_text("video", encoding="utf-8")
             played.write_text("video", encoding="utf-8")
+            artwork.write_text("thumbnail", encoding="utf-8")
             rows = [
-                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=42.5),
-                SimpleNamespace(row_id=2, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=3.0),
-                SimpleNamespace(row_id=3, played=False, file_path=str(root / "missing.mp4"), title="Missing", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=9.0),
+                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=42.5, raw_metadata_json=json.dumps({"artwork_path": str(artwork), "artwork_url": "https://example.com/art.jpg"})),
+                SimpleNamespace(row_id=2, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=3.0, raw_metadata_json=None),
+                SimpleNamespace(row_id=3, played=False, file_path=str(root / "missing.mp4"), title="Missing", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=9.0, raw_metadata_json=None),
             ]
 
             items = _android_sync_items_from_rows(rows, root, max_items=10)
 
             self.assertEqual([item.row_id for item in items], [1])
             self.assertEqual(items[0].file_path, unplayed.resolve())
+            self.assertEqual(items[0].artwork_path, artwork.resolve())
+            self.assertEqual(items[0].artwork_url, "https://example.com/art.jpg")
             self.assertAlmostEqual(items[0].position_seconds, 42.5)
 
     def test_sync_items_to_android_pushes_unplayed_file(self):
@@ -1576,8 +1581,51 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertIn("-metadata:s:a:0", metadata_cmds[0])
             self.assertIn("-disposition:v:0", metadata_cmds[0])
             self.assertIn("attached_pic", metadata_cmds[0])
+            self.assertIn("-c:v", metadata_cmds[0])
+            self.assertIn("mjpeg", metadata_cmds[0])
             self.assertIn("-id3v2_version", metadata_cmds[0])
             urlopen_mock.assert_called_once_with("https://example.com/art.jpg", timeout=20)
+
+    def test_sync_items_to_android_uses_downloaded_thumbnail_sidecar_for_album_art(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            artwork = Path(tmpdir) / "episode.webp"
+            media.write_text("audio", encoding="utf-8")
+            artwork.write_text("thumbnail", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-audio", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            def fake_which(name):
+                return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
+
+            with mock.patch("android_sync.shutil.which", side_effect=fake_which), mock.patch("android_sync.urllib.request.urlopen") as urlopen_mock:
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=8, title="Episode", source_name="Channel", file_path=media, artwork_path=artwork)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            metadata_cmds = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertIn(str(artwork.resolve()), metadata_cmds[0])
+            self.assertIn("mjpeg", metadata_cmds[0])
+            urlopen_mock.assert_not_called()
 
     def test_sync_items_to_android_refreshes_existing_remote_file_when_metadata_available(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android

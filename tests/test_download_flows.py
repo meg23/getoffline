@@ -121,6 +121,7 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertEqual(len(FakeYoutubeDL.instances), 2)
             self.assertEqual(FakeYoutubeDL.instances[0].urls, [config["youtube"][0]["url"]])
             self.assertEqual(FakeYoutubeDL.instances[1].urls, [mp3_url])
+            self.assertTrue(FakeYoutubeDL.instances[0].opts.get("writethumbnail"))
 
             youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(config["youtube"][0]["name"])
             podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(config["podcasts"][0]["name"])
@@ -138,6 +139,61 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("YouTube: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Podcast: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+
+
+    def test_podcast_artwork_prefers_highest_resolution_image(self):
+        feed = SimpleNamespace(
+            feed=SimpleNamespace(
+                image={"href": "https://example.com/feed-64.jpg", "width": "64", "height": "64"},
+                itunes_image={"href": "https://example.com/feed-1400.jpg", "width": "1400", "height": "1400"},
+            )
+        )
+        entry = SimpleNamespace(
+            image={"href": "https://example.com/entry-300.jpg", "width": "300", "height": "300"},
+            media_thumbnail=[
+                {"url": "https://example.com/entry-120.jpg", "width": "120", "height": "120"},
+                {"url": "https://example.com/entry-3000.jpg", "width": "3000", "height": "3000"},
+            ],
+        )
+
+        self.assertEqual(podcasts._podcast_artwork_url(feed, entry), "https://example.com/entry-3000.jpg")
+
+    def test_podcast_artwork_prefers_itunes_art_when_thumbnail_is_small(self):
+        feed = SimpleNamespace(feed=SimpleNamespace(itunes_image={"href": "https://example.com/show-art.jpg"}))
+        entry = SimpleNamespace(media_thumbnail=[{"url": "https://example.com/small.jpg", "width": "120", "height": "120"}])
+
+        self.assertEqual(podcasts._podcast_artwork_url(feed, entry), "https://example.com/show-art.jpg")
+
+    def test_youtube_metadata_records_best_thumbnail_and_downloaded_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            thumbnail = media.with_suffix(".webp")
+            thumbnail.write_text("thumbnail", encoding="utf-8")
+
+            payload = youtube._build_youtube_payload(
+                source_name="Channel",
+                source_url="https://youtube.com/playlist?list=test",
+                info={
+                    "id": "abc123",
+                    "title": "Episode",
+                    "webpage_url": "https://youtube.com/watch?v=abc123",
+                    "thumbnails": [
+                        {"url": "https://example.com/small.jpg", "width": 120, "height": 90},
+                        {"url": "https://example.com/large.jpg", "width": 1920, "height": 1080},
+                    ],
+                },
+                output_file=str(media),
+                storage_root=tmpdir,
+                subtitle_enabled=False,
+                download_status="downloaded",
+            )
+
+            metadata = payload["raw_metadata"]
+            self.assertEqual(metadata["thumbnail"], "https://example.com/large.jpg")
+            self.assertEqual(metadata["artwork_url"], "https://example.com/large.jpg")
+            self.assertEqual(metadata["thumbnail_path"], str(thumbnail.resolve()))
+            self.assertEqual(metadata["artwork_path"], str(thumbnail.resolve()))
 
     def test_youtube_parent_process_invokes_short_lived_subprocess_and_tracks_rss(self):
         with tempfile.TemporaryDirectory() as tmpdir:

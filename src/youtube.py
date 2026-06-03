@@ -33,6 +33,71 @@ _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 log = get_logger("youtube")
 
 _YTDLP_REMOTE_COMPONENT = "ejs:github"
+_THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+
+def _thumbnail_dimension(value: object, key: str) -> int:
+    if not isinstance(value, dict):
+        return 0
+    raw_value = value.get(key)
+    try:
+        return max(0, int(float(str(raw_value or "0").strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _thumbnail_quality_score(thumbnail: dict) -> tuple:
+    width = _thumbnail_dimension(thumbnail, "width")
+    height = _thumbnail_dimension(thumbnail, "height")
+    url = str(thumbnail.get("url") or "")
+    area = width * height
+    if area <= 0:
+        area = max(width, height)
+    preference = str(thumbnail.get("preference") or "")
+    try:
+        preference_value = int(float(preference))
+    except (TypeError, ValueError):
+        preference_value = 0
+    return (area, max(width, height), preference_value, len(url))
+
+
+def _best_thumbnail_url(info: Dict) -> str:
+    thumbnails = info.get("thumbnails") or []
+    candidates = []
+    if isinstance(thumbnails, list):
+        for thumbnail in thumbnails:
+            if isinstance(thumbnail, dict) and str(thumbnail.get("url") or "").strip():
+                candidates.append(thumbnail)
+    if candidates:
+        best_thumbnail = max(candidates, key=_thumbnail_quality_score)
+        return str(best_thumbnail.get("url") or "").strip()
+    return str(info.get("thumbnail") or "").strip()
+
+
+def _find_thumbnail_sidecar(*paths: object) -> Optional[str]:
+    seen = set()
+    for raw_path in paths:
+        if not raw_path:
+            continue
+        path = Path(raw_path).expanduser()
+        candidates = []
+        if path.exists() and path.is_file() and path.suffix.lower() in _THUMBNAIL_EXTENSIONS:
+            candidates.append(path)
+        for suffix in _THUMBNAIL_EXTENSIONS:
+            candidates.append(path.with_suffix(suffix))
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if resolved.exists() and resolved.is_file():
+                return str(resolved)
+    return None
+
 
 def _normalize_ytdlp_message(message: str) -> str:
     text = str(message or "").strip()
@@ -376,15 +441,8 @@ def _build_youtube_payload(
         item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
     title = str(info.get("title") or "").strip() or None
 
-    thumbnail_url = str(info.get("thumbnail") or "").strip()
-    if not thumbnail_url:
-        thumbnails = info.get("thumbnails") or []
-        if isinstance(thumbnails, list):
-            for thumbnail in thumbnails:
-                if isinstance(thumbnail, dict):
-                    thumbnail_url = str(thumbnail.get("url") or "").strip()
-                    if thumbnail_url:
-                        break
+    thumbnail_url = _best_thumbnail_url(info)
+    thumbnail_path = _find_thumbnail_sidecar(path) if path is not None else None
 
     compact_metadata = {
         "id": info.get("id"),
@@ -405,6 +463,8 @@ def _build_youtube_payload(
         "height": info.get("height"),
         "thumbnail": thumbnail_url,
         "artwork_url": thumbnail_url,
+        "thumbnail_path": thumbnail_path,
+        "artwork_path": thumbnail_path,
         "filesize": info.get("filesize"),
         "filesize_approx": info.get("filesize_approx"),
         "acodec": info.get("acodec"),
@@ -502,7 +562,8 @@ def _download_youtube_items_in_process(config, downloaded_items):
             subtitle_futures_by_media: Dict[Path, object] = {}
 
             subtitle_or_aux_exts = {
-                ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3"
+                ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3",
+                *_THUMBNAIL_EXTENSIONS,
             }
 
             def _normalized_stem(value: str) -> str:
@@ -742,6 +803,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
+                "writethumbnail": True,
                 "extractor_args": {
                     "youtube": {
                         "skip": ["shorts"],

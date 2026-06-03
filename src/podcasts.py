@@ -146,38 +146,76 @@ def _image_href(value: object) -> str:
     return ""
 
 
-def _media_thumbnail_url(value: object) -> str:
-    thumbnails = None
+def _image_dimension(value: object, key: str) -> int:
+    raw_value = None
     if isinstance(value, dict):
-        thumbnails = value.get("media_thumbnail") or value.get("media_thumbnail_detail")
-    if thumbnails is None:
-        thumbnails = getattr(value, "media_thumbnail", None)
-    if isinstance(thumbnails, list):
-        for thumbnail in thumbnails:
-            image_url = _image_href(thumbnail)
-            if image_url:
-                return image_url
-    return ""
+        raw_value = value.get(key)
+    else:
+        raw_value = getattr(value, key, None)
+    try:
+        return max(0, int(float(str(raw_value or "0").strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _append_artwork_candidate(candidates: list, value: object, source_priority: int = 0) -> None:
+    image_url = _image_href(value)
+    if not image_url:
+        return
+    width = _image_dimension(value, "width")
+    height = _image_dimension(value, "height")
+    candidates.append({"url": image_url, "width": width, "height": height, "source_priority": source_priority})
+
+
+def _candidate_values(container: object, key: str) -> list:
+    value = None
+    if isinstance(container, dict):
+        value = container.get(key)
+    elif container is not None:
+        value = getattr(container, key, None)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _append_podcast_artwork_candidates(candidates: list, value: object) -> None:
+    if value is None:
+        return
+    for key in ("image", "itunes_image"):
+        for image_value in _candidate_values(value, key):
+            _append_artwork_candidate(candidates, image_value, source_priority=2)
+    for key in ("media_thumbnail", "media_thumbnail_detail", "media_content"):
+        for image_value in _candidate_values(value, key):
+            _append_artwork_candidate(candidates, image_value, source_priority=1)
+
+
+def _artwork_quality_score(candidate: dict) -> tuple:
+    width = int(candidate.get("width") or 0)
+    height = int(candidate.get("height") or 0)
+    url = str(candidate.get("url") or "")
+    area = width * height
+    source_priority = int(candidate.get("source_priority") or 0)
+    if area <= 0:
+        area = max(width, height)
+    if area <= 0:
+        area = source_priority * 1_000_000
+    format_bonus = 0
+    lower_url = url.lower()
+    if ".jpg" in lower_url or ".jpeg" in lower_url or ".png" in lower_url:
+        format_bonus = 1
+    return (area, source_priority, max(width, height), format_bonus, len(url))
 
 
 def _podcast_artwork_url(feed: object, entry: object) -> str:
-    for candidate in (entry, getattr(feed, "feed", None)):
-        if candidate is None:
-            continue
-        if isinstance(candidate, dict):
-            for key in ("image", "itunes_image"):
-                image_url = _image_href(candidate.get(key))
-                if image_url:
-                    return image_url
-        else:
-            for key in ("image", "itunes_image"):
-                image_url = _image_href(getattr(candidate, key, None))
-                if image_url:
-                    return image_url
-        image_url = _media_thumbnail_url(candidate)
-        if image_url:
-            return image_url
-    return ""
+    candidates = []
+    _append_podcast_artwork_candidates(candidates, entry)
+    _append_podcast_artwork_candidates(candidates, getattr(feed, "feed", None))
+    if not candidates:
+        return ""
+    best_candidate = max(candidates, key=_artwork_quality_score)
+    return str(best_candidate.get("url") or "").strip()
 
 
 def _entry_title(entry: object) -> str:
