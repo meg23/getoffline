@@ -1108,15 +1108,32 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
         state.android_sync_status.last_skipped_count = 0
 
     try:
+        log.info(
+            "Android sync job starting: force=%s enabled=%s max_items=%s destination=%s",
+            "yes" if force else "no",
+            "yes" if sync_config.enabled else "no",
+            sync_config.max_items,
+            sync_config.destination,
+        )
         rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
         items = _android_sync_items_from_rows(rows, state.output_root, sync_config.max_items)
+        log.info("Android sync job selected %s unplayed local item(s) from %s downloaded row(s)", len(items), len(rows))
         result = sync_items_to_android(items, sync_config)
+        log.info(
+            "Android sync job completed: result=%s copied=%s skipped=%s failed=%s device=%s",
+            result.message,
+            result.copied,
+            result.skipped,
+            result.failed,
+            result.device_serial or "none",
+        )
         with state.android_sync_status.lock:
             state.android_sync_status.last_result = result.message
             state.android_sync_status.last_error = "; ".join(result.errors[:3]) if result.errors else None
             state.android_sync_status.last_copied_count = result.copied
             state.android_sync_status.last_skipped_count = result.skipped
     except Exception as exc:
+        log.exception("Android sync job failed unexpectedly: %s", exc)
         with state.android_sync_status.lock:
             state.android_sync_status.last_result = "failed"
             state.android_sync_status.last_error = str(exc)
@@ -1128,14 +1145,18 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
 
 def trigger_android_sync(state: AppState, *, force: bool = False) -> bool:
     defaults = state.config.get("defaults") or {}
-    if not force and not config_from_defaults(defaults).enabled:
+    sync_config = config_from_defaults(defaults)
+    if not force and not sync_config.enabled:
+        log.info("Android sync trigger ignored: disabled")
         return False
     with state.android_sync_status.lock:
         if state.android_sync_status.is_running:
+            log.info("Android sync trigger ignored: already running")
             return False
 
     thread = threading.Thread(target=_run_android_sync_job, args=(state, force), daemon=True)
     thread.start()
+    log.info("Android sync trigger accepted: force=%s", "yes" if force else "no")
     return True
 
 
@@ -1270,8 +1291,10 @@ def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
 
 def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
-        if stop_event.wait(_auto_update_interval_seconds(state)):
+        interval_seconds = _auto_update_interval_seconds(state)
+        if stop_event.wait(interval_seconds):
             break
+        log.info("Android sync periodic check running after %ss interval", interval_seconds)
         trigger_android_sync(state)
 
 

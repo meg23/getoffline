@@ -71,6 +71,57 @@ def _remote_quote(path: str) -> str:
     return "'" + str(path).replace("'", "'\\''") + "'"
 
 
+def _command_for_log(args: List[str]) -> str:
+    return " ".join(_remote_quote(arg) if re.search(r"\s", str(arg)) else str(arg) for arg in args)
+
+
+def _combined_output(completed: object) -> str:
+    stdout = str(getattr(completed, "stdout", "") or "").strip()
+    stderr = str(getattr(completed, "stderr", "") or "").strip()
+    if stdout and stderr:
+        return f"{stdout}; {stderr}"
+    return stdout or stderr
+
+
+def _append_error(result: AndroidSyncResult, message: str) -> None:
+    result.errors.append(message)
+    log.warning("Android sync: %s", message)
+
+
+def _run_adb_command(
+    args: List[str],
+    *,
+    description: str,
+    timeout: int,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> subprocess.CompletedProcess:
+    log.debug("Android sync adb command starting: %s (%s)", description, _command_for_log(args))
+    try:
+        completed = runner(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log.warning("Android sync adb command timed out during %s after %ss", description, timeout)
+        raise RuntimeError(f"{description} timed out after {timeout}s") from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("Android sync adb command failed during %s: %s", description, exc)
+        raise RuntimeError(f"{description} failed: {exc}") from exc
+
+    output = _combined_output(completed)
+    log.debug(
+        "Android sync adb command finished: %s returncode=%s output=%s",
+        description,
+        getattr(completed, "returncode", "unknown"),
+        output or "none",
+    )
+    return completed
+
+
 def build_remote_media_path(destination: str, item: AndroidSyncItem) -> str:
     source = _safe_remote_component(item.source_name)
     title = _safe_remote_component(item.title or item.file_path.stem)
@@ -81,19 +132,38 @@ def build_remote_media_path(destination: str, item: AndroidSyncItem) -> str:
 def find_connected_device(adb_path: str, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Optional[str]:
     adb_executable = shutil.which(adb_path) if not Path(adb_path).is_absolute() else adb_path
     if not adb_executable:
+        log.warning("Android sync: adb executable not found: %s", adb_path)
         return None
-    completed = runner(
+    completed = _run_adb_command(
         [adb_executable, "devices"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        description="checking connected Android devices",
         timeout=15,
-        check=False,
+        runner=runner,
     )
-    for line in completed.stdout.splitlines()[1:]:
+    if int(getattr(completed, "returncode", 1) or 0) != 0:
+        raise RuntimeError(f"adb devices failed: {_combined_output(completed) or 'no output'}")
+
+    unauthorized = []
+    offline = []
+    for line in str(getattr(completed, "stdout", "") or "").splitlines()[1:]:
         parts = line.split()
-        if len(parts) >= 2 and parts[1] == "device":
-            return parts[0]
+        if len(parts) < 2:
+            continue
+        serial, state = parts[0], parts[1]
+        if state == "device":
+            log.info("Android sync: found authorized device serial=%s", serial)
+            return serial
+        if state == "unauthorized":
+            unauthorized.append(serial)
+        elif state == "offline":
+            offline.append(serial)
+
+    if unauthorized:
+        log.warning("Android sync: device(s) connected but unauthorized: %s", ", ".join(unauthorized))
+    if offline:
+        log.warning("Android sync: device(s) connected but offline: %s", ", ".join(offline))
+    if not unauthorized and not offline:
+        log.info("Android sync: no Android devices reported by adb")
     return None
 
 
@@ -104,99 +174,156 @@ def sync_items_to_android(
 ) -> AndroidSyncResult:
     result = AndroidSyncResult(message="disabled")
     if not config.enabled:
+        log.info("Android sync skipped: disabled")
+        return result
+
+    sync_items = list(items)[: config.max_items]
+    if not sync_items:
+        result.message = "no unplayed media to sync"
+        log.info("Android sync skipped: no unplayed media items selected")
         return result
 
     adb_executable = shutil.which(config.adb_path) if not Path(config.adb_path).is_absolute() else config.adb_path
     if not adb_executable:
         result.message = f"adb not found: {config.adb_path}"
         result.failed += 1
+        _append_error(result, result.message)
         return result
+
+    destination = config.destination.rstrip("/") or "/sdcard/Movies/GetOffline"
+    log.info(
+        "Android sync starting: items=%s destination=%s adb=%s include_subtitles=%s",
+        len(sync_items),
+        destination,
+        adb_executable,
+        "yes" if config.include_subtitles else "no",
+    )
 
     try:
         device_serial = find_connected_device(adb_executable, runner=runner)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except RuntimeError as exc:
         result.message = f"adb device check failed: {exc}"
         result.failed += 1
-        result.errors.append(str(exc))
+        _append_error(result, str(exc))
         return result
 
     if not device_serial:
         result.message = "no authorized Android device connected"
+        _append_error(result, "no authorized Android device connected; check USB debugging authorization")
         return result
 
     result.device_serial = device_serial
-    destination = config.destination.rstrip("/") or "/sdcard/Movies/GetOffline"
     try:
-        runner(
-            [adb_executable, "-s", device_serial, "shell", "mkdir", "-p", destination],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        mkdir = _run_adb_command(
+            [adb_executable, "-s", device_serial, "shell", "sh", "-c", f"mkdir -p {_remote_quote(destination)}"],
+            description=f"creating Android destination folder {destination}",
             timeout=30,
-            check=False,
+            runner=runner,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except RuntimeError as exc:
         result.message = f"unable to prepare Android folder: {exc}"
         result.failed += 1
-        result.errors.append(str(exc))
+        _append_error(result, str(exc))
+        return result
+    if int(getattr(mkdir, "returncode", 1) or 0) != 0:
+        output = _combined_output(mkdir) or "no output"
+        result.message = f"unable to prepare Android folder: {output}"
+        result.failed += 1
+        _append_error(result, result.message)
         return result
 
-    for item in list(items)[: config.max_items]:
+    for item in sync_items:
         result.attempted += 1
         local_path = item.file_path.expanduser().resolve()
         if not local_path.exists() or not local_path.is_file():
             result.failed += 1
-            result.errors.append(f"missing local file: {local_path}")
+            _append_error(result, f"missing local file for row {item.row_id}: {local_path}")
             continue
 
         remote_media_path = build_remote_media_path(destination, item)
-        exists = runner(
-            [adb_executable, "-s", device_serial, "shell", "test", "-f", remote_media_path],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=15,
-            check=False,
+        log.info(
+            "Android sync item starting: row_id=%s local=%s remote=%s size_bytes=%s",
+            item.row_id,
+            local_path,
+            remote_media_path,
+            local_path.stat().st_size,
         )
-        if exists.returncode == 0:
+        try:
+            exists = _run_adb_command(
+                [adb_executable, "-s", device_serial, "shell", "sh", "-c", f"test -f {_remote_quote(remote_media_path)}"],
+                description=f"checking existing Android file for row {item.row_id}",
+                timeout=15,
+                runner=runner,
+            )
+        except RuntimeError as exc:
+            result.failed += 1
+            _append_error(result, f"unable to check existing Android file for row {item.row_id}: {exc}")
+            continue
+        if int(getattr(exists, "returncode", 1) or 0) == 0:
             result.skipped += 1
+            log.info("Android sync item skipped: row_id=%s remote file already exists", item.row_id)
             continue
 
-        pushed = runner(
-            [adb_executable, "-s", device_serial, "push", str(local_path), remote_media_path],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=300,
-            check=False,
-        )
-        if pushed.returncode != 0:
+        try:
+            pushed = _run_adb_command(
+                [adb_executable, "-s", device_serial, "push", str(local_path), remote_media_path],
+                description=f"pushing media row {item.row_id}",
+                timeout=300,
+                runner=runner,
+            )
+        except RuntimeError as exc:
             result.failed += 1
-            result.errors.append(pushed.stderr.strip() or pushed.stdout.strip() or f"push failed: {local_path}")
+            _append_error(result, f"push failed for row {item.row_id}: {exc}")
+            continue
+        if int(getattr(pushed, "returncode", 1) or 0) != 0:
+            result.failed += 1
+            _append_error(result, _combined_output(pushed) or f"push failed for row {item.row_id}: {local_path}")
             continue
 
         result.copied += 1
         result.copied_files.append(remote_media_path)
+        log.info("Android sync item copied: row_id=%s remote=%s", item.row_id, remote_media_path)
 
-        if config.include_subtitles and item.subtitle_path:
-            subtitle_path = item.subtitle_path.expanduser().resolve()
-            if subtitle_path.exists() and subtitle_path.suffix.lower() in MEDIA_SUBTITLE_EXTENSIONS:
-                remote_subtitle_path = str(Path(remote_media_path).with_suffix(subtitle_path.suffix)).replace("\\", "/")
-                subtitle_push = runner(
-                    [adb_executable, "-s", device_serial, "push", str(subtitle_path), remote_subtitle_path],
-                    text=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=120,
-                    check=False,
-                )
-                if subtitle_push.returncode != 0:
-                    result.errors.append(
-                        subtitle_push.stderr.strip() or subtitle_push.stdout.strip() or f"subtitle push failed: {subtitle_path}"
-                    )
+        if not config.include_subtitles or not item.subtitle_path:
+            continue
+
+        subtitle_path = item.subtitle_path.expanduser().resolve()
+        if not subtitle_path.exists():
+            log.info("Android sync subtitle skipped: row_id=%s subtitle missing path=%s", item.row_id, subtitle_path)
+            continue
+        if subtitle_path.suffix.lower() not in MEDIA_SUBTITLE_EXTENSIONS:
+            log.info("Android sync subtitle skipped: row_id=%s unsupported extension path=%s", item.row_id, subtitle_path)
+            continue
+
+        remote_subtitle_path = str(Path(remote_media_path).with_suffix(subtitle_path.suffix)).replace("\\", "/")
+        try:
+            subtitle_push = _run_adb_command(
+                [adb_executable, "-s", device_serial, "push", str(subtitle_path), remote_subtitle_path],
+                description=f"pushing subtitle for row {item.row_id}",
+                timeout=120,
+                runner=runner,
+            )
+        except RuntimeError as exc:
+            _append_error(result, f"subtitle push failed for row {item.row_id}: {exc}")
+            continue
+        if int(getattr(subtitle_push, "returncode", 1) or 0) != 0:
+            _append_error(
+                result,
+                _combined_output(subtitle_push) or f"subtitle push failed for row {item.row_id}: {subtitle_path}",
+            )
+        else:
+            log.info("Android sync subtitle copied: row_id=%s remote=%s", item.row_id, remote_subtitle_path)
 
     if result.failed:
         result.message = f"copied {result.copied}, skipped {result.skipped}, failed {result.failed}"
     else:
         result.message = f"copied {result.copied}, skipped {result.skipped}"
+    log.info(
+        "Android sync finished: attempted=%s copied=%s skipped=%s failed=%s device=%s",
+        result.attempted,
+        result.copied,
+        result.skipped,
+        result.failed,
+        result.device_serial or "none",
+    )
     return result

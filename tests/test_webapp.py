@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -1465,7 +1466,7 @@ class AndroidSyncTests(unittest.TestCase):
                 calls.append(cmd)
                 if cmd[-1] == "devices":
                     return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
-                if "test" in cmd:
+                if any("test -f" in str(part) for part in cmd):
                     return SimpleNamespace(stdout="", stderr="", returncode=1)
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
@@ -1479,6 +1480,62 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(result.copied, 1)
             self.assertEqual(result.device_serial, "ABC123")
             self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "ABC123", "push"] for cmd in calls))
+    def test_sync_items_to_android_reports_mkdir_failure(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+
+            def fake_runner(cmd, **kwargs):
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("mkdir -p" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="permission denied", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"), mock.patch("android_sync.log.warning") as warning_mock:
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 0)
+            self.assertEqual(result.failed, 1)
+            self.assertIn("unable to prepare Android folder", result.message)
+            self.assertTrue(result.errors)
+            warning_mock.assert_called()
+
+    def test_sync_items_to_android_handles_push_timeout(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+
+            def fake_runner(cmd, **kwargs):
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("mkdir -p" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                if "push" in cmd:
+                    raise subprocess.TimeoutExpired(cmd, timeout=300)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 0)
+            self.assertEqual(result.failed, 1)
+            self.assertIn("timed out", result.errors[0])
+
 
 
 if __name__ == "__main__":
