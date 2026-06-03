@@ -1127,20 +1127,82 @@ def _extract_artwork_path_from_metadata(raw_metadata_json: Optional[str], output
     metadata = _metadata_dict(raw_metadata_json)
     if metadata is None:
         return None
+    root = output_root.expanduser().resolve()
     for key in ("artwork_path", "thumbnail_path"):
         value = str(metadata.get(key) or "").strip()
         if not value:
             continue
         candidate = Path(value).expanduser()
         if not candidate.is_absolute():
-            candidate = output_root / candidate
+            candidate = root / candidate
         try:
             resolved = candidate.resolve()
-        except OSError:
+            resolved.relative_to(root)
+        except (OSError, ValueError):
             continue
         if resolved.exists() and resolved.is_file():
             return resolved
     return None
+
+
+def _delete_downloaded_artifacts_for_row(output_root: Path, row: MediaRow) -> int:
+    root = output_root.expanduser().resolve()
+    candidates: List[Path] = []
+    media_path = _resolve_safe_media_path(root, row.file_path) if getattr(row, "file_path", None) else None
+    if media_path is not None:
+        candidates.append(media_path)
+        for suffix in (".srt", ".vtt", ".jpg", ".jpeg", ".png", ".webp"):
+            candidates.append(media_path.with_suffix(suffix))
+
+    if media_path is not None:
+        subtitle_path = _resolve_safe_subtitle_path(root, row, media_path)
+        if subtitle_path is not None:
+            candidates.append(subtitle_path)
+
+    artwork_path = _extract_artwork_path_from_metadata(getattr(row, "raw_metadata_json", None), root)
+    if artwork_path is not None:
+        candidates.append(artwork_path)
+
+    allowed_suffixes = MEDIA_EXTENSIONS | {".srt", ".vtt", ".jpg", ".jpeg", ".png", ".webp"}
+    deleted_count = 0
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if not resolved.exists() or not resolved.is_file() or resolved.suffix.lower() not in allowed_suffixes:
+            continue
+        try:
+            resolved.unlink(missing_ok=True)
+            deleted_count += 1
+        except OSError as exc:
+            log.warning(
+                "Unable to delete played media artifact row_id=%s path=%s: %s",
+                getattr(row, "row_id", "unknown"),
+                resolved,
+                exc,
+            )
+
+    if deleted_count:
+        log.info(
+            "Deleted %s played media artifact(s) for row_id=%s",
+            deleted_count,
+            getattr(row, "row_id", "unknown"),
+        )
+    return deleted_count
+
+
+def _mark_download_played_and_delete_artifacts(state: AppState, row_id: int, played: bool = True) -> bool:
+    row = fetch_downloaded_media_row_by_id(state.database_path, row_id) if played else None
+    updated = mark_download_played(str(state.database_path), row_id, played=played)
+    if updated and played and row is not None:
+        _delete_downloaded_artifacts_for_row(state.output_root, row)
+    return updated
 
 def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_items: int) -> List[AndroidSyncItem]:
     items: List[AndroidSyncItem] = []
@@ -4477,7 +4539,7 @@ def make_handler(state: AppState):
                     return
 
                 played_value = path == "/mark-played"
-                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
+                _mark_download_played_and_delete_artifacts(state, int(raw_id), played=played_value)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -4695,7 +4757,7 @@ def make_handler(state: AppState):
                     position_seconds = 0.0
                 _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
                 if _is_playback_completion_reason(raw_reason):
-                    mark_download_played(str(state.database_path), row_id, played=True)
+                    _mark_download_played_and_delete_artifacts(state, row_id, played=True)
                 self.send_response(204)
                 self.end_headers()
                 return
@@ -4732,9 +4794,9 @@ def make_handler(state: AppState):
                     should_trigger_podcast_redownload = False
                     for row_id in row_ids:
                         if batch_action == "played":
-                            mark_download_played(str(state.database_path), row_id, played=True)
+                            _mark_download_played_and_delete_artifacts(state, row_id, played=True)
                         elif batch_action == "unplayed":
-                            mark_download_played(str(state.database_path), row_id, played=False)
+                            _mark_download_played_and_delete_artifacts(state, row_id, played=False)
                         elif batch_action == "favorite":
                             mark_download_favorite(str(state.database_path), row_id, favorite=True)
                         elif batch_action == "unfavorite":
@@ -4776,7 +4838,14 @@ def make_handler(state: AppState):
                 return
 
             if path == "/mark-all-played":
+                rows_to_delete = [
+                    row
+                    for row in fetch_downloaded_media_rows(state.database_path, state.output_root)
+                    if not row.played
+                ]
                 mark_all_downloads_played(str(state.database_path))
+                for row in rows_to_delete:
+                    _delete_downloaded_artifacts_for_row(state.output_root, row)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()

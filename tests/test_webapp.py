@@ -26,6 +26,8 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
+    _delete_downloaded_artifacts_for_row,
+    _mark_download_played_and_delete_artifacts,
     _infer_media_type_for_redownload,
     fetch_downloaded_media_row_by_id,
     _stream_media,
@@ -799,7 +801,74 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(Path(rows[0].file_path), normalized_media_path)
 
+    def test_delete_downloaded_artifacts_for_played_row_removes_media_and_sidecars(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            subtitle = root / "episode.srt"
+            thumbnail = root / "episode.webp"
+            outside_artwork = root.parent / "outside-art.jpg"
+            media.write_text("audio", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
+            thumbnail.write_text("thumbnail", encoding="utf-8")
+            outside_artwork.write_text("outside", encoding="utf-8")
+            row = SimpleNamespace(
+                row_id=10,
+                file_path=str(media),
+                subtitle_path=str(subtitle),
+                raw_metadata_json=json.dumps({"artwork_path": str(thumbnail), "thumbnail_path": str(outside_artwork)}),
+            )
 
+            deleted = _delete_downloaded_artifacts_for_row(root, row)
+
+            self.assertEqual(deleted, 3)
+            self.assertFalse(media.exists())
+            self.assertFalse(subtitle.exists())
+            self.assertFalse(thumbnail.exists())
+            self.assertTrue(outside_artwork.exists())
+
+    def test_mark_download_played_from_webapp_deletes_local_media(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp4"
+            thumbnail = root / "episode.jpg"
+            media.write_text("video", encoding="utf-8")
+            thumbnail.write_text("thumbnail", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "youtube",
+                    "source_name": "Channel",
+                    "item_uid": "uid-play-delete",
+                    "item_url": "https://youtube.com/watch?v=uid-play-delete",
+                    "media_url": "https://youtube.com/watch?v=uid-play-delete",
+                    "title": "Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp4",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"artwork_path": str(thumbnail)},
+                },
+            )
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {}},
+                update_runner=lambda config, items: None,
+            )
+            row = fetch_downloaded_media_rows(db_path, root)[0]
+
+            updated = _mark_download_played_and_delete_artifacts(state, row.row_id, played=True)
+
+            self.assertTrue(updated)
+            self.assertFalse(media.exists())
+            self.assertFalse(thumbnail.exists())
+            updated_row = fetch_downloaded_media_row_by_id(db_path, row.row_id)
+            self.assertIsNotNone(updated_row)
+            self.assertTrue(updated_row.played)
 
     def test_mark_download_played_updates_row_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
