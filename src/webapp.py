@@ -4119,6 +4119,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-row-actions {{ justify-content: center; }}
     .section-help {{ margin: .15rem 0 .9rem; color: #52627d; }}
     .android-section {{ border-color: #bcd0f8; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); }}
+    .ollama-section {{ border-color: #c7d2fe; background: linear-gradient(180deg, #fbfbff 0%, #ffffff 100%); }}
     .source-list {{ display: grid; gap: .75rem; margin-top: .75rem; }}
     .source-card {{ border: 1px solid var(--border-soft); border-radius: 12px; background: #fff; overflow: hidden; }}
     .source-card[open] {{ border-color: #c9d7f2; box-shadow: 0 8px 22px rgba(15, 35, 80, 0.06); }}
@@ -4154,7 +4155,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     <h1>Settings</h1>
 
     <div class="section">
-      <h2>Defaults</h2>
+      <h2>General</h2>
       <form method="post" action="/settings">
         <input type="hidden" name="settings_action" value="update_defaults" />
         <label for="output_root">Output root</label>
@@ -4193,6 +4194,25 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
           </div>
           <div>
+            <label for="deno_path">Deno executable</label>
+            <input id="deno_path" name="deno_path" value="{deno_path}" required />
+          </div>
+        </div>
+        <p><strong>Resolved path:</strong> Deno <code>{resolved_deno_path}</code></p>
+
+        <div class="actions">
+          <button type="submit" class="primary">Save general settings</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section ollama-section">
+      <h2>Ollama configuration</h2>
+      <p>Configure the local model used to generate summaries and manage stored summary text.</p>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_ollama" />
+        <div class="grid">
+          <div>
             <label for="summary_model">Ollama summary model</label>
             <input id="summary_model" name="summary_model" value="{summary_model}" required />
           </div>
@@ -4200,15 +4220,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label for="ollama_path">Ollama executable</label>
             <input id="ollama_path" name="ollama_path" value="{ollama_path}" required />
           </div>
-          <div>
-            <label for="deno_path">Deno executable</label>
-            <input id="deno_path" name="deno_path" value="{deno_path}" required />
-          </div>
         </div>
-        <p><strong>Resolved paths:</strong> Ollama <code>{resolved_ollama_path}</code> · Deno <code>{resolved_deno_path}</code></p>
-
+        <p><strong>Resolved path:</strong> Ollama <code>{resolved_ollama_path}</code></p>
         <div class="actions">
-          <button type="submit" class="primary">Save defaults</button>
+          <button type="submit" class="primary">Save Ollama configuration</button>
+        </div>
+      </form>
+      <form method="post" action="/settings" onsubmit="return confirm('Clear all stored summaries? They will be regenerated later.');">
+        <input type="hidden" name="settings_action" value="clear_summaries" />
+        <div class="actions">
+          <button type="submit" class="danger">Clear summaries</button>
         </div>
       </form>
     </div>
@@ -4265,16 +4286,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
         <div class="actions">
           <button type="submit" class="primary">Save cookie</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="section">
-      <h2>Summaries</h2>
-      <form method="post" action="/settings" onsubmit="return confirm('Clear all stored summaries? They will be regenerated later.');">
-        <input type="hidden" name="settings_action" value="clear_summaries" />
-        <div class="actions">
-          <button type="submit" class="danger">Clear summaries</button>
         </div>
       </form>
     </div>
@@ -5075,14 +5086,23 @@ def make_handler(state: AppState):
                         "playlist_end": (form.get("playlist_end") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
-                        "summary_model": (form.get("summary_model") or [""])[0],
-                        "ollama_path": (form.get("ollama_path") or [""])[0],
                         "deno_path": (form.get("deno_path") or [""])[0],
                     }
                     sanitized_updates = {
                         k: str(v).strip()
                         for k, v in updates.items()
                         if str(v).strip() or k == "ffmpeg_audio_filter"
+                    }
+                    update_stored_defaults(str(state.database_path), sanitized_updates)
+                elif settings_action == "update_ollama":
+                    updates = {
+                        "summary_model": (form.get("summary_model") or [""])[0],
+                        "ollama_path": (form.get("ollama_path") or [""])[0],
+                    }
+                    sanitized_updates = {
+                        k: str(v).strip()
+                        for k, v in updates.items()
+                        if str(v).strip()
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
                 elif settings_action == "update_android_sync":
