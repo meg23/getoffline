@@ -714,14 +714,18 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("General", body)
         self.assertIn("Ollama configuration", body)
         self.assertIn("Android push configuration", body)
+        self.assertIn("Syncthing Android configuration", body)
         self.assertIn('name="settings_action" value="update_ytdlp"', body)
         self.assertIn('Save yt-dlp configuration</button>', body)
         self.assertIn('name="settings_action" value="update_ollama"', body)
         self.assertIn('name="settings_action" value="clear_summaries"', body)
         self.assertIn('Save Ollama configuration</button>', body)
         self.assertIn('name="settings_action" value="update_android_sync"', body)
+        self.assertIn('name="settings_action" value="update_syncthing_android_sync"', body)
         self.assertIn('action="/android-sync?next=/settings"', body)
+        self.assertIn('action="/syncthing-android-sync?next=/settings"', body)
         self.assertIn('Sync to Android now</button>', body)
+        self.assertIn('Stage Syncthing Android files now</button>', body)
         self.assertIn('name="android_sync_connection_mode"', body)
         self.assertIn('name="android_sync_wifi_address"', body)
         self.assertIn('Wi-Fi (connect to paired device)', body)
@@ -1979,6 +1983,72 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(result.failed, 1)
             self.assertIn("timed out", result.errors[0])
 
+
+
+class SyncthingAndroidSyncTests(unittest.TestCase):
+    def test_sync_items_to_syncthing_android_copies_media_subtitle_manifest_and_playlist(self):
+        from android_sync import AndroidSyncItem
+        from syncthing_sync import SyncthingAndroidSyncConfig, sync_items_to_syncthing_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp4"
+            subtitle = root / "episode.vtt"
+            local_sync = root / "phone-share"
+            media.write_text("video", encoding="utf-8")
+            subtitle.write_text("WEBVTT", encoding="utf-8")
+
+            result = sync_items_to_syncthing_android(
+                [
+                    AndroidSyncItem(
+                        row_id=1,
+                        title="Episode",
+                        source_name="Channel",
+                        file_path=media,
+                        subtitle_path=subtitle,
+                        position_seconds=12.5,
+                    )
+                ],
+                SyncthingAndroidSyncConfig(
+                    enabled=True,
+                    local_sync_folder=str(local_sync),
+                    android_destination="/sdcard/Movies/GetOffline",
+                    max_items=10,
+                ),
+            )
+
+            self.assertEqual(result.copied, 1)
+            copied_media = local_sync / "Channel - Episode.mp4"
+            copied_subtitle = local_sync / "Channel - Episode.vtt"
+            self.assertTrue(copied_media.exists())
+            self.assertTrue(copied_subtitle.exists())
+            self.assertIn("Channel - Episode.mp4", (local_sync / "syncdb.txt").read_text(encoding="utf-8"))
+            playlist_text = (local_sync / "GetOffline.xspf").read_text(encoding="utf-8")
+            self.assertIn("file:///sdcard/Movies/GetOffline/Channel%20-%20Episode.mp4", playlist_text)
+            self.assertIn("start-time=12", playlist_text)
+
+    def test_sync_items_to_syncthing_android_prunes_stale_manifest_files(self):
+        from android_sync import AndroidSyncItem
+        from syncthing_sync import SyncthingAndroidSyncConfig, sync_items_to_syncthing_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            local_sync = root / "phone-share"
+            local_sync.mkdir()
+            media.write_text("audio", encoding="utf-8")
+            stale = local_sync / "Old.mp3"
+            stale.write_text("old", encoding="utf-8")
+            (local_sync / "syncdb.txt").write_text("Old.mp3\n", encoding="utf-8")
+
+            result = sync_items_to_syncthing_android(
+                [AndroidSyncItem(row_id=2, title="Episode", source_name="Podcast", file_path=media)],
+                SyncthingAndroidSyncConfig(enabled=True, local_sync_folder=str(local_sync), prune=True),
+            )
+
+            self.assertEqual(result.deleted, 1)
+            self.assertFalse(stale.exists())
+            self.assertTrue((local_sync / "Podcast - Episode.mp3").exists())
 
 
 if __name__ == "__main__":

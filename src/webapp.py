@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from android_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items_to_android
+from syncthing_sync import config_from_defaults as syncthing_config_from_defaults, sync_items_to_syncthing_android
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -138,6 +139,7 @@ class AppState:
     update_runner: Callable[[Dict, List[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
     android_sync_status: AndroidSyncStatus = field(default_factory=AndroidSyncStatus)
+    syncthing_android_sync_status: AndroidSyncStatus = field(default_factory=AndroidSyncStatus)
     pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
     pending_progress: Dict[int, Tuple[float, bool]] = field(default_factory=dict)
     pending_progress_event: threading.Event = field(default_factory=threading.Event)
@@ -1038,6 +1040,7 @@ def _run_update_job(state: AppState) -> None:
         state.update_runner(state.config, downloaded_items)
         _index_transcripts_on_startup(state)
         trigger_android_sync(state, force=True)
+        trigger_syncthing_android_sync(state, force=True)
         with state.update_status.lock:
             state.update_status.last_result = "ok"
             state.update_status.last_items_count = len(downloaded_items)
@@ -1424,6 +1427,80 @@ def trigger_android_sync(state: AppState, *, force: bool = False) -> bool:
     return True
 
 
+
+def _run_syncthing_android_sync_job(state: AppState, force: bool = False) -> None:
+    defaults = state.config.get("defaults") or {}
+    sync_config = syncthing_config_from_defaults(defaults)
+    if force:
+        sync_config.enabled = True
+    with state.syncthing_android_sync_status.lock:
+        state.syncthing_android_sync_status.is_running = True
+        state.syncthing_android_sync_status.last_started_at = time.time()
+        state.syncthing_android_sync_status.last_result = "running"
+        state.syncthing_android_sync_status.last_error = None
+        state.syncthing_android_sync_status.last_copied_count = 0
+        state.syncthing_android_sync_status.last_skipped_count = 0
+
+    try:
+        log.info(
+            "Syncthing Android sync job starting: force=%s enabled=%s max_items=%s local_folder=%s android_destination=%s",
+            "yes" if force else "no",
+            "yes" if sync_config.enabled else "no",
+            sync_config.max_items,
+            sync_config.local_sync_folder,
+            sync_config.android_destination,
+        )
+        rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
+        items = _android_sync_items_from_rows(
+            rows,
+            state.output_root,
+            sync_config.max_items,
+            include_unplayed=sync_config.include_unplayed,
+            include_started=sync_config.include_started,
+            include_played=sync_config.include_played,
+            exclude_regex=sync_config.exclude_regex,
+        )
+        log.info("Syncthing Android sync job selected %s local item(s) from %s downloaded row(s)", len(items), len(rows))
+        result = sync_items_to_syncthing_android(items, sync_config)
+        log.info(
+            "Syncthing Android sync job completed: result=%s copied=%s skipped=%s failed=%s",
+            result.message,
+            result.copied,
+            result.skipped,
+            result.failed,
+        )
+        with state.syncthing_android_sync_status.lock:
+            state.syncthing_android_sync_status.last_result = result.message
+            state.syncthing_android_sync_status.last_error = "; ".join(result.errors[:3]) if result.errors else None
+            state.syncthing_android_sync_status.last_copied_count = result.copied
+            state.syncthing_android_sync_status.last_skipped_count = result.skipped
+    except Exception as exc:
+        log.exception("Syncthing Android sync job failed unexpectedly: %s", exc)
+        with state.syncthing_android_sync_status.lock:
+            state.syncthing_android_sync_status.last_result = "failed"
+            state.syncthing_android_sync_status.last_error = str(exc)
+    finally:
+        with state.syncthing_android_sync_status.lock:
+            state.syncthing_android_sync_status.is_running = False
+            state.syncthing_android_sync_status.last_finished_at = time.time()
+
+
+def trigger_syncthing_android_sync(state: AppState, *, force: bool = False) -> bool:
+    defaults = state.config.get("defaults") or {}
+    sync_config = syncthing_config_from_defaults(defaults)
+    if not force and not sync_config.enabled:
+        log.info("Syncthing Android sync trigger ignored: disabled")
+        return False
+    with state.syncthing_android_sync_status.lock:
+        if state.syncthing_android_sync_status.is_running:
+            log.info("Syncthing Android sync trigger ignored: already running")
+            return False
+
+    thread = threading.Thread(target=_run_syncthing_android_sync_job, args=(state, force), daemon=True)
+    thread.start()
+    log.info("Syncthing Android sync trigger accepted: force=%s", "yes" if force else "no")
+    return True
+
 def _enqueue_progress_update(state: AppState, row_id: int, position_seconds: float, reason: str = "unknown", forced: bool = False) -> None:
     safe_seconds = max(0.0, float(position_seconds or 0.0))
     completion = _is_playback_completion_reason(reason)
@@ -1560,6 +1637,7 @@ def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
             break
         log.info("Android sync periodic check running after %ss interval", interval_seconds)
         trigger_android_sync(state)
+        trigger_syncthing_android_sync(state)
 
 
 def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> None:
@@ -3891,6 +3969,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     android_sync_include_started_checked = default_checked("android_sync_include_started", True)
     android_sync_include_played_checked = default_checked("android_sync_include_played", False)
     android_sync_exclude_regex = html.escape(str(defaults.get("android_sync_exclude_regex") or ""))
+    syncthing_android_sync_enabled_checked = default_checked("syncthing_android_sync_enabled")
+    syncthing_android_sync_local_folder = html.escape(str(defaults.get("syncthing_android_sync_local_folder") or "./syncthing-android"))
+    syncthing_android_sync_android_destination = html.escape(str(defaults.get("syncthing_android_sync_android_destination") or "/sdcard/Movies/GetOffline"))
+    syncthing_android_sync_max_items = html.escape(str(defaults.get("syncthing_android_sync_max_items") or "10"))
+    syncthing_android_sync_include_subtitles_checked = default_checked("syncthing_android_sync_include_subtitles", True)
+    syncthing_android_sync_include_unplayed_checked = default_checked("syncthing_android_sync_include_unplayed", True)
+    syncthing_android_sync_include_started_checked = default_checked("syncthing_android_sync_include_started", True)
+    syncthing_android_sync_include_played_checked = default_checked("syncthing_android_sync_include_played", False)
+    syncthing_android_sync_exclude_regex = html.escape(str(defaults.get("syncthing_android_sync_exclude_regex") or ""))
+    syncthing_android_sync_prune_checked = default_checked("syncthing_android_sync_prune", True)
     resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
     resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
@@ -4315,6 +4403,59 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       <form method="post" action="/android-sync?next=/settings">
         <div class="actions">
           <button type="submit">Sync to Android now</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section syncthing-android-section">
+      <h2>Syncthing Android configuration</h2>
+      <p>Configure a local folder that Syncthing shares with your Android device. GetOffline copies selected media into this folder; Syncthing handles delivery to the phone.</p>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_syncthing_android_sync" />
+        <div class="grid">
+          <div>
+            <label for="syncthing_android_sync_enabled"><input id="syncthing_android_sync_enabled" type="checkbox" name="syncthing_android_sync_enabled" value="1"{syncthing_android_sync_enabled_checked} /> Auto-stage for Syncthing Android</label>
+          </div>
+          <div>
+            <label for="syncthing_android_sync_include_subtitles"><input id="syncthing_android_sync_include_subtitles" type="checkbox" name="syncthing_android_sync_include_subtitles" value="1"{syncthing_android_sync_include_subtitles_checked} /> Include subtitles</label>
+          </div>
+          <div>
+            <label for="syncthing_android_sync_include_unplayed"><input id="syncthing_android_sync_include_unplayed" type="checkbox" name="syncthing_android_sync_include_unplayed" value="1"{syncthing_android_sync_include_unplayed_checked} /> Sync unplayed media</label>
+          </div>
+          <div>
+            <label for="syncthing_android_sync_include_started"><input id="syncthing_android_sync_include_started" type="checkbox" name="syncthing_android_sync_include_started" value="1"{syncthing_android_sync_include_started_checked} /> Sync started media</label>
+          </div>
+          <div>
+            <label for="syncthing_android_sync_include_played"><input id="syncthing_android_sync_include_played" type="checkbox" name="syncthing_android_sync_include_played" value="1"{syncthing_android_sync_include_played_checked} /> Sync played media</label>
+          </div>
+          <div>
+            <label for="syncthing_android_sync_prune"><input id="syncthing_android_sync_prune" type="checkbox" name="syncthing_android_sync_prune" value="1"{syncthing_android_sync_prune_checked} /> Remove stale staged files</label>
+          </div>
+          <div>
+            <label for="syncthing_android_sync_local_folder">Local Syncthing folder</label>
+            <input id="syncthing_android_sync_local_folder" name="syncthing_android_sync_local_folder" value="{syncthing_android_sync_local_folder}" required />
+          </div>
+          <div>
+            <label for="syncthing_android_sync_android_destination">Android folder path</label>
+            <input id="syncthing_android_sync_android_destination" name="syncthing_android_sync_android_destination" value="{syncthing_android_sync_android_destination}" required />
+          </div>
+          <div>
+            <label for="syncthing_android_sync_max_items">Max items per sync</label>
+            <input id="syncthing_android_sync_max_items" name="syncthing_android_sync_max_items" value="{syncthing_android_sync_max_items}" required />
+          </div>
+          <div>
+            <label for="syncthing_android_sync_exclude_regex">Exclude media matching regex</label>
+            <input id="syncthing_android_sync_exclude_regex" name="syncthing_android_sync_exclude_regex" value="{syncthing_android_sync_exclude_regex}" placeholder="trailer|sample" />
+          </div>
+        </div>
+        <p class="section-help">Set the Android folder to the path where the Syncthing Android app exposes this shared folder, so generated VLC playlists point at playable phone paths.</p>
+        <div class="actions">
+          <button type="submit" class="primary">Save Syncthing Android configuration</button>
+        </div>
+      </form>
+      <form method="post" action="/syncthing-android-sync?next=/settings">
+        <div class="actions">
+          <button type="submit">Stage Syncthing Android files now</button>
         </div>
       </form>
     </div>
@@ -4958,6 +5099,17 @@ def make_handler(state: AppState):
                 self.end_headers()
                 return
 
+            if path == "/syncthing-android-sync":
+                started = trigger_syncthing_android_sync(state, force=True)
+                log.info("Manual Syncthing Android sync requested (started=%s)", "yes" if started else "no")
+                redirect_to = (query.get("next") or ["/"])[0]
+                if redirect_to not in {"/", "/settings"}:
+                    redirect_to = "/"
+                self.send_response(303)
+                self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
+
             if path == "/progress":
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length).decode("utf-8") if length else ""
@@ -5170,6 +5322,25 @@ def make_handler(state: AppState):
                         k: str(v).strip()
                         for k, v in updates.items()
                         if str(v).strip() or k in {"android_sync_exclude_regex", "android_sync_wifi_address"}
+                    }
+                    update_stored_defaults(str(state.database_path), sanitized_updates)
+                elif settings_action == "update_syncthing_android_sync":
+                    updates = {
+                        "syncthing_android_sync_enabled": "1" if (form.get("syncthing_android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "syncthing_android_sync_local_folder": (form.get("syncthing_android_sync_local_folder") or ["./syncthing-android"])[0],
+                        "syncthing_android_sync_android_destination": (form.get("syncthing_android_sync_android_destination") or ["/sdcard/Movies/GetOffline"])[0],
+                        "syncthing_android_sync_max_items": (form.get("syncthing_android_sync_max_items") or ["10"])[0],
+                        "syncthing_android_sync_include_subtitles": "1" if (form.get("syncthing_android_sync_include_subtitles") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "syncthing_android_sync_include_unplayed": "1" if (form.get("syncthing_android_sync_include_unplayed") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "syncthing_android_sync_include_started": "1" if (form.get("syncthing_android_sync_include_started") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "syncthing_android_sync_include_played": "1" if (form.get("syncthing_android_sync_include_played") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "syncthing_android_sync_exclude_regex": (form.get("syncthing_android_sync_exclude_regex") or [""])[0],
+                        "syncthing_android_sync_prune": "1" if (form.get("syncthing_android_sync_prune") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                    }
+                    sanitized_updates = {
+                        k: str(v).strip()
+                        for k, v in updates.items()
+                        if str(v).strip() or k == "syncthing_android_sync_exclude_regex"
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
                 elif settings_action == "update_telemetry":

@@ -16,7 +16,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
-- Optional Android offline sync that copies unplayed media to a connected phone with `adb push`
+- Optional Android offline sync that copies unplayed media to a connected phone with `adb push` or stages media in a Syncthing-shared folder
 
 ## Requirements
 
@@ -98,6 +98,12 @@ GetOffline can copy unplayed downloads to an Android phone so they are available
 To sync over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each sync/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
 
 When enabled, GetOffline periodically checks for an authorized connected phone using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The phone button in the library toolbar starts a manual Android sync immediately. Files already present in the destination folder are skipped unless GetOffline can refresh them with embedded metadata. When `ffmpeg` is available, GetOffline tags the copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image before pushing it, then asks Android's media scanner to rescan the pushed file. Each sync also writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
+
+### Syncthing Android sync
+
+If you prefer not to use `adb`, configure **Syncthing Android configuration** separately in Settings. Choose a local folder that is already shared to your phone by Syncthing, then enable **Auto-stage for Syncthing Android**. GetOffline copies the selected unplayed/started/played media into that local shared folder, optionally includes subtitles, writes `syncdb.txt` to track staged files, prunes stale staged files when enabled, and writes `GetOffline.xspf` with Android file paths for VLC resume start times.
+
+On the phone, share the same folder with the Syncthing Android app and set **Android folder path** to the location where that folder appears on Android, such as `/sdcard/Movies/GetOffline`. Syncthing performs the device transfer; GetOffline only stages files locally. Manual staging is available from **Stage Syncthing Android files now** in Settings, and automatic staging runs after downloads and on the same periodic interval as the `adb` sync.
 
 To build a standalone executable with Pex:
 
