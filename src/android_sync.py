@@ -23,6 +23,8 @@ MOV_METADATA_EXTENSIONS = {".m4a", ".mov", ".mp4"}
 class AndroidSyncConfig:
     enabled: bool = False
     adb_path: str = "adb"
+    connection_mode: str = "usb"
+    wifi_address: str = ""
     destination: str = "/sdcard/Movies/GetOffline"
     max_items: int = 10
     include_subtitles: bool = True
@@ -69,6 +71,8 @@ def config_from_defaults(defaults: dict) -> AndroidSyncConfig:
     return AndroidSyncConfig(
         enabled=_coerce_bool(defaults.get("android_sync_enabled")),
         adb_path=str(defaults.get("android_sync_adb_path") or "adb").strip() or "adb",
+        connection_mode=str(defaults.get("android_sync_connection_mode") or "usb").strip().lower() or "usb",
+        wifi_address=str(defaults.get("android_sync_wifi_address") or "").strip(),
         destination=str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline").strip()
         or "/sdcard/Movies/GetOffline",
         max_items=max(1, max_items),
@@ -337,11 +341,58 @@ def build_vlc_xspf(entries: List[Tuple[AndroidSyncItem, str]]) -> str:
 """
 
 
-def find_connected_device(adb_path: str, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Optional[str]:
+def _normalize_wifi_address(address: str) -> str:
+    value = str(address or "").strip()
+    if not value:
+        return ""
+    if value.startswith("[") or ":" in value:
+        return value
+    return f"{value}:5555"
+
+
+def _connect_adb_wifi(
+    adb_executable: str,
+    wifi_address: str,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> Optional[str]:
+    target = _normalize_wifi_address(wifi_address)
+    if not target:
+        log.warning("Android sync Wi-Fi requested but no device address is configured")
+        return None
+
+    completed = _run_adb_command(
+        [adb_executable, "connect", target],
+        description=f"connecting to paired Android device over Wi-Fi at {target}",
+        timeout=30,
+        runner=runner,
+    )
+    output = _combined_output(completed)
+    if int(getattr(completed, "returncode", 1) or 0) != 0:
+        raise RuntimeError(f"adb connect {target} failed: {output or 'no output'}")
+    if output and "failed" in output.lower():
+        raise RuntimeError(f"adb connect {target} failed: {output}")
+    log.info("Android sync: Wi-Fi adb connect completed for %s: %s", target, output or "no output")
+    return target
+
+
+def find_connected_device(
+    adb_path: str,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    *,
+    connection_mode: str = "usb",
+    wifi_address: str = "",
+) -> Optional[str]:
     adb_executable = shutil.which(adb_path) if not Path(adb_path).is_absolute() else adb_path
     if not adb_executable:
         log.warning("Android sync: adb executable not found: %s", adb_path)
         return None
+
+    expected_serial = None
+    if str(connection_mode or "usb").strip().lower() == "wifi":
+        expected_serial = _connect_adb_wifi(adb_executable, wifi_address, runner)
+        if not expected_serial:
+            return None
+
     completed = _run_adb_command(
         [adb_executable, "devices"],
         description="checking connected Android devices",
@@ -351,6 +402,7 @@ def find_connected_device(adb_path: str, runner: Callable[..., subprocess.Comple
     if int(getattr(completed, "returncode", 1) or 0) != 0:
         raise RuntimeError(f"adb devices failed: {_combined_output(completed) or 'no output'}")
 
+    authorized = []
     unauthorized = []
     offline = []
     for line in str(getattr(completed, "stdout", "") or "").splitlines()[1:]:
@@ -359,12 +411,21 @@ def find_connected_device(adb_path: str, runner: Callable[..., subprocess.Comple
             continue
         serial, state = parts[0], parts[1]
         if state == "device":
-            log.info("Android sync: found authorized device serial=%s", serial)
-            return serial
+            authorized.append(serial)
+            continue
         if state == "unauthorized":
             unauthorized.append(serial)
         elif state == "offline":
             offline.append(serial)
+
+    if expected_serial:
+        if expected_serial in authorized:
+            log.info("Android sync: found authorized Wi-Fi device serial=%s", expected_serial)
+            return expected_serial
+        log.warning("Android sync: Wi-Fi device %s is not authorized/online after adb connect", expected_serial)
+    elif authorized:
+        log.info("Android sync: found authorized device serial=%s", authorized[0])
+        return authorized[0]
 
     if unauthorized:
         log.warning("Android sync: device(s) connected but unauthorized: %s", ", ".join(unauthorized))
@@ -503,7 +564,12 @@ def delete_items_from_android(
     log.info("Android delete starting: items=%s destination=%s adb=%s", len(delete_items), destination, adb_executable)
 
     try:
-        device_serial = find_connected_device(adb_executable, runner=runner)
+        device_serial = find_connected_device(
+            adb_executable,
+            runner=runner,
+            connection_mode=config.connection_mode,
+            wifi_address=config.wifi_address,
+        )
     except RuntimeError as exc:
         result.message = f"adb device check failed: {exc}"
         result.failed += 1
@@ -511,8 +577,12 @@ def delete_items_from_android(
         return result
 
     if not device_serial:
-        result.message = "no authorized Android device connected"
-        _append_error(result, "no authorized Android device connected; check USB debugging authorization")
+        if str(config.connection_mode or "usb").strip().lower() == "wifi":
+            result.message = "no authorized Android Wi-Fi device connected"
+            _append_error(result, "no authorized Android Wi-Fi device connected; check the Wi-Fi address and adb pairing")
+        else:
+            result.message = "no authorized Android device connected"
+            _append_error(result, "no authorized Android device connected; check USB debugging authorization")
         return result
 
     result.device_serial = device_serial
@@ -590,7 +660,12 @@ def sync_items_to_android(
     )
 
     try:
-        device_serial = find_connected_device(adb_executable, runner=runner)
+        device_serial = find_connected_device(
+            adb_executable,
+            runner=runner,
+            connection_mode=config.connection_mode,
+            wifi_address=config.wifi_address,
+        )
     except RuntimeError as exc:
         result.message = f"adb device check failed: {exc}"
         result.failed += 1
@@ -598,8 +673,12 @@ def sync_items_to_android(
         return result
 
     if not device_serial:
-        result.message = "no authorized Android device connected"
-        _append_error(result, "no authorized Android device connected; check USB debugging authorization")
+        if str(config.connection_mode or "usb").strip().lower() == "wifi":
+            result.message = "no authorized Android Wi-Fi device connected"
+            _append_error(result, "no authorized Android Wi-Fi device connected; check the Wi-Fi address and adb pairing")
+        else:
+            result.message = "no authorized Android device connected"
+            _append_error(result, "no authorized Android device connected; check USB debugging authorization")
         return result
 
     result.device_serial = device_serial
