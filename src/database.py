@@ -307,6 +307,10 @@ def _run_migration_0009(db_path: str) -> None:
     _migration_0009_add_media_summaries_table(db_path)
 
 
+def _run_migration_0010(db_path: str) -> None:
+    _migration_0010_add_source_max_downloads(db_path)
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
@@ -337,6 +341,10 @@ MIGRATIONS = [
     (
         "0009_add_media_summaries_table",
         _run_migration_0009,
+    ),
+    (
+        "0010_add_source_max_downloads",
+        _run_migration_0010,
     ),
 ]
 
@@ -423,6 +431,15 @@ def _migration_0005_add_source_enabled(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0010_add_source_max_downloads(db_path: str) -> None:
+    columns = _table_columns_sqlite(db_path, "source_configs")
+    if "max_downloads" in columns:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE source_configs ADD COLUMN max_downloads INTEGER")
+        conn.commit()
+
+
 def apply_migrations(db_path: str) -> None:
     _ensure_schema_migrations_table(db_path)
     for revision, migrate in MIGRATIONS:
@@ -486,7 +503,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         row = conn.execute("SELECT youtube_cookie_text FROM download_settings WHERE id = 1").fetchone()
         source_rows = conn.execute(
             """
-            SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds
+            SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads
             FROM source_configs
             ORDER BY source_type, position, id
             """
@@ -494,7 +511,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
 
     youtube = []
     podcasts = []
-    for row_id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset in source_rows:
+    for row_id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset, source_max_downloads in source_rows:
         payload = {
             "id": int(row_id),
             "name": name,
@@ -504,6 +521,8 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         }
         if subtitle_offset is not None:
             payload["subtitle_offset_seconds"] = subtitle_offset
+        if source_max_downloads is not None:
+            payload["max_downloads"] = int(source_max_downloads)
         if source_type == "youtube":
             payload["type"] = media_type or "audio"
             youtube.append(payload)
@@ -624,8 +643,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                 conn.execute(
                     """
                     INSERT INTO source_configs (
-                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "youtube",
@@ -636,6 +655,7 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                         1 if bool(item.get("enabled", True)) else 0,
                         1 if bool(item.get("subtitles", True)) else 0,
                         item.get("subtitle_offset_seconds"),
+                        item.get("max_downloads"),
                         now,
                     ),
                 )
@@ -644,8 +664,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                 conn.execute(
                     """
                     INSERT INTO source_configs (
-                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "podcast",
@@ -656,6 +676,7 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                         1 if bool(item.get("enabled", True)) else 0,
                         1 if bool(item.get("subtitles", True)) else 0,
                         item.get("subtitle_offset_seconds"),
+                        item.get("max_downloads"),
                         now,
                     ),
                 )
@@ -684,6 +705,7 @@ def add_source_config(
     media_type: Optional[str],
     subtitles: bool,
     subtitle_offset_seconds: Optional[float],
+    max_downloads: Optional[int] = None,
     enabled: bool = True,
 ) -> None:
     ensure_config_seeded(db_path)
@@ -698,8 +720,8 @@ def add_source_config(
             conn.execute(
                 """
                 INSERT INTO source_configs (
-                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_type,
@@ -710,6 +732,7 @@ def add_source_config(
                     1 if enabled else 0,
                     1 if subtitles else 0,
                     subtitle_offset_seconds,
+                    max_downloads,
                     now,
                 ),
             )
@@ -757,6 +780,7 @@ def update_source_config(
     media_type: Optional[str],
     subtitles: bool,
     subtitle_offset_seconds: Optional[float],
+    max_downloads: Optional[int] = None,
 ) -> bool:
     ensure_config_seeded(db_path)
     normalized_media_type = (str(media_type).strip().lower() if media_type is not None else None)
@@ -772,6 +796,7 @@ def update_source_config(
                     media_type = ?,
                     subtitles = ?,
                     subtitle_offset_seconds = ?,
+                    max_downloads = ?,
                     updated_at = ?
                 WHERE id = ?
                 """,
@@ -781,6 +806,7 @@ def update_source_config(
                     normalized_media_type,
                     1 if subtitles else 0,
                     subtitle_offset_seconds,
+                    max_downloads,
                     _utcnow().isoformat(),
                     int(row_id),
                 ),

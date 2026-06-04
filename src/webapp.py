@@ -3905,6 +3905,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         status = "enabled" if enabled else "disabled"
         subtitle_offset = item.get("subtitle_offset_seconds")
         subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
+        source_max_downloads = item.get("max_downloads")
+        source_max_downloads_text = html.escape("" if source_max_downloads is None else str(source_max_downloads))
         media_audio_selected = " selected" if media_type_value == "audio" else ""
         media_video_selected = " selected" if media_type_value == "video" else ""
         subtitles_yes_selected = " selected" if subtitles_enabled else ""
@@ -3942,6 +3944,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
                   <input id="youtube_offset_{row_id}" type="text" name="subtitle_offset_seconds_{row_id}" value="{subtitle_offset_text}" placeholder="offset (optional)" />
                 </div>
                 <div>
+                  <label for="youtube_max_downloads_{row_id}">Max downloads</label>
+                  <input id="youtube_max_downloads_{row_id}" type="number" min="1" step="1" name="max_downloads_{row_id}" value="{source_max_downloads_text}" placeholder="use default" />
+                </div>
+                <div>
                   <label for="youtube_enabled_{row_id}">Status</label>
                   <select id="youtube_enabled_{row_id}" name="enabled_{row_id}"><option value="1"{enabled_selected}>enabled</option><option value="0"{disabled_selected}>disabled</option></select>
                 </div>
@@ -3961,6 +3967,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         status = "enabled" if enabled else "disabled"
         subtitle_offset = item.get("subtitle_offset_seconds")
         subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
+        source_max_downloads = item.get("max_downloads")
+        source_max_downloads_text = html.escape("" if source_max_downloads is None else str(source_max_downloads))
         subtitles_yes_selected = " selected" if subtitles_enabled else ""
         subtitles_no_selected = "" if subtitles_enabled else " selected"
         enabled_selected = " selected" if enabled else ""
@@ -3990,6 +3998,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
                 <div>
                   <label for="podcast_offset_{row_id}">Subtitle offset seconds</label>
                   <input id="podcast_offset_{row_id}" type="text" name="subtitle_offset_seconds_{row_id}" value="{subtitle_offset_text}" placeholder="offset (optional)" />
+                </div>
+                <div>
+                  <label for="podcast_max_downloads_{row_id}">Max downloads</label>
+                  <input id="podcast_max_downloads_{row_id}" type="number" min="1" step="1" name="max_downloads_{row_id}" value="{source_max_downloads_text}" placeholder="use default" />
                 </div>
                 <div>
                   <label for="podcast_enabled_{row_id}">Status</label>
@@ -4119,6 +4131,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-row-actions {{ justify-content: center; }}
     .section-help {{ margin: .15rem 0 .9rem; color: #52627d; }}
     .android-section {{ border-color: #bcd0f8; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); }}
+    .ytdlp-section {{ border-color: #bfdbfe; background: linear-gradient(180deg, #f8fcff 0%, #ffffff 100%); }}
     .ollama-section {{ border-color: #c7d2fe; background: linear-gradient(180deg, #fbfbff 0%, #ffffff 100%); }}
     .source-list {{ display: grid; gap: .75rem; margin-top: .75rem; }}
     .source-card {{ border: 1px solid var(--border-soft); border-radius: 12px; background: #fff; overflow: hidden; }}
@@ -4163,6 +4176,28 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
         <div class="grid">
           <div>
+            <label for="processing_workers">Processing workers</label>
+            <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
+          </div>
+          <div>
+            <label for="auto_update_minutes">Auto update interval (minutes)</label>
+            <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="primary">Save general settings</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section ytdlp-section">
+      <h2>yt-dlp configuration</h2>
+      <p>Configure yt-dlp download behavior and authentication used for YouTube and media extraction.</p>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_ytdlp" />
+        <div class="grid">
+          <div>
             <label for="audio_format">Audio format</label>
             <input id="audio_format" name="audio_format" value="{audio_format}" required />
           </div>
@@ -4175,23 +4210,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <input id="ffmpeg_audio_filter" name="ffmpeg_audio_filter" value="{ffmpeg_audio_filter}" placeholder="loudnorm=I=-14:TP=-1.5:LRA=11" />
           </div>
           <div>
-            <label for="max_downloads">Max downloads</label>
+            <label for="max_downloads">Default source max downloads</label>
             <input id="max_downloads" name="max_downloads" value="{max_downloads}" required />
-          </div>
-          <div>
-            <label for="playlist_end">Playlist end</label>
-            <input id="playlist_end" name="playlist_end" value="{playlist_end}" required />
-          </div>
-        </div>
-
-        <div class="grid">
-          <div>
-            <label for="processing_workers">Processing workers</label>
-            <input id="processing_workers" name="processing_workers" value="{processing_workers}" required />
-          </div>
-          <div>
-            <label for="auto_update_minutes">Auto update interval (minutes)</label>
-            <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
           </div>
           <div>
             <label for="deno_path">Deno executable</label>
@@ -4199,9 +4219,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           </div>
         </div>
         <p><strong>Resolved path:</strong> Deno <code>{resolved_deno_path}</code></p>
-
+        <label for="youtube_cookie_text">YouTube cookies.txt content</label>
+        <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
         <div class="actions">
-          <button type="submit" class="primary">Save general settings</button>
+          <button type="submit" class="primary">Save yt-dlp configuration</button>
         </div>
       </form>
     </div>
@@ -4279,18 +4300,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     </div>
 
     <div class="section">
-      <h2>YouTube cookie text</h2>
-      <form method="post" action="/settings">
-        <input type="hidden" name="settings_action" value="update_cookie" />
-        <label for="youtube_cookie_text">cookies.txt content</label>
-        <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
-        <div class="actions">
-          <button type="submit" class="primary">Save cookie</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="section">
       <h2>YouTube sources</h2>
       <p class="section-help">Open a source to edit its settings, then use the single save button at the bottom to apply all YouTube source changes.</p>
       <form method="post" action="/settings" onsubmit="return confirm('Save YouTube source changes? Checked sources will be deleted.');">
@@ -4315,6 +4324,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label>Subtitles enabled</label>
             <select name="subtitles"><option value="1">yes</option><option value="0">no</option></select>
           </div>
+          <div><label>Max downloads (optional)</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div>
         </div>
         <label>Subtitle offset seconds (optional)</label>
         <input name="subtitle_offset_seconds" />
@@ -4343,6 +4353,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label>Subtitles enabled</label>
             <select name="subtitles"><option value="1">yes</option><option value="0">no</option></select>
           </div>
+          <div><label>Max downloads (optional)</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div>
           <div><label>Subtitle offset seconds (optional)</label><input name="subtitle_offset_seconds" /></div>
         </div>
         <div class="actions"><button type="submit" class="primary">Add podcast source</button></div>
@@ -5079,13 +5090,22 @@ def make_handler(state: AppState):
                 if settings_action == "update_defaults":
                     updates = {
                         "output_root": (form.get("output_root") or [""])[0],
+                        "processing_workers": (form.get("processing_workers") or [""])[0],
+                        "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                    }
+                    sanitized_updates = {
+                        k: str(v).strip()
+                        for k, v in updates.items()
+                        if str(v).strip()
+                    }
+                    update_stored_defaults(str(state.database_path), sanitized_updates)
+                elif settings_action == "update_ytdlp":
+                    updates = {
                         "audio_format": (form.get("audio_format") or [""])[0],
                         "audio_quality": (form.get("audio_quality") or [""])[0],
                         "ffmpeg_audio_filter": (form.get("ffmpeg_audio_filter") or [""])[0],
                         "max_downloads": (form.get("max_downloads") or [""])[0],
-                        "playlist_end": (form.get("playlist_end") or [""])[0],
-                        "processing_workers": (form.get("processing_workers") or [""])[0],
-                        "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                        "playlist_end": (form.get("max_downloads") or [""])[0],
                         "deno_path": (form.get("deno_path") or [""])[0],
                     }
                     sanitized_updates = {
@@ -5094,6 +5114,9 @@ def make_handler(state: AppState):
                         if str(v).strip() or k == "ffmpeg_audio_filter"
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
+                    raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
+                    cookie_text = str(raw_cookie).strip()
+                    update_download_settings(str(state.database_path), cookie_text or None)
                 elif settings_action == "update_ollama":
                     updates = {
                         "summary_model": (form.get("summary_model") or [""])[0],
@@ -5184,6 +5207,15 @@ def make_handler(state: AppState):
                             self.send_error(400, "Invalid subtitle_offset_seconds")
                             return
                         enabled = (form.get(f"enabled_{source_id}") or ["1"])[0] in {"1", "true", "yes", "on"}
+                        raw_max_downloads = str((form.get(f"max_downloads_{source_id}") or [""])[0]).strip()
+                        try:
+                            source_max_downloads = int(raw_max_downloads) if raw_max_downloads else None
+                        except ValueError:
+                            self.send_error(400, "Invalid max_downloads")
+                            return
+                        if source_max_downloads is not None and source_max_downloads < 1:
+                            self.send_error(400, "Invalid max_downloads")
+                            return
                         update_source_config(
                             str(state.database_path),
                             row_id=source_id,
@@ -5192,6 +5224,7 @@ def make_handler(state: AppState):
                             media_type=media_type,
                             subtitles=subtitles,
                             subtitle_offset_seconds=subtitle_offset,
+                            max_downloads=source_max_downloads,
                         )
                         set_source_enabled(str(state.database_path), source_id, enabled)
 
@@ -5213,6 +5246,15 @@ def make_handler(state: AppState):
                     except ValueError:
                         self.send_error(400, "Invalid subtitle_offset_seconds")
                         return
+                    raw_max_downloads = str((form.get("max_downloads") or [""])[0]).strip()
+                    try:
+                        source_max_downloads = int(raw_max_downloads) if raw_max_downloads else None
+                    except ValueError:
+                        self.send_error(400, "Invalid max_downloads")
+                        return
+                    if source_max_downloads is not None and source_max_downloads < 1:
+                        self.send_error(400, "Invalid max_downloads")
+                        return
                     add_source_config(
                         str(state.database_path),
                         source_type=source_type,
@@ -5221,6 +5263,7 @@ def make_handler(state: AppState):
                         media_type=media_type,
                         subtitles=subtitles,
                         subtitle_offset_seconds=subtitle_offset,
+                        max_downloads=source_max_downloads,
                         enabled=True,
                     )
 
@@ -5251,6 +5294,15 @@ def make_handler(state: AppState):
                                     self.send_error(400, "Invalid media_type")
                                     return
                             subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                            raw_max_downloads = str((form.get("max_downloads") or [""])[0]).strip()
+                            try:
+                                source_max_downloads = int(raw_max_downloads) if raw_max_downloads else None
+                            except ValueError:
+                                self.send_error(400, "Invalid max_downloads")
+                                return
+                            if source_max_downloads is not None and source_max_downloads < 1:
+                                self.send_error(400, "Invalid max_downloads")
+                                return
                             raw_offset = str((form.get("subtitle_offset_seconds") or [""])[0]).strip()
                             try:
                                 subtitle_offset = float(raw_offset) if raw_offset else None
@@ -5265,6 +5317,7 @@ def make_handler(state: AppState):
                                 media_type=media_type,
                                 subtitles=subtitles,
                                 subtitle_offset_seconds=subtitle_offset,
+                                max_downloads=source_max_downloads,
                             )
 
                 try:

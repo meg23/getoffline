@@ -704,7 +704,7 @@ class WebAppHelpersTests(unittest.TestCase):
                 "podcasts": [{"name": "Pod", "url": "https://example.com/rss", "subtitles": True}],
             }
         )
-        self.assertIn("YouTube cookie text", body)
+        self.assertIn("yt-dlp configuration", body)
         self.assertIn("/settings", body)
         self.assertIn("youtube_cookie_text", body)
         self.assertIn("Add YouTube source", body)
@@ -712,6 +712,8 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("General", body)
         self.assertIn("Ollama configuration", body)
         self.assertIn("Android push configuration", body)
+        self.assertIn('name="settings_action" value="update_ytdlp"', body)
+        self.assertIn('Save yt-dlp configuration</button>', body)
         self.assertIn('name="settings_action" value="update_ollama"', body)
         self.assertIn('name="settings_action" value="clear_summaries"', body)
         self.assertIn('Save Ollama configuration</button>', body)
@@ -719,6 +721,7 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
         self.assertIn('name="enabled_0"', body)
+        self.assertIn('name="max_downloads_0"', body)
         self.assertIn('Save YouTube sources</button>', body)
         self.assertIn('Save podcast sources</button>', body)
 
