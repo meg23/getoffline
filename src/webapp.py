@@ -1198,9 +1198,7 @@ def _android_delete_item_from_row(row: MediaRow, output_root: Path) -> Optional[
 def _run_android_delete_job(state: AppState, rows: List[MediaRow]) -> None:
     defaults = state.config.get("defaults") or {}
     delete_config = config_from_defaults(defaults)
-    if not delete_config.enabled:
-        log.info("Android delete skipped after played mark: Android sync is disabled")
-        return
+    delete_config.enabled = True
     items = []
     for row in rows:
         item = _android_delete_item_from_row(row, state.output_root)

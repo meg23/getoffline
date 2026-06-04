@@ -873,7 +873,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertIsNotNone(updated_row)
             self.assertTrue(updated_row.played)
 
-    def test_run_android_delete_job_deletes_remote_played_media_when_sync_enabled(self):
+    def test_run_android_delete_job_deletes_remote_played_media_even_when_auto_sync_disabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             media = root / "episode.mp4"
@@ -883,7 +883,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
                 database_path=root / "downloads.sqlite3",
                 config={
                     "defaults": {
-                        "android_sync_enabled": "1",
+                        "android_sync_enabled": "0",
                         "android_sync_adb_path": "adb",
                         "android_sync_destination": "/sdcard/Movies/GetOffline",
                     }
@@ -906,6 +906,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
 
             delete_mock.assert_called_once()
             items_arg, config_arg = delete_mock.call_args.args
+            self.assertTrue(config_arg.enabled)
             self.assertEqual(config_arg.destination, "/sdcard/Movies/GetOffline")
             self.assertEqual(len(items_arg), 1)
             self.assertEqual(items_arg[0].row_id, 99)
