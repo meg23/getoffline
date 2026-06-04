@@ -709,11 +709,13 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("youtube_cookie_text", body)
         self.assertIn("Add YouTube source", body)
         self.assertIn("Add podcast source", body)
-        self.assertIn("Disable", body)
-        self.assertIn('name="source_action" value="edit"', body)
-        self.assertIn('name="media_type"', body)
-        self.assertIn('form="youtube-edit-0"', body)
-        self.assertIn('>Save</button>', body)
+        self.assertIn("Android push configuration", body)
+        self.assertIn('name="settings_action" value="update_android_sync"', body)
+        self.assertIn('name="settings_action" value="update_sources"', body)
+        self.assertIn('name="media_type_0"', body)
+        self.assertIn('name="enabled_0"', body)
+        self.assertIn('Save YouTube sources</button>', body)
+        self.assertIn('Save podcast sources</button>', body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:

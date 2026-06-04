@@ -3894,7 +3894,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
     cookie_value = html.escape(cookie_text)
 
-    youtube_rows = []
+    youtube_cards = []
     for item in config.get("youtube") or []:
         row_id = int(item.get("id") or 0)
         name = html.escape(str(item.get("name") or ""))
@@ -3903,52 +3903,55 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         subtitles_enabled = bool(item.get("subtitles", True))
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
-        toggle_to = "0" if enabled else "1"
-        toggle_label = "Disable" if enabled else "Enable"
         subtitle_offset = item.get("subtitle_offset_seconds")
         subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
         media_audio_selected = " selected" if media_type_value == "audio" else ""
         media_video_selected = " selected" if media_type_value == "video" else ""
         subtitles_yes_selected = " selected" if subtitles_enabled else ""
         subtitles_no_selected = "" if subtitles_enabled else " selected"
-        edit_form_id = f"youtube-edit-{row_id}"
-        youtube_rows.append(
+        enabled_selected = " selected" if enabled else ""
+        disabled_selected = "" if enabled else " selected"
+        youtube_cards.append(
             f"""
-            <tr>
-              <td><input type="text" name="name" value="{name}" required form="{edit_form_id}" /></td>
-              <td><input type="url" name="url" value="{url}" required form="{edit_form_id}" /></td>
-              <td><select name="media_type" form="{edit_form_id}"><option value="audio"{media_audio_selected}>audio</option><option value="video"{media_video_selected}>video</option></select></td>
-              <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
-              <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
-              <td><span class="row-status">{status}</span></td>
-            </tr>
-            <tr class="source-row-actions-row">
-              <td colspan="6" class="source-row-actions-cell">
-                <div class="row-actions source-row-actions">
-                  <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
-                    <input type="hidden" name="source_action" value="edit" />
-                    <input type="hidden" name="source_id" value="{row_id}" />
-                    <input type="hidden" name="source_type" value="youtube" />
-                    <button type="submit" class="primary table-action">Save</button>
-                  </form>
-                  <form method="post" action="/settings" class="compact-form">
-                    <input type="hidden" name="source_action" value="toggle" />
-                    <input type="hidden" name="source_id" value="{row_id}" />
-                    <input type="hidden" name="enabled" value="{toggle_to}" />
-                    <button type="submit" class="table-action">{toggle_label}</button>
-                  </form>
-                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
-                    <input type="hidden" name="source_action" value="delete" />
-                    <input type="hidden" name="source_id" value="{row_id}" />
-                    <button type="submit" class="danger table-action">Delete</button>
-                  </form>
+            <details class="source-card">
+              <summary>
+                <span class="source-card-title">{name or "Unnamed YouTube source"}</span>
+                <span class="source-card-url">{url}</span>
+                <span class="row-status">{status}</span>
+              </summary>
+              <input type="hidden" name="source_id" value="{row_id}" />
+              <div class="source-card-grid">
+                <div>
+                  <label for="youtube_name_{row_id}">Name</label>
+                  <input id="youtube_name_{row_id}" type="text" name="name_{row_id}" value="{name}" required />
                 </div>
-              </td>
-            </tr>
+                <div>
+                  <label for="youtube_url_{row_id}">URL</label>
+                  <input id="youtube_url_{row_id}" type="url" name="url_{row_id}" value="{url}" required />
+                </div>
+                <div>
+                  <label for="youtube_media_type_{row_id}">Download type</label>
+                  <select id="youtube_media_type_{row_id}" name="media_type_{row_id}"><option value="audio"{media_audio_selected}>audio</option><option value="video"{media_video_selected}>video</option></select>
+                </div>
+                <div>
+                  <label for="youtube_subtitles_{row_id}">Subtitles</label>
+                  <select id="youtube_subtitles_{row_id}" name="subtitles_{row_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select>
+                </div>
+                <div>
+                  <label for="youtube_offset_{row_id}">Subtitle offset seconds</label>
+                  <input id="youtube_offset_{row_id}" type="text" name="subtitle_offset_seconds_{row_id}" value="{subtitle_offset_text}" placeholder="offset (optional)" />
+                </div>
+                <div>
+                  <label for="youtube_enabled_{row_id}">Status</label>
+                  <select id="youtube_enabled_{row_id}" name="enabled_{row_id}"><option value="1"{enabled_selected}>enabled</option><option value="0"{disabled_selected}>disabled</option></select>
+                </div>
+              </div>
+              <label class="delete-check" for="youtube_delete_{row_id}"><input id="youtube_delete_{row_id}" type="checkbox" name="delete_{row_id}" value="1" /> Delete this source on save</label>
+            </details>
             """
         )
 
-    podcast_rows = []
+    podcast_cards = []
     for item in config.get("podcasts") or []:
         row_id = int(item.get("id") or 0)
         name = html.escape(str(item.get("name") or ""))
@@ -3956,50 +3959,50 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         subtitles_enabled = bool(item.get("subtitles", True))
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
-        toggle_to = "0" if enabled else "1"
-        toggle_label = "Disable" if enabled else "Enable"
         subtitle_offset = item.get("subtitle_offset_seconds")
         subtitle_offset_text = html.escape("" if subtitle_offset is None else str(subtitle_offset))
         subtitles_yes_selected = " selected" if subtitles_enabled else ""
         subtitles_no_selected = "" if subtitles_enabled else " selected"
-        edit_form_id = f"podcast-edit-{row_id}"
-        podcast_rows.append(
+        enabled_selected = " selected" if enabled else ""
+        disabled_selected = "" if enabled else " selected"
+        podcast_cards.append(
             f"""
-            <tr>
-              <td><input type="text" name="name" value="{name}" required form="{edit_form_id}" /></td>
-              <td><input type="url" name="url" value="{url}" required form="{edit_form_id}" /></td>
-              <td><select name="subtitles" form="{edit_form_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select></td>
-              <td><input type="text" name="subtitle_offset_seconds" value="{subtitle_offset_text}" placeholder="offset (optional)" form="{edit_form_id}" /></td>
-              <td><span class="row-status">{status}</span></td>
-            </tr>
-            <tr class="source-row-actions-row">
-              <td colspan="5" class="source-row-actions-cell">
-                <div class="row-actions source-row-actions">
-                  <form id="{edit_form_id}" method="post" action="/settings" class="compact-form">
-                    <input type="hidden" name="source_action" value="edit" />
-                    <input type="hidden" name="source_id" value="{row_id}" />
-                    <input type="hidden" name="source_type" value="podcast" />
-                    <button type="submit" class="primary table-action">Save</button>
-                  </form>
-                  <form method="post" action="/settings" class="compact-form">
-                    <input type="hidden" name="source_action" value="toggle" />
-                    <input type="hidden" name="source_id" value="{row_id}" />
-                    <input type="hidden" name="enabled" value="{toggle_to}" />
-                    <button type="submit" class="table-action">{toggle_label}</button>
-                  </form>
-                  <form method="post" action="/settings" onsubmit="return confirm('Delete this source?');" class="compact-form">
-                    <input type="hidden" name="source_action" value="delete" />
-                    <input type="hidden" name="source_id" value="{row_id}" />
-                    <button type="submit" class="danger table-action">Delete</button>
-                  </form>
+            <details class="source-card">
+              <summary>
+                <span class="source-card-title">{name or "Unnamed podcast source"}</span>
+                <span class="source-card-url">{url}</span>
+                <span class="row-status">{status}</span>
+              </summary>
+              <input type="hidden" name="source_id" value="{row_id}" />
+              <div class="source-card-grid">
+                <div>
+                  <label for="podcast_name_{row_id}">Name</label>
+                  <input id="podcast_name_{row_id}" type="text" name="name_{row_id}" value="{name}" required />
                 </div>
-              </td>
-            </tr>
+                <div>
+                  <label for="podcast_url_{row_id}">URL</label>
+                  <input id="podcast_url_{row_id}" type="url" name="url_{row_id}" value="{url}" required />
+                </div>
+                <div>
+                  <label for="podcast_subtitles_{row_id}">Subtitles</label>
+                  <select id="podcast_subtitles_{row_id}" name="subtitles_{row_id}"><option value="1"{subtitles_yes_selected}>yes</option><option value="0"{subtitles_no_selected}>no</option></select>
+                </div>
+                <div>
+                  <label for="podcast_offset_{row_id}">Subtitle offset seconds</label>
+                  <input id="podcast_offset_{row_id}" type="text" name="subtitle_offset_seconds_{row_id}" value="{subtitle_offset_text}" placeholder="offset (optional)" />
+                </div>
+                <div>
+                  <label for="podcast_enabled_{row_id}">Status</label>
+                  <select id="podcast_enabled_{row_id}" name="enabled_{row_id}"><option value="1"{enabled_selected}>enabled</option><option value="0"{disabled_selected}>disabled</option></select>
+                </div>
+              </div>
+              <label class="delete-check" for="podcast_delete_{row_id}"><input id="podcast_delete_{row_id}" type="checkbox" name="delete_{row_id}" value="1" /> Delete this source on save</label>
+            </details>
             """
         )
 
-    youtube_table = "".join(youtube_rows) or "<tr><td colspan='7'>No YouTube sources configured.</td></tr>"
-    podcast_table = "".join(podcast_rows) or "<tr><td colspan='6'>No podcast sources configured.</td></tr>"
+    youtube_sources = "".join(youtube_cards) or "<p>No YouTube sources configured.</p>"
+    podcast_sources = "".join(podcast_cards) or "<p>No podcast sources configured.</p>"
     runtime_stats = _collect_runtime_stats()
     runtime_rows = []
     for label, value in runtime_stats:
@@ -4114,6 +4117,21 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .source-row-actions-row td {{ border-bottom: 1px solid var(--border-soft); }}
     .source-row-actions-cell {{ padding-top: 0; padding-bottom: .8rem; }}
     .source-row-actions {{ justify-content: center; }}
+    .section-help {{ margin: .15rem 0 .9rem; color: #52627d; }}
+    .android-section {{ border-color: #bcd0f8; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); }}
+    .source-list {{ display: grid; gap: .75rem; margin-top: .75rem; }}
+    .source-card {{ border: 1px solid var(--border-soft); border-radius: 12px; background: #fff; overflow: hidden; }}
+    .source-card[open] {{ border-color: #c9d7f2; box-shadow: 0 8px 22px rgba(15, 35, 80, 0.06); }}
+    .source-card summary {{ display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 2fr) auto; gap: .75rem; align-items: center; padding: .78rem .9rem; cursor: pointer; font-weight: 700; }}
+    .source-card summary::-webkit-details-marker {{ display: none; }}
+    .source-card summary::before {{ content: '▸'; color: var(--primary); font-size: .9rem; transition: transform .14s ease-in-out; }}
+    .source-card[open] summary::before {{ transform: rotate(90deg); }}
+    .source-card summary {{ grid-template-columns: auto minmax(10rem, 1fr) minmax(12rem, 2fr) auto; }}
+    .source-card-url {{ color: #52627d; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .source-card-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .82rem; padding: 0 .9rem .9rem; }}
+    .delete-check {{ display: flex; align-items: center; gap: .45rem; margin: 0 .9rem .9rem; color: var(--danger); }}
+    .delete-check input, label input[type="checkbox"] {{ width: auto; }}
+    .source-save-actions {{ justify-content: flex-end; }}
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
@@ -4125,6 +4143,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       .source-table td {{ border: 0; padding: .35rem 0; }}
       .source-table td:last-child {{ padding-top: .2rem; }}
       .row-actions {{ gap: .4rem; justify-content: center; flex-wrap: wrap; }}
+      .source-card summary, .source-card-grid {{ grid-template-columns: 1fr; }}
+      .source-card summary {{ gap: .35rem; }}
+      .source-card-url {{ white-space: normal; }}
     }}
   </style>
 </head>
@@ -4186,8 +4207,17 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         </div>
         <p><strong>Resolved paths:</strong> Ollama <code>{resolved_ollama_path}</code> · Deno <code>{resolved_deno_path}</code></p>
 
-        <h3>Android offline sync</h3>
-        <p>Enable this to copy unplayed media to an Android phone when it is connected and authorized with USB debugging. The app uses <code>adb push</code>.</p>
+        <div class="actions">
+          <button type="submit" class="primary">Save defaults</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section android-section">
+      <h2>Android push configuration</h2>
+      <p>Enable this to copy media to an Android phone when it is connected and authorized with USB debugging. The app uses <code>adb push</code>.</p>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_android_sync" />
         <div class="grid">
           <div>
             <label for="android_sync_enabled"><input id="android_sync_enabled" type="checkbox" name="android_sync_enabled" value="1"{android_sync_enabled_checked} /> Auto-sync to Android</label>
@@ -4221,9 +4251,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <input id="android_sync_exclude_regex" name="android_sync_exclude_regex" value="{android_sync_exclude_regex}" placeholder="trailer|sample" />
           </div>
         </div>
-
         <div class="actions">
-          <button type="submit" class="primary">Save defaults</button>
+          <button type="submit" class="primary">Save Android push configuration</button>
         </div>
       </form>
     </div>
@@ -4252,12 +4281,13 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>YouTube sources</h2>
-      <div class="table-wrap">
-    <table class="source-table">
-        <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Subtitles</th><th>Offset</th><th>Status</th></tr></thead>
-        <tbody>{youtube_table}</tbody>
-      </table>
-      </div>
+      <p class="section-help">Open a source to edit its settings, then use the single save button at the bottom to apply all YouTube source changes.</p>
+      <form method="post" action="/settings" onsubmit="return confirm('Save YouTube source changes? Checked sources will be deleted.');">
+        <input type="hidden" name="settings_action" value="update_sources" />
+        <input type="hidden" name="source_type" value="youtube" />
+        <div class="source-list">{youtube_sources}</div>
+        <div class="actions source-save-actions"><button type="submit" class="primary">Save YouTube sources</button></div>
+      </form>
 
       <h3>Add YouTube source</h3>
       <form method="post" action="/settings">
@@ -4283,12 +4313,13 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section">
       <h2>Podcast sources</h2>
-      <div class="table-wrap">
-    <table class="source-table">
-        <thead><tr><th>Name</th><th>URL</th><th>Subtitles</th><th>Offset</th><th>Status</th></tr></thead>
-        <tbody>{podcast_table}</tbody>
-      </table>
-      </div>
+      <p class="section-help">Open a source to edit its settings, then use the single save button at the bottom to apply all podcast source changes.</p>
+      <form method="post" action="/settings" onsubmit="return confirm('Save podcast source changes? Checked sources will be deleted.');">
+        <input type="hidden" name="settings_action" value="update_sources" />
+        <input type="hidden" name="source_type" value="podcast" />
+        <div class="source-list">{podcast_sources}</div>
+        <div class="actions source-save-actions"><button type="submit" class="primary">Save podcast sources</button></div>
+      </form>
 
       <h3>Add podcast source</h3>
       <form method="post" action="/settings">
@@ -5047,6 +5078,15 @@ def make_handler(state: AppState):
                         "summary_model": (form.get("summary_model") or [""])[0],
                         "ollama_path": (form.get("ollama_path") or [""])[0],
                         "deno_path": (form.get("deno_path") or [""])[0],
+                    }
+                    sanitized_updates = {
+                        k: str(v).strip()
+                        for k, v in updates.items()
+                        if str(v).strip() or k == "ffmpeg_audio_filter"
+                    }
+                    update_stored_defaults(str(state.database_path), sanitized_updates)
+                elif settings_action == "update_android_sync":
+                    updates = {
                         "android_sync_enabled": "1" if (form.get("android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
                         "android_sync_adb_path": (form.get("android_sync_adb_path") or ["adb"])[0],
                         "android_sync_destination": (form.get("android_sync_destination") or ["/sdcard/Movies/GetOffline"])[0],
@@ -5060,7 +5100,7 @@ def make_handler(state: AppState):
                     sanitized_updates = {
                         k: str(v).strip()
                         for k, v in updates.items()
-                        if str(v).strip() or k == "ffmpeg_audio_filter"
+                        if str(v).strip() or k == "android_sync_exclude_regex"
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
                 elif settings_action == "update_telemetry":
@@ -5090,6 +5130,50 @@ def make_handler(state: AppState):
                         log.warning("Captured Python threaddump to %s", threaddump_path)
                 elif settings_action == "clear_summaries":
                     deleted = clear_all_summaries(str(state.database_path))
+
+                elif settings_action == "update_sources":
+                    source_type = str((form.get("source_type") or [""])[0]).strip().lower()
+                    if source_type not in {"youtube", "podcast"}:
+                        self.send_error(400, "Invalid source_type")
+                        return
+                    for source_id_raw in form.get("source_id") or []:
+                        if not str(source_id_raw).isdigit():
+                            self.send_error(400, "Invalid source_id")
+                            return
+                        source_id = int(source_id_raw)
+                        if (form.get(f"delete_{source_id}") or ["0"])[0] in {"1", "true", "yes", "on"}:
+                            delete_source_config(str(state.database_path), source_id)
+                            continue
+
+                        name = str((form.get(f"name_{source_id}") or [""])[0]).strip()
+                        url = str((form.get(f"url_{source_id}") or [""])[0]).strip()
+                        if not name or not url:
+                            self.send_error(400, "Missing source name/url")
+                            return
+                        media_type = None
+                        if source_type == "youtube":
+                            media_type = str((form.get(f"media_type_{source_id}") or ["audio"])[0]).strip().lower()
+                            if media_type not in {"audio", "video"}:
+                                self.send_error(400, "Invalid media_type")
+                                return
+                        subtitles = (form.get(f"subtitles_{source_id}") or ["1"])[0] in {"1", "true", "yes", "on"}
+                        raw_offset = str((form.get(f"subtitle_offset_seconds_{source_id}") or [""])[0]).strip()
+                        try:
+                            subtitle_offset = float(raw_offset) if raw_offset else None
+                        except ValueError:
+                            self.send_error(400, "Invalid subtitle_offset_seconds")
+                            return
+                        enabled = (form.get(f"enabled_{source_id}") or ["1"])[0] in {"1", "true", "yes", "on"}
+                        update_source_config(
+                            str(state.database_path),
+                            row_id=source_id,
+                            name=name,
+                            url=url,
+                            media_type=media_type,
+                            subtitles=subtitles,
+                            subtitle_offset_seconds=subtitle_offset,
+                        )
+                        set_source_enabled(str(state.database_path), source_id, enabled)
 
                 elif settings_action == "add_source":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
