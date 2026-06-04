@@ -103,7 +103,7 @@ When enabled, GetOffline periodically checks for an authorized connected phone u
 
 If you prefer not to use `adb`, configure **Syncthing Android configuration** separately in Settings. By default, GetOffline expects Syncthing to share your main downloads folder (`output_root`) and then manages a generated `.stignore-getoffline` include list from the selected unplayed/started/played media. That means the media stays in the main directory; Syncthing receives ignore patterns that include only the chosen media, optional subtitles, `syncdb.txt`, and `GetOffline.xspf`.
 
-On the phone, share the same folder with the Syncthing Android app and set **Android folder path** to the location where that shared root appears on Android, such as `/sdcard/Movies/GetOffline`. GetOffline updates the include list after downloads and on the same periodic interval as the `adb` sync. You can also run **Update Syncthing Android include list now** in Settings. If you need a different Syncthing root, uncheck **Use main downloads folder as Syncthing root** and provide an alternate folder; only files already under that root can be included.
+On the phone, share the same folder with the Syncthing Android app and set **Android folder path** to the location where that shared root appears on Android, such as `/sdcard/Movies/GetOffline`. GetOffline updates the include list after downloads and on the same periodic interval as the `adb` sync. You can also run **Update Syncthing Android include list now** in Settings.
 
 To build a standalone executable with Pex:
 

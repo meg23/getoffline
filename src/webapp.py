@@ -1443,11 +1443,11 @@ def _run_syncthing_android_sync_job(state: AppState, force: bool = False) -> Non
 
     try:
         log.info(
-            "Syncthing Android sync job starting: force=%s enabled=%s max_items=%s local_folder=%s android_destination=%s",
+            "Syncthing Android sync job starting: force=%s enabled=%s max_items=%s output_root=%s android_destination=%s",
             "yes" if force else "no",
             "yes" if sync_config.enabled else "no",
             sync_config.max_items,
-            sync_config.local_sync_folder,
+            state.output_root,
             sync_config.android_destination,
         )
         rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
@@ -3970,8 +3970,6 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     android_sync_include_played_checked = default_checked("android_sync_include_played", False)
     android_sync_exclude_regex = html.escape(str(defaults.get("android_sync_exclude_regex") or ""))
     syncthing_android_sync_enabled_checked = default_checked("syncthing_android_sync_enabled")
-    syncthing_android_sync_use_output_root_checked = default_checked("syncthing_android_sync_use_output_root", True)
-    syncthing_android_sync_local_folder = html.escape(str(defaults.get("syncthing_android_sync_local_folder") or ""))
     syncthing_android_sync_android_destination = html.escape(str(defaults.get("syncthing_android_sync_android_destination") or "/sdcard/Movies/GetOffline"))
     syncthing_android_sync_max_items = html.escape(str(defaults.get("syncthing_android_sync_max_items") or "10"))
     syncthing_android_sync_include_subtitles_checked = default_checked("syncthing_android_sync_include_subtitles", True)
@@ -4429,11 +4427,8 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label for="syncthing_android_sync_include_played"><input id="syncthing_android_sync_include_played" type="checkbox" name="syncthing_android_sync_include_played" value="1"{syncthing_android_sync_include_played_checked} /> Sync played media</label>
           </div>
           <div>
-            <label for="syncthing_android_sync_use_output_root"><input id="syncthing_android_sync_use_output_root" type="checkbox" name="syncthing_android_sync_use_output_root" value="1"{syncthing_android_sync_use_output_root_checked} /> Use main downloads folder as Syncthing root</label>
-          </div>
-          <div>
-            <label for="syncthing_android_sync_local_folder">Alternate Syncthing folder root</label>
-            <input id="syncthing_android_sync_local_folder" name="syncthing_android_sync_local_folder" value="{syncthing_android_sync_local_folder}" placeholder="Leave blank to use output_root" />
+            <label>Syncthing folder root</label>
+            <p class="section-help">Uses the main downloads folder configured above (<code>output_root</code>); no staging or alternate folder is required.</p>
           </div>
           <div>
             <label for="syncthing_android_sync_android_destination">Android folder path</label>
@@ -4448,7 +4443,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <input id="syncthing_android_sync_exclude_regex" name="syncthing_android_sync_exclude_regex" value="{syncthing_android_sync_exclude_regex}" placeholder="trailer|sample" />
           </div>
         </div>
-        <p class="section-help">GetOffline writes a managed <code>.stignore-getoffline</code> include list and adds it to <code>.stignore</code> in the Syncthing folder root. Set the Android folder to where the same root appears on your phone so generated VLC playlists point at playable paths.</p>
+        <p class="section-help">GetOffline writes a managed <code>.stignore-getoffline</code> include list and adds it to <code>.stignore</code> in <code>output_root</code>. Set the Android folder to where the same root appears on your phone so generated VLC playlists point at playable paths.</p>
         <div class="actions">
           <button type="submit" class="primary">Save Syncthing Android configuration</button>
         </div>
@@ -5327,8 +5322,6 @@ def make_handler(state: AppState):
                 elif settings_action == "update_syncthing_android_sync":
                     updates = {
                         "syncthing_android_sync_enabled": "1" if (form.get("syncthing_android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
-                        "syncthing_android_sync_use_output_root": "1" if (form.get("syncthing_android_sync_use_output_root") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
-                        "syncthing_android_sync_local_folder": (form.get("syncthing_android_sync_local_folder") or [""])[0],
                         "syncthing_android_sync_android_destination": (form.get("syncthing_android_sync_android_destination") or ["/sdcard/Movies/GetOffline"])[0],
                         "syncthing_android_sync_max_items": (form.get("syncthing_android_sync_max_items") or ["10"])[0],
                         "syncthing_android_sync_include_subtitles": "1" if (form.get("syncthing_android_sync_include_subtitles") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
@@ -5340,7 +5333,7 @@ def make_handler(state: AppState):
                     sanitized_updates = {
                         k: str(v).strip()
                         for k, v in updates.items()
-                        if str(v).strip() or k in {"syncthing_android_sync_exclude_regex", "syncthing_android_sync_local_folder"}
+                        if str(v).strip() or k == "syncthing_android_sync_exclude_regex"
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
                 elif settings_action == "update_telemetry":

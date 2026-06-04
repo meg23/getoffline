@@ -726,7 +726,8 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('action="/syncthing-android-sync?next=/settings"', body)
         self.assertIn('Sync to Android now</button>', body)
         self.assertIn('Update Syncthing Android include list now</button>', body)
-        self.assertIn('name="syncthing_android_sync_use_output_root"', body)
+        self.assertIn('Uses the main downloads folder configured above', body)
+        self.assertNotIn('Alternate Syncthing folder root', body)
         self.assertIn('name="android_sync_connection_mode"', body)
         self.assertIn('name="android_sync_wifi_address"', body)
         self.assertIn('Wi-Fi (connect to paired device)', body)
@@ -2013,7 +2014,6 @@ class SyncthingAndroidSyncTests(unittest.TestCase):
                 ],
                 SyncthingAndroidSyncConfig(
                     enabled=True,
-                    use_output_root=True,
                     android_destination="/sdcard/Movies/GetOffline",
                     max_items=10,
                 ),
@@ -2033,26 +2033,25 @@ class SyncthingAndroidSyncTests(unittest.TestCase):
             self.assertIn("file:///sdcard/Movies/GetOffline/Channel/episode%20[1].mp4", playlist_text)
             self.assertIn("start-time=12", playlist_text)
 
-    def test_sync_items_to_syncthing_android_rejects_files_outside_sync_root(self):
+    def test_sync_items_to_syncthing_android_rejects_files_outside_output_root(self):
         from android_sync import AndroidSyncItem
         from syncthing_sync import SyncthingAndroidSyncConfig, sync_items_to_syncthing_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            outside = root / "outside.mp3"
-            alternate_root = root / "phone-share"
-            alternate_root.mkdir()
+            root = Path(tmpdir) / "downloads"
+            root.mkdir()
+            outside = Path(tmpdir) / "outside.mp3"
             outside.write_text("audio", encoding="utf-8")
 
             result = sync_items_to_syncthing_android(
                 [AndroidSyncItem(row_id=2, title="Episode", source_name="Podcast", file_path=outside)],
-                SyncthingAndroidSyncConfig(enabled=True, use_output_root=False, local_sync_folder=str(alternate_root)),
+                SyncthingAndroidSyncConfig(enabled=True),
                 output_root=root,
             )
 
             self.assertEqual(result.failed, 1)
             self.assertIn("outside the configured Syncthing folder root", result.errors[0])
-            self.assertTrue((alternate_root / ".stignore-getoffline").exists())
+            self.assertTrue((root / ".stignore-getoffline").exists())
 
 
 if __name__ == "__main__":

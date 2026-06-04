@@ -17,8 +17,6 @@ MANAGED_BLOCK_END = "// END GetOffline managed Syncthing Android sync"
 @dataclass
 class SyncthingAndroidSyncConfig:
     enabled: bool = False
-    use_output_root: bool = True
-    local_sync_folder: str = ""
     android_destination: str = "/sdcard/Movies/GetOffline"
     max_items: int = 10
     include_subtitles: bool = True
@@ -70,8 +68,6 @@ def config_from_defaults(defaults: dict) -> SyncthingAndroidSyncConfig:
     max_items = _coerce_int(defaults.get("syncthing_android_sync_max_items"), 10)
     return SyncthingAndroidSyncConfig(
         enabled=_coerce_bool(defaults.get("syncthing_android_sync_enabled")),
-        use_output_root=_coerce_bool(defaults.get("syncthing_android_sync_use_output_root"), True),
-        local_sync_folder=str(defaults.get("syncthing_android_sync_local_folder") or "").strip(),
         android_destination=str(defaults.get("syncthing_android_sync_android_destination") or "/sdcard/Movies/GetOffline").strip()
         or "/sdcard/Movies/GetOffline",
         max_items=max(1, max_items),
@@ -88,10 +84,8 @@ def _append_error(result: SyncthingAndroidSyncResult, message: str) -> None:
     log.warning("Syncthing Android sync: %s", message)
 
 
-def _sync_root_from_config(config: SyncthingAndroidSyncConfig, output_root: Path) -> Path:
-    if config.use_output_root or not str(config.local_sync_folder or "").strip():
-        return output_root.expanduser().resolve()
-    return Path(config.local_sync_folder).expanduser().resolve()
+def _sync_root_from_config(output_root: Path) -> Path:
+    return output_root.expanduser().resolve()
 
 
 def _relative_posix_path(sync_root: Path, local_path: Path) -> Optional[str]:
@@ -243,7 +237,7 @@ def sync_items_to_syncthing_android(
         return result
 
     sync_items = list(items)[: config.max_items]
-    sync_root = _sync_root_from_config(config, output_root)
+    sync_root = _sync_root_from_config(output_root)
     android_destination = config.android_destination.rstrip("/") or "/sdcard/Movies/GetOffline"
 
     try:
