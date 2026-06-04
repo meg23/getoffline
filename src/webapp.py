@@ -1037,7 +1037,7 @@ def _run_update_job(state: AppState) -> None:
     try:
         state.update_runner(state.config, downloaded_items)
         _index_transcripts_on_startup(state)
-        trigger_android_sync(state)
+        trigger_android_sync(state, force=True)
         with state.update_status.lock:
             state.update_status.last_result = "ok"
             state.update_status.last_items_count = len(downloaded_items)
@@ -2243,9 +2243,6 @@ def _render_index(
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}</button>
       <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}</button>
-      <form id="android-sync-form" method="post" action="/android-sync" class="toolbar-form">
-        <button id="android-sync-button" class="icon-button" type="submit" title="Sync unplayed to Android" aria-label="Sync unplayed to Android" {android_button_disabled}>📱</button>
-      </form>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
@@ -4259,7 +4256,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="section android-section">
       <h2>Android push configuration</h2>
-      <p>Enable this to copy media to an Android phone when it is connected and authorized with USB debugging. The app uses <code>adb push</code>.</p>
+      <p>Configure Android push settings. Manual and scheduled downloads automatically try to push matching media when an authorized device is found. The app uses <code>adb push</code>.</p>
       <form method="post" action="/settings">
         <input type="hidden" name="settings_action" value="update_android_sync" />
         <div class="grid">
@@ -4298,6 +4295,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         <p><strong>Resolved path:</strong> ADB <code>{resolved_android_sync_adb_path}</code></p>
         <div class="actions">
           <button type="submit" class="primary">Save Android push configuration</button>
+        </div>
+      </form>
+      <form method="post" action="/android-sync?next=/settings">
+        <div class="actions">
+          <button type="submit">Sync to Android now</button>
         </div>
       </form>
     </div>
@@ -4890,6 +4892,7 @@ def make_handler(state: AppState):
             self.close_connection = True
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
+            query = parse_qs(parsed.query)
 
             if path == "/import-media":
                 content_type = self.headers.get("Content-Type") or ""
@@ -4932,8 +4935,11 @@ def make_handler(state: AppState):
             if path == "/android-sync":
                 started = trigger_android_sync(state, force=True)
                 log.info("Manual Android sync requested (started=%s)", "yes" if started else "no")
+                redirect_to = (query.get("next") or ["/"])[0]
+                if redirect_to not in {"/", "/settings"}:
+                    redirect_to = "/"
                 self.send_response(303)
-                self.send_header("Location", "/")
+                self.send_header("Location", redirect_to)
                 self.end_headers()
                 return
 

@@ -340,6 +340,8 @@ class WebAppHelpersTests(unittest.TestCase):
             )
             self.assertIn('aria-label="Sync downloads"', body)
             self.assertIn("action=\"/update\"", body)
+            self.assertNotIn('id="android-sync-button"', body)
+            self.assertNotIn('>📱</button>', body)
             self.assertIn("event.preventDefault();", body)
             self.assertIn("fetch('/update', { method: 'POST', keepalive: true })", body)
             self.assertIn("fetch('/update-status', { cache: 'no-store' })", body)
@@ -718,6 +720,8 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('name="settings_action" value="clear_summaries"', body)
         self.assertIn('Save Ollama configuration</button>', body)
         self.assertIn('name="settings_action" value="update_android_sync"', body)
+        self.assertIn('action="/android-sync?next=/settings"', body)
+        self.assertIn('Sync to Android now</button>', body)
         self.assertIn('ADB <code>', body)
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
@@ -1539,18 +1543,21 @@ class WebAppUpdateThreadTests(unittest.TestCase):
                 update_runner=_runner,
             )
 
-            started = trigger_background_update(state)
-            self.assertTrue(started)
+            with mock.patch("webapp.trigger_android_sync") as android_sync_mock:
+                started = trigger_background_update(state)
+                self.assertTrue(started)
 
-            started_again = trigger_background_update(state)
-            self.assertFalse(started_again)
+                started_again = trigger_background_update(state)
+                self.assertFalse(started_again)
 
-            deadline = time.time() + 2
-            while time.time() < deadline:
-                with state.update_status.lock:
-                    if not state.update_status.is_running and state.update_status.last_result == "ok":
-                        break
-                time.sleep(0.05)
+                deadline = time.time() + 2
+                while time.time() < deadline:
+                    with state.update_status.lock:
+                        if not state.update_status.is_running and state.update_status.last_result == "ok":
+                            break
+                    time.sleep(0.05)
+
+                android_sync_mock.assert_called_once_with(state, force=True)
 
             with state.update_status.lock:
                 self.assertEqual(state.update_status.last_result, "ok")
