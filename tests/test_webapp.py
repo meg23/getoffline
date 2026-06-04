@@ -340,6 +340,8 @@ class WebAppHelpersTests(unittest.TestCase):
             )
             self.assertIn('aria-label="Sync downloads"', body)
             self.assertIn("action=\"/update\"", body)
+            self.assertNotIn('id="android-sync-button"', body)
+            self.assertNotIn('>📱</button>', body)
             self.assertIn("event.preventDefault();", body)
             self.assertIn("fetch('/update', { method: 'POST', keepalive: true })", body)
             self.assertIn("fetch('/update-status', { cache: 'no-store' })", body)
@@ -704,16 +706,29 @@ class WebAppHelpersTests(unittest.TestCase):
                 "podcasts": [{"name": "Pod", "url": "https://example.com/rss", "subtitles": True}],
             }
         )
-        self.assertIn("YouTube cookie text", body)
+        self.assertIn("yt-dlp configuration", body)
         self.assertIn("/settings", body)
         self.assertIn("youtube_cookie_text", body)
         self.assertIn("Add YouTube source", body)
         self.assertIn("Add podcast source", body)
-        self.assertIn("Disable", body)
-        self.assertIn('name="source_action" value="edit"', body)
-        self.assertIn('name="media_type"', body)
-        self.assertIn('form="youtube-edit-0"', body)
-        self.assertIn('>Save</button>', body)
+        self.assertIn("General", body)
+        self.assertIn("Ollama configuration", body)
+        self.assertIn("Android push configuration", body)
+        self.assertIn('name="settings_action" value="update_ytdlp"', body)
+        self.assertIn('Save yt-dlp configuration</button>', body)
+        self.assertIn('name="settings_action" value="update_ollama"', body)
+        self.assertIn('name="settings_action" value="clear_summaries"', body)
+        self.assertIn('Save Ollama configuration</button>', body)
+        self.assertIn('name="settings_action" value="update_android_sync"', body)
+        self.assertIn('action="/android-sync?next=/settings"', body)
+        self.assertIn('Sync to Android now</button>', body)
+        self.assertIn('ADB <code>', body)
+        self.assertIn('name="settings_action" value="update_sources"', body)
+        self.assertIn('name="media_type_0"', body)
+        self.assertIn('name="enabled_0"', body)
+        self.assertIn('name="max_downloads_0"', body)
+        self.assertIn('Save YouTube sources</button>', body)
+        self.assertIn('Save podcast sources</button>', body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1528,18 +1543,21 @@ class WebAppUpdateThreadTests(unittest.TestCase):
                 update_runner=_runner,
             )
 
-            started = trigger_background_update(state)
-            self.assertTrue(started)
+            with mock.patch("webapp.trigger_android_sync") as android_sync_mock:
+                started = trigger_background_update(state)
+                self.assertTrue(started)
 
-            started_again = trigger_background_update(state)
-            self.assertFalse(started_again)
+                started_again = trigger_background_update(state)
+                self.assertFalse(started_again)
 
-            deadline = time.time() + 2
-            while time.time() < deadline:
-                with state.update_status.lock:
-                    if not state.update_status.is_running and state.update_status.last_result == "ok":
-                        break
-                time.sleep(0.05)
+                deadline = time.time() + 2
+                while time.time() < deadline:
+                    with state.update_status.lock:
+                        if not state.update_status.is_running and state.update_status.last_result == "ok":
+                            break
+                    time.sleep(0.05)
+
+                android_sync_mock.assert_called_once_with(state, force=True)
 
             with state.update_status.lock:
                 self.assertEqual(state.update_status.last_result, "ok")

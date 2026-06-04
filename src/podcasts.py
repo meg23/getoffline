@@ -255,11 +255,13 @@ def _download_podcasts_in_process(config, downloaded_items):
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 entry_subtitles_enabled = False
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
+            source_max_downloads = int(entry.get("max_downloads") or defaults.get("max_downloads") or 3)
+            source_max_downloads = max(1, source_max_downloads)
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)
 
             feed = feedparser.parse(url)
-            entries = feed.entries[: defaults["max_downloads"]]
+            entries = feed.entries[:source_max_downloads]
 
             episode_jobs = []
             for ep in entries:

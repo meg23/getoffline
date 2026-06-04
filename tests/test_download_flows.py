@@ -97,6 +97,43 @@ class DownloadFlowTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
+
+    def test_source_max_downloads_limits_youtube_playlistend(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["defaults"]["max_downloads"] = 9
+            config["defaults"]["playlist_end"] = 9
+            config["youtube"][0]["max_downloads"] = 2
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            ):
+                youtube.download_youtube_items(config, [])
+
+            self.assertEqual(FakeYoutubeDL.instances[0].opts["playlistend"], 2)
+
+    def test_source_max_downloads_limits_podcast_feed_entries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["defaults"]["max_downloads"] = 3
+            config["podcasts"][0]["max_downloads"] = 2
+            fake_feed = SimpleNamespace(
+                entries=[
+                    SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-1.mp3")]),
+                    SimpleNamespace(title="Episode 2", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-2.mp3")]),
+                    SimpleNamespace(title="Episode 3", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-3.mp3")]),
+                ]
+            )
+
+            downloaded_items = []
+            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+                podcasts.download_podcasts(config, downloaded_items)
+
+            self.assertEqual(len(FakeYoutubeDL.instances), 2)
+            self.assertEqual(len([item for item in downloaded_items if item.startswith("Podcast:")]), 2)
+
     def test_sample_config_single_youtube_and_podcast_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)

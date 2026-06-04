@@ -538,6 +538,8 @@ def _download_youtube_items_in_process(config, downloaded_items):
             download_type = entry.get("type", "audio").lower()
             entry_subtitles_enabled = entry.get("subtitles", True)
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
+            source_max_downloads = int(entry.get("max_downloads") or defaults.get("max_downloads") or defaults.get("playlist_end") or 3)
+            source_max_downloads = max(1, source_max_downloads)
             should_generate_subtitles = entry_subtitles_enabled
             subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "subprocess"))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
@@ -799,7 +801,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     log.info("Post-processed for %s via %s: %s", name, postprocessor, path.name)
 
             ydl_opts = {
-                "playlistend": defaults["playlist_end"],
+                "playlistend": source_max_downloads,
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
