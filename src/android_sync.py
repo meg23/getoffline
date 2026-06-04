@@ -26,6 +26,10 @@ class AndroidSyncConfig:
     destination: str = "/sdcard/Movies/GetOffline"
     max_items: int = 10
     include_subtitles: bool = True
+    include_unplayed: bool = True
+    include_started: bool = True
+    include_played: bool = False
+    exclude_regex: str = ""
 
 
 @dataclass
@@ -69,6 +73,10 @@ def config_from_defaults(defaults: dict) -> AndroidSyncConfig:
         or "/sdcard/Movies/GetOffline",
         max_items=max(1, max_items),
         include_subtitles=_coerce_bool(defaults.get("android_sync_include_subtitles", "1")),
+        include_unplayed=_coerce_bool(defaults.get("android_sync_include_unplayed", "1")),
+        include_started=_coerce_bool(defaults.get("android_sync_include_started", "1")),
+        include_played=_coerce_bool(defaults.get("android_sync_include_played", "0")),
+        exclude_regex=str(defaults.get("android_sync_exclude_regex") or "").strip(),
     )
 
 
@@ -405,6 +413,69 @@ def _remote_subtitle_paths_for_media(remote_media_path: str) -> List[str]:
     return paths
 
 
+def _syncdb_remote_path(destination: str) -> str:
+    return f"{destination.rstrip('/')}/syncdb.txt"
+
+
+def _read_remote_syncdb(
+    adb_executable: str,
+    device_serial: str,
+    destination: str,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> set[str]:
+    remote_syncdb_path = _syncdb_remote_path(destination)
+    try:
+        completed = _run_adb_command(
+            [adb_executable, "-s", device_serial, "shell", f"cat {_remote_quote(remote_syncdb_path)} 2>/dev/null || true"],
+            description=f"reading Android sync history {remote_syncdb_path}",
+            timeout=30,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        log.warning("Android sync history read failed; continuing with empty history: %s", exc)
+        return set()
+    if int(getattr(completed, "returncode", 1) or 0) != 0:
+        log.warning("Android sync history read returned non-zero; continuing with empty history: %s", _combined_output(completed) or "no output")
+        return set()
+    return {line.strip() for line in str(getattr(completed, "stdout", "") or "").splitlines() if line.strip()}
+
+
+def _write_remote_syncdb(
+    adb_executable: str,
+    device_serial: str,
+    destination: str,
+    synced_paths: Iterable[str],
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> None:
+    remote_syncdb_path = _syncdb_remote_path(destination)
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as handle:
+            for path in sorted({str(path).strip() for path in synced_paths if str(path).strip()}):
+                handle.write(path + "\n")
+            local_syncdb_path = Path(handle.name)
+        completed = _run_adb_command(
+            [adb_executable, "-s", device_serial, "push", str(local_syncdb_path), remote_syncdb_path],
+            description="pushing Android sync history",
+            timeout=120,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        _append_error(result, f"Android sync history push failed: {exc}")
+    except OSError as exc:
+        _append_error(result, f"Android sync history generation failed: {exc}")
+    else:
+        if int(getattr(completed, "returncode", 1) or 0) != 0:
+            _append_error(result, _combined_output(completed) or "Android sync history push failed")
+        else:
+            log.info("Android sync history copied: remote=%s", remote_syncdb_path)
+    finally:
+        try:
+            local_syncdb_path.unlink(missing_ok=True)
+        except (NameError, OSError):
+            pass
+
+
 def delete_items_from_android(
     items: Iterable[AndroidSyncItem],
     config: AndroidSyncConfig,
@@ -533,6 +604,8 @@ def sync_items_to_android(
 
     result.device_serial = device_serial
     vlc_playlist_entries: List[Tuple[AndroidSyncItem, str]] = []
+    syncdb_paths: set[str] = set()
+    syncdb_changed = False
     try:
         mkdir = _run_adb_command(
             [adb_executable, "-s", device_serial, "shell", f"mkdir -p {_remote_quote(destination)}"],
@@ -552,6 +625,8 @@ def sync_items_to_android(
         _append_error(result, result.message)
         return result
 
+    syncdb_paths = _read_remote_syncdb(adb_executable, device_serial, destination, runner)
+
     for item in sync_items:
         result.attempted += 1
         local_path = item.file_path.expanduser().resolve()
@@ -568,6 +643,12 @@ def sync_items_to_android(
             remote_media_path,
             local_path.stat().st_size,
         )
+        if remote_media_path in syncdb_paths:
+            result.skipped += 1
+            vlc_playlist_entries.append((item, remote_media_path))
+            log.info("Android sync item skipped: row_id=%s remote path already recorded in syncdb.txt", item.row_id)
+            continue
+
         remote_exists = False
         try:
             exists = _run_adb_command(
@@ -586,6 +667,8 @@ def sync_items_to_android(
         push_source_path = _copy_with_embedded_metadata(local_path, item, runner)
         if remote_exists and push_source_path == local_path:
             result.skipped += 1
+            syncdb_paths.add(remote_media_path)
+            syncdb_changed = True
             vlc_playlist_entries.append((item, remote_media_path))
             log.info("Android sync item skipped: row_id=%s remote file already exists and metadata refresh is unavailable", item.row_id)
             continue
@@ -614,6 +697,8 @@ def sync_items_to_android(
         _rescan_android_media(adb_executable, device_serial, remote_media_path, runner)
         result.copied += 1
         result.copied_files.append(remote_media_path)
+        syncdb_paths.add(remote_media_path)
+        syncdb_changed = True
         vlc_playlist_entries.append((item, remote_media_path))
         log.info("Android sync item copied: row_id=%s remote=%s", item.row_id, remote_media_path)
 
@@ -647,6 +732,9 @@ def sync_items_to_android(
         else:
             log.info("Android sync subtitle copied: row_id=%s remote=%s", item.row_id, remote_subtitle_path)
 
+
+    if syncdb_changed or not syncdb_paths:
+        _write_remote_syncdb(adb_executable, device_serial, destination, syncdb_paths, result, runner)
 
     if vlc_playlist_entries:
         remote_playlist_path = f"{destination}/GetOffline.xspf"
