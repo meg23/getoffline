@@ -3880,6 +3880,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     android_sync_adb_path_raw = str(defaults.get("android_sync_adb_path") or "adb")
     android_sync_adb_path = html.escape(android_sync_adb_path_raw)
     resolved_android_sync_adb_path = html.escape(str(shutil.which(android_sync_adb_path_raw) or "not found"))
+    android_sync_connection_mode_raw = str(defaults.get("android_sync_connection_mode") or "usb").strip().lower()
+    android_sync_usb_selected = " selected" if android_sync_connection_mode_raw != "wifi" else ""
+    android_sync_wifi_selected = " selected" if android_sync_connection_mode_raw == "wifi" else ""
+    android_sync_wifi_address = html.escape(str(defaults.get("android_sync_wifi_address") or ""))
     android_sync_destination = html.escape(str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"))
     android_sync_max_items = html.escape(str(defaults.get("android_sync_max_items") or "10"))
     android_sync_include_subtitles_checked = default_checked("android_sync_include_subtitles", True)
@@ -4278,6 +4282,17 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           <div>
             <label for="android_sync_adb_path">ADB executable</label>
             <input id="android_sync_adb_path" name="android_sync_adb_path" value="{android_sync_adb_path}" required />
+          </div>
+          <div>
+            <label for="android_sync_connection_mode">ADB connection</label>
+            <select id="android_sync_connection_mode" name="android_sync_connection_mode">
+              <option value="usb"{android_sync_usb_selected}>USB / already connected device</option>
+              <option value="wifi"{android_sync_wifi_selected}>Wi-Fi (connect to paired device)</option>
+            </select>
+          </div>
+          <div>
+            <label for="android_sync_wifi_address">Wi-Fi device address</label>
+            <input id="android_sync_wifi_address" name="android_sync_wifi_address" value="{android_sync_wifi_address}" placeholder="192.168.1.50:5555" />
           </div>
           <div>
             <label for="android_sync_destination">Phone folder</label>
@@ -5141,6 +5156,8 @@ def make_handler(state: AppState):
                     updates = {
                         "android_sync_enabled": "1" if (form.get("android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
                         "android_sync_adb_path": (form.get("android_sync_adb_path") or ["adb"])[0],
+                        "android_sync_connection_mode": (form.get("android_sync_connection_mode") or ["usb"])[0],
+                        "android_sync_wifi_address": (form.get("android_sync_wifi_address") or [""])[0],
                         "android_sync_destination": (form.get("android_sync_destination") or ["/sdcard/Movies/GetOffline"])[0],
                         "android_sync_max_items": (form.get("android_sync_max_items") or ["10"])[0],
                         "android_sync_include_subtitles": "1" if (form.get("android_sync_include_subtitles") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
@@ -5152,7 +5169,7 @@ def make_handler(state: AppState):
                     sanitized_updates = {
                         k: str(v).strip()
                         for k, v in updates.items()
-                        if str(v).strip() or k == "android_sync_exclude_regex"
+                        if str(v).strip() or k in {"android_sync_exclude_regex", "android_sync_wifi_address"}
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
                 elif settings_action == "update_telemetry":

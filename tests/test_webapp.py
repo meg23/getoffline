@@ -722,6 +722,9 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('name="settings_action" value="update_android_sync"', body)
         self.assertIn('action="/android-sync?next=/settings"', body)
         self.assertIn('Sync to Android now</button>', body)
+        self.assertIn('name="android_sync_connection_mode"', body)
+        self.assertIn('name="android_sync_wifi_address"', body)
+        self.assertIn('Wi-Fi (connect to paired device)', body)
         self.assertIn('ADB <code>', body)
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
@@ -1857,6 +1860,42 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(len(metadata_cmds), 1)
             self.assertEqual(len(media_pushes), 1)
             self.assertNotEqual(Path(media_pushes[0][-2]), media)
+
+    def test_sync_items_to_android_connects_to_paired_wifi_device(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if cmd[:3] == ["/usr/bin/adb", "connect", "192.168.1.50:5555"]:
+                    return SimpleNamespace(stdout="connected to 192.168.1.50:5555", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\n192.168.1.50:5555\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(
+                        enabled=True,
+                        connection_mode="wifi",
+                        wifi_address="192.168.1.50:5555",
+                        destination="/sdcard/Movies/GetOffline",
+                        max_items=10,
+                    ),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(result.device_serial, "192.168.1.50:5555")
+            self.assertEqual(calls[0], ["/usr/bin/adb", "connect", "192.168.1.50:5555"])
+            self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "192.168.1.50:5555", "push"] for cmd in calls))
 
     def test_delete_items_from_android_removes_remote_media_and_subtitles(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, delete_items_from_android
