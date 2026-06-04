@@ -375,7 +375,8 @@ DEFAULT_APP_CONFIG = {
     "android_sync_include_played": "0",
     "android_sync_exclude_regex": "",
     "syncthing_android_sync_enabled": "0",
-    "syncthing_android_sync_local_folder": "./syncthing-android",
+    "syncthing_android_sync_use_output_root": "1",
+    "syncthing_android_sync_local_folder": "",
     "syncthing_android_sync_android_destination": "/sdcard/Movies/GetOffline",
     "syncthing_android_sync_max_items": "10",
     "syncthing_android_sync_include_subtitles": "1",
@@ -383,7 +384,6 @@ DEFAULT_APP_CONFIG = {
     "syncthing_android_sync_include_started": "1",
     "syncthing_android_sync_include_played": "0",
     "syncthing_android_sync_exclude_regex": "",
-    "syncthing_android_sync_prune": "1",
 }
 
 
@@ -566,7 +566,8 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "android_sync_include_played": str(defaults.get("android_sync_include_played") or "0").strip().lower() in {"1", "true", "yes", "on"},
             "android_sync_exclude_regex": str(defaults.get("android_sync_exclude_regex") or ""),
             "syncthing_android_sync_enabled": str(defaults.get("syncthing_android_sync_enabled") or "0").strip().lower() in {"1", "true", "yes", "on"},
-            "syncthing_android_sync_local_folder": str(defaults.get("syncthing_android_sync_local_folder") or "./syncthing-android"),
+            "syncthing_android_sync_use_output_root": str(defaults.get("syncthing_android_sync_use_output_root") or "1").strip().lower() in {"1", "true", "yes", "on"},
+            "syncthing_android_sync_local_folder": str(defaults.get("syncthing_android_sync_local_folder") or ""),
             "syncthing_android_sync_android_destination": str(defaults.get("syncthing_android_sync_android_destination") or "/sdcard/Movies/GetOffline"),
             "syncthing_android_sync_max_items": _coerce_int(defaults.get("syncthing_android_sync_max_items"), 10),
             "syncthing_android_sync_include_subtitles": str(defaults.get("syncthing_android_sync_include_subtitles") or "1").strip().lower() in {"1", "true", "yes", "on"},
@@ -574,7 +575,6 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "syncthing_android_sync_include_started": str(defaults.get("syncthing_android_sync_include_started") or "1").strip().lower() in {"1", "true", "yes", "on"},
             "syncthing_android_sync_include_played": str(defaults.get("syncthing_android_sync_include_played") or "0").strip().lower() in {"1", "true", "yes", "on"},
             "syncthing_android_sync_exclude_regex": str(defaults.get("syncthing_android_sync_exclude_regex") or ""),
-            "syncthing_android_sync_prune": str(defaults.get("syncthing_android_sync_prune") or "1").strip().lower() in {"1", "true", "yes", "on"},
             "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
             "telemetry_dumps_enabled": str(
                 defaults.get("telemetry_dumps_enabled", defaults.get("heapdump_enabled", "0")) or "0"

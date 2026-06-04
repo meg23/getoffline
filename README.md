@@ -16,7 +16,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
-- Optional Android offline sync that copies unplayed media to a connected phone with `adb push` or stages media in a Syncthing-shared folder
+- Optional Android offline sync that copies unplayed media to a connected phone with `adb push` or uses Syncthing ignore patterns to sync selected files from the main downloads folder
 
 ## Requirements
 
@@ -101,9 +101,9 @@ When enabled, GetOffline periodically checks for an authorized connected phone u
 
 ### Syncthing Android sync
 
-If you prefer not to use `adb`, configure **Syncthing Android configuration** separately in Settings. Choose a local folder that is already shared to your phone by Syncthing, then enable **Auto-stage for Syncthing Android**. GetOffline copies the selected unplayed/started/played media into that local shared folder, optionally includes subtitles, writes `syncdb.txt` to track staged files, prunes stale staged files when enabled, and writes `GetOffline.xspf` with Android file paths for VLC resume start times.
+If you prefer not to use `adb`, configure **Syncthing Android configuration** separately in Settings. By default, GetOffline expects Syncthing to share your main downloads folder (`output_root`) and then manages a generated `.stignore-getoffline` include list from the selected unplayed/started/played media. That means the media stays in the main directory; Syncthing receives ignore patterns that include only the chosen media, optional subtitles, `syncdb.txt`, and `GetOffline.xspf`.
 
-On the phone, share the same folder with the Syncthing Android app and set **Android folder path** to the location where that folder appears on Android, such as `/sdcard/Movies/GetOffline`. Syncthing performs the device transfer; GetOffline only stages files locally. Manual staging is available from **Stage Syncthing Android files now** in Settings, and automatic staging runs after downloads and on the same periodic interval as the `adb` sync.
+On the phone, share the same folder with the Syncthing Android app and set **Android folder path** to the location where that shared root appears on Android, such as `/sdcard/Movies/GetOffline`. GetOffline updates the include list after downloads and on the same periodic interval as the `adb` sync. You can also run **Update Syncthing Android include list now** in Settings. If you need a different Syncthing root, uncheck **Use main downloads folder as Syncthing root** and provide an alternate folder; only files already under that root can be included.
 
 To build a standalone executable with Pex:
 
