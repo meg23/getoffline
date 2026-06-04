@@ -718,6 +718,7 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('name="settings_action" value="clear_summaries"', body)
         self.assertIn('Save Ollama configuration</button>', body)
         self.assertIn('name="settings_action" value="update_android_sync"', body)
+        self.assertIn('ADB <code>', body)
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
         self.assertIn('name="enabled_0"', body)

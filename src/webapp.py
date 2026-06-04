@@ -3880,7 +3880,9 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         return " checked" if checked else ""
 
     android_sync_enabled_checked = default_checked("android_sync_enabled")
-    android_sync_adb_path = html.escape(str(defaults.get("android_sync_adb_path") or "adb"))
+    android_sync_adb_path_raw = str(defaults.get("android_sync_adb_path") or "adb")
+    android_sync_adb_path = html.escape(android_sync_adb_path_raw)
+    resolved_android_sync_adb_path = html.escape(str(shutil.which(android_sync_adb_path_raw) or "not found"))
     android_sync_destination = html.escape(str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"))
     android_sync_max_items = html.escape(str(defaults.get("android_sync_max_items") or "10"))
     android_sync_include_subtitles_checked = default_checked("android_sync_include_subtitles", True)
@@ -4293,6 +4295,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <input id="android_sync_exclude_regex" name="android_sync_exclude_regex" value="{android_sync_exclude_regex}" placeholder="trailer|sample" />
           </div>
         </div>
+        <p><strong>Resolved path:</strong> ADB <code>{resolved_android_sync_adb_path}</code></p>
         <div class="actions">
           <button type="submit" class="primary">Save Android push configuration</button>
         </div>
