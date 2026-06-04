@@ -16,6 +16,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
+- Optional Android offline sync that copies unplayed media to a connected phone with `adb push`
 
 ## Requirements
 
@@ -84,6 +85,17 @@ Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`,
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
 Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
+
+## Android offline sync
+
+GetOffline can copy unplayed downloads to an Android phone so they are available to watch or listen to offline. It uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
+
+1. Install Android platform tools so `adb` is available on the computer running GetOffline.
+2. Enable Developer options and USB debugging on the phone, then authorize the computer when Android prompts you.
+3. Open `http://127.0.0.1:8080/settings` and enable **Auto-sync to Android**.
+4. Choose the phone folder, for example `/sdcard/Movies/GetOffline`, and the maximum number of unplayed items to copy each sync.
+
+When enabled, GetOffline periodically checks for an authorized connected phone using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The phone button in the library toolbar starts a manual Android sync immediately. Files already present in the destination folder are skipped unless GetOffline can refresh them with embedded metadata. When `ffmpeg` is available, GetOffline tags the copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image before pushing it, then asks Android's media scanner to rescan the pushed file. Each sync also writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
 To build a standalone executable with Pex:
 

@@ -1,5 +1,7 @@
+import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -24,6 +26,9 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
+    _delete_downloaded_artifacts_for_row,
+    _mark_download_played_and_delete_artifacts,
+    _run_android_delete_job,
     _infer_media_type_for_redownload,
     fetch_downloaded_media_row_by_id,
     _stream_media,
@@ -797,7 +802,117 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(Path(rows[0].file_path), normalized_media_path)
 
+    def test_delete_downloaded_artifacts_for_played_row_removes_media_and_sidecars(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            subtitle = root / "episode.srt"
+            thumbnail = root / "episode.webp"
+            outside_artwork = root.parent / "outside-art.jpg"
+            media.write_text("audio", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
+            thumbnail.write_text("thumbnail", encoding="utf-8")
+            outside_artwork.write_text("outside", encoding="utf-8")
+            row = SimpleNamespace(
+                row_id=10,
+                file_path=str(media),
+                subtitle_path=str(subtitle),
+                raw_metadata_json=json.dumps({"artwork_path": str(thumbnail), "thumbnail_path": str(outside_artwork)}),
+            )
 
+            deleted = _delete_downloaded_artifacts_for_row(root, row)
+
+            self.assertEqual(deleted, 3)
+            self.assertFalse(media.exists())
+            self.assertFalse(subtitle.exists())
+            self.assertFalse(thumbnail.exists())
+            self.assertTrue(outside_artwork.exists())
+
+    def test_mark_download_played_from_webapp_deletes_local_media(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media = root / "episode.mp4"
+            thumbnail = root / "episode.jpg"
+            media.write_text("video", encoding="utf-8")
+            thumbnail.write_text("thumbnail", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "youtube",
+                    "source_name": "Channel",
+                    "item_uid": "uid-play-delete",
+                    "item_url": "https://youtube.com/watch?v=uid-play-delete",
+                    "media_url": "https://youtube.com/watch?v=uid-play-delete",
+                    "title": "Episode",
+                    "file_path": str(media),
+                    "file_ext": "mp4",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                    "raw_metadata": {"artwork_path": str(thumbnail)},
+                },
+            )
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {}},
+                update_runner=lambda config, items: None,
+            )
+            row = fetch_downloaded_media_rows(db_path, root)[0]
+
+            with mock.patch("webapp._trigger_android_delete_for_rows") as android_delete_mock:
+                updated = _mark_download_played_and_delete_artifacts(state, row.row_id, played=True)
+
+            self.assertTrue(updated)
+            android_delete_mock.assert_called_once()
+            self.assertFalse(media.exists())
+            self.assertFalse(thumbnail.exists())
+            updated_row = fetch_downloaded_media_row_by_id(db_path, row.row_id)
+            self.assertIsNotNone(updated_row)
+            self.assertTrue(updated_row.played)
+
+    def test_run_android_delete_job_deletes_remote_played_media_even_when_auto_sync_disabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+            state = AppState(
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                config={
+                    "defaults": {
+                        "android_sync_enabled": "0",
+                        "android_sync_adb_path": "adb",
+                        "android_sync_destination": "/sdcard/Movies/GetOffline",
+                    }
+                },
+                update_runner=lambda config, items: None,
+            )
+            row = SimpleNamespace(
+                row_id=99,
+                file_path=str(media),
+                title="Episode",
+                source_name="Channel",
+                source_type="youtube",
+                subtitle_path=None,
+                last_position_seconds=0.0,
+            )
+
+            with mock.patch("webapp.delete_items_from_android") as delete_mock:
+                delete_mock.return_value = SimpleNamespace(message="deleted 1", copied=1, failed=0, device_serial="ABC123")
+                _run_android_delete_job(state, [row])
+
+            delete_mock.assert_called_once()
+            items_arg, config_arg = delete_mock.call_args.args
+            self.assertTrue(config_arg.enabled)
+            self.assertEqual(config_arg.destination, "/sdcard/Movies/GetOffline")
+            self.assertEqual(len(items_arg), 1)
+            self.assertEqual(items_arg[0].row_id, 99)
+            self.assertEqual(items_arg[0].title, "Episode")
+            self.assertEqual(items_arg[0].source_name, "Channel")
+            self.assertEqual(items_arg[0].file_path, media.resolve())
 
     def test_mark_download_played_updates_row_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1430,6 +1545,325 @@ class WebAppUpdateThreadTests(unittest.TestCase):
                 self.assertEqual(state.update_status.last_result, "ok")
                 self.assertEqual(state.update_status.last_items_count, 1)
             self.assertEqual(calls, ["run"])
+
+
+class AndroidSyncTests(unittest.TestCase):
+    def test_android_sync_items_only_include_unplayed_existing_media(self):
+        from webapp import _android_sync_items_from_rows
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unplayed = root / "unplayed.mp4"
+            played = root / "played.mp4"
+            artwork = root / "unplayed.webp"
+            unplayed.write_text("video", encoding="utf-8")
+            played.write_text("video", encoding="utf-8")
+            artwork.write_text("thumbnail", encoding="utf-8")
+            rows = [
+                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=42.5, raw_metadata_json=json.dumps({"artwork_path": str(artwork), "artwork_url": "https://example.com/art.jpg"})),
+                SimpleNamespace(row_id=2, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=3.0, raw_metadata_json=None),
+                SimpleNamespace(row_id=3, played=False, file_path=str(root / "missing.mp4"), title="Missing", source_name="Channel", source_type="youtube", subtitle_path=None, last_position_seconds=9.0, raw_metadata_json=None),
+            ]
+
+            items = _android_sync_items_from_rows(rows, root, max_items=10)
+
+            self.assertEqual([item.row_id for item in items], [1])
+            self.assertEqual(items[0].file_path, unplayed.resolve())
+            self.assertEqual(items[0].artwork_path, artwork.resolve())
+            self.assertEqual(items[0].artwork_url, "https://example.com/art.jpg")
+            self.assertAlmostEqual(items[0].position_seconds, 42.5)
+
+    def test_sync_items_to_android_pushes_unplayed_file(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+            calls = []
+            playlist_payloads = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-media", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                if "push" in cmd and str(cmd[-1]).endswith("GetOffline.xspf"):
+                    playlist_payloads.append(Path(cmd[-2]).read_text(encoding="utf-8"))
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media, position_seconds=97.25)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(result.device_serial, "ABC123")
+            self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "ABC123", "push"] for cmd in calls))
+            metadata_cmds = []
+            media_pushes = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+                if "push" in cmd and str(cmd[-1]).endswith("Episode.mp4"):
+                    media_pushes.append(cmd)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertIn("title=Episode", metadata_cmds[0])
+            self.assertIn("artist=Channel", metadata_cmds[0])
+            self.assertIn("album_artist=Channel", metadata_cmds[0])
+            self.assertIn("-metadata:s:a:0", metadata_cmds[0])
+            self.assertIn("comment=GetOffline row_id=1 position_seconds=97.250", metadata_cmds[0])
+            self.assertTrue(any("MEDIA_SCANNER_SCAN_FILE" in str(part) for cmd in calls for part in cmd))
+            self.assertEqual(len(media_pushes), 1)
+            self.assertNotEqual(Path(media_pushes[0][-2]), media)
+            self.assertIn(["/usr/bin/adb", "-s", "ABC123", "shell", "mkdir -p '/sdcard/Movies/GetOffline'"], calls)
+            self.assertFalse(any(cmd[3:6] == ["shell", "sh", "-c"] for cmd in calls))
+            self.assertEqual(result.vlc_playlist_path, "/sdcard/Movies/GetOffline/GetOffline.xspf")
+            self.assertEqual(len(playlist_payloads), 1)
+            self.assertIn("<title>Episode</title>", playlist_payloads[0])
+            self.assertIn("<creator>Channel</creator>", playlist_payloads[0])
+            self.assertIn("<vlc:option>start-time=97</vlc:option>", playlist_payloads[0])
+            self.assertIn("position_seconds=97.250", playlist_payloads[0])
+
+    def test_sync_items_to_android_embeds_album_art_for_podcast_audio(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        class FakeArtworkResponse:
+            headers = {"Content-Type": "image/jpeg"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size):
+                return b"fake-jpeg"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-audio", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            def fake_which(name):
+                return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
+
+            with mock.patch("android_sync.shutil.which", side_effect=fake_which), mock.patch(
+                "android_sync.urllib.request.urlopen", return_value=FakeArtworkResponse()
+            ) as urlopen_mock:
+                result = sync_items_to_android(
+                    [
+                        AndroidSyncItem(
+                            row_id=7,
+                            title="Podcast Episode",
+                            source_name="Podcast Show",
+                            file_path=media,
+                            position_seconds=12.5,
+                            artwork_url="https://example.com/art.jpg",
+                        )
+                    ],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            metadata_cmds = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertIn("artist=Podcast Show", metadata_cmds[0])
+            self.assertIn("album=Podcast Show", metadata_cmds[0])
+            self.assertIn("genre=Podcast", metadata_cmds[0])
+            self.assertIn("-metadata:s:a:0", metadata_cmds[0])
+            self.assertIn("-disposition:v:0", metadata_cmds[0])
+            self.assertIn("attached_pic", metadata_cmds[0])
+            self.assertIn("-c:v", metadata_cmds[0])
+            self.assertIn("mjpeg", metadata_cmds[0])
+            self.assertIn("-id3v2_version", metadata_cmds[0])
+            urlopen_mock.assert_called_once_with("https://example.com/art.jpg", timeout=20)
+
+    def test_sync_items_to_android_uses_downloaded_thumbnail_sidecar_for_album_art(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            artwork = Path(tmpdir) / "episode.webp"
+            media.write_text("audio", encoding="utf-8")
+            artwork.write_text("thumbnail", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-audio", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            def fake_which(name):
+                return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
+
+            with mock.patch("android_sync.shutil.which", side_effect=fake_which), mock.patch("android_sync.urllib.request.urlopen") as urlopen_mock:
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=8, title="Episode", source_name="Channel", file_path=media, artwork_path=artwork)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            metadata_cmds = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertIn(str(artwork.resolve()), metadata_cmds[0])
+            self.assertIn("mjpeg", metadata_cmds[0])
+            urlopen_mock.assert_not_called()
+
+    def test_sync_items_to_android_refreshes_existing_remote_file_when_metadata_available(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if "-metadata" in cmd:
+                    Path(cmd[-1]).write_text("tagged-audio", encoding="utf-8")
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            def fake_which(name):
+                return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
+
+            with mock.patch("android_sync.shutil.which", side_effect=fake_which):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=9, title="Existing Episode", source_name="Podcast Show", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            metadata_cmds = []
+            media_pushes = []
+            for cmd in calls:
+                if "-metadata" in cmd:
+                    metadata_cmds.append(cmd)
+                if "push" in cmd and str(cmd[-1]).endswith("Existing Episode.mp3"):
+                    media_pushes.append(cmd)
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(result.skipped, 0)
+            self.assertEqual(len(metadata_cmds), 1)
+            self.assertEqual(len(media_pushes), 1)
+            self.assertNotEqual(Path(media_pushes[0][-2]), media)
+
+    def test_delete_items_from_android_removes_remote_media_and_subtitles(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, delete_items_from_android
+
+        calls = []
+
+        def fake_runner(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[-1] == "devices":
+                return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+            return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+        with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+            result = delete_items_from_android(
+                [AndroidSyncItem(row_id=5, title="Episode", source_name="Channel", file_path=Path("episode.mp4"))],
+                AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                runner=fake_runner,
+            )
+
+        rm_commands = [cmd for cmd in calls if len(cmd) >= 5 and cmd[3] == "shell" and str(cmd[4]).startswith("rm -f")]
+        self.assertEqual(result.copied, 1)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(len(rm_commands), 1)
+        self.assertIn("Channel - Episode.mp4", rm_commands[0][4])
+        self.assertIn("Channel - Episode.srt", rm_commands[0][4])
+        self.assertIn("Channel - Episode.vtt", rm_commands[0][4])
+
+    def test_sync_items_to_android_reports_mkdir_failure(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+
+            def fake_runner(cmd, **kwargs):
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("mkdir -p" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="permission denied", returncode=1)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"), mock.patch("android_sync.log.warning") as warning_mock:
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 0)
+            self.assertEqual(result.failed, 1)
+            self.assertIn("unable to prepare Android folder", result.message)
+            self.assertTrue(result.errors)
+            warning_mock.assert_called()
+
+    def test_sync_items_to_android_handles_push_timeout(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+
+            def fake_runner(cmd, **kwargs):
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("mkdir -p" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=0)
+                if any("test -f" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="", stderr="", returncode=1)
+                if "push" in cmd:
+                    raise subprocess.TimeoutExpired(cmd, timeout=300)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 0)
+            self.assertEqual(result.failed, 1)
+            self.assertIn("timed out", result.errors[0])
+
 
 
 if __name__ == "__main__":

@@ -84,6 +84,7 @@ def _episode_payload(
     subtitle_path,
     download_status,
     error_message=None,
+    artwork_url=None,
 ):
     file_value = Path(file_path).expanduser().resolve() if file_path else None
     file_size = file_value.stat().st_size if file_value and file_value.exists() else None
@@ -125,10 +126,96 @@ def _episode_payload(
             "media_url": media_url,
             "title": title,
             "description": description,
+            "artwork_url": artwork_url,
+            "image_url": artwork_url,
         },
     }
 
 
+
+
+def _image_href(value: object) -> str:
+    if isinstance(value, dict):
+        return str(value.get("href") or value.get("url") or "").strip()
+    href = getattr(value, "href", None)
+    if href:
+        return str(href).strip()
+    url = getattr(value, "url", None)
+    if url:
+        return str(url).strip()
+    return ""
+
+
+def _image_dimension(value: object, key: str) -> int:
+    raw_value = None
+    if isinstance(value, dict):
+        raw_value = value.get(key)
+    else:
+        raw_value = getattr(value, key, None)
+    try:
+        return max(0, int(float(str(raw_value or "0").strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _append_artwork_candidate(candidates: list, value: object, source_priority: int = 0) -> None:
+    image_url = _image_href(value)
+    if not image_url:
+        return
+    width = _image_dimension(value, "width")
+    height = _image_dimension(value, "height")
+    candidates.append({"url": image_url, "width": width, "height": height, "source_priority": source_priority})
+
+
+def _candidate_values(container: object, key: str) -> list:
+    value = None
+    if isinstance(container, dict):
+        value = container.get(key)
+    elif container is not None:
+        value = getattr(container, key, None)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _append_podcast_artwork_candidates(candidates: list, value: object) -> None:
+    if value is None:
+        return
+    for key in ("image", "itunes_image"):
+        for image_value in _candidate_values(value, key):
+            _append_artwork_candidate(candidates, image_value, source_priority=2)
+    for key in ("media_thumbnail", "media_thumbnail_detail", "media_content"):
+        for image_value in _candidate_values(value, key):
+            _append_artwork_candidate(candidates, image_value, source_priority=1)
+
+
+def _artwork_quality_score(candidate: dict) -> tuple:
+    width = int(candidate.get("width") or 0)
+    height = int(candidate.get("height") or 0)
+    url = str(candidate.get("url") or "")
+    area = width * height
+    source_priority = int(candidate.get("source_priority") or 0)
+    if area <= 0:
+        area = max(width, height)
+    if area <= 0:
+        area = source_priority * 1_000_000
+    format_bonus = 0
+    lower_url = url.lower()
+    if ".jpg" in lower_url or ".jpeg" in lower_url or ".png" in lower_url:
+        format_bonus = 1
+    return (area, source_priority, max(width, height), format_bonus, len(url))
+
+
+def _podcast_artwork_url(feed: object, entry: object) -> str:
+    candidates = []
+    _append_podcast_artwork_candidates(candidates, entry)
+    _append_podcast_artwork_candidates(candidates, getattr(feed, "feed", None))
+    if not candidates:
+        return ""
+    best_candidate = max(candidates, key=_artwork_quality_score)
+    return str(best_candidate.get("url") or "").strip()
 
 
 def _entry_title(entry: object) -> str:
@@ -226,6 +313,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                         "subtitle_offset_seconds": subtitle_offset_seconds,
                         "episode_title": episode_title,
                         "description": _entry_summary(ep),
+                        "artwork_url": _podcast_artwork_url(feed, ep),
                         "mp3_url": mp3_url,
                         "final_audio": Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}",
                         "ydl_opts": ydl_opts,
@@ -260,6 +348,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                                 subtitle_path=None,
                                 download_status="failed",
                                 error_message=str(last_download_error),
+                                artwork_url=job.get("artwork_url"),
                             ),
                         )
                         log.error(
@@ -297,6 +386,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                             subtitle_enabled=job["entry_subtitles_enabled"],
                             subtitle_path=subtitle_path,
                             download_status="downloaded",
+                            artwork_url=job.get("artwork_url"),
                         ),
                     )
                     generate_missing_summaries(db_path, limit=5, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"), timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90))

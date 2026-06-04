@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from android_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items_to_android
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -103,6 +104,7 @@ class MediaRow:
     last_position_seconds: float = 0.0
     subtitle_path: Optional[str] = None
     summary_text: Optional[str] = None
+    raw_metadata_json: Optional[str] = None
 
 
 @dataclass
@@ -117,12 +119,25 @@ class UpdateStatus:
 
 
 @dataclass
+class AndroidSyncStatus:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    is_running: bool = False
+    last_started_at: Optional[float] = None
+    last_finished_at: Optional[float] = None
+    last_result: str = "idle"
+    last_error: Optional[str] = None
+    last_copied_count: int = 0
+    last_skipped_count: int = 0
+
+
+@dataclass
 class AppState:
     output_root: Path
     database_path: Path
     config: Dict
     update_runner: Callable[[Dict, List[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
+    android_sync_status: AndroidSyncStatus = field(default_factory=AndroidSyncStatus)
     pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
     pending_progress: Dict[int, Tuple[float, bool]] = field(default_factory=dict)
     pending_progress_event: threading.Event = field(default_factory=threading.Event)
@@ -589,7 +604,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
                 """
                 SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, '')
                 FROM downloads d
                 LEFT JOIN media_summaries ms ON ms.download_id = d.id
                 WHERE d.download_status = 'downloaded'
@@ -619,6 +634,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             last_position_seconds=float(row[13] or 0.0),
             subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
             summary_text=row[16] or None,
+            raw_metadata_json=row[17] or None,
         )
         for row in rows
     ]
@@ -643,7 +659,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
                 """
                 SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, '')
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, '')
                 FROM downloads d
                 LEFT JOIN media_summaries ms ON ms.download_id = d.id
                 WHERE d.id = ? AND d.download_status = 'downloaded'
@@ -676,6 +692,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         last_position_seconds=float(row[13] or 0.0),
         subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
         summary_text=row[16] or None,
+        raw_metadata_json=row[17] or None,
     )
 
 
@@ -1020,6 +1037,7 @@ def _run_update_job(state: AppState) -> None:
     try:
         state.update_runner(state.config, downloaded_items)
         _index_transcripts_on_startup(state)
+        trigger_android_sync(state)
         with state.update_status.lock:
             state.update_status.last_result = "ok"
             state.update_status.last_items_count = len(downloaded_items)
@@ -1040,6 +1058,326 @@ def trigger_background_update(state: AppState) -> bool:
 
     thread = threading.Thread(target=_run_update_job, args=(state,), daemon=True)
     thread.start()
+    return True
+
+
+def _snapshot_android_sync_status(status: AndroidSyncStatus) -> Dict[str, str]:
+    with status.lock:
+        return {
+            "is_running": "yes" if status.is_running else "no",
+            "last_started_at": _format_timestamp(status.last_started_at),
+            "last_finished_at": _format_timestamp(status.last_finished_at),
+            "last_result": status.last_result,
+            "last_error": status.last_error or "none",
+            "last_copied_count": str(status.last_copied_count),
+            "last_skipped_count": str(status.last_skipped_count),
+        }
+
+
+
+def _metadata_dict(raw_metadata_json: Optional[str]) -> Optional[dict]:
+    if not raw_metadata_json:
+        return None
+    try:
+        metadata = json.loads(raw_metadata_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    return metadata
+
+
+def _thumbnail_score(thumbnail: dict) -> tuple:
+    try:
+        width = max(0, int(float(str(thumbnail.get("width") or "0").strip())))
+    except (TypeError, ValueError):
+        width = 0
+    try:
+        height = max(0, int(float(str(thumbnail.get("height") or "0").strip())))
+    except (TypeError, ValueError):
+        height = 0
+    area = width * height
+    if area <= 0:
+        area = max(width, height)
+    url = str(thumbnail.get("url") or "")
+    return (area, max(width, height), len(url))
+
+
+def _extract_artwork_url_from_metadata(raw_metadata_json: Optional[str]) -> Optional[str]:
+    metadata = _metadata_dict(raw_metadata_json)
+    if metadata is None:
+        return None
+    for key in ("artwork_url", "image_url", "thumbnail", "thumbnail_url"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    thumbnails = metadata.get("thumbnails")
+    candidates = []
+    if isinstance(thumbnails, list):
+        for thumbnail in thumbnails:
+            if isinstance(thumbnail, dict) and str(thumbnail.get("url") or "").strip():
+                candidates.append(thumbnail)
+    if candidates:
+        best_thumbnail = max(candidates, key=_thumbnail_score)
+        return str(best_thumbnail.get("url") or "").strip()
+    return None
+
+
+def _extract_artwork_path_from_metadata(raw_metadata_json: Optional[str], output_root: Path) -> Optional[Path]:
+    metadata = _metadata_dict(raw_metadata_json)
+    if metadata is None:
+        return None
+    root = output_root.expanduser().resolve()
+    for key in ("artwork_path", "thumbnail_path"):
+        value = str(metadata.get(key) or "").strip()
+        if not value:
+            continue
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved.exists() and resolved.is_file():
+            return resolved
+    return None
+
+
+def _resolve_safe_media_reference_path(output_root: Path, candidate_path: str) -> Optional[Path]:
+    root = output_root.expanduser().resolve()
+    raw = Path(candidate_path).expanduser()
+    candidates = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        candidates.append(root / raw)
+        candidates.append(raw)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=False)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved.suffix.lower() not in MEDIA_EXTENSIONS:
+            continue
+        return resolved
+    return None
+
+
+def _android_delete_item_from_row(row: MediaRow, output_root: Path) -> Optional[AndroidSyncItem]:
+    media_path = (
+        _resolve_safe_media_reference_path(output_root, row.file_path)
+        if getattr(row, "file_path", None)
+        else None
+    )
+    if media_path is None:
+        return None
+    subtitle_path = None
+    subtitle_value = getattr(row, "subtitle_path", None)
+    if subtitle_value:
+        try:
+            candidate_subtitle = Path(str(subtitle_value)).expanduser().resolve(strict=False)
+            candidate_subtitle.relative_to(output_root.expanduser().resolve())
+        except (OSError, ValueError):
+            candidate_subtitle = None
+        if candidate_subtitle is not None and candidate_subtitle.suffix.lower() in {".srt", ".vtt"}:
+            subtitle_path = candidate_subtitle
+    return AndroidSyncItem(
+        row_id=row.row_id,
+        title=row.title or media_path.stem,
+        source_name=row.source_name or row.source_type or "GetOffline",
+        file_path=media_path,
+        subtitle_path=subtitle_path,
+        position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
+    )
+
+
+def _run_android_delete_job(state: AppState, rows: List[MediaRow]) -> None:
+    defaults = state.config.get("defaults") or {}
+    delete_config = config_from_defaults(defaults)
+    delete_config.enabled = True
+    items = []
+    for row in rows:
+        item = _android_delete_item_from_row(row, state.output_root)
+        if item is not None:
+            items.append(item)
+    if not items:
+        log.info("Android delete skipped after played mark: no Android delete items selected")
+        return
+    result = delete_items_from_android(items, delete_config)
+    log.info(
+        "Android delete after played mark completed: result=%s deleted=%s failed=%s device=%s",
+        result.message,
+        result.copied,
+        result.failed,
+        result.device_serial or "none",
+    )
+
+
+def _trigger_android_delete_for_rows(state: AppState, rows: List[MediaRow]) -> bool:
+    if not rows:
+        return False
+    thread = threading.Thread(
+        target=_run_android_delete_job,
+        args=(state, list(rows)),
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
+def _delete_downloaded_artifacts_for_row(output_root: Path, row: MediaRow) -> int:
+    root = output_root.expanduser().resolve()
+    candidates: List[Path] = []
+    media_path = _resolve_safe_media_path(root, row.file_path) if getattr(row, "file_path", None) else None
+    if media_path is not None:
+        candidates.append(media_path)
+        for suffix in (".srt", ".vtt", ".jpg", ".jpeg", ".png", ".webp"):
+            candidates.append(media_path.with_suffix(suffix))
+
+    if media_path is not None:
+        subtitle_path = _resolve_safe_subtitle_path(root, row, media_path)
+        if subtitle_path is not None:
+            candidates.append(subtitle_path)
+
+    artwork_path = _extract_artwork_path_from_metadata(getattr(row, "raw_metadata_json", None), root)
+    if artwork_path is not None:
+        candidates.append(artwork_path)
+
+    allowed_suffixes = MEDIA_EXTENSIONS | {".srt", ".vtt", ".jpg", ".jpeg", ".png", ".webp"}
+    deleted_count = 0
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if not resolved.exists() or not resolved.is_file() or resolved.suffix.lower() not in allowed_suffixes:
+            continue
+        try:
+            resolved.unlink(missing_ok=True)
+            deleted_count += 1
+        except OSError as exc:
+            log.warning(
+                "Unable to delete played media artifact row_id=%s path=%s: %s",
+                getattr(row, "row_id", "unknown"),
+                resolved,
+                exc,
+            )
+
+    if deleted_count:
+        log.info(
+            "Deleted %s played media artifact(s) for row_id=%s",
+            deleted_count,
+            getattr(row, "row_id", "unknown"),
+        )
+    return deleted_count
+
+
+def _mark_download_played_and_delete_artifacts(state: AppState, row_id: int, played: bool = True) -> bool:
+    row = fetch_downloaded_media_row_by_id(state.database_path, row_id) if played else None
+    updated = mark_download_played(str(state.database_path), row_id, played=played)
+    if updated and played and row is not None:
+        _trigger_android_delete_for_rows(state, [row])
+        _delete_downloaded_artifacts_for_row(state.output_root, row)
+    return updated
+
+def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_items: int) -> List[AndroidSyncItem]:
+    items: List[AndroidSyncItem] = []
+    for row in rows:
+        if row.played:
+            continue
+        media_path = _resolve_safe_media_path(output_root, row.file_path) if row.file_path else None
+        if media_path is None:
+            continue
+        subtitle_path = _resolve_safe_subtitle_path(output_root, row, media_path)
+        items.append(
+            AndroidSyncItem(
+                row_id=row.row_id,
+                title=row.title or media_path.stem,
+                source_name=row.source_name or row.source_type or "GetOffline",
+                file_path=media_path,
+                subtitle_path=subtitle_path,
+                position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
+                artwork_url=_extract_artwork_url_from_metadata(getattr(row, "raw_metadata_json", None)),
+                artwork_path=_extract_artwork_path_from_metadata(getattr(row, "raw_metadata_json", None), output_root),
+            )
+        )
+        if len(items) >= max(1, int(max_items or 1)):
+            break
+    return items
+
+
+def _run_android_sync_job(state: AppState, force: bool = False) -> None:
+    defaults = state.config.get("defaults") or {}
+    sync_config = config_from_defaults(defaults)
+    if force:
+        sync_config.enabled = True
+    with state.android_sync_status.lock:
+        state.android_sync_status.is_running = True
+        state.android_sync_status.last_started_at = time.time()
+        state.android_sync_status.last_result = "running"
+        state.android_sync_status.last_error = None
+        state.android_sync_status.last_copied_count = 0
+        state.android_sync_status.last_skipped_count = 0
+
+    try:
+        log.info(
+            "Android sync job starting: force=%s enabled=%s max_items=%s destination=%s",
+            "yes" if force else "no",
+            "yes" if sync_config.enabled else "no",
+            sync_config.max_items,
+            sync_config.destination,
+        )
+        rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
+        items = _android_sync_items_from_rows(rows, state.output_root, sync_config.max_items)
+        log.info("Android sync job selected %s unplayed local item(s) from %s downloaded row(s)", len(items), len(rows))
+        result = sync_items_to_android(items, sync_config)
+        log.info(
+            "Android sync job completed: result=%s copied=%s skipped=%s failed=%s device=%s",
+            result.message,
+            result.copied,
+            result.skipped,
+            result.failed,
+            result.device_serial or "none",
+        )
+        with state.android_sync_status.lock:
+            state.android_sync_status.last_result = result.message
+            state.android_sync_status.last_error = "; ".join(result.errors[:3]) if result.errors else None
+            state.android_sync_status.last_copied_count = result.copied
+            state.android_sync_status.last_skipped_count = result.skipped
+    except Exception as exc:
+        log.exception("Android sync job failed unexpectedly: %s", exc)
+        with state.android_sync_status.lock:
+            state.android_sync_status.last_result = "failed"
+            state.android_sync_status.last_error = str(exc)
+    finally:
+        with state.android_sync_status.lock:
+            state.android_sync_status.is_running = False
+            state.android_sync_status.last_finished_at = time.time()
+
+
+def trigger_android_sync(state: AppState, *, force: bool = False) -> bool:
+    defaults = state.config.get("defaults") or {}
+    sync_config = config_from_defaults(defaults)
+    if not force and not sync_config.enabled:
+        log.info("Android sync trigger ignored: disabled")
+        return False
+    with state.android_sync_status.lock:
+        if state.android_sync_status.is_running:
+            log.info("Android sync trigger ignored: already running")
+            return False
+
+    thread = threading.Thread(target=_run_android_sync_job, args=(state, force), daemon=True)
+    thread.start()
+    log.info("Android sync trigger accepted: force=%s", "yes" if force else "no")
     return True
 
 
@@ -1172,6 +1510,15 @@ def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
         trigger_background_update(state)
 
 
+def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        interval_seconds = _auto_update_interval_seconds(state)
+        if stop_event.wait(interval_seconds):
+            break
+        log.info("Android sync periodic check running after %ss interval", interval_seconds)
+        trigger_android_sync(state)
+
+
 def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         if stop_event.wait(DESCRIPTOR_CLEANUP_INTERVAL_SECONDS):
@@ -1252,6 +1599,7 @@ def _render_index(
     status: Dict[str, str],
     show_played: bool = False,
     favorites_only: bool = False,
+    android_status: Optional[Dict[str, str]] = None,
 ) -> str:
     cards = []
     visible_rows = []
@@ -1325,6 +1673,9 @@ def _render_index(
 
     table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No media items found yet.</td></tr>"
     sync_running = status["is_running"] == "yes"
+    android_status = android_status or {"is_running": "no", "last_result": "idle", "last_copied_count": "0", "last_skipped_count": "0"}
+    android_running = android_status.get("is_running") == "yes"
+    android_button_disabled = "disabled" if android_running else ""
     button_disabled = "disabled" if sync_running else ""
     sync_icon_class = " is-spinning" if sync_running else ""
     sync_icon_href = "#bi-arrow-repeat" if sync_running else "#bi-download"
@@ -1363,7 +1714,6 @@ def _render_index(
     favorites_href = "/" + ("?" + "&".join(fav_query_bits) if fav_query_bits else "")
     favorites_label = "Show favorites" if toggle_favorites_only else "Show all"
     favorites_icon = "bi-heart" if toggle_favorites_only else "bi-heart-fill"
-
     return f"""<!doctype html>
 <html>
 <head>
@@ -1850,6 +2200,9 @@ def _render_index(
       </form>
       <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}</button>
       <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}</button>
+      <form id="android-sync-form" method="post" action="/android-sync" class="toolbar-form">
+        <button id="android-sync-button" class="icon-button" type="submit" title="Sync unplayed to Android" aria-label="Sync unplayed to Android" {android_button_disabled}>📱</button>
+      </form>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
@@ -3475,6 +3828,11 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
     ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
     deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
+    android_sync_enabled_checked = " checked" if bool(defaults.get("android_sync_enabled")) else ""
+    android_sync_adb_path = html.escape(str(defaults.get("android_sync_adb_path") or "adb"))
+    android_sync_destination = html.escape(str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"))
+    android_sync_max_items = html.escape(str(defaults.get("android_sync_max_items") or "10"))
+    android_sync_include_subtitles_checked = " checked" if bool(defaults.get("android_sync_include_subtitles", True)) else ""
     resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
     resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
@@ -3772,6 +4130,29 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           </div>
         </div>
         <p><strong>Resolved paths:</strong> Ollama <code>{resolved_ollama_path}</code> · Deno <code>{resolved_deno_path}</code></p>
+
+        <h3>Android offline sync</h3>
+        <p>Enable this to copy unplayed media to an Android phone when it is connected and authorized with USB debugging. The app uses <code>adb push</code>.</p>
+        <div class="grid">
+          <div>
+            <label for="android_sync_enabled"><input id="android_sync_enabled" type="checkbox" name="android_sync_enabled" value="1"{android_sync_enabled_checked} /> Auto-sync to Android</label>
+          </div>
+          <div>
+            <label for="android_sync_include_subtitles"><input id="android_sync_include_subtitles" type="checkbox" name="android_sync_include_subtitles" value="1"{android_sync_include_subtitles_checked} /> Include subtitles</label>
+          </div>
+          <div>
+            <label for="android_sync_adb_path">ADB executable</label>
+            <input id="android_sync_adb_path" name="android_sync_adb_path" value="{android_sync_adb_path}" required />
+          </div>
+          <div>
+            <label for="android_sync_destination">Phone folder</label>
+            <input id="android_sync_destination" name="android_sync_destination" value="{android_sync_destination}" required />
+          </div>
+          <div>
+            <label for="android_sync_max_items">Max unplayed items per sync</label>
+            <input id="android_sync_max_items" name="android_sync_max_items" value="{android_sync_max_items}" required />
+          </div>
+        </div>
 
         <div class="actions">
           <button type="submit" class="primary">Save defaults</button>
@@ -4138,7 +4519,15 @@ def make_handler(state: AppState):
                 status = _snapshot_status(state.update_status)
                 show_played = (query.get('show_played') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
                 favorites_only = (query.get('favorites') or ['0'])[0] in {'1', 'true', 'yes', 'on'}
-                body = _render_index(_rows(), state.output_root, state.database_path, status, show_played=show_played, favorites_only=favorites_only)
+                body = _render_index(
+                    _rows(),
+                    state.output_root,
+                    state.database_path,
+                    status,
+                    show_played=show_played,
+                    favorites_only=favorites_only,
+                    android_status=_snapshot_android_sync_status(state.android_sync_status),
+                )
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -4165,6 +4554,17 @@ def make_handler(state: AppState):
 
             if path == "/update-status":
                 status_payload = _snapshot_status(state.update_status)
+                body_bytes = json.dumps(status_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            if path == "/android-sync-status":
+                status_payload = _snapshot_android_sync_status(state.android_sync_status)
                 body_bytes = json.dumps(status_payload).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -4224,7 +4624,7 @@ def make_handler(state: AppState):
                     return
 
                 played_value = path == "/mark-played"
-                mark_download_played(str(state.database_path), int(raw_id), played=played_value)
+                _mark_download_played_and_delete_artifacts(state, int(raw_id), played=played_value)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -4405,6 +4805,14 @@ def make_handler(state: AppState):
                 self.end_headers()
                 return
 
+            if path == "/android-sync":
+                started = trigger_android_sync(state, force=True)
+                log.info("Manual Android sync requested (started=%s)", "yes" if started else "no")
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+
             if path == "/progress":
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length).decode("utf-8") if length else ""
@@ -4434,7 +4842,7 @@ def make_handler(state: AppState):
                     position_seconds = 0.0
                 _enqueue_progress_update(state, row_id, position_seconds, reason=raw_reason, forced=is_forced)
                 if _is_playback_completion_reason(raw_reason):
-                    mark_download_played(str(state.database_path), row_id, played=True)
+                    _mark_download_played_and_delete_artifacts(state, row_id, played=True)
                 self.send_response(204)
                 self.end_headers()
                 return
@@ -4471,9 +4879,9 @@ def make_handler(state: AppState):
                     should_trigger_podcast_redownload = False
                     for row_id in row_ids:
                         if batch_action == "played":
-                            mark_download_played(str(state.database_path), row_id, played=True)
+                            _mark_download_played_and_delete_artifacts(state, row_id, played=True)
                         elif batch_action == "unplayed":
-                            mark_download_played(str(state.database_path), row_id, played=False)
+                            _mark_download_played_and_delete_artifacts(state, row_id, played=False)
                         elif batch_action == "favorite":
                             mark_download_favorite(str(state.database_path), row_id, favorite=True)
                         elif batch_action == "unfavorite":
@@ -4515,7 +4923,15 @@ def make_handler(state: AppState):
                 return
 
             if path == "/mark-all-played":
+                rows_to_delete = [
+                    row
+                    for row in fetch_downloaded_media_rows(state.database_path, state.output_root)
+                    if not row.played
+                ]
                 mark_all_downloads_played(str(state.database_path))
+                _trigger_android_delete_for_rows(state, rows_to_delete)
+                for row in rows_to_delete:
+                    _delete_downloaded_artifacts_for_row(state.output_root, row)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -4563,6 +4979,11 @@ def make_handler(state: AppState):
                         "summary_model": (form.get("summary_model") or [""])[0],
                         "ollama_path": (form.get("ollama_path") or [""])[0],
                         "deno_path": (form.get("deno_path") or [""])[0],
+                        "android_sync_enabled": "1" if (form.get("android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_adb_path": (form.get("android_sync_adb_path") or ["adb"])[0],
+                        "android_sync_destination": (form.get("android_sync_destination") or ["/sdcard/Movies/GetOffline"])[0],
+                        "android_sync_max_items": (form.get("android_sync_max_items") or ["10"])[0],
+                        "android_sync_include_subtitles": "1" if (form.get("android_sync_include_subtitles") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
                     }
                     sanitized_updates = {
                         k: str(v).strip()
@@ -4743,6 +5164,14 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     )
     progress_flush_thread.start()
 
+    android_sync_stop_event = threading.Event()
+    android_sync_thread = threading.Thread(
+        target=_android_sync_loop,
+        args=(state, android_sync_stop_event),
+        daemon=True,
+    )
+    android_sync_thread.start()
+
     def _idle_rss_loop(stop_event: threading.Event) -> None:
         while not stop_event.wait(IDLE_RSS_LOG_INTERVAL_SECONDS):
             usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -4778,6 +5207,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     finally:
         auto_update_stop_event.set()
         progress_flush_stop_event.set()
+        android_sync_stop_event.set()
         rss_stop_event.set()
         descriptor_cleanup_stop_event.set()
         state.pending_progress_event.set()
