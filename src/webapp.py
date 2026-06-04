@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from android_sync import AndroidSyncItem, config_from_defaults, sync_items_to_android
+from android_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items_to_android
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -1145,6 +1145,92 @@ def _extract_artwork_path_from_metadata(raw_metadata_json: Optional[str], output
     return None
 
 
+def _resolve_safe_media_reference_path(output_root: Path, candidate_path: str) -> Optional[Path]:
+    root = output_root.expanduser().resolve()
+    raw = Path(candidate_path).expanduser()
+    candidates = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        candidates.append(root / raw)
+        candidates.append(raw)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=False)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved.suffix.lower() not in MEDIA_EXTENSIONS:
+            continue
+        return resolved
+    return None
+
+
+def _android_delete_item_from_row(row: MediaRow, output_root: Path) -> Optional[AndroidSyncItem]:
+    media_path = (
+        _resolve_safe_media_reference_path(output_root, row.file_path)
+        if getattr(row, "file_path", None)
+        else None
+    )
+    if media_path is None:
+        return None
+    subtitle_path = None
+    subtitle_value = getattr(row, "subtitle_path", None)
+    if subtitle_value:
+        try:
+            candidate_subtitle = Path(str(subtitle_value)).expanduser().resolve(strict=False)
+            candidate_subtitle.relative_to(output_root.expanduser().resolve())
+        except (OSError, ValueError):
+            candidate_subtitle = None
+        if candidate_subtitle is not None and candidate_subtitle.suffix.lower() in {".srt", ".vtt"}:
+            subtitle_path = candidate_subtitle
+    return AndroidSyncItem(
+        row_id=row.row_id,
+        title=row.title or media_path.stem,
+        source_name=row.source_name or row.source_type or "GetOffline",
+        file_path=media_path,
+        subtitle_path=subtitle_path,
+        position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
+    )
+
+
+def _run_android_delete_job(state: AppState, rows: List[MediaRow]) -> None:
+    defaults = state.config.get("defaults") or {}
+    delete_config = config_from_defaults(defaults)
+    if not delete_config.enabled:
+        log.info("Android delete skipped after played mark: Android sync is disabled")
+        return
+    items = []
+    for row in rows:
+        item = _android_delete_item_from_row(row, state.output_root)
+        if item is not None:
+            items.append(item)
+    if not items:
+        log.info("Android delete skipped after played mark: no Android delete items selected")
+        return
+    result = delete_items_from_android(items, delete_config)
+    log.info(
+        "Android delete after played mark completed: result=%s deleted=%s failed=%s device=%s",
+        result.message,
+        result.copied,
+        result.failed,
+        result.device_serial or "none",
+    )
+
+
+def _trigger_android_delete_for_rows(state: AppState, rows: List[MediaRow]) -> bool:
+    if not rows:
+        return False
+    thread = threading.Thread(
+        target=_run_android_delete_job,
+        args=(state, list(rows)),
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
 def _delete_downloaded_artifacts_for_row(output_root: Path, row: MediaRow) -> int:
     root = output_root.expanduser().resolve()
     candidates: List[Path] = []
@@ -1201,6 +1287,7 @@ def _mark_download_played_and_delete_artifacts(state: AppState, row_id: int, pla
     row = fetch_downloaded_media_row_by_id(state.database_path, row_id) if played else None
     updated = mark_download_played(str(state.database_path), row_id, played=played)
     if updated and played and row is not None:
+        _trigger_android_delete_for_rows(state, [row])
         _delete_downloaded_artifacts_for_row(state.output_root, row)
     return updated
 
@@ -4844,6 +4931,7 @@ def make_handler(state: AppState):
                     if not row.played
                 ]
                 mark_all_downloads_played(str(state.database_path))
+                _trigger_android_delete_for_rows(state, rows_to_delete)
                 for row in rows_to_delete:
                     _delete_downloaded_artifacts_for_row(state.output_root, row)
                 self.send_response(303)

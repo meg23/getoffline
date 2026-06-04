@@ -28,6 +28,7 @@ from webapp import (  # noqa: E402
     _resolve_safe_media_path,
     _delete_downloaded_artifacts_for_row,
     _mark_download_played_and_delete_artifacts,
+    _run_android_delete_job,
     _infer_media_type_for_redownload,
     fetch_downloaded_media_row_by_id,
     _stream_media,
@@ -861,14 +862,56 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             )
             row = fetch_downloaded_media_rows(db_path, root)[0]
 
-            updated = _mark_download_played_and_delete_artifacts(state, row.row_id, played=True)
+            with mock.patch("webapp._trigger_android_delete_for_rows") as android_delete_mock:
+                updated = _mark_download_played_and_delete_artifacts(state, row.row_id, played=True)
 
             self.assertTrue(updated)
+            android_delete_mock.assert_called_once()
             self.assertFalse(media.exists())
             self.assertFalse(thumbnail.exists())
             updated_row = fetch_downloaded_media_row_by_id(db_path, row.row_id)
             self.assertIsNotNone(updated_row)
             self.assertTrue(updated_row.played)
+
+    def test_run_android_delete_job_deletes_remote_played_media_when_sync_enabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+            state = AppState(
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                config={
+                    "defaults": {
+                        "android_sync_enabled": "1",
+                        "android_sync_adb_path": "adb",
+                        "android_sync_destination": "/sdcard/Movies/GetOffline",
+                    }
+                },
+                update_runner=lambda config, items: None,
+            )
+            row = SimpleNamespace(
+                row_id=99,
+                file_path=str(media),
+                title="Episode",
+                source_name="Channel",
+                source_type="youtube",
+                subtitle_path=None,
+                last_position_seconds=0.0,
+            )
+
+            with mock.patch("webapp.delete_items_from_android") as delete_mock:
+                delete_mock.return_value = SimpleNamespace(message="deleted 1", copied=1, failed=0, device_serial="ABC123")
+                _run_android_delete_job(state, [row])
+
+            delete_mock.assert_called_once()
+            items_arg, config_arg = delete_mock.call_args.args
+            self.assertEqual(config_arg.destination, "/sdcard/Movies/GetOffline")
+            self.assertEqual(len(items_arg), 1)
+            self.assertEqual(items_arg[0].row_id, 99)
+            self.assertEqual(items_arg[0].title, "Episode")
+            self.assertEqual(items_arg[0].source_name, "Channel")
+            self.assertEqual(items_arg[0].file_path, media.resolve())
 
     def test_mark_download_played_updates_row_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1737,6 +1780,32 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(len(metadata_cmds), 1)
             self.assertEqual(len(media_pushes), 1)
             self.assertNotEqual(Path(media_pushes[0][-2]), media)
+
+    def test_delete_items_from_android_removes_remote_media_and_subtitles(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, delete_items_from_android
+
+        calls = []
+
+        def fake_runner(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[-1] == "devices":
+                return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+            return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+        with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+            result = delete_items_from_android(
+                [AndroidSyncItem(row_id=5, title="Episode", source_name="Channel", file_path=Path("episode.mp4"))],
+                AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                runner=fake_runner,
+            )
+
+        rm_commands = [cmd for cmd in calls if len(cmd) >= 5 and cmd[3] == "shell" and str(cmd[4]).startswith("rm -f")]
+        self.assertEqual(result.copied, 1)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(len(rm_commands), 1)
+        self.assertIn("Channel - Episode.mp4", rm_commands[0][4])
+        self.assertIn("Channel - Episode.srt", rm_commands[0][4])
+        self.assertIn("Channel - Episode.vtt", rm_commands[0][4])
 
     def test_sync_items_to_android_reports_mkdir_failure(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android

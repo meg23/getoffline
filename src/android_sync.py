@@ -398,6 +398,94 @@ def _rescan_android_media(
         )
 
 
+def _remote_subtitle_paths_for_media(remote_media_path: str) -> List[str]:
+    paths = []
+    for suffix in sorted(MEDIA_SUBTITLE_EXTENSIONS):
+        paths.append(str(Path(remote_media_path).with_suffix(suffix)).replace("\\", "/"))
+    return paths
+
+
+def delete_items_from_android(
+    items: Iterable[AndroidSyncItem],
+    config: AndroidSyncConfig,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> AndroidSyncResult:
+    result = AndroidSyncResult(message="disabled")
+    if not config.enabled:
+        log.info("Android delete skipped: disabled")
+        return result
+
+    delete_items = list(items)
+    if not delete_items:
+        result.message = "no Android files to delete"
+        log.info("Android delete skipped: no items selected")
+        return result
+
+    adb_executable = shutil.which(config.adb_path) if not Path(config.adb_path).is_absolute() else config.adb_path
+    if not adb_executable:
+        result.message = f"adb not found: {config.adb_path}"
+        result.failed += 1
+        _append_error(result, result.message)
+        return result
+
+    destination = config.destination.rstrip("/") or "/sdcard/Movies/GetOffline"
+    log.info("Android delete starting: items=%s destination=%s adb=%s", len(delete_items), destination, adb_executable)
+
+    try:
+        device_serial = find_connected_device(adb_executable, runner=runner)
+    except RuntimeError as exc:
+        result.message = f"adb device check failed: {exc}"
+        result.failed += 1
+        _append_error(result, str(exc))
+        return result
+
+    if not device_serial:
+        result.message = "no authorized Android device connected"
+        _append_error(result, "no authorized Android device connected; check USB debugging authorization")
+        return result
+
+    result.device_serial = device_serial
+    for item in delete_items:
+        result.attempted += 1
+        remote_media_path = build_remote_media_path(destination, item)
+        remote_paths = [remote_media_path]
+        remote_paths.extend(_remote_subtitle_paths_for_media(remote_media_path))
+        quoted_paths = " ".join(_remote_quote(path) for path in remote_paths)
+        try:
+            deleted = _run_adb_command(
+                [adb_executable, "-s", device_serial, "shell", f"rm -f {quoted_paths}"],
+                description=f"deleting Android media row {item.row_id}",
+                timeout=60,
+                runner=runner,
+            )
+        except RuntimeError as exc:
+            result.failed += 1
+            _append_error(result, f"delete failed for row {item.row_id}: {exc}")
+            continue
+        if int(getattr(deleted, "returncode", 1) or 0) != 0:
+            result.failed += 1
+            _append_error(result, _combined_output(deleted) or f"delete failed for row {item.row_id}: {remote_media_path}")
+            continue
+
+        for remote_path in remote_paths:
+            _rescan_android_media(adb_executable, device_serial, remote_path, runner)
+        result.copied += 1
+        result.copied_files.append(remote_media_path)
+        log.info("Android delete item completed: row_id=%s remote=%s", item.row_id, remote_media_path)
+
+    if result.failed:
+        result.message = f"deleted {result.copied}, failed {result.failed}"
+    else:
+        result.message = f"deleted {result.copied}"
+    log.info(
+        "Android delete finished: attempted=%s deleted=%s failed=%s device=%s",
+        result.attempted,
+        result.copied,
+        result.failed,
+        result.device_serial or "none",
+    )
+    return result
+
 def sync_items_to_android(
     items: Iterable[AndroidSyncItem],
     config: AndroidSyncConfig,
