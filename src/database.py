@@ -360,6 +360,10 @@ DEFAULT_APP_CONFIG = {
     "android_sync_destination": "/sdcard/Movies/GetOffline",
     "android_sync_max_items": "10",
     "android_sync_include_subtitles": "1",
+    "android_sync_include_unplayed": "1",
+    "android_sync_include_started": "1",
+    "android_sync_include_played": "0",
+    "android_sync_exclude_regex": "",
 }
 
 
@@ -524,6 +528,10 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "android_sync_destination": str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"),
             "android_sync_max_items": _coerce_int(defaults.get("android_sync_max_items"), 10),
             "android_sync_include_subtitles": str(defaults.get("android_sync_include_subtitles") or "1").strip().lower() in {"1", "true", "yes", "on"},
+            "android_sync_include_unplayed": str(defaults.get("android_sync_include_unplayed") or "1").strip().lower() in {"1", "true", "yes", "on"},
+            "android_sync_include_started": str(defaults.get("android_sync_include_started") or "1").strip().lower() in {"1", "true", "yes", "on"},
+            "android_sync_include_played": str(defaults.get("android_sync_include_played") or "0").strip().lower() in {"1", "true", "yes", "on"},
+            "android_sync_exclude_regex": str(defaults.get("android_sync_exclude_regex") or ""),
             "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
             "telemetry_dumps_enabled": str(
                 defaults.get("telemetry_dumps_enabled", defaults.get("heapdump_enabled", "0")) or "0"

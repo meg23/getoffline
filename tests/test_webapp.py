@@ -1573,6 +1573,64 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertEqual(items[0].artwork_url, "https://example.com/art.jpg")
             self.assertAlmostEqual(items[0].position_seconds, 42.5)
 
+
+    def test_android_sync_items_filters_statuses_and_exclusion_regex(self):
+        from webapp import _android_sync_items_from_rows
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unplayed = root / "unplayed.mp4"
+            started = root / "started.mp4"
+            played = root / "played.mp4"
+            excluded = root / "bonus.mp4"
+            for media in (unplayed, started, played, excluded):
+                media.write_text("video", encoding="utf-8")
+            rows = [
+                SimpleNamespace(row_id=1, played=False, file_path=str(unplayed), title="Unplayed", source_name="Channel", source_type="youtube", item_url=None, subtitle_path=None, last_position_seconds=0.0, raw_metadata_json=None),
+                SimpleNamespace(row_id=2, played=False, file_path=str(started), title="Started", source_name="Channel", source_type="youtube", item_url=None, subtitle_path=None, last_position_seconds=10.0, raw_metadata_json=None),
+                SimpleNamespace(row_id=3, played=True, file_path=str(played), title="Played", source_name="Channel", source_type="youtube", item_url=None, subtitle_path=None, last_position_seconds=0.0, raw_metadata_json=None),
+                SimpleNamespace(row_id=4, played=False, file_path=str(excluded), title="Bonus Clip", source_name="Channel", source_type="youtube", item_url=None, subtitle_path=None, last_position_seconds=0.0, raw_metadata_json=None),
+            ]
+
+            items = _android_sync_items_from_rows(
+                rows,
+                root,
+                max_items=10,
+                include_unplayed=True,
+                include_started=False,
+                include_played=True,
+                exclude_regex="bonus",
+            )
+
+            self.assertEqual([item.row_id for item in items], [1, 3])
+
+    def test_sync_items_to_android_skips_paths_recorded_in_syncdb(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp4"
+            media.write_text("video", encoding="utf-8")
+            calls = []
+
+            def fake_runner(cmd, **kwargs):
+                calls.append(cmd)
+                if cmd[-1] == "devices":
+                    return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
+                if any("cat '/sdcard/Movies/GetOffline/syncdb.txt'" in str(part) for part in cmd):
+                    return SimpleNamespace(stdout="/sdcard/Movies/GetOffline/Channel - Episode.mp4\n", stderr="", returncode=0)
+                return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+
+            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+                result = sync_items_to_android(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
+                    AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(result.copied, 0)
+            self.assertEqual(result.skipped, 1)
+            self.assertFalse(any("push" in cmd and str(cmd[-1]).endswith("Episode.mp4") for cmd in calls))
+
     def test_sync_items_to_android_pushes_unplayed_file(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 

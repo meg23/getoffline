@@ -1289,10 +1289,45 @@ def _mark_download_played_and_delete_artifacts(state: AppState, row_id: int, pla
         _delete_downloaded_artifacts_for_row(state.output_root, row)
     return updated
 
-def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_items: int) -> List[AndroidSyncItem]:
+def _android_sync_items_from_rows(
+    rows: List[MediaRow],
+    output_root: Path,
+    max_items: int,
+    *,
+    include_unplayed: bool = True,
+    include_started: bool = True,
+    include_played: bool = False,
+    exclude_regex: str = "",
+) -> List[AndroidSyncItem]:
     items: List[AndroidSyncItem] = []
+    exclude_pattern = None
+    if exclude_regex:
+        try:
+            exclude_pattern = re.compile(str(exclude_regex), re.IGNORECASE)
+        except re.error as exc:
+            log.warning("Android sync exclusion regex ignored because it is invalid: %s", exc)
     for row in rows:
+        position_seconds = max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0))
+        is_started = bool(position_seconds > 0 and not row.played)
         if row.played:
+            if not include_played:
+                continue
+        elif is_started:
+            if not include_started:
+                continue
+        elif not include_unplayed:
+            continue
+        exclusion_text = " ".join(
+            str(value or "")
+            for value in (
+                getattr(row, "title", ""),
+                getattr(row, "source_name", ""),
+                getattr(row, "source_type", ""),
+                getattr(row, "file_path", ""),
+                getattr(row, "item_url", ""),
+            )
+        )
+        if exclude_pattern is not None and exclude_pattern.search(exclusion_text):
             continue
         media_path = _resolve_safe_media_path(output_root, row.file_path) if row.file_path else None
         if media_path is None:
@@ -1305,7 +1340,7 @@ def _android_sync_items_from_rows(rows: List[MediaRow], output_root: Path, max_i
                 source_name=row.source_name or row.source_type or "GetOffline",
                 file_path=media_path,
                 subtitle_path=subtitle_path,
-                position_seconds=max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0)),
+                position_seconds=position_seconds,
                 artwork_url=_extract_artwork_url_from_metadata(getattr(row, "raw_metadata_json", None)),
                 artwork_path=_extract_artwork_path_from_metadata(getattr(row, "raw_metadata_json", None), output_root),
             )
@@ -1337,8 +1372,16 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
             sync_config.destination,
         )
         rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
-        items = _android_sync_items_from_rows(rows, state.output_root, sync_config.max_items)
-        log.info("Android sync job selected %s unplayed local item(s) from %s downloaded row(s)", len(items), len(rows))
+        items = _android_sync_items_from_rows(
+            rows,
+            state.output_root,
+            sync_config.max_items,
+            include_unplayed=sync_config.include_unplayed,
+            include_started=sync_config.include_started,
+            include_played=sync_config.include_played,
+            exclude_regex=sync_config.exclude_regex,
+        )
+        log.info("Android sync job selected %s local item(s) from %s downloaded row(s)", len(items), len(rows))
         result = sync_items_to_android(items, sync_config)
         log.info(
             "Android sync job completed: result=%s copied=%s skipped=%s failed=%s device=%s",
@@ -3828,11 +3871,23 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
     ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
     deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
-    android_sync_enabled_checked = " checked" if bool(defaults.get("android_sync_enabled")) else ""
+    def default_checked(key: str, fallback: bool = False) -> str:
+        value = defaults.get(key, fallback)
+        if isinstance(value, bool):
+            checked = value
+        else:
+            checked = str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+        return " checked" if checked else ""
+
+    android_sync_enabled_checked = default_checked("android_sync_enabled")
     android_sync_adb_path = html.escape(str(defaults.get("android_sync_adb_path") or "adb"))
     android_sync_destination = html.escape(str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"))
     android_sync_max_items = html.escape(str(defaults.get("android_sync_max_items") or "10"))
-    android_sync_include_subtitles_checked = " checked" if bool(defaults.get("android_sync_include_subtitles", True)) else ""
+    android_sync_include_subtitles_checked = default_checked("android_sync_include_subtitles", True)
+    android_sync_include_unplayed_checked = default_checked("android_sync_include_unplayed", True)
+    android_sync_include_started_checked = default_checked("android_sync_include_started", True)
+    android_sync_include_played_checked = default_checked("android_sync_include_played", False)
+    android_sync_exclude_regex = html.escape(str(defaults.get("android_sync_exclude_regex") or ""))
     resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
     resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
@@ -4141,6 +4196,15 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label for="android_sync_include_subtitles"><input id="android_sync_include_subtitles" type="checkbox" name="android_sync_include_subtitles" value="1"{android_sync_include_subtitles_checked} /> Include subtitles</label>
           </div>
           <div>
+            <label for="android_sync_include_unplayed"><input id="android_sync_include_unplayed" type="checkbox" name="android_sync_include_unplayed" value="1"{android_sync_include_unplayed_checked} /> Sync unplayed media</label>
+          </div>
+          <div>
+            <label for="android_sync_include_started"><input id="android_sync_include_started" type="checkbox" name="android_sync_include_started" value="1"{android_sync_include_started_checked} /> Sync started media</label>
+          </div>
+          <div>
+            <label for="android_sync_include_played"><input id="android_sync_include_played" type="checkbox" name="android_sync_include_played" value="1"{android_sync_include_played_checked} /> Sync played media</label>
+          </div>
+          <div>
             <label for="android_sync_adb_path">ADB executable</label>
             <input id="android_sync_adb_path" name="android_sync_adb_path" value="{android_sync_adb_path}" required />
           </div>
@@ -4149,8 +4213,12 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <input id="android_sync_destination" name="android_sync_destination" value="{android_sync_destination}" required />
           </div>
           <div>
-            <label for="android_sync_max_items">Max unplayed items per sync</label>
+            <label for="android_sync_max_items">Max items per sync</label>
             <input id="android_sync_max_items" name="android_sync_max_items" value="{android_sync_max_items}" required />
+          </div>
+          <div>
+            <label for="android_sync_exclude_regex">Exclude media matching regex</label>
+            <input id="android_sync_exclude_regex" name="android_sync_exclude_regex" value="{android_sync_exclude_regex}" placeholder="trailer|sample" />
           </div>
         </div>
 
@@ -4984,6 +5052,10 @@ def make_handler(state: AppState):
                         "android_sync_destination": (form.get("android_sync_destination") or ["/sdcard/Movies/GetOffline"])[0],
                         "android_sync_max_items": (form.get("android_sync_max_items") or ["10"])[0],
                         "android_sync_include_subtitles": "1" if (form.get("android_sync_include_subtitles") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_include_unplayed": "1" if (form.get("android_sync_include_unplayed") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_include_started": "1" if (form.get("android_sync_include_started") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_include_played": "1" if (form.get("android_sync_include_played") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_exclude_regex": (form.get("android_sync_exclude_regex") or [""])[0],
                     }
                     sanitized_updates = {
                         k: str(v).strip()
