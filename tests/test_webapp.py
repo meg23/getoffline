@@ -26,8 +26,8 @@ from webapp import (  # noqa: E402
     _render_player,
     _srt_to_vtt,
     _resolve_safe_media_path,
-    _delete_downloaded_artifacts_for_row,
-    _mark_download_played_and_delete_artifacts,
+    _mark_all_downloads_played_from_webapp,
+    _mark_download_played_from_webapp,
     _run_android_delete_job,
     _infer_media_type_for_redownload,
     fetch_downloaded_media_row_by_id,
@@ -820,39 +820,15 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(Path(rows[0].file_path), normalized_media_path)
 
-    def test_delete_downloaded_artifacts_for_played_row_removes_media_and_sidecars(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            media = root / "episode.mp3"
-            subtitle = root / "episode.srt"
-            thumbnail = root / "episode.webp"
-            outside_artwork = root.parent / "outside-art.jpg"
-            media.write_text("audio", encoding="utf-8")
-            subtitle.write_text("subtitle", encoding="utf-8")
-            thumbnail.write_text("thumbnail", encoding="utf-8")
-            outside_artwork.write_text("outside", encoding="utf-8")
-            row = SimpleNamespace(
-                row_id=10,
-                file_path=str(media),
-                subtitle_path=str(subtitle),
-                raw_metadata_json=json.dumps({"artwork_path": str(thumbnail), "thumbnail_path": str(outside_artwork)}),
-            )
-
-            deleted = _delete_downloaded_artifacts_for_row(root, row)
-
-            self.assertEqual(deleted, 3)
-            self.assertFalse(media.exists())
-            self.assertFalse(subtitle.exists())
-            self.assertFalse(thumbnail.exists())
-            self.assertTrue(outside_artwork.exists())
-
-    def test_mark_download_played_from_webapp_deletes_local_media(self):
+    def test_mark_download_played_from_webapp_preserves_local_media_and_sidecars(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             db_path = root / "downloads.sqlite3"
             media = root / "episode.mp4"
+            subtitle = root / "episode.srt"
             thumbnail = root / "episode.jpg"
             media.write_text("video", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
             thumbnail.write_text("thumbnail", encoding="utf-8")
 
             init_database(str(db_path))
@@ -861,13 +837,14 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
                 {
                     "source_type": "youtube",
                     "source_name": "Channel",
-                    "item_uid": "uid-play-delete",
-                    "item_url": "https://youtube.com/watch?v=uid-play-delete",
-                    "media_url": "https://youtube.com/watch?v=uid-play-delete",
+                    "item_uid": "uid-play-preserve",
+                    "item_url": "https://youtube.com/watch?v=uid-play-preserve",
+                    "media_url": "https://youtube.com/watch?v=uid-play-preserve",
                     "title": "Episode",
                     "file_path": str(media),
                     "file_ext": "mp4",
                     "file_size_bytes": media.stat().st_size,
+                    "subtitle_path": str(subtitle),
                     "download_status": "downloaded",
                     "raw_metadata": {"artwork_path": str(thumbnail)},
                 },
@@ -881,15 +858,54 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             row = fetch_downloaded_media_rows(db_path, root)[0]
 
             with mock.patch("webapp._trigger_android_delete_for_rows") as android_delete_mock:
-                updated = _mark_download_played_and_delete_artifacts(state, row.row_id, played=True)
+                updated = _mark_download_played_from_webapp(state, row.row_id, played=True)
 
             self.assertTrue(updated)
             android_delete_mock.assert_called_once()
-            self.assertFalse(media.exists())
-            self.assertFalse(thumbnail.exists())
+            self.assertTrue(media.exists())
+            self.assertTrue(subtitle.exists())
+            self.assertTrue(thumbnail.exists())
             updated_row = fetch_downloaded_media_row_by_id(db_path, row.row_id)
             self.assertIsNotNone(updated_row)
             self.assertTrue(updated_row.played)
+
+    def test_mark_all_downloads_played_from_webapp_preserves_local_media(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media_paths = [root / "episode-one.mp3", root / "episode-two.mp3"]
+            init_database(str(db_path))
+            for index, media in enumerate(media_paths, start=1):
+                media.write_text("audio", encoding="utf-8")
+                upsert_download(
+                    str(db_path),
+                    {
+                        "source_type": "podcast",
+                        "source_name": "Channel",
+                        "item_uid": f"uid-play-all-{index}",
+                        "item_url": f"https://example.com/episode-{index}.mp3",
+                        "media_url": f"https://example.com/episode-{index}.mp3",
+                        "title": f"Episode {index}",
+                        "file_path": str(media),
+                        "file_ext": "mp3",
+                        "file_size_bytes": media.stat().st_size,
+                        "download_status": "downloaded",
+                    },
+                )
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {}},
+                update_runner=lambda config, items: None,
+            )
+
+            with mock.patch("webapp._trigger_android_delete_for_rows") as android_delete_mock:
+                updated = _mark_all_downloads_played_from_webapp(state)
+
+            self.assertEqual(updated, 2)
+            android_delete_mock.assert_called_once()
+            self.assertTrue(all(path.exists() for path in media_paths))
+            self.assertTrue(all(row.played for row in fetch_downloaded_media_rows(db_path, root)))
 
     def test_run_android_delete_job_deletes_remote_played_media_even_when_auto_sync_disabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
