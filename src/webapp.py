@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
+from profiles import Profile, ProfileManager
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -147,6 +148,60 @@ class AppState:
     progress_last_log_at: float = 0.0
     progress_last_reason: str = "unknown"
     progress_last_forced: bool = False
+    profile_manager: Optional[ProfileManager] = None
+    profile_lock: threading.RLock = field(default_factory=threading.RLock)
+    profile_update_statuses: Dict[str, UpdateStatus] = field(default_factory=dict)
+
+
+def _activate_profile(state: AppState, profile: Profile) -> None:
+    if state.profile_manager is None:
+        return
+    config = state.profile_manager.load_config(profile)
+    configured_output_root = Path(str(config["defaults"]["output_root"]))
+    with state.profile_lock:
+        state.output_root = configured_output_root
+        state.database_path = profile.database_path
+        state.config = config
+    materialize_youtube_cookie_file(str(profile.database_path))
+
+
+def _profile_view(state: AppState) -> Tuple[List[Profile], Optional[Profile]]:
+    if state.profile_manager is None:
+        return [], None
+    return state.profile_manager.list_profiles(), state.profile_manager.get_active()
+
+
+def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profile], redirect_to: str) -> str:
+    if active_profile is None:
+        return ""
+    options: List[str] = []
+    for profile in profiles:
+        selected = " selected" if profile.profile_id == active_profile.profile_id else ""
+        options.append(
+            f'<option value="{html.escape(profile.profile_id)}"{selected}>{html.escape(profile.name)}</option>'
+        )
+    return f"""
+    <details class="profile-menu">
+      <summary aria-label="Current profile">{html.escape(active_profile.name)}</summary>
+      <div class="profile-popover">
+        <form method="post" action="/profiles/switch">
+          <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+          <label for="profile-switcher">Profile</label>
+          <select id="profile-switcher" name="profile_id" onchange="this.form.submit()">{"".join(options)}</select>
+        </form>
+        <form method="post" action="/profiles/create">
+          <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+          <label for="new-profile-name">Create profile</label>
+          <div class="profile-form-row"><input id="new-profile-name" name="name" maxlength="80" required placeholder="Profile name" /><button type="submit">Create</button></div>
+        </form>
+        <form method="post" action="/profiles/rename">
+          <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+          <label for="rename-profile-name">Rename current</label>
+          <div class="profile-form-row"><input id="rename-profile-name" name="name" maxlength="80" required value="{html.escape(active_profile.name)}" /><button type="submit">Rename</button></div>
+        </form>
+      </div>
+    </details>
+    """
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -1510,11 +1565,37 @@ def _auto_update_interval_seconds(state: AppState) -> int:
     return max(1, minutes) * 60
 
 
+def _profile_update_state(state: AppState, profile: Profile) -> AppState:
+    if state.profile_manager is None or profile.profile_id == state.profile_manager.active_profile_id:
+        return state
+    status = state.profile_update_statuses.get(profile.profile_id)
+    if status is None:
+        status = UpdateStatus()
+        state.profile_update_statuses[profile.profile_id] = status
+    config = state.profile_manager.load_config(profile)
+    return AppState(
+        output_root=Path(str(config["defaults"]["output_root"])),
+        database_path=profile.database_path,
+        config=config,
+        update_runner=state.update_runner,
+        update_status=status,
+    )
+
+
+def _trigger_all_profile_updates(state: AppState) -> None:
+    if state.profile_manager is None:
+        trigger_background_update(state)
+        return
+    for profile in state.profile_manager.list_profiles():
+        profile_state = _profile_update_state(state, profile)
+        trigger_background_update(profile_state)
+
+
 def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         if stop_event.wait(_auto_update_interval_seconds(state)):
             break
-        trigger_background_update(state)
+        _trigger_all_profile_updates(state)
 
 
 def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
@@ -1607,7 +1688,10 @@ def _render_index(
     show_played: bool = False,
     favorites_only: bool = False,
     android_status: Optional[Dict[str, str]] = None,
+    profiles: Optional[List[Profile]] = None,
+    active_profile: Optional[Profile] = None,
 ) -> str:
+    profile_menu = _render_profile_menu(profiles or [], active_profile, "/")
     cards = []
     visible_rows = []
     for row in rows:
@@ -1896,6 +1980,17 @@ def _render_index(
     .quick-add-meta-sub {{ font-size: .82rem; color: #5f6d90; margin-top: .15rem; }}
     .quick-add-empty {{ color: #5f6d90; font-size: .88rem; }}
 
+    .hero {{ position: relative; }}
+    .profile-menu {{ position: absolute; top: 0; right: 0; z-index: 20; }}
+    .profile-menu summary {{ cursor: pointer; list-style: none; border: 1px solid #c9d5ef; border-radius: 999px; background: #fff; color: #243251; padding: .5rem .85rem; font-weight: 700; box-shadow: var(--shadow); }}
+    .profile-menu summary::after {{ content: ' ▾'; color: var(--muted); }}
+    .profile-menu summary::-webkit-details-marker {{ display: none; }}
+    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .5rem); width: min(22rem, 85vw); padding: .85rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .8rem; }}
+    .profile-popover form {{ margin: 0; }}
+    .profile-popover label {{ display: block; margin-bottom: .3rem; color: #3f4e75; font-size: .82rem; font-weight: 700; }}
+    .profile-popover input, .profile-popover select {{ width: 100%; border: 1px solid #c9d5ef; border-radius: 9px; padding: .48rem .58rem; font: inherit; }}
+    .profile-form-row {{ display: grid; grid-template-columns: 1fr auto; gap: .4rem; }}
+    .profile-form-row button {{ border: 1px solid #c9d5ef; border-radius: 9px; background: #eef3ff; color: #2c3e74; font-weight: 700; }}
 
     table {{
       width: 100%;
@@ -2176,6 +2271,7 @@ def _render_index(
   <div class="container">
     <div class="hero">
       <h1>GetOffline</h1>
+      {profile_menu}
       <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
@@ -3818,7 +3914,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 </html>"""
 
 
-def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
+def _render_settings(
+    config: Dict[str, Dict[str, object]],
+    profiles: Optional[List[Profile]] = None,
+    active_profile: Optional[Profile] = None,
+) -> str:
+    profile_menu = _render_profile_menu(profiles or [], active_profile, "/settings")
     defaults = config.get("defaults", {})
     cookie_text = str((config.get("download_settings") or {}).get("youtube_cookie_text") or "")
     output_root = html.escape(str(defaults.get("output_root") or ""))
@@ -4068,6 +4169,16 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     button.primary {{ background: var(--primary); color: #fff; border-color: var(--primary); }}
     button.primary:hover {{ background: var(--primary-strong); border-color: var(--primary-strong); }}
     button.danger {{ border-color: #f2bfca; color: var(--danger); background: #fff7f9; }}
+    .settings-header {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; position: relative; }}
+    .profile-menu {{ position: relative; z-index: 20; }}
+    .profile-menu summary {{ cursor: pointer; list-style: none; border: 1px solid #cdd9f1; border-radius: 999px; background: #fff; padding: .5rem .85rem; font-weight: 700; white-space: nowrap; }}
+    .profile-menu summary::after {{ content: ' ▾'; color: #52627d; }}
+    .profile-menu summary::-webkit-details-marker {{ display: none; }}
+    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .5rem); width: min(22rem, 85vw); padding: .85rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .8rem; }}
+    .profile-popover form {{ margin: 0; }}
+    .profile-popover label {{ margin: 0 0 .3rem; }}
+    .profile-form-row {{ display: grid; grid-template-columns: 1fr auto; gap: .4rem; }}
+    .profile-form-row button {{ padding: .5rem .7rem; }}
     .section {{
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -4140,7 +4251,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 </head>
 <body>
   <div class="wrap">
-    <h1>Settings</h1>
+    <div class="settings-header"><h1>Settings</h1>{profile_menu}</div>
 
     <div class="section">
       <h2>General</h2>
@@ -4673,6 +4784,8 @@ def make_handler(state: AppState):
                     show_played=show_played,
                     favorites_only=favorites_only,
                     android_status=_snapshot_android_sync_status(state.android_sync_status),
+                    profiles=_profile_view(state)[0],
+                    active_profile=_profile_view(state)[1],
                 )
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
@@ -4689,7 +4802,8 @@ def make_handler(state: AppState):
                     log.exception("GET /settings failed to load config db=%s: %s", state.database_path, exc)
                     self.send_error(503, "Database unavailable")
                     return
-                body = _render_settings(stored)
+                profile_list, active_profile = _profile_view(state)
+                body = _render_settings(stored, profiles=profile_list, active_profile=active_profile)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -4913,6 +5027,31 @@ def make_handler(state: AppState):
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
+
+            if path in {"/profiles/switch", "/profiles/create", "/profiles/rename"}:
+                if state.profile_manager is None:
+                    self.send_error(404, "Profiles are unavailable")
+                    return
+                length = int(self.headers.get("Content-Length") or 0)
+                form = parse_qs(self.rfile.read(length).decode("utf-8"))
+                redirect_to = str((form.get("redirect_to") or ["/"])[0])
+                if redirect_to not in {"/", "/settings"}:
+                    redirect_to = "/"
+                try:
+                    if path == "/profiles/switch":
+                        profile = state.profile_manager.switch(str((form.get("profile_id") or [""])[0]))
+                    elif path == "/profiles/create":
+                        profile = state.profile_manager.create(str((form.get("name") or [""])[0]))
+                    else:
+                        profile = state.profile_manager.rename_active(str((form.get("name") or [""])[0]))
+                    _activate_profile(state, profile)
+                except ValueError as exc:
+                    self.send_error(400, str(exc))
+                    return
+                self.send_response(303)
+                self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
 
             if path == "/import-media":
                 content_type = self.headers.get("Content-Type") or ""
@@ -5385,13 +5524,23 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     config["youtube"] = stored["youtube"]
     config["podcasts"] = stored["podcasts"]
     materialize_youtube_cookie_file(str(defaults["database_path"]))
-    state = AppState(
-        output_root=Path(config["defaults"]["output_root"]),
-        database_path=Path(defaults["database_path"]),
-        config=config,
-        update_runner=_default_update_runner,
+    registry_value = os.getenv("GETOFFLINE_PROFILES_PATH")
+    registry_path = Path(registry_value) if registry_value else Path(defaults["database_path"]).parent / "profiles.json"
+    profile_manager = ProfileManager(
+        registry_path=registry_path,
+        default_output_root=Path(config["defaults"]["output_root"]),
+        default_database_path=Path(defaults["database_path"]),
     )
-    configured_defaults = config.get("defaults") or {}
+    active_profile = profile_manager.get_active()
+    active_config = profile_manager.load_config(active_profile)
+    state = AppState(
+        output_root=Path(str(active_config["defaults"]["output_root"])),
+        database_path=active_profile.database_path,
+        config=active_config,
+        update_runner=_default_update_runner,
+        profile_manager=profile_manager,
+    )
+    configured_defaults = active_config.get("defaults") or {}
     ensure_local_summary_model(
         model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
         ollama_path=str(configured_defaults.get("ollama_path") or "ollama"),

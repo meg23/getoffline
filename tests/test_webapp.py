@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from profiles import Profile, ProfileManager  # noqa: E402
 from database import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
@@ -41,12 +42,54 @@ from webapp import (  # noqa: E402
     trigger_background_update,
     update_download_position_seconds,
     trigger_single_youtube_download,
+    _render_profile_menu,
+    _trigger_all_profile_updates,
 )
 
 
 class WebAppHelpersTests(unittest.TestCase):
     def setUp(self):
         _LAST_DISCONNECT_LOGGED_AT.clear()
+
+    def test_profile_menu_contains_switch_create_and_rename_controls(self):
+        profile = Profile("default", "default", Path("/tmp/downloads"), Path("/tmp/downloads.sqlite3"))
+
+        body = _render_profile_menu([profile], profile, "/")
+
+        self.assertIn('id="profile-switcher"', body)
+        self.assertIn('action="/profiles/create"', body)
+        self.assertIn('action="/profiles/rename"', body)
+        self.assertIn('value="default" selected', body)
+
+    def test_background_update_triggers_every_profile(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manager = ProfileManager(root / "profiles.json", root / "downloads", root / "downloads.sqlite3")
+            manager.create("Alice")
+            calls = []
+
+            def unused_runner(config, items):
+                _ = config, items
+
+            def record_trigger(profile_state):
+                calls.append(str(profile_state.database_path))
+                return True
+
+            state = AppState(
+                output_root=manager.get_active().output_root,
+                database_path=manager.get_active().database_path,
+                config=manager.load_config(manager.get_active()),
+                update_runner=unused_runner,
+                profile_manager=manager,
+            )
+
+            with mock.patch("webapp.trigger_background_update", side_effect=record_trigger):
+                _trigger_all_profile_updates(state)
+
+            expected_paths = set()
+            for profile in manager.list_profiles():
+                expected_paths.add(str(profile.database_path))
+            self.assertEqual(set(calls), expected_paths)
 
     def test_flush_pending_progress_updates_batches_in_memory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
