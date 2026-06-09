@@ -60,11 +60,13 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('action="/profiles/create"', body)
         self.assertIn('action="/profiles/rename"', body)
         self.assertIn('value="default" selected', body)
-        self.assertIn('class="profile-trigger"', body)
+        self.assertIn('class="profile-controls"', body)
+        self.assertIn('class="profile-switch-form"', body)
         self.assertIn('class="profile-avatar"', body)
-        self.assertIn('class="profile-chevron"', body)
+        self.assertIn('class="profile-add-button"', body)
+        self.assertIn('Create or rename a profile', body)
         self.assertIn('class="profile-action-button"', body)
-        self.assertIn('Current profile', body)
+        self.assertNotIn('<label for="profile-switcher">', body)
 
     def test_background_update_triggers_every_profile(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1397,7 +1399,8 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('title="Settings"', body)
             self.assertIn('aria-label="Settings"', body)
             self.assertIn('href="#bi-gear"', body)
-            self.assertIn('.profile-trigger {', body)
+            self.assertIn('.profile-switch-form {', body)
+            self.assertIn('.profile-add-button {', body)
             self.assertIn('height: 2.4rem;', body)
             self.assertIn('border-radius: 12px;', body)
             self.assertIn('class="hero-heading"', body)
