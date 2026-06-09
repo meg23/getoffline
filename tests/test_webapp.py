@@ -713,25 +713,48 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("Add podcast source", body)
         self.assertIn("General", body)
         self.assertIn("Ollama configuration", body)
-        self.assertIn("Android push configuration", body)
+        self.assertIn("Directory sync", body)
         self.assertIn('name="settings_action" value="update_ytdlp"', body)
         self.assertIn('Save yt-dlp configuration</button>', body)
         self.assertIn('name="settings_action" value="update_ollama"', body)
         self.assertIn('name="settings_action" value="clear_summaries"', body)
         self.assertIn('Save Ollama configuration</button>', body)
         self.assertIn('name="settings_action" value="update_android_sync"', body)
-        self.assertIn('action="/android-sync?next=/settings"', body)
-        self.assertIn('Sync to Android now</button>', body)
+        self.assertIn('name="android_sync_target"', body)
+        self.assertIn('Local disk', body)
+        self.assertIn('Android device', body)
+        self.assertIn('name="android_sync_directory"', body)
+        self.assertIn('Save and sync</button>', body)
         self.assertIn('name="android_sync_connection_mode"', body)
         self.assertIn('name="android_sync_wifi_address"', body)
         self.assertIn('Wi-Fi (connect to paired device)', body)
         self.assertIn('ADB <code>', body)
+        self.assertIn('justify-content: flex-end', body)
+        self.assertIn('.sync-target-fields[hidden] { display: none; }', body)
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
         self.assertIn('name="enabled_0"', body)
         self.assertIn('name="max_downloads_0"', body)
         self.assertIn('Save YouTube sources</button>', body)
         self.assertIn('Save podcast sources</button>', body)
+
+    def test_render_settings_hides_android_fields_for_local_disk(self):
+        body = _render_settings(
+            {
+                "defaults": {
+                    "android_sync_target": "directory",
+                    "android_sync_directory": "/mnt/offline",
+                },
+                "download_settings": {},
+                "youtube": [],
+                "podcasts": [],
+            }
+        )
+
+        self.assertIn('<option value="directory" selected>Local disk</option>', body)
+        self.assertIn('id="directory-sync-fields" class="grid sync-target-fields"', body)
+        self.assertIn('id="android-sync-fields" class="grid sync-target-fields" hidden', body)
+        self.assertIn('id="android-sync-resolved" hidden', body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1584,7 +1607,7 @@ class WebAppUpdateThreadTests(unittest.TestCase):
             self.assertEqual(calls, ["run"])
 
 
-class AndroidSyncTests(unittest.TestCase):
+class MediaSyncTests(unittest.TestCase):
     def test_android_sync_items_only_include_unplayed_existing_media(self):
         from webapp import _android_sync_items_from_rows
 
@@ -1641,8 +1664,32 @@ class AndroidSyncTests(unittest.TestCase):
 
             self.assertEqual([item.row_id for item in items], [1, 3])
 
+
+    def test_sync_items_to_directory_copies_media_subtitles_and_playlist(self):
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            subtitle = root / "episode.srt"
+            destination = root / "offline"
+            media.write_text("audio", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
+
+            with mock.patch("media_sync.shutil.which", return_value=None):
+                result = sync_items(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Podcast", file_path=media, subtitle_path=subtitle)],
+                    AndroidSyncConfig(enabled=True, target="directory", directory=str(destination)),
+                )
+
+            copied_media = destination / "Podcast - Episode.mp3"
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(copied_media.read_text(encoding="utf-8"), "audio")
+            self.assertEqual(copied_media.with_suffix(".srt").read_text(encoding="utf-8"), "subtitle")
+            self.assertIn(copied_media.as_uri(), (destination / "GetOffline.xspf").read_text(encoding="utf-8"))
+
     def test_sync_items_to_android_skips_paths_recorded_in_syncdb(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp4"
@@ -1657,7 +1704,7 @@ class AndroidSyncTests(unittest.TestCase):
                     return SimpleNamespace(stdout="/sdcard/Movies/GetOffline/Channel - Episode.mp4\n", stderr="", returncode=0)
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
-            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+            with mock.patch("media_sync.shutil.which", return_value="/usr/bin/adb"):
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
@@ -1669,7 +1716,7 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertFalse(any("push" in cmd and str(cmd[-1]).endswith("Episode.mp4") for cmd in calls))
 
     def test_sync_items_to_android_pushes_unplayed_file(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp4"
@@ -1690,7 +1737,7 @@ class AndroidSyncTests(unittest.TestCase):
                     playlist_payloads.append(Path(cmd[-2]).read_text(encoding="utf-8"))
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
-            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+            with mock.patch("media_sync.shutil.which", return_value="/usr/bin/adb"):
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media, position_seconds=97.25)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
@@ -1726,7 +1773,7 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertIn("position_seconds=97.250", playlist_payloads[0])
 
     def test_sync_items_to_android_embeds_album_art_for_podcast_audio(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         class FakeArtworkResponse:
             headers = {"Content-Type": "image/jpeg"}
@@ -1759,8 +1806,8 @@ class AndroidSyncTests(unittest.TestCase):
             def fake_which(name):
                 return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
 
-            with mock.patch("android_sync.shutil.which", side_effect=fake_which), mock.patch(
-                "android_sync.urllib.request.urlopen", return_value=FakeArtworkResponse()
+            with mock.patch("media_sync.shutil.which", side_effect=fake_which), mock.patch(
+                "media_sync.urllib.request.urlopen", return_value=FakeArtworkResponse()
             ) as urlopen_mock:
                 result = sync_items_to_android(
                     [
@@ -1795,7 +1842,7 @@ class AndroidSyncTests(unittest.TestCase):
             urlopen_mock.assert_called_once_with("https://example.com/art.jpg", timeout=20)
 
     def test_sync_items_to_android_uses_downloaded_thumbnail_sidecar_for_album_art(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp3"
@@ -1818,7 +1865,7 @@ class AndroidSyncTests(unittest.TestCase):
             def fake_which(name):
                 return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
 
-            with mock.patch("android_sync.shutil.which", side_effect=fake_which), mock.patch("android_sync.urllib.request.urlopen") as urlopen_mock:
+            with mock.patch("media_sync.shutil.which", side_effect=fake_which), mock.patch("media_sync.urllib.request.urlopen") as urlopen_mock:
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=8, title="Episode", source_name="Channel", file_path=media, artwork_path=artwork)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
@@ -1836,7 +1883,7 @@ class AndroidSyncTests(unittest.TestCase):
             urlopen_mock.assert_not_called()
 
     def test_sync_items_to_android_refreshes_existing_remote_file_when_metadata_available(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp3"
@@ -1857,7 +1904,7 @@ class AndroidSyncTests(unittest.TestCase):
             def fake_which(name):
                 return "/usr/bin/ffmpeg" if name == "ffmpeg" else "/usr/bin/adb"
 
-            with mock.patch("android_sync.shutil.which", side_effect=fake_which):
+            with mock.patch("media_sync.shutil.which", side_effect=fake_which):
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=9, title="Existing Episode", source_name="Podcast Show", file_path=media)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
@@ -1878,7 +1925,7 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertNotEqual(Path(media_pushes[0][-2]), media)
 
     def test_sync_items_to_android_connects_to_paired_wifi_device(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp4"
@@ -1895,7 +1942,7 @@ class AndroidSyncTests(unittest.TestCase):
                     return SimpleNamespace(stdout="", stderr="", returncode=1)
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
-            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+            with mock.patch("media_sync.shutil.which", return_value="/usr/bin/adb"):
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
                     AndroidSyncConfig(
@@ -1914,7 +1961,7 @@ class AndroidSyncTests(unittest.TestCase):
             self.assertTrue(any(cmd[:4] == ["/usr/bin/adb", "-s", "192.168.1.50:5555", "push"] for cmd in calls))
 
     def test_delete_items_from_android_removes_remote_media_and_subtitles(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, delete_items_from_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, delete_items_from_android
 
         calls = []
 
@@ -1924,7 +1971,7 @@ class AndroidSyncTests(unittest.TestCase):
                 return SimpleNamespace(stdout="List of devices attached\nABC123\tdevice\n", stderr="", returncode=0)
             return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
-        with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+        with mock.patch("media_sync.shutil.which", return_value="/usr/bin/adb"):
             result = delete_items_from_android(
                 [AndroidSyncItem(row_id=5, title="Episode", source_name="Channel", file_path=Path("episode.mp4"))],
                 AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
@@ -1940,7 +1987,7 @@ class AndroidSyncTests(unittest.TestCase):
         self.assertIn("Channel - Episode.vtt", rm_commands[0][4])
 
     def test_sync_items_to_android_reports_mkdir_failure(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp4"
@@ -1953,7 +2000,7 @@ class AndroidSyncTests(unittest.TestCase):
                     return SimpleNamespace(stdout="", stderr="permission denied", returncode=1)
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
-            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"), mock.patch("android_sync.log.warning") as warning_mock:
+            with mock.patch("media_sync.shutil.which", return_value="/usr/bin/adb"), mock.patch("media_sync.log.warning") as warning_mock:
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),
@@ -1967,7 +2014,7 @@ class AndroidSyncTests(unittest.TestCase):
             warning_mock.assert_called()
 
     def test_sync_items_to_android_handles_push_timeout(self):
-        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
+        from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp4"
@@ -1984,7 +2031,7 @@ class AndroidSyncTests(unittest.TestCase):
                     raise subprocess.TimeoutExpired(cmd, timeout=300)
                 return SimpleNamespace(stdout="ok", stderr="", returncode=0)
 
-            with mock.patch("android_sync.shutil.which", return_value="/usr/bin/adb"):
+            with mock.patch("media_sync.shutil.which", return_value="/usr/bin/adb"):
                 result = sync_items_to_android(
                     [AndroidSyncItem(row_id=1, title="Episode", source_name="Channel", file_path=media)],
                     AndroidSyncConfig(enabled=True, destination="/sdcard/Movies/GetOffline", max_items=10),

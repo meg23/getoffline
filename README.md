@@ -16,7 +16,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
-- Optional Android offline sync that copies unplayed media to a connected phone with `adb push`
+- Optional offline sync that copies selected media to a directory on disk or to a connected Android phone with `adb push`
 
 ## Requirements
 
@@ -86,18 +86,22 @@ Use the **Update Downloads** button in the web UI to trigger background download
 
 Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
 
-## Android offline sync
+## Directory sync
 
-GetOffline can copy unplayed downloads to an Android phone so they are available to watch or listen to offline. It uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
+GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory sync writes media, optional subtitles, and `GetOffline.xspf` directly to the selected folder.
+
+Android sync uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
+
+To configure Android sync:
 
 1. Install Android platform tools so `adb` is available on the computer running GetOffline.
 2. Enable Developer options and USB debugging on the phone, then authorize the computer when Android prompts you.
-3. Open `http://127.0.0.1:8080/settings` and enable **Auto-sync to Android**.
+3. Open `http://127.0.0.1:8080/settings`, choose **Android device**, and optionally enable automatic sync after downloads.
 4. Choose the phone folder, for example `/sdcard/Movies/GetOffline`, and the maximum number of unplayed items to copy each sync.
 
 To sync over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each sync/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
 
-When enabled, GetOffline periodically checks for an authorized connected phone using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The phone button in the library toolbar starts a manual Android sync immediately. Files already present in the destination folder are skipped unless GetOffline can refresh them with embedded metadata. When `ffmpeg` is available, GetOffline tags the copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image before pushing it, then asks Android's media scanner to rescan the pushed file. Each sync also writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
+When enabled, GetOffline periodically syncs the selected destination using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The **Save and sync** button in Settings persists the configuration and starts a sync immediately. Files already present in the destination folder are skipped when they match the local file. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android sync also asks the device's media scanner to rescan pushed files. Each sync writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
 To build a standalone executable with Pex:
 
