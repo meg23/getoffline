@@ -124,6 +124,8 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "summary_model": "qwen2.5:0.5b",
                     "ollama_path": "/opt/bin/ollama",
                     "deno_path": "/opt/bin/deno",
+                    "android_sync_target": "directory",
+                    "android_sync_directory": "/mnt/offline",
                 },
             )
             update_download_settings(db_path, "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\txyz")
@@ -135,6 +137,8 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(config["defaults"]["summary_model"], "qwen2.5:0.5b")
             self.assertEqual(config["defaults"]["ollama_path"], "/opt/bin/ollama")
             self.assertEqual(config["defaults"]["deno_path"], "/opt/bin/deno")
+            self.assertEqual(config["defaults"]["android_sync_target"], "directory")
+            self.assertEqual(config["defaults"]["android_sync_directory"], "/mnt/offline")
             self.assertIn("SID", config["download_settings"]["youtube_cookie_text"])
 
     def test_sources_seed_and_replace(self):

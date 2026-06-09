@@ -713,19 +713,23 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("Add podcast source", body)
         self.assertIn("General", body)
         self.assertIn("Ollama configuration", body)
-        self.assertIn("Android push configuration", body)
+        self.assertIn("Offline sync", body)
         self.assertIn('name="settings_action" value="update_ytdlp"', body)
         self.assertIn('Save yt-dlp configuration</button>', body)
         self.assertIn('name="settings_action" value="update_ollama"', body)
         self.assertIn('name="settings_action" value="clear_summaries"', body)
         self.assertIn('Save Ollama configuration</button>', body)
         self.assertIn('name="settings_action" value="update_android_sync"', body)
-        self.assertIn('action="/android-sync?next=/settings"', body)
-        self.assertIn('Sync to Android now</button>', body)
+        self.assertIn('name="android_sync_target"', body)
+        self.assertIn('Directory on disk', body)
+        self.assertIn('Android device', body)
+        self.assertIn('name="android_sync_directory"', body)
+        self.assertIn('Save and sync</button>', body)
         self.assertIn('name="android_sync_connection_mode"', body)
         self.assertIn('name="android_sync_wifi_address"', body)
         self.assertIn('Wi-Fi (connect to paired device)', body)
         self.assertIn('ADB <code>', body)
+        self.assertIn('justify-content: flex-end', body)
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
         self.assertIn('name="enabled_0"', body)
@@ -1640,6 +1644,30 @@ class AndroidSyncTests(unittest.TestCase):
             )
 
             self.assertEqual([item.row_id for item in items], [1, 3])
+
+
+    def test_sync_items_to_directory_copies_media_subtitles_and_playlist(self):
+        from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            subtitle = root / "episode.srt"
+            destination = root / "offline"
+            media.write_text("audio", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
+
+            with mock.patch("android_sync.shutil.which", return_value=None):
+                result = sync_items(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Podcast", file_path=media, subtitle_path=subtitle)],
+                    AndroidSyncConfig(enabled=True, target="directory", directory=str(destination)),
+                )
+
+            copied_media = destination / "Podcast - Episode.mp3"
+            self.assertEqual(result.copied, 1)
+            self.assertEqual(copied_media.read_text(encoding="utf-8"), "audio")
+            self.assertEqual(copied_media.with_suffix(".srt").read_text(encoding="utf-8"), "subtitle")
+            self.assertIn(copied_media.as_uri(), (destination / "GetOffline.xspf").read_text(encoding="utf-8"))
 
     def test_sync_items_to_android_skips_paths_recorded_in_syncdb(self):
         from android_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android

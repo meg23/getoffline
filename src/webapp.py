@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from android_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items_to_android
+from android_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -1220,6 +1220,10 @@ def _run_android_delete_job(state: AppState, rows: List[MediaRow]) -> None:
 def _trigger_android_delete_for_rows(state: AppState, rows: List[MediaRow]) -> bool:
     if not rows:
         return False
+    sync_config = config_from_defaults(state.config.get("defaults") or {})
+    if sync_config.target != "android":
+        log.info("Android delete skipped after played mark: current sync destination is %s", sync_config.target)
+        return False
     thread = threading.Thread(
         target=_run_android_delete_job,
         args=(state, list(rows)),
@@ -1342,7 +1346,7 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
             exclude_regex=sync_config.exclude_regex,
         )
         log.info("Android sync job selected %s local item(s) from %s downloaded row(s)", len(items), len(rows))
-        result = sync_items_to_android(items, sync_config)
+        result = sync_items(items, sync_config)
         log.info(
             "Android sync job completed: result=%s copied=%s skipped=%s failed=%s device=%s",
             result.message,
@@ -3837,6 +3841,13 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
         return " checked" if checked else ""
 
     android_sync_enabled_checked = default_checked("android_sync_enabled")
+    android_sync_target_raw = str(defaults.get("android_sync_target") or "android").strip().lower()
+    android_sync_target_raw = android_sync_target_raw if android_sync_target_raw in {"directory", "android"} else "android"
+    android_sync_directory_selected = " selected" if android_sync_target_raw == "directory" else ""
+    android_sync_android_selected = " selected" if android_sync_target_raw == "android" else ""
+    android_sync_directory = html.escape(str(defaults.get("android_sync_directory") or "./offline-sync"))
+    android_fields_hidden = " hidden" if android_sync_target_raw != "android" else ""
+    directory_fields_hidden = " hidden" if android_sync_target_raw != "directory" else ""
     android_sync_adb_path_raw = str(defaults.get("android_sync_adb_path") or "adb")
     android_sync_adb_path = html.escape(android_sync_adb_path_raw)
     resolved_android_sync_adb_path = html.escape(str(shutil.which(android_sync_adb_path_raw) or "not found"))
@@ -4041,7 +4052,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       box-shadow: 0 0 0 3px rgba(39, 93, 240, 0.16);
     }}
     textarea {{ min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
-    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; }}
+    .actions {{ margin-top: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }}
     button, a {{
       border-radius: 10px;
       border: 1px solid #c9d7f2;
@@ -4070,7 +4081,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     .section table input, .section table select {{ width: 100%; min-width: 0; }}
-    .row-actions {{ display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center; justify-content: center; }}
+    .row-actions {{ display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center; justify-content: flex-end; }}
     .row-actions form {{ margin: 0; }}
     .compact-form {{ display: inline-block; }}
     .row-status {{ font-size: .78rem; color: #364968; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }}
@@ -4091,7 +4102,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     .table-wrap {{ overflow: visible; }}
     .source-row-actions-row td {{ border-bottom: 1px solid var(--border-soft); }}
     .source-row-actions-cell {{ padding-top: 0; padding-bottom: .8rem; }}
-    .source-row-actions {{ justify-content: center; }}
+    .source-row-actions {{ justify-content: flex-end; }}
     .section-help {{ margin: .15rem 0 .9rem; color: #52627d; }}
     .android-section {{ border-color: #bcd0f8; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); }}
     .ytdlp-section {{ border-color: #bfdbfe; background: linear-gradient(180deg, #f8fcff 0%, #ffffff 100%); }}
@@ -4219,13 +4230,28 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     </div>
 
     <div class="section android-section">
-      <h2>Android push configuration</h2>
-      <p>Configure Android push settings. Manual and scheduled downloads automatically try to push matching media when an authorized device is found. The app uses <code>adb push</code>.</p>
-      <form method="post" action="/settings">
+      <h2>Offline sync</h2>
+      <p>Keep selected media in a directory on this computer, an external drive, or an Android device. Android-specific connection settings appear only when Android is selected.</p>
+      <form id="offline-sync-form" method="post" action="/settings">
         <input type="hidden" name="settings_action" value="update_android_sync" />
         <div class="grid">
           <div>
-            <label for="android_sync_enabled"><input id="android_sync_enabled" type="checkbox" name="android_sync_enabled" value="1"{android_sync_enabled_checked} /> Auto-sync to Android</label>
+            <label for="android_sync_target">Sync destination</label>
+            <select id="android_sync_target" name="android_sync_target">
+              <option value="directory"{android_sync_directory_selected}>Directory on disk</option>
+              <option value="android"{android_sync_android_selected}>Android device</option>
+            </select>
+          </div>
+          <div>
+            <label for="android_sync_enabled"><input id="android_sync_enabled" type="checkbox" name="android_sync_enabled" value="1"{android_sync_enabled_checked} /> Auto-sync after downloads</label>
+          </div>
+          <div>
+            <label for="android_sync_max_items">Max items per sync</label>
+            <input id="android_sync_max_items" name="android_sync_max_items" type="number" min="1" value="{android_sync_max_items}" required />
+          </div>
+          <div>
+            <label for="android_sync_exclude_regex">Exclude media matching regex</label>
+            <input id="android_sync_exclude_regex" name="android_sync_exclude_regex" value="{android_sync_exclude_regex}" placeholder="trailer|sample" />
           </div>
           <div>
             <label for="android_sync_include_subtitles"><input id="android_sync_include_subtitles" type="checkbox" name="android_sync_include_subtitles" value="1"{android_sync_include_subtitles_checked} /> Include subtitles</label>
@@ -4239,9 +4265,21 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
           <div>
             <label for="android_sync_include_played"><input id="android_sync_include_played" type="checkbox" name="android_sync_include_played" value="1"{android_sync_include_played_checked} /> Sync played media</label>
           </div>
+        </div>
+        <div id="directory-sync-fields" class="grid"{directory_fields_hidden}>
+          <div>
+            <label for="android_sync_directory">Directory path</label>
+            <input id="android_sync_directory" name="android_sync_directory" value="{android_sync_directory}" placeholder="/mnt/offline-media" />
+          </div>
+        </div>
+        <div id="android-sync-fields" class="grid"{android_fields_hidden}>
+          <div>
+            <label for="android_sync_destination">Android folder</label>
+            <input id="android_sync_destination" name="android_sync_destination" value="{android_sync_destination}" />
+          </div>
           <div>
             <label for="android_sync_adb_path">ADB executable</label>
-            <input id="android_sync_adb_path" name="android_sync_adb_path" value="{android_sync_adb_path}" required />
+            <input id="android_sync_adb_path" name="android_sync_adb_path" value="{android_sync_adb_path}" />
           </div>
           <div>
             <label for="android_sync_connection_mode">ADB connection</label>
@@ -4254,27 +4292,10 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label for="android_sync_wifi_address">Wi-Fi device address</label>
             <input id="android_sync_wifi_address" name="android_sync_wifi_address" value="{android_sync_wifi_address}" placeholder="192.168.1.50:5555" />
           </div>
-          <div>
-            <label for="android_sync_destination">Phone folder</label>
-            <input id="android_sync_destination" name="android_sync_destination" value="{android_sync_destination}" required />
-          </div>
-          <div>
-            <label for="android_sync_max_items">Max items per sync</label>
-            <input id="android_sync_max_items" name="android_sync_max_items" value="{android_sync_max_items}" required />
-          </div>
-          <div>
-            <label for="android_sync_exclude_regex">Exclude media matching regex</label>
-            <input id="android_sync_exclude_regex" name="android_sync_exclude_regex" value="{android_sync_exclude_regex}" placeholder="trailer|sample" />
-          </div>
         </div>
-        <p><strong>Resolved path:</strong> ADB <code>{resolved_android_sync_adb_path}</code></p>
+        <p id="android-sync-resolved"{android_fields_hidden}><strong>Resolved path:</strong> ADB <code>{resolved_android_sync_adb_path}</code></p>
         <div class="actions">
-          <button type="submit" class="primary">Save Android push configuration</button>
-        </div>
-      </form>
-      <form method="post" action="/android-sync?next=/settings">
-        <div class="actions">
-          <button type="submit">Sync to Android now</button>
+          <button type="submit" class="primary">Save and sync</button>
         </div>
       </form>
     </div>
@@ -4370,6 +4391,20 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 
     <div class="actions"><a href="/">Back to library</a></div>
   </div>
+  <script>
+    const syncTarget = document.getElementById('android_sync_target');
+    const directoryFields = document.getElementById('directory-sync-fields');
+    const androidFields = document.getElementById('android-sync-fields');
+    const androidResolved = document.getElementById('android-sync-resolved');
+    const updateSyncFields = () => {{
+      const androidSelected = syncTarget?.value === 'android';
+      if (directoryFields) directoryFields.hidden = androidSelected;
+      if (androidFields) androidFields.hidden = !androidSelected;
+      if (androidResolved) androidResolved.hidden = !androidSelected;
+    }};
+    syncTarget?.addEventListener('change', updateSyncFields);
+    updateSyncFields();
+  </script>
 </body>
 </html>"""
 
@@ -5105,8 +5140,14 @@ def make_handler(state: AppState):
                     }
                     update_stored_defaults(str(state.database_path), sanitized_updates)
                 elif settings_action == "update_android_sync":
+                    sync_target = str((form.get("android_sync_target") or ["android"])[0]).strip().lower()
+                    if sync_target not in {"directory", "android"}:
+                        self.send_error(400, "Invalid sync destination")
+                        return
                     updates = {
                         "android_sync_enabled": "1" if (form.get("android_sync_enabled") or ["0"])[0] in {"1", "true", "yes", "on"} else "0",
+                        "android_sync_target": sync_target,
+                        "android_sync_directory": (form.get("android_sync_directory") or ["./offline-sync"])[0],
                         "android_sync_adb_path": (form.get("android_sync_adb_path") or ["adb"])[0],
                         "android_sync_connection_mode": (form.get("android_sync_connection_mode") or ["usb"])[0],
                         "android_sync_wifi_address": (form.get("android_sync_wifi_address") or [""])[0],
@@ -5310,6 +5351,8 @@ def make_handler(state: AppState):
                 state.config["podcasts"] = stored["podcasts"]
                 state.output_root = Path(stored["defaults"]["output_root"])
                 materialize_youtube_cookie_file(str(state.database_path))
+                if settings_action == "update_android_sync":
+                    trigger_android_sync(state, force=True)
 
                 self.send_response(303)
                 self.send_header("Location", "/settings")

@@ -22,6 +22,8 @@ MOV_METADATA_EXTENSIONS = {".m4a", ".mov", ".mp4"}
 @dataclass
 class AndroidSyncConfig:
     enabled: bool = False
+    target: str = "android"
+    directory: str = "./offline-sync"
     adb_path: str = "adb"
     connection_mode: str = "usb"
     wifi_address: str = ""
@@ -70,6 +72,8 @@ def config_from_defaults(defaults: dict) -> AndroidSyncConfig:
         max_items = 10
     return AndroidSyncConfig(
         enabled=_coerce_bool(defaults.get("android_sync_enabled")),
+        target=str(defaults.get("android_sync_target") or "android").strip().lower() or "android",
+        directory=str(defaults.get("android_sync_directory") or "./offline-sync").strip() or "./offline-sync",
         adb_path=str(defaults.get("android_sync_adb_path") or "adb").strip() or "adb",
         connection_mode=str(defaults.get("android_sync_connection_mode") or "usb").strip().lower() or "usb",
         wifi_address=str(defaults.get("android_sync_wifi_address") or "").strip(),
@@ -864,3 +868,121 @@ def sync_items_to_android(
         result.device_serial or "none",
     )
     return result
+
+
+def _copy_item_to_directory(
+    item: AndroidSyncItem,
+    destination_path: Path,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> bool:
+    source_path = item.file_path.expanduser().resolve()
+    if not source_path.is_file():
+        result.failed += 1
+        _append_error(result, f"missing local file for row {item.row_id}: {source_path}")
+        return False
+    if destination_path.is_file() and destination_path.stat().st_size == source_path.stat().st_size:
+        result.skipped += 1
+        return True
+    copy_source = _copy_with_embedded_metadata(source_path, item, runner)
+    try:
+        shutil.copy2(copy_source, destination_path)
+        result.copied += 1
+        result.copied_files.append(str(destination_path))
+        return True
+    except OSError as exc:
+        result.failed += 1
+        _append_error(result, f"copy failed for row {item.row_id}: {exc}")
+        return False
+    finally:
+        if copy_source != source_path:
+            copy_source.unlink(missing_ok=True)
+
+
+def _copy_subtitle_to_directory(item: AndroidSyncItem, destination_path: Path, result: AndroidSyncResult) -> None:
+    if not item.subtitle_path:
+        return
+    subtitle_source = item.subtitle_path.expanduser().resolve()
+    if not subtitle_source.is_file():
+        return
+    subtitle_destination = destination_path.with_suffix(subtitle_source.suffix)
+    try:
+        if not subtitle_destination.is_file() or subtitle_destination.stat().st_size != subtitle_source.stat().st_size:
+            shutil.copy2(subtitle_source, subtitle_destination)
+    except OSError as exc:
+        result.failed += 1
+        _append_error(result, f"subtitle copy failed for row {item.row_id}: {exc}")
+
+
+def _write_directory_playlist(
+    destination: Path,
+    entries: List[Tuple[AndroidSyncItem, str]],
+    result: AndroidSyncResult,
+) -> None:
+    if not entries:
+        return
+    playlist_path = destination / "GetOffline.xspf"
+    try:
+        playlist_path.write_text(build_vlc_xspf(entries), encoding="utf-8")
+        result.vlc_playlist_path = str(playlist_path)
+    except OSError as exc:
+        result.failed += 1
+        _append_error(result, f"VLC playlist write failed: {exc}")
+
+
+def _prepare_sync_directory(config: AndroidSyncConfig, item_count: int, result: AndroidSyncResult) -> Optional[Path]:
+    destination = Path(config.directory).expanduser().resolve()
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        return destination
+    except OSError as exc:
+        result.failed = item_count
+        result.message = f"unable to prepare sync directory: {exc}"
+        _append_error(result, result.message)
+        return None
+
+
+def _set_sync_result_message(result: AndroidSyncResult) -> None:
+    if result.failed:
+        result.message = f"copied {result.copied}, skipped {result.skipped}, failed {result.failed}"
+    else:
+        result.message = f"copied {result.copied}, skipped {result.skipped}"
+
+
+def sync_items_to_directory(
+    items: Iterable[AndroidSyncItem],
+    config: AndroidSyncConfig,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> AndroidSyncResult:
+    result = AndroidSyncResult(message="disabled")
+    if not config.enabled:
+        return result
+    sync_items = list(items)[: config.max_items]
+    if not sync_items:
+        result.message = "no media to sync"
+        return result
+    destination = _prepare_sync_directory(config, len(sync_items), result)
+    if destination is None:
+        return result
+    playlist_entries: List[Tuple[AndroidSyncItem, str]] = []
+    for item in sync_items:
+        result.attempted += 1
+        destination_path = destination / Path(build_remote_media_path("", item)).name
+        if not _copy_item_to_directory(item, destination_path, result, runner):
+            continue
+        playlist_entries.append((item, str(destination_path)))
+        if config.include_subtitles:
+            _copy_subtitle_to_directory(item, destination_path, result)
+    _write_directory_playlist(destination, playlist_entries, result)
+    _set_sync_result_message(result)
+    return result
+
+
+def sync_items(
+    items: Iterable[AndroidSyncItem],
+    config: AndroidSyncConfig,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> AndroidSyncResult:
+    if config.target == "directory":
+        return sync_items_to_directory(items, config, runner)
+    return sync_items_to_android(items, config, runner)
