@@ -86,9 +86,9 @@ Use the **Update Downloads** button in the web UI to trigger background download
 
 Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
 
-## Offline sync
+## Directory sync
 
-GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose the destination type in Settings; Android-only ADB settings appear when Android is selected. Directory sync writes media, optional subtitles, and `GetOffline.xspf` directly to the selected folder.
+GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory sync writes media, optional subtitles, and `GetOffline.xspf` directly to the selected folder.
 
 Android sync uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
 

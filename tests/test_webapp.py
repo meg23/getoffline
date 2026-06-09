@@ -713,7 +713,7 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("Add podcast source", body)
         self.assertIn("General", body)
         self.assertIn("Ollama configuration", body)
-        self.assertIn("Offline sync", body)
+        self.assertIn("Directory sync", body)
         self.assertIn('name="settings_action" value="update_ytdlp"', body)
         self.assertIn('Save yt-dlp configuration</button>', body)
         self.assertIn('name="settings_action" value="update_ollama"', body)
@@ -721,7 +721,7 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('Save Ollama configuration</button>', body)
         self.assertIn('name="settings_action" value="update_android_sync"', body)
         self.assertIn('name="android_sync_target"', body)
-        self.assertIn('Directory on disk', body)
+        self.assertIn('Local disk', body)
         self.assertIn('Android device', body)
         self.assertIn('name="android_sync_directory"', body)
         self.assertIn('Save and sync</button>', body)
@@ -730,12 +730,31 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('Wi-Fi (connect to paired device)', body)
         self.assertIn('ADB <code>', body)
         self.assertIn('justify-content: flex-end', body)
+        self.assertIn('.sync-target-fields[hidden] { display: none; }', body)
         self.assertIn('name="settings_action" value="update_sources"', body)
         self.assertIn('name="media_type_0"', body)
         self.assertIn('name="enabled_0"', body)
         self.assertIn('name="max_downloads_0"', body)
         self.assertIn('Save YouTube sources</button>', body)
         self.assertIn('Save podcast sources</button>', body)
+
+    def test_render_settings_hides_android_fields_for_local_disk(self):
+        body = _render_settings(
+            {
+                "defaults": {
+                    "android_sync_target": "directory",
+                    "android_sync_directory": "/mnt/offline",
+                },
+                "download_settings": {},
+                "youtube": [],
+                "podcasts": [],
+            }
+        )
+
+        self.assertIn('<option value="directory" selected>Local disk</option>', body)
+        self.assertIn('id="directory-sync-fields" class="grid sync-target-fields"', body)
+        self.assertIn('id="android-sync-fields" class="grid sync-target-fields" hidden', body)
+        self.assertIn('id="android-sync-resolved" hidden', body)
 
     def test_index_includes_listened_summary_panel(self):
         with tempfile.TemporaryDirectory() as tmpdir:

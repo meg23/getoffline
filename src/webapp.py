@@ -4076,6 +4076,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
       background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
     }}
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .82rem; }}
+    .sync-target-fields[hidden] {{ display: none; }}
     table {{ width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: .75rem; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }}
     thead th {{ background: #f4f7fe; font-size: .84rem; text-transform: uppercase; letter-spacing: .03em; color: #33415e; }}
     th, td {{ border-bottom: 1px solid var(--border-soft); padding: .52rem; text-align: left; vertical-align: middle; }}
@@ -4230,15 +4231,15 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     </div>
 
     <div class="section android-section">
-      <h2>Offline sync</h2>
-      <p>Keep selected media in a directory on this computer, an external drive, or an Android device. Android-specific connection settings appear only when Android is selected.</p>
+      <h2>Directory sync</h2>
+      <p>Sync selected media to local disk or an Android device. Android connection settings are hidden unless Android is selected.</p>
       <form id="offline-sync-form" method="post" action="/settings">
         <input type="hidden" name="settings_action" value="update_android_sync" />
         <div class="grid">
           <div>
             <label for="android_sync_target">Sync destination</label>
             <select id="android_sync_target" name="android_sync_target">
-              <option value="directory"{android_sync_directory_selected}>Directory on disk</option>
+              <option value="directory"{android_sync_directory_selected}>Local disk</option>
               <option value="android"{android_sync_android_selected}>Android device</option>
             </select>
           </div>
@@ -4266,13 +4267,13 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
             <label for="android_sync_include_played"><input id="android_sync_include_played" type="checkbox" name="android_sync_include_played" value="1"{android_sync_include_played_checked} /> Sync played media</label>
           </div>
         </div>
-        <div id="directory-sync-fields" class="grid"{directory_fields_hidden}>
+        <div id="directory-sync-fields" class="grid sync-target-fields"{directory_fields_hidden}>
           <div>
             <label for="android_sync_directory">Directory path</label>
             <input id="android_sync_directory" name="android_sync_directory" value="{android_sync_directory}" placeholder="/mnt/offline-media" />
           </div>
         </div>
-        <div id="android-sync-fields" class="grid"{android_fields_hidden}>
+        <div id="android-sync-fields" class="grid sync-target-fields"{android_fields_hidden}>
           <div>
             <label for="android_sync_destination">Android folder</label>
             <input id="android_sync_destination" name="android_sync_destination" value="{android_sync_destination}" />
@@ -4398,9 +4399,18 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     const androidResolved = document.getElementById('android-sync-resolved');
     const updateSyncFields = () => {{
       const androidSelected = syncTarget?.value === 'android';
-      if (directoryFields) directoryFields.hidden = androidSelected;
-      if (androidFields) androidFields.hidden = !androidSelected;
-      if (androidResolved) androidResolved.hidden = !androidSelected;
+      if (directoryFields) {{
+        directoryFields.hidden = androidSelected;
+        directoryFields.setAttribute('aria-hidden', String(androidSelected));
+      }}
+      if (androidFields) {{
+        androidFields.hidden = !androidSelected;
+        androidFields.setAttribute('aria-hidden', String(!androidSelected));
+      }}
+      if (androidResolved) {{
+        androidResolved.hidden = !androidSelected;
+        androidResolved.setAttribute('aria-hidden', String(!androidSelected));
+      }}
     }};
     syncTarget?.addEventListener('change', updateSyncFields);
     updateSyncFields();
