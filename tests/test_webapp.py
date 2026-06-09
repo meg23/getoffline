@@ -341,6 +341,39 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(row.row_id, rows[0].row_id)
             self.assertEqual(row.title, "Single Row Episode")
 
+    def test_fetch_downloaded_media_row_by_id_uses_profile_output_root_for_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_root = Path(tmpdir) / "profiles" / "alice"
+            output_root = profile_root / "downloads"
+            db_path = profile_root / "downloads.sqlite3"
+            media = output_root / "podcast" / "episode.mp3"
+            media.parent.mkdir(parents=True)
+            media.write_text("audio", encoding="utf-8")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "podcast",
+                    "source_name": "ProfilePlaybackTest",
+                    "item_uid": "uid-profile-playback",
+                    "item_url": "https://example.com/episode.mp3",
+                    "title": "Profile Episode",
+                    "file_path": str(media),
+                    "storage_root": str(output_root),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            listed_row = fetch_downloaded_media_rows(db_path, output_root)[0]
+            playback_row = fetch_downloaded_media_row_by_id(db_path, listed_row.row_id, output_root)
+
+            self.assertIsNotNone(playback_row)
+            self.assertEqual(Path(playback_row.file_path), media.resolve())
+            self.assertEqual(_resolve_safe_media_path(output_root, playback_row.file_path), media.resolve())
+
     def test_stream_disconnect_logging_is_throttled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp3"

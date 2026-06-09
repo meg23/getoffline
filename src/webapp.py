@@ -706,7 +706,9 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     ]
 
 
-def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
+def fetch_downloaded_media_row_by_id(
+    db_path: Path, row_id: int, output_root: Optional[Path] = None
+) -> Optional[MediaRow]:
     try:
         init_database(str(db_path))
     except sqlite3.OperationalError as exc:
@@ -742,13 +744,14 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
     if row is None:
         return None
 
+    artifact_root = output_root or db_path.parent
     return MediaRow(
         row_id=row[0],
         source_type=row[1],
         source_name=row[2],
         item_url=row[3],
         title=row[4],
-        file_path=resolve_download_artifact_path(str(db_path.parent), row[5], row[6]) or row[5] or row[6],
+        file_path=resolve_download_artifact_path(str(artifact_root), row[5], row[6]) or row[5] or row[6],
         file_ext=row[7],
         file_size_bytes=row[8],
         upload_date=row[9],
@@ -756,7 +759,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         favorite=bool(row[11]),
         played_at=row[12],
         last_position_seconds=float(row[13] or 0.0),
-        subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
+        subtitle_path=resolve_download_artifact_path(str(artifact_root), row[14], row[15]) or row[14] or row[15] or None,
         summary_text=row[16] or None,
         raw_metadata_json=row[17] or None,
     )
@@ -1300,7 +1303,7 @@ def _trigger_android_delete_for_rows(state: AppState, rows: List[MediaRow]) -> b
 
 
 def _mark_download_played_from_webapp(state: AppState, row_id: int, played: bool = True) -> bool:
-    row = fetch_downloaded_media_row_by_id(state.database_path, row_id) if played else None
+    row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root) if played else None
     updated = mark_download_played(str(state.database_path), row_id, played=played)
     if updated and played and row is not None:
         _trigger_android_delete_for_rows(state, [row])
@@ -4952,7 +4955,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id), state.output_root)
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -4971,7 +4974,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id), state.output_root)
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -4998,7 +5001,7 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid id")
                     return
 
-                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id), state.output_root)
                 if row is None:
                     log.warning("GET %s missing row id=%s", path, raw_id)
                     self.send_error(404, "Item not found")
@@ -5220,7 +5223,7 @@ def make_handler(state: AppState):
                         elif batch_action == "unfavorite":
                             mark_download_favorite(str(state.database_path), row_id, favorite=False)
                         elif batch_action == "delete":
-                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
                             if row is None:
                                 continue
                             media_path = _resolve_safe_media_path(state.output_root, row.file_path)
@@ -5229,7 +5232,7 @@ def make_handler(state: AppState):
                             else:
                                 delete_download_entry(str(state.database_path), row_id)
                         elif batch_action == "download":
-                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
                             if row is None:
                                 continue
                             if row.source_type == "youtube" and row.item_url:
