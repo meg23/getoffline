@@ -180,24 +180,35 @@ def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profi
         options.append(
             f'<option value="{html.escape(profile.profile_id)}"{selected}>{html.escape(profile.name)}</option>'
         )
+    profile_name = html.escape(active_profile.name)
+    profile_initial = html.escape(active_profile.name[:1].upper() or "P")
     return f"""
     <details class="profile-menu">
-      <summary aria-label="Current profile">{html.escape(active_profile.name)}</summary>
+      <summary class="profile-trigger" aria-label="Current profile: {profile_name}">
+        <span class="profile-avatar" aria-hidden="true">{profile_initial}</span>
+        <span class="profile-trigger-name">{profile_name}</span>
+        <span class="profile-chevron" aria-hidden="true"></span>
+      </summary>
       <div class="profile-popover">
+        <div class="profile-popover-heading">
+          <span class="profile-avatar profile-avatar-large" aria-hidden="true">{profile_initial}</span>
+          <span><strong>{profile_name}</strong><small>Current profile</small></span>
+        </div>
         <form method="post" action="/profiles/switch">
           <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
-          <label for="profile-switcher">Profile</label>
+          <label for="profile-switcher">Switch profile</label>
           <select id="profile-switcher" name="profile_id" onchange="this.form.submit()">{"".join(options)}</select>
         </form>
+        <div class="profile-popover-divider" aria-hidden="true"></div>
         <form method="post" action="/profiles/create">
           <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
-          <label for="new-profile-name">Create profile</label>
-          <div class="profile-form-row"><input id="new-profile-name" name="name" maxlength="80" required placeholder="Profile name" /><button type="submit">Create</button></div>
+          <label for="new-profile-name">New profile</label>
+          <div class="profile-form-row"><input id="new-profile-name" name="name" maxlength="80" required placeholder="Profile name" /><button class="profile-action-button" type="submit">Create</button></div>
         </form>
         <form method="post" action="/profiles/rename">
           <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
-          <label for="rename-profile-name">Rename current</label>
-          <div class="profile-form-row"><input id="rename-profile-name" name="name" maxlength="80" required value="{html.escape(active_profile.name)}" /><button type="submit">Rename</button></div>
+          <label for="rename-profile-name">Rename current profile</label>
+          <div class="profile-form-row"><input id="rename-profile-name" name="name" maxlength="80" required value="{profile_name}" /><button class="profile-action-button" type="submit">Save</button></div>
         </form>
       </div>
     </details>
@@ -1980,17 +1991,50 @@ def _render_index(
     .quick-add-meta-sub {{ font-size: .82rem; color: #5f6d90; margin-top: .15rem; }}
     .quick-add-empty {{ color: #5f6d90; font-size: .88rem; }}
 
-    .hero {{ position: relative; }}
-    .profile-menu {{ position: absolute; top: 0; right: 0; z-index: 20; }}
-    .profile-menu summary {{ cursor: pointer; list-style: none; border: 1px solid #c9d5ef; border-radius: 999px; background: #fff; color: #243251; padding: .5rem .85rem; font-weight: 700; box-shadow: var(--shadow); }}
-    .profile-menu summary::after {{ content: ' ▾'; color: var(--muted); }}
-    .profile-menu summary::-webkit-details-marker {{ display: none; }}
-    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .5rem); width: min(22rem, 85vw); padding: .85rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .8rem; }}
+    .hero-heading {{ display: flex; align-items: center; justify-content: space-between; gap: 1rem; }}
+    .hero-heading h1 {{ margin-bottom: 0; }}
+    .profile-menu {{ position: relative; z-index: 20; flex: 0 0 auto; }}
+    .profile-trigger {{
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      min-width: 0;
+      height: 2.4rem;
+      padding: .25rem .65rem .25rem .3rem;
+      border: 1px solid #c9d5ef;
+      border-radius: 12px;
+      background: #eef3ff;
+      color: #2c3e74;
+      cursor: pointer;
+      list-style: none;
+      font-size: .88rem;
+      line-height: 1;
+      font-weight: 700;
+      box-shadow: none;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }}
+    .profile-trigger::-webkit-details-marker {{ display: none; }}
+    .profile-trigger:hover, .profile-menu[open] .profile-trigger {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
+    .profile-avatar {{ display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border-radius: 9px; background: #3f6ff1; color: #fff; font-size: .78rem; line-height: 1; font-weight: 800; text-transform: uppercase; }}
+    .profile-trigger:hover .profile-avatar, .profile-menu[open] .profile-trigger .profile-avatar {{ background: rgba(255, 255, 255, .2); }}
+    .profile-trigger-name {{ max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .profile-chevron {{ width: .45rem; height: .45rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform .15s ease; opacity: .75; }}
+    .profile-menu[open] .profile-chevron {{ transform: rotate(225deg) translate(-1px, -1px); }}
+    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .55rem); width: min(21rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .85rem; }}
+    .profile-popover-heading {{ display: flex; align-items: center; gap: .7rem; color: #243251; }}
+    .profile-popover-heading strong, .profile-popover-heading small {{ display: block; }}
+    .profile-popover-heading strong {{ font-size: .95rem; }}
+    .profile-popover-heading small {{ margin-top: .12rem; color: var(--muted); font-size: .76rem; font-weight: 500; }}
+    .profile-avatar-large {{ width: 2.25rem; height: 2.25rem; border-radius: 10px; font-size: .9rem; }}
+    .profile-popover .profile-avatar-large {{ background: #3f6ff1; }}
     .profile-popover form {{ margin: 0; }}
-    .profile-popover label {{ display: block; margin-bottom: .3rem; color: #3f4e75; font-size: .82rem; font-weight: 700; }}
-    .profile-popover input, .profile-popover select {{ width: 100%; border: 1px solid #c9d5ef; border-radius: 9px; padding: .48rem .58rem; font: inherit; }}
-    .profile-form-row {{ display: grid; grid-template-columns: 1fr auto; gap: .4rem; }}
-    .profile-form-row button {{ border: 1px solid #c9d5ef; border-radius: 9px; background: #eef3ff; color: #2c3e74; font-weight: 700; }}
+    .profile-popover label {{ display: block; margin: 0 0 .35rem; color: #3f4e75; font-size: .78rem; font-weight: 700; }}
+    .profile-popover input, .profile-popover select {{ width: 100%; min-width: 0; height: 2.35rem; border: 1px solid #c9d5ef; border-radius: 9px; padding: .48rem .6rem; font: inherit; font-size: .88rem; color: #243251; background: #fff; }}
+    .profile-popover input:focus, .profile-popover select:focus {{ outline: none; border-color: #8eb0ff; box-shadow: 0 0 0 3px rgba(63, 111, 241, .14); }}
+    .profile-popover-divider {{ height: 1px; background: #e6ebf6; }}
+    .profile-form-row {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }}
+    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }}
+    .profile-action-button:hover {{ background: #2f62f2; border-color: #2f62f2; }}
 
     table {{
       width: 100%;
@@ -2245,6 +2289,7 @@ def _render_index(
 
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
+      .profile-trigger-name {{ max-width: 7rem; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
       .mini-player-backdrop {{ padding: .5rem; }}
       .mini-player {{ right: .5rem; bottom: .5rem; width: calc(100vw - 1rem); max-height: 95vh; }}
@@ -2270,8 +2315,7 @@ def _render_index(
   {_icon_sprite()}
   <div class="container">
     <div class="hero">
-      <h1>GetOffline</h1>
-      {profile_menu}
+      <div class="hero-heading"><h1>GetOffline</h1>{profile_menu}</div>
       <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
@@ -4169,16 +4213,50 @@ def _render_settings(
     button.primary {{ background: var(--primary); color: #fff; border-color: var(--primary); }}
     button.primary:hover {{ background: var(--primary-strong); border-color: var(--primary-strong); }}
     button.danger {{ border-color: #f2bfca; color: var(--danger); background: #fff7f9; }}
-    .settings-header {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; position: relative; }}
-    .profile-menu {{ position: relative; z-index: 20; }}
-    .profile-menu summary {{ cursor: pointer; list-style: none; border: 1px solid #cdd9f1; border-radius: 999px; background: #fff; padding: .5rem .85rem; font-weight: 700; white-space: nowrap; }}
-    .profile-menu summary::after {{ content: ' ▾'; color: #52627d; }}
-    .profile-menu summary::-webkit-details-marker {{ display: none; }}
-    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .5rem); width: min(22rem, 85vw); padding: .85rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .8rem; }}
+    .settings-header {{ display: flex; align-items: center; justify-content: space-between; gap: 1rem; position: relative; }}
+    .settings-header h1 {{ margin-bottom: 0; }}
+    .profile-menu {{ position: relative; z-index: 20; flex: 0 0 auto; }}
+    .profile-trigger {{
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      min-width: 0;
+      height: 2.4rem;
+      padding: .25rem .65rem .25rem .3rem;
+      border: 1px solid #c9d5ef;
+      border-radius: 12px;
+      background: #eef3ff;
+      color: #2c3e74;
+      cursor: pointer;
+      list-style: none;
+      font-size: .88rem;
+      line-height: 1;
+      font-weight: 700;
+      box-shadow: none;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }}
+    .profile-trigger::-webkit-details-marker {{ display: none; }}
+    .profile-trigger:hover, .profile-menu[open] .profile-trigger {{ color: #fff; background: var(--primary); border-color: var(--primary); }}
+    .profile-avatar {{ display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border-radius: 9px; background: #3f6ff1; color: #fff; font-size: .78rem; line-height: 1; font-weight: 800; text-transform: uppercase; }}
+    .profile-trigger:hover .profile-avatar, .profile-menu[open] .profile-trigger .profile-avatar {{ background: rgba(255, 255, 255, .2); }}
+    .profile-trigger-name {{ max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .profile-chevron {{ width: .45rem; height: .45rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform .15s ease; opacity: .75; }}
+    .profile-menu[open] .profile-chevron {{ transform: rotate(225deg) translate(-1px, -1px); }}
+    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .55rem); width: min(21rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .85rem; }}
+    .profile-popover-heading {{ display: flex; align-items: center; gap: .7rem; color: #243251; }}
+    .profile-popover-heading strong, .profile-popover-heading small {{ display: block; }}
+    .profile-popover-heading strong {{ font-size: .95rem; }}
+    .profile-popover-heading small {{ margin-top: .12rem; color: #52627d; font-size: .76rem; font-weight: 500; }}
+    .profile-avatar-large {{ width: 2.25rem; height: 2.25rem; border-radius: 10px; font-size: .9rem; }}
+    .profile-popover .profile-avatar-large {{ background: #3f6ff1; }}
     .profile-popover form {{ margin: 0; }}
-    .profile-popover label {{ margin: 0 0 .3rem; }}
-    .profile-form-row {{ display: grid; grid-template-columns: 1fr auto; gap: .4rem; }}
-    .profile-form-row button {{ padding: .5rem .7rem; }}
+    .profile-popover label {{ display: block; margin: 0 0 .35rem; color: #3f4e75; font-size: .78rem; font-weight: 700; }}
+    .profile-popover input, .profile-popover select {{ width: 100%; min-width: 0; height: 2.35rem; border: 1px solid #c9d5ef; border-radius: 9px; padding: .48rem .6rem; font: inherit; font-size: .88rem; color: #243251; background: #fff; }}
+    .profile-popover input:focus, .profile-popover select:focus {{ outline: none; border-color: #8eb0ff; box-shadow: 0 0 0 3px rgba(63, 111, 241, .14); }}
+    .profile-popover-divider {{ height: 1px; background: #e6ebf6; }}
+    .profile-form-row {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }}
+    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }}
+    .profile-action-button:hover {{ background: #2f62f2; border-color: #2f62f2; }}
     .section {{
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -4235,6 +4313,7 @@ def _render_settings(
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
+      .profile-trigger-name {{ max-width: 7rem; }}
       .wrap {{ padding: 1rem; }}
       th, td {{ padding: .45rem; }}
       .source-table, .source-table thead, .source-table tbody, .source-table tr, .source-table th, .source-table td {{ display: block; width: 100%; }}
