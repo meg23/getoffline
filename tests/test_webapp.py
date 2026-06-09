@@ -587,6 +587,7 @@ class WebAppHelpersTests(unittest.TestCase):
                     state,
                     url="https://www.youtube.com/watch?v=abc123",
                     media_type="audio",
+                    allow_live_streams=True,
                 )
                 self.assertTrue(started)
 
@@ -605,6 +606,7 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(cfg["youtube"][0]["type"], "audio")
             self.assertTrue(cfg["youtube"][0]["subtitles"])
             self.assertFalse(cfg["youtube"][0]["redownload"])
+            self.assertTrue(cfg["youtube"][0]["allow_live_streams"])
 
 
     def test_trigger_single_youtube_download_marks_forced_redownload_entry(self):

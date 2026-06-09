@@ -493,6 +493,75 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             opts = FakeYoutubeDL.instances[0].opts
             self.assertTrue("extract_flat" not in opts or not opts.get("extract_flat"))
 
+    def test_live_stream_filter_can_be_enabled_for_single_downloads(self):
+        filter_results = []
+
+        class FakeYoutubeDLLiveFilter(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                flt = self.opts.get("match_filter")
+                filter_results.append(
+                    flt(
+                        {
+                            "id": "live-1",
+                            "title": "Live now",
+                            "webpage_url": "https://youtube.com/watch?v=live-1",
+                            "is_live": True,
+                            "live_status": "is_live",
+                        }
+                    )
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["youtube"] = [
+                {
+                    "name": "SingleLive",
+                    "url": "https://youtube.com/watch?v=live-1",
+                    "type": "video",
+                    "allow_live_streams": True,
+                }
+            ]
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLLiveFilter):
+                youtube.download_youtube_items(config, [])
+
+        self.assertEqual(filter_results, [None])
+
+    def test_live_stream_filter_still_blocks_configured_sources_by_default(self):
+        filter_results = []
+
+        class FakeYoutubeDLLiveFilter(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                flt = self.opts.get("match_filter")
+                filter_results.append(
+                    flt(
+                        {
+                            "id": "live-1",
+                            "title": "Live now",
+                            "webpage_url": "https://youtube.com/watch?v=live-1",
+                            "is_live": True,
+                            "live_status": "is_live",
+                        }
+                    )
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["youtube"] = [
+                {
+                    "name": "ConfiguredSource",
+                    "url": "https://youtube.com/playlist?list=live",
+                    "type": "video",
+                }
+            ]
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDLLiveFilter):
+                youtube.download_youtube_items(config, [])
+
+        self.assertEqual(filter_results, ["Skipping live stream: Live now"])
+
     def test_youtube_no_download_warning_uses_unique_filter_counts(self):
         class FakeYoutubeDLDuplicateFilterCalls(FakeYoutubeDL):
             def download(self, urls):

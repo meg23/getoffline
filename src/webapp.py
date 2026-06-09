@@ -1568,6 +1568,7 @@ def trigger_single_youtube_download(
     media_type: str,
     force_redownload: bool = False,
     subtitles_enabled: Optional[bool] = None,
+    allow_live_streams: bool = False,
 ) -> bool:
     from youtube import resolve_youtube_source_name
 
@@ -1589,6 +1590,7 @@ def trigger_single_youtube_download(
                 "enabled": True,
                 "subtitles": media_type == "audio" if subtitles_enabled is None else bool(subtitles_enabled),
                 "redownload": bool(force_redownload),
+                "allow_live_streams": bool(allow_live_streams),
             }
         ],
         "podcasts": [],
@@ -5096,6 +5098,7 @@ def make_handler(state: AppState):
                     url=url,
                     media_type=media_type,
                     subtitles_enabled=True,
+                    allow_live_streams=True,
                 )
                 self.send_response(303)
                 self.send_header("Location", "/")
