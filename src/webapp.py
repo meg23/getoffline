@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from android_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
+from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries

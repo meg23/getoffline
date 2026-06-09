@@ -11,7 +11,7 @@ from typing import Callable, Iterable, List, Optional, Tuple
 
 from logger import get_logger
 
-log = get_logger("android_sync")
+log = get_logger("media_sync")
 
 MEDIA_SUBTITLE_EXTENSIONS = {".srt", ".vtt"}
 MEDIA_METADATA_EXTENSIONS = {".aac", ".flac", ".m4a", ".mkv", ".mov", ".mp3", ".mp4", ".ogg", ".wav", ".webm"}
