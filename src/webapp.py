@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
+from profiles import Profile, ProfileManager
 from logger import get_logger
 from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
@@ -147,6 +148,71 @@ class AppState:
     progress_last_log_at: float = 0.0
     progress_last_reason: str = "unknown"
     progress_last_forced: bool = False
+    profile_manager: Optional[ProfileManager] = None
+    profile_lock: threading.RLock = field(default_factory=threading.RLock)
+    profile_update_statuses: Dict[str, UpdateStatus] = field(default_factory=dict)
+
+
+def _activate_profile(state: AppState, profile: Profile) -> None:
+    if state.profile_manager is None:
+        return
+    config = state.profile_manager.load_config(profile)
+    configured_output_root = Path(str(config["defaults"]["output_root"]))
+    with state.profile_lock:
+        state.output_root = configured_output_root
+        state.database_path = profile.database_path
+        state.config = config
+    materialize_youtube_cookie_file(str(profile.database_path))
+
+
+def _profile_view(state: AppState) -> Tuple[List[Profile], Optional[Profile]]:
+    if state.profile_manager is None:
+        return [], None
+    return state.profile_manager.list_profiles(), state.profile_manager.get_active()
+
+
+def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profile], redirect_to: str) -> str:
+    if active_profile is None:
+        return ""
+    options: List[str] = []
+    for profile in profiles:
+        selected = " selected" if profile.profile_id == active_profile.profile_id else ""
+        options.append(
+            f'<option value="{html.escape(profile.profile_id)}"{selected}>{html.escape(profile.name)}</option>'
+        )
+    profile_name = html.escape(active_profile.name)
+    profile_initial = html.escape(active_profile.name[:1].upper() or "P")
+    return f"""
+    <div class="profile-controls">
+      <form class="profile-switch-form" method="post" action="/profiles/switch">
+        <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+        <span class="profile-avatar" aria-hidden="true">{profile_initial}</span>
+        <span class="profile-select-wrap">
+          <select id="profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">{"".join(options)}</select>
+        </span>
+      </form>
+      <details class="profile-manage-menu">
+        <summary class="profile-add-button" aria-label="Create or rename a profile" title="Create or rename a profile">+</summary>
+        <div class="profile-popover">
+          <div class="profile-popover-heading">
+            <strong>Manage profiles</strong>
+            <small>Create a new profile or rename {profile_name}.</small>
+          </div>
+          <form method="post" action="/profiles/create">
+            <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+            <label for="new-profile-name">New profile</label>
+            <div class="profile-form-row"><input id="new-profile-name" name="name" maxlength="80" required placeholder="Profile name" /><button class="profile-action-button" type="submit">Create</button></div>
+          </form>
+          <div class="profile-popover-divider" aria-hidden="true"></div>
+          <form method="post" action="/profiles/rename">
+            <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+            <label for="rename-profile-name">Rename current profile</label>
+            <div class="profile-form-row"><input id="rename-profile-name" name="name" maxlength="80" required value="{profile_name}" /><button class="profile-action-button" type="submit">Save</button></div>
+          </form>
+        </div>
+      </details>
+    </div>
+    """
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
@@ -640,7 +706,9 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
     ]
 
 
-def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[MediaRow]:
+def fetch_downloaded_media_row_by_id(
+    db_path: Path, row_id: int, output_root: Optional[Path] = None
+) -> Optional[MediaRow]:
     try:
         init_database(str(db_path))
     except sqlite3.OperationalError as exc:
@@ -676,13 +744,14 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
     if row is None:
         return None
 
+    artifact_root = output_root or db_path.parent
     return MediaRow(
         row_id=row[0],
         source_type=row[1],
         source_name=row[2],
         item_url=row[3],
         title=row[4],
-        file_path=resolve_download_artifact_path(str(db_path.parent), row[5], row[6]) or row[5] or row[6],
+        file_path=resolve_download_artifact_path(str(artifact_root), row[5], row[6]) or row[5] or row[6],
         file_ext=row[7],
         file_size_bytes=row[8],
         upload_date=row[9],
@@ -690,7 +759,7 @@ def fetch_downloaded_media_row_by_id(db_path: Path, row_id: int) -> Optional[Med
         favorite=bool(row[11]),
         played_at=row[12],
         last_position_seconds=float(row[13] or 0.0),
-        subtitle_path=resolve_download_artifact_path(str(db_path.parent), row[14], row[15]) or row[14] or row[15] or None,
+        subtitle_path=resolve_download_artifact_path(str(artifact_root), row[14], row[15]) or row[14] or row[15] or None,
         summary_text=row[16] or None,
         raw_metadata_json=row[17] or None,
     )
@@ -1234,7 +1303,7 @@ def _trigger_android_delete_for_rows(state: AppState, rows: List[MediaRow]) -> b
 
 
 def _mark_download_played_from_webapp(state: AppState, row_id: int, played: bool = True) -> bool:
-    row = fetch_downloaded_media_row_by_id(state.database_path, row_id) if played else None
+    row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root) if played else None
     updated = mark_download_played(str(state.database_path), row_id, played=played)
     if updated and played and row is not None:
         _trigger_android_delete_for_rows(state, [row])
@@ -1510,11 +1579,37 @@ def _auto_update_interval_seconds(state: AppState) -> int:
     return max(1, minutes) * 60
 
 
+def _profile_update_state(state: AppState, profile: Profile) -> AppState:
+    if state.profile_manager is None or profile.profile_id == state.profile_manager.active_profile_id:
+        return state
+    status = state.profile_update_statuses.get(profile.profile_id)
+    if status is None:
+        status = UpdateStatus()
+        state.profile_update_statuses[profile.profile_id] = status
+    config = state.profile_manager.load_config(profile)
+    return AppState(
+        output_root=Path(str(config["defaults"]["output_root"])),
+        database_path=profile.database_path,
+        config=config,
+        update_runner=state.update_runner,
+        update_status=status,
+    )
+
+
+def _trigger_all_profile_updates(state: AppState) -> None:
+    if state.profile_manager is None:
+        trigger_background_update(state)
+        return
+    for profile in state.profile_manager.list_profiles():
+        profile_state = _profile_update_state(state, profile)
+        trigger_background_update(profile_state)
+
+
 def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         if stop_event.wait(_auto_update_interval_seconds(state)):
             break
-        trigger_background_update(state)
+        _trigger_all_profile_updates(state)
 
 
 def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
@@ -1607,7 +1702,10 @@ def _render_index(
     show_played: bool = False,
     favorites_only: bool = False,
     android_status: Optional[Dict[str, str]] = None,
+    profiles: Optional[List[Profile]] = None,
+    active_profile: Optional[Profile] = None,
 ) -> str:
+    profile_menu = _render_profile_menu(profiles or [], active_profile, "/")
     cards = []
     visible_rows = []
     for row in rows:
@@ -1896,6 +1994,32 @@ def _render_index(
     .quick-add-meta-sub {{ font-size: .82rem; color: #5f6d90; margin-top: .15rem; }}
     .quick-add-empty {{ color: #5f6d90; font-size: .88rem; }}
 
+    .hero-heading {{ display: flex; align-items: center; justify-content: space-between; gap: 1rem; }}
+    .hero-heading h1 {{ margin-bottom: 0; }}
+    .profile-controls {{ display: flex; align-items: center; gap: .4rem; flex: 0 0 auto; }}
+    .profile-switch-form {{ display: inline-flex; align-items: center; gap: .4rem; height: 2.4rem; margin: 0; padding: .25rem .35rem .25rem .3rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; transition: background .15s ease, border-color .15s ease; }}
+    .profile-switch-form:hover {{ background: #e3ebff; border-color: #aebfe5; }}
+    .profile-avatar {{ display: inline-flex; align-items: center; justify-content: center; flex: 0 0 1.75rem; width: 1.75rem; height: 1.75rem; border-radius: 9px; background: #3f6ff1; color: #fff; font-size: .78rem; line-height: 1; font-weight: 800; text-transform: uppercase; }}
+    .profile-select-wrap {{ position: relative; display: inline-flex; align-items: center; min-width: 0; }}
+    .profile-select-wrap::after {{ content: ''; position: absolute; right: .35rem; width: .42rem; height: .42rem; border-right: 2px solid #56658a; border-bottom: 2px solid #56658a; transform: rotate(45deg) translateY(-2px); pointer-events: none; }}
+    .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
+    .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
+    .profile-manage-menu {{ position: relative; z-index: 20; }}
+    .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-add-button::-webkit-details-marker {{ display: none; }}
+    .profile-add-button:hover, .profile-manage-menu[open] .profile-add-button {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
+    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .55rem); width: min(21rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .85rem; }}
+    .profile-popover-heading strong, .profile-popover-heading small {{ display: block; }}
+    .profile-popover-heading strong {{ color: #243251; font-size: .95rem; }}
+    .profile-popover-heading small {{ margin-top: .18rem; color: var(--muted); font-size: .76rem; font-weight: 500; }}
+    .profile-popover form {{ margin: 0; }}
+    .profile-popover label {{ display: block; margin: 0 0 .35rem; color: #3f4e75; font-size: .78rem; font-weight: 700; }}
+    .profile-popover input {{ width: 100%; min-width: 0; height: 2.35rem; border: 1px solid #c9d5ef; border-radius: 9px; padding: .48rem .6rem; font: inherit; font-size: .88rem; color: #243251; background: #fff; }}
+    .profile-popover input:focus {{ outline: none; border-color: #8eb0ff; box-shadow: 0 0 0 3px rgba(63, 111, 241, .14); }}
+    .profile-popover-divider {{ height: 1px; background: #e6ebf6; }}
+    .profile-form-row {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }}
+    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }}
+    .profile-action-button:hover {{ background: #2f62f2; border-color: #2f62f2; }}
 
     table {{
       width: 100%;
@@ -2150,6 +2274,7 @@ def _render_index(
 
     @media (max-width: 980px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
+      .profile-switch-form select {{ max-width: 7rem; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
       .mini-player-backdrop {{ padding: .5rem; }}
       .mini-player {{ right: .5rem; bottom: .5rem; width: calc(100vw - 1rem); max-height: 95vh; }}
@@ -2175,7 +2300,7 @@ def _render_index(
   {_icon_sprite()}
   <div class="container">
     <div class="hero">
-      <h1>GetOffline</h1>
+      <div class="hero-heading"><h1>GetOffline</h1>{profile_menu}</div>
       <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
@@ -3818,7 +3943,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
 </html>"""
 
 
-def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
+def _render_settings(
+    config: Dict[str, Dict[str, object]],
+    profiles: Optional[List[Profile]] = None,
+    active_profile: Optional[Profile] = None,
+) -> str:
+    profile_menu = _render_profile_menu(profiles or [], active_profile, "/settings")
     defaults = config.get("defaults", {})
     cookie_text = str((config.get("download_settings") or {}).get("youtube_cookie_text") or "")
     output_root = html.escape(str(defaults.get("output_root") or ""))
@@ -4068,6 +4198,33 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     button.primary {{ background: var(--primary); color: #fff; border-color: var(--primary); }}
     button.primary:hover {{ background: var(--primary-strong); border-color: var(--primary-strong); }}
     button.danger {{ border-color: #f2bfca; color: var(--danger); background: #fff7f9; }}
+    .settings-header {{ display: flex; align-items: center; justify-content: space-between; gap: 1rem; }}
+    .settings-header h1 {{ margin-bottom: 0; }}
+    .profile-controls {{ display: flex; align-items: center; gap: .4rem; flex: 0 0 auto; }}
+    .profile-switch-form {{ display: inline-flex; align-items: center; gap: .4rem; height: 2.4rem; margin: 0; padding: .25rem .35rem .25rem .3rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; transition: background .15s ease, border-color .15s ease; }}
+    .profile-switch-form:hover {{ background: #e3ebff; border-color: #aebfe5; }}
+    .profile-avatar {{ display: inline-flex; align-items: center; justify-content: center; flex: 0 0 1.75rem; width: 1.75rem; height: 1.75rem; border-radius: 9px; background: #3f6ff1; color: #fff; font-size: .78rem; line-height: 1; font-weight: 800; text-transform: uppercase; }}
+    .profile-select-wrap {{ position: relative; display: inline-flex; align-items: center; min-width: 0; }}
+    .profile-select-wrap::after {{ content: ''; position: absolute; right: .35rem; width: .42rem; height: .42rem; border-right: 2px solid #56658a; border-bottom: 2px solid #56658a; transform: rotate(45deg) translateY(-2px); pointer-events: none; }}
+    .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
+    .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
+    .profile-manage-menu {{ position: relative; z-index: 20; }}
+    .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-add-button::-webkit-details-marker {{ display: none; }}
+    .profile-add-button:hover, .profile-manage-menu[open] .profile-add-button {{ color: #fff; background: var(--primary); border-color: var(--primary); }}
+    .profile-popover {{ position: absolute; right: 0; top: calc(100% + .55rem); width: min(21rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(15, 35, 80, .18); display: grid; gap: .85rem; }}
+    .profile-popover-heading strong, .profile-popover-heading small {{ display: block; }}
+    .profile-popover-heading strong {{ color: #243251; font-size: .95rem; }}
+    .profile-popover-heading small {{ margin-top: .18rem; color: #52627d; font-size: .76rem; font-weight: 500; }}
+    .profile-popover form {{ margin: 0; }}
+    .profile-popover label {{ display: block; margin: 0 0 .35rem; color: #3f4e75; font-size: .78rem; font-weight: 700; }}
+    .profile-popover input {{ width: 100%; min-width: 0; height: 2.35rem; border: 1px solid #c9d5ef; border-radius: 9px; padding: .48rem .6rem; font: inherit; font-size: .88rem; color: #243251; background: #fff; }}
+    .profile-popover input:focus {{ outline: none; border-color: #8eb0ff; box-shadow: 0 0 0 3px rgba(63, 111, 241, .14); }}
+    .profile-popover-divider {{ height: 1px; background: #e6ebf6; }}
+    .profile-form-row {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }}
+    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }}
+    .profile-action-button:hover {{ background: #2f62f2; border-color: #2f62f2; }}
+
     .section {{
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -4124,6 +4281,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
     code {{ background: #eef3ff; border: 1px solid #d9e4fb; border-radius: 6px; padding: .1rem .3rem; }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr; }}
+      .profile-switch-form select {{ max-width: 7rem; }}
       .wrap {{ padding: 1rem; }}
       th, td {{ padding: .45rem; }}
       .source-table, .source-table thead, .source-table tbody, .source-table tr, .source-table th, .source-table td {{ display: block; width: 100%; }}
@@ -4140,7 +4298,7 @@ def _render_settings(config: Dict[str, Dict[str, object]]) -> str:
 </head>
 <body>
   <div class="wrap">
-    <h1>Settings</h1>
+    <div class="settings-header"><h1>Settings</h1>{profile_menu}</div>
 
     <div class="section">
       <h2>General</h2>
@@ -4673,6 +4831,8 @@ def make_handler(state: AppState):
                     show_played=show_played,
                     favorites_only=favorites_only,
                     android_status=_snapshot_android_sync_status(state.android_sync_status),
+                    profiles=_profile_view(state)[0],
+                    active_profile=_profile_view(state)[1],
                 )
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
@@ -4689,7 +4849,8 @@ def make_handler(state: AppState):
                     log.exception("GET /settings failed to load config db=%s: %s", state.database_path, exc)
                     self.send_error(503, "Database unavailable")
                     return
-                body = _render_settings(stored)
+                profile_list, active_profile = _profile_view(state)
+                body = _render_settings(stored, profiles=profile_list, active_profile=active_profile)
                 body_bytes = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -4794,7 +4955,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id), state.output_root)
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -4813,7 +4974,7 @@ def make_handler(state: AppState):
                 if raw_id is None or not str(raw_id).isdigit():
                     self.send_error(400, "Missing or invalid id")
                     return
-                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id), state.output_root)
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
@@ -4840,7 +5001,7 @@ def make_handler(state: AppState):
                     self.send_error(400, "Missing or invalid id")
                     return
 
-                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id))
+                row = fetch_downloaded_media_row_by_id(state.database_path, int(raw_id), state.output_root)
                 if row is None:
                     log.warning("GET %s missing row id=%s", path, raw_id)
                     self.send_error(404, "Item not found")
@@ -4913,6 +5074,31 @@ def make_handler(state: AppState):
             parsed = urlparse(self.path)
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
+
+            if path in {"/profiles/switch", "/profiles/create", "/profiles/rename"}:
+                if state.profile_manager is None:
+                    self.send_error(404, "Profiles are unavailable")
+                    return
+                length = int(self.headers.get("Content-Length") or 0)
+                form = parse_qs(self.rfile.read(length).decode("utf-8"))
+                redirect_to = str((form.get("redirect_to") or ["/"])[0])
+                if redirect_to not in {"/", "/settings"}:
+                    redirect_to = "/"
+                try:
+                    if path == "/profiles/switch":
+                        profile = state.profile_manager.switch(str((form.get("profile_id") or [""])[0]))
+                    elif path == "/profiles/create":
+                        profile = state.profile_manager.create(str((form.get("name") or [""])[0]))
+                    else:
+                        profile = state.profile_manager.rename_active(str((form.get("name") or [""])[0]))
+                    _activate_profile(state, profile)
+                except ValueError as exc:
+                    self.send_error(400, str(exc))
+                    return
+                self.send_response(303)
+                self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
 
             if path == "/import-media":
                 content_type = self.headers.get("Content-Type") or ""
@@ -5037,7 +5223,7 @@ def make_handler(state: AppState):
                         elif batch_action == "unfavorite":
                             mark_download_favorite(str(state.database_path), row_id, favorite=False)
                         elif batch_action == "delete":
-                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
                             if row is None:
                                 continue
                             media_path = _resolve_safe_media_path(state.output_root, row.file_path)
@@ -5046,7 +5232,7 @@ def make_handler(state: AppState):
                             else:
                                 delete_download_entry(str(state.database_path), row_id)
                         elif batch_action == "download":
-                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id)
+                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
                             if row is None:
                                 continue
                             if row.source_type == "youtube" and row.item_url:
@@ -5385,13 +5571,23 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     config["youtube"] = stored["youtube"]
     config["podcasts"] = stored["podcasts"]
     materialize_youtube_cookie_file(str(defaults["database_path"]))
-    state = AppState(
-        output_root=Path(config["defaults"]["output_root"]),
-        database_path=Path(defaults["database_path"]),
-        config=config,
-        update_runner=_default_update_runner,
+    registry_value = os.getenv("GETOFFLINE_PROFILES_PATH")
+    registry_path = Path(registry_value) if registry_value else Path(defaults["database_path"]).parent / "profiles.json"
+    profile_manager = ProfileManager(
+        registry_path=registry_path,
+        default_output_root=Path(config["defaults"]["output_root"]),
+        default_database_path=Path(defaults["database_path"]),
     )
-    configured_defaults = config.get("defaults") or {}
+    active_profile = profile_manager.get_active()
+    active_config = profile_manager.load_config(active_profile)
+    state = AppState(
+        output_root=Path(str(active_config["defaults"]["output_root"])),
+        database_path=active_profile.database_path,
+        config=active_config,
+        update_runner=_default_update_runner,
+        profile_manager=profile_manager,
+    )
+    configured_defaults = active_config.get("defaults") or {}
     ensure_local_summary_model(
         model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
         ollama_path=str(configured_defaults.get("ollama_path") or "ollama"),

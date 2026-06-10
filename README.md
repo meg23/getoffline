@@ -16,6 +16,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
+- Separate profiles with isolated databases, settings, source feeds, playback history, and download folders
 - Optional offline sync that copies selected media to a directory on disk or to a connected Android phone with `adb push`
 
 ## Requirements
@@ -84,7 +85,9 @@ Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`,
 
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
-Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
+Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20). Automatic checks continue for every profile, not only the profile currently visible in the web app.
+
+Use the profile menu in the top-right corner of the library or Settings page to switch profiles, create a profile, or rename the current profile. The initial `default` profile keeps the existing database and download directory. Each newly created profile receives its own database, settings, source lists, playback history, and download directory.
 
 ## Directory sync
 
