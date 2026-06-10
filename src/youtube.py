@@ -545,6 +545,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 should_generate_subtitles = False
             is_forced_redownload = bool(entry.get("redownload", False))
+            allow_live_streams = bool(entry.get("allow_live_streams", False))
 
             extracted_audio_files: List[Path] = []
             postprocessed_file_by_key: Dict[str, Path] = {}
@@ -638,7 +639,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 _ = incomplete
                 entry_key = _entry_key(info_dict)
                 candidate_entries_seen_keys.add(entry_key)
-                live_reason = skip_live_streams(info_dict, incomplete=incomplete)
+                live_reason = None if allow_live_streams else skip_live_streams(info_dict, incomplete=incomplete)
                 if live_reason:
                     _record_skip(live_reason, info_dict)
                     return live_reason
@@ -867,6 +868,8 @@ def _download_youtube_items_in_process(config, downloaded_items):
             log.info("YouTube download mode for %s: full entry extraction enabled", name)
             if is_forced_redownload:
                 log.info("YouTube download mode for %s: forced redownload (duplicate skip disabled)", name)
+            if allow_live_streams:
+                log.info("YouTube download mode for %s: live streams allowed", name)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
             before_video = {p.resolve() for p in Path(folder).glob("*.mp4")}
 

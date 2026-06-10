@@ -12,7 +12,7 @@
 - YouTube Whisper subtitle generation is serialized to one worker for runtime stability on current Python/Whisper stacks
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
-- Automatically skips YouTube live streams
+- Automatically skips YouTube live streams in configured sources while allowing a live video to be downloaded from the web app's **+** button
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
@@ -61,7 +61,7 @@ Environment variables still override the file when needed:
 - `GETOFFLINE_OUTPUT_ROOT`
 - `GETOFFLINE_DATABASE_PATH`
 
-YouTube live streams are skipped automatically and will not be downloaded.
+YouTube live streams are skipped automatically for configured playlist and channel sources. To download a specific live video, paste its URL into the web app's **+** dialog. The download remains active until the stream ends or the application stops.
 
 ## Usage
 
