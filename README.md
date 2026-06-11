@@ -91,7 +91,7 @@ Use the profile menu in the top-right corner of the library or Settings page to 
 
 ## Directory sync
 
-GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory sync writes media, optional subtitles, and `GetOffline.xspf` directly to the selected folder.
+GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory sync writes media, optional subtitles, `GetOffline.xspf`, and a `syncdb.txt` history file directly to the selected folder. Paths recorded in `syncdb.txt` are skipped on later runs so tagged media is not copied repeatedly.
 
 Android sync uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
 
@@ -104,7 +104,7 @@ To configure Android sync:
 
 To sync over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each sync/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
 
-When enabled, GetOffline periodically syncs the selected destination using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The **Save and sync** button in Settings persists the configuration and starts a sync immediately. Files already present in the destination folder are skipped when they match the local file. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android sync also asks the device's media scanner to rescan pushed files. Each sync writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
+When enabled, GetOffline periodically syncs the selected destination using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The **Save and sync** button in Settings persists the configuration and starts a sync immediately. Completed destination paths are recorded in `syncdb.txt` and skipped on later runs. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android sync also asks the device's media scanner to rescan pushed files. Each sync writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
 To build a standalone executable with Pex:
 

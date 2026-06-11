@@ -1766,17 +1766,31 @@ class MediaSyncTests(unittest.TestCase):
             media.write_text("audio", encoding="utf-8")
             subtitle.write_text("subtitle", encoding="utf-8")
 
-            with mock.patch("media_sync.shutil.which", return_value=None):
-                result = sync_items(
+            with mock.patch("media_sync.shutil.which", return_value=None), mock.patch(
+                "media_sync.log.info"
+            ) as info_mock, mock.patch("media_sync.log.warning") as warning_mock, mock.patch(
+                "media_sync.log.debug"
+            ) as debug_mock:
+                first_result = sync_items(
+                    [AndroidSyncItem(row_id=1, title="Episode", source_name="Podcast", file_path=media, subtitle_path=subtitle)],
+                    AndroidSyncConfig(enabled=True, target="directory", directory=str(destination)),
+                )
+                media.write_text("changed audio content", encoding="utf-8")
+                second_result = sync_items(
                     [AndroidSyncItem(row_id=1, title="Episode", source_name="Podcast", file_path=media, subtitle_path=subtitle)],
                     AndroidSyncConfig(enabled=True, target="directory", directory=str(destination)),
                 )
 
             copied_media = destination / "Podcast - Episode.mp3"
-            self.assertEqual(result.copied, 1)
+            self.assertEqual(first_result.copied, 1)
+            self.assertEqual(second_result.copied, 0)
+            self.assertEqual(second_result.skipped, 1)
             self.assertEqual(copied_media.read_text(encoding="utf-8"), "audio")
             self.assertEqual(copied_media.with_suffix(".srt").read_text(encoding="utf-8"), "subtitle")
             self.assertIn(copied_media.as_uri(), (destination / "GetOffline.xspf").read_text(encoding="utf-8"))
+            self.assertEqual((destination / "syncdb.txt").read_text(encoding="utf-8"), f"{copied_media}\n")
+            log_calls = info_mock.call_args_list + warning_mock.call_args_list + debug_mock.call_args_list
+            self.assertNotIn("Android", " ".join(str(call) for call in log_calls))
 
     def test_sync_items_to_android_skips_paths_recorded_in_syncdb(self):
         from media_sync import AndroidSyncConfig, AndroidSyncItem, sync_items_to_android
