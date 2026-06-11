@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 
+from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
 from database import (
     build_item_uid,
     ensure_config_seeded,
@@ -537,6 +538,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
 
             download_type = entry.get("type", "audio").lower()
             entry_subtitles_enabled = entry.get("subtitles", True)
+            delete_explicit_content = bool(entry.get("delete_explicit_content", False))
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             source_max_downloads = int(entry.get("max_downloads") or defaults.get("max_downloads") or defaults.get("playlist_end") or 3)
             source_max_downloads = max(1, source_max_downloads)
@@ -544,6 +546,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "subprocess"))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 should_generate_subtitles = False
+            should_transcribe = should_generate_subtitles or delete_explicit_content
             is_forced_redownload = bool(entry.get("redownload", False))
             allow_live_streams = bool(entry.get("allow_live_streams", False))
 
@@ -748,14 +751,14 @@ def _download_youtube_items_in_process(config, downloaded_items):
                         completed_download_ids.add(download_key)
                         downloaded_items.append(f"YouTube: {name} – {title}")
 
-                    if subtitle_executor is not None and download_type == "video" and should_generate_subtitles and output_file:
+                    if subtitle_executor is not None and download_type == "video" and should_transcribe and output_file:
                         candidate_file = Path(output_file).expanduser().resolve()
                         if candidate_file.exists() and candidate_file not in subtitle_futures_by_media:
                             subtitle_futures_by_media[candidate_file] = subtitle_executor.submit(
                                 _process_media_file,
                                 candidate_file,
                                 name,
-                                should_generate_subtitles,
+                                should_transcribe,
                                 subtitle_offset_seconds,
                                 subtitle_transcription_mode,
                             )
@@ -783,12 +786,12 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     extracted_audio_files.append(resolved_path)
                     postprocessed_file_by_key[download_key] = resolved_path
 
-                    if subtitle_executor is not None and should_generate_subtitles and resolved_path not in subtitle_futures_by_media:
+                    if subtitle_executor is not None and should_transcribe and resolved_path not in subtitle_futures_by_media:
                         subtitle_futures_by_media[resolved_path] = subtitle_executor.submit(
                             _process_media_file,
                             resolved_path,
                             name,
-                            should_generate_subtitles,
+                            should_transcribe,
                             subtitle_offset_seconds,
                             subtitle_transcription_mode,
                         )
@@ -1005,7 +1008,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     _process_media_file,
                     candidate,
                     name,
-                    should_generate_subtitles,
+                    should_transcribe,
                     subtitle_offset_seconds,
                     subtitle_transcription_mode,
                 )
@@ -1037,7 +1040,46 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 if remapped_path is not None:
                     resolved_file = str(remapped_path)
 
-                if should_generate_subtitles and not Path(resolved_file).expanduser().resolve().with_suffix(".srt").exists():
+                resolved_media_path = Path(resolved_file).expanduser().resolve()
+                subtitle_path = resolved_media_path.with_suffix(".srt")
+                explicit_match = screen_transcript(subtitle_path) if delete_explicit_content else None
+                if explicit_match is not None:
+                    deleted_paths = delete_media_artifacts(resolved_media_path)
+                    log_filtered_deletion(
+                        source_type="youtube",
+                        source_name=name,
+                        title=str(info.get("title") or resolved_media_path.stem),
+                        media_path=resolved_media_path,
+                        match=explicit_match,
+                        deleted_paths=deleted_paths,
+                    )
+                    upsert_download(
+                        db_path,
+                        _build_youtube_payload(
+                            source_name=name,
+                            source_url=url,
+                            info=info,
+                            output_file=None,
+                            storage_root=defaults["output_root"],
+                            subtitle_enabled=should_generate_subtitles,
+                            download_status="filtered",
+                            error_message=f"Deleted by transcript filter: {explicit_match.category}",
+                        ),
+                    )
+                    downloaded_items.append(f"Filtered YouTube: {name} – {info.get('title') or resolved_media_path.stem}")
+                    log.warning(
+                        "Deleted YouTube download after transcript screening: %s – %s (%s)",
+                        name,
+                        info.get("title") or resolved_media_path.name,
+                        explicit_match.category,
+                    )
+                    record.clear()
+                    del info
+                    continue
+
+                if subtitle_path.exists() and not should_generate_subtitles:
+                    subtitle_path.unlink(missing_ok=True)
+                if should_generate_subtitles and not subtitle_path.exists():
                     log.warning("Expected subtitle sidecar missing before DB upsert source=%s file=%s", name, resolved_file)
 
                 upsert_download(

@@ -820,6 +820,8 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('name="media_type_0"', body)
         self.assertIn('name="enabled_0"', body)
         self.assertIn('name="max_downloads_0"', body)
+        self.assertIn('name="delete_explicit_content_0"', body)
+        self.assertIn("Delete downloads containing profanity or sexual content", body)
         self.assertIn('Save YouTube sources</button>', body)
         self.assertIn('Save podcast sources</button>', body)
 

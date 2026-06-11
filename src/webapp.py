@@ -4015,6 +4015,7 @@ def _render_settings(
         url = html.escape(str(item.get("url") or ""))
         media_type_value = str(item.get("type") or "audio")
         subtitles_enabled = bool(item.get("subtitles", True))
+        explicit_filter_checked = " checked" if bool(item.get("delete_explicit_content", False)) else ""
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         subtitle_offset = item.get("subtitle_offset_seconds")
@@ -4062,6 +4063,10 @@ def _render_settings(
                   <input id="youtube_max_downloads_{row_id}" type="number" min="1" step="1" name="max_downloads_{row_id}" value="{source_max_downloads_text}" placeholder="use default" />
                 </div>
                 <div>
+                  <label class="checkbox-label" for="youtube_explicit_filter_{row_id}"><input id="youtube_explicit_filter_{row_id}" type="checkbox" name="delete_explicit_content_{row_id}" value="1"{explicit_filter_checked} /> Delete downloads containing profanity or sexual content</label>
+                  <span class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as filtered.</span>
+                </div>
+                <div>
                   <label for="youtube_enabled_{row_id}">Status</label>
                   <select id="youtube_enabled_{row_id}" name="enabled_{row_id}"><option value="1"{enabled_selected}>enabled</option><option value="0"{disabled_selected}>disabled</option></select>
                 </div>
@@ -4077,6 +4082,7 @@ def _render_settings(
         name = html.escape(str(item.get("name") or ""))
         url = html.escape(str(item.get("url") or ""))
         subtitles_enabled = bool(item.get("subtitles", True))
+        explicit_filter_checked = " checked" if bool(item.get("delete_explicit_content", False)) else ""
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         subtitle_offset = item.get("subtitle_offset_seconds")
@@ -4116,6 +4122,10 @@ def _render_settings(
                 <div>
                   <label for="podcast_max_downloads_{row_id}">Max downloads</label>
                   <input id="podcast_max_downloads_{row_id}" type="number" min="1" step="1" name="max_downloads_{row_id}" value="{source_max_downloads_text}" placeholder="use default" />
+                </div>
+                <div>
+                  <label class="checkbox-label" for="podcast_explicit_filter_{row_id}"><input id="podcast_explicit_filter_{row_id}" type="checkbox" name="delete_explicit_content_{row_id}" value="1"{explicit_filter_checked} /> Delete downloads containing profanity or sexual content</label>
+                  <span class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as filtered.</span>
                 </div>
                 <div>
                   <label for="podcast_enabled_{row_id}">Status</label>
@@ -4495,6 +4505,7 @@ def _render_settings(
             <select name="subtitles"><option value="1">yes</option><option value="0">no</option></select>
           </div>
           <div><label>Max downloads (optional)</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div>
+          <div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete downloads containing profanity or sexual content</label></div>
         </div>
         <label>Subtitle offset seconds (optional)</label>
         <input name="subtitle_offset_seconds" />
@@ -4525,6 +4536,7 @@ def _render_settings(
           </div>
           <div><label>Max downloads (optional)</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div>
           <div><label>Subtitle offset seconds (optional)</label><input name="subtitle_offset_seconds" /></div>
+          <div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete downloads containing profanity or sexual content</label></div>
         </div>
         <div class="actions"><button type="submit" class="primary">Add podcast source</button></div>
       </form>
@@ -5435,6 +5447,7 @@ def make_handler(state: AppState):
                         except ValueError:
                             self.send_error(400, "Invalid subtitle_offset_seconds")
                             return
+                        delete_explicit_content = (form.get(f"delete_explicit_content_{source_id}") or ["0"])[0] in {"1", "true", "yes", "on"}
                         enabled = (form.get(f"enabled_{source_id}") or ["1"])[0] in {"1", "true", "yes", "on"}
                         raw_max_downloads = str((form.get(f"max_downloads_{source_id}") or [""])[0]).strip()
                         try:
@@ -5454,6 +5467,7 @@ def make_handler(state: AppState):
                             subtitles=subtitles,
                             subtitle_offset_seconds=subtitle_offset,
                             max_downloads=source_max_downloads,
+                            delete_explicit_content=delete_explicit_content,
                         )
                         set_source_enabled(str(state.database_path), source_id, enabled)
 
@@ -5469,6 +5483,7 @@ def make_handler(state: AppState):
                         return
                     media_type = (form.get("media_type") or [None])[0] if source_type == "youtube" else None
                     subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                    delete_explicit_content = (form.get("delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
                     raw_offset = str((form.get("subtitle_offset_seconds") or [""])[0]).strip()
                     try:
                         subtitle_offset = float(raw_offset) if raw_offset else None
@@ -5493,6 +5508,7 @@ def make_handler(state: AppState):
                         subtitles=subtitles,
                         subtitle_offset_seconds=subtitle_offset,
                         max_downloads=source_max_downloads,
+                        delete_explicit_content=delete_explicit_content,
                         enabled=True,
                     )
 
@@ -5523,6 +5539,7 @@ def make_handler(state: AppState):
                                     self.send_error(400, "Invalid media_type")
                                     return
                             subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                            delete_explicit_content = (form.get("delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
                             raw_max_downloads = str((form.get("max_downloads") or [""])[0]).strip()
                             try:
                                 source_max_downloads = int(raw_max_downloads) if raw_max_downloads else None
@@ -5547,6 +5564,7 @@ def make_handler(state: AppState):
                                 subtitles=subtitles,
                                 subtitle_offset_seconds=subtitle_offset,
                                 max_downloads=source_max_downloads,
+                                delete_explicit_content=delete_explicit_content,
                             )
 
                 try:
