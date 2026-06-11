@@ -24,6 +24,10 @@ _PROFANITY_TERMS = {
     "motherfucker",
     "shit",
     "shitty",
+    "ass",
+    "piss",
+    "damn",
+    "dick"
 }
 
 _SEXUAL_TERMS = {
@@ -39,6 +43,8 @@ _SEXUAL_TERMS = {
     "porn",
     "pornographic",
     "sexual intercourse",
+    "sex",
+    "sexual"
 }
 
 _SRT_METADATA_RE = re.compile(
