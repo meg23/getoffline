@@ -128,6 +128,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "deno_path": "/opt/bin/deno",
                     "android_sync_target": "directory",
                     "android_sync_directory": "/mnt/offline",
+                    "manual_upload_delete_explicit_content": "1",
                 },
             )
             update_download_settings(db_path, "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\txyz")
@@ -141,6 +142,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(config["defaults"]["deno_path"], "/opt/bin/deno")
             self.assertEqual(config["defaults"]["android_sync_target"], "directory")
             self.assertEqual(config["defaults"]["android_sync_directory"], "/mnt/offline")
+            self.assertTrue(config["defaults"]["manual_upload_delete_explicit_content"])
             self.assertIn("SID", config["download_settings"]["youtube_cookie_text"])
 
     def test_sources_seed_and_replace(self):

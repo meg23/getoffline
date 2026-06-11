@@ -82,6 +82,13 @@ python src/main.py
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
+Audio and video files dragged into the library page are copied into the `manual`
+folder and transcribed. In **Settings → General**, enable **Delete drag-and-drop
+uploads containing profanity or sexual content** to screen those generated
+transcripts with the same filter used for configured YouTube and podcast
+sources. Matching uploads and their sidecars are deleted, marked as filtered in
+the database, and recorded with a `CONTENT_FILTER_DELETION` audit event.
+
 Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls. Each source also has a **Delete downloads containing profanity or sexual content** checkbox. When enabled, GetOffline transcribes every new item for screening, deletes matching media and sidecars, and records it as filtered so it is not downloaded again. This local term-based filter is intentionally conservative and can miss context, euphemisms, or transcription errors.
 
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.

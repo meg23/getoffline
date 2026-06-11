@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
 from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
 from profiles import Profile, ProfileManager
 from logger import get_logger
@@ -419,6 +420,57 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
     _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
 
 
+def _manual_upload_filter_enabled(defaults: Dict) -> bool:
+    value = defaults.get("manual_upload_delete_explicit_content", False)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _mark_manual_upload_filtered(state: AppState, item_uid: str, category: str) -> None:
+    with sqlite3.connect(str(state.database_path)) as conn:
+        conn.execute(
+            """
+            UPDATE downloads
+            SET file_path = NULL, file_path_relative = NULL, file_size_bytes = NULL,
+                subtitle_enabled = 0, subtitle_path = NULL, subtitle_path_relative = NULL,
+                download_status = 'filtered', error_message = ?, last_seen_at = ?
+            WHERE source_type = 'manual' AND source_name = 'Manual Uploads' AND item_uid = ?
+            """,
+            (
+                f"Deleted by transcript filter: {category}",
+                datetime.now(timezone.utc).isoformat(),
+                str(item_uid),
+            ),
+        )
+        conn.commit()
+
+
+def _filter_imported_media(
+    state: AppState,
+    item_uid: str,
+    media_path: Path,
+    subtitle_path: Optional[Path],
+    defaults: Dict,
+) -> bool:
+    if not _manual_upload_filter_enabled(defaults):
+        return False
+    explicit_match = screen_transcript(subtitle_path)
+    if explicit_match is None:
+        return False
+    deleted_paths = delete_media_artifacts(Path(media_path))
+    log_filtered_deletion(
+        source_type="manual",
+        source_name="Manual Uploads",
+        title=_normalize_stem(Path(media_path).stem),
+        media_path=Path(media_path),
+        match=explicit_match,
+        deleted_paths=deleted_paths,
+    )
+    _mark_manual_upload_filtered(state, item_uid, explicit_match.category)
+    return True
+
+
 def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path) -> None:
     defaults = (state.config or {}).get("defaults") or {}
     subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "subprocess")
@@ -436,6 +488,9 @@ def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path
     except Exception as exc:
         log.warning("Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc)
         subtitle_path = None
+
+    if _filter_imported_media(state, item_uid, Path(media_path), subtitle_path, defaults):
+        return
 
     if subtitle_path:
         with sqlite3.connect(str(state.database_path)) as conn:
@@ -4006,6 +4061,7 @@ def _render_settings(
     resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
+    manual_upload_filter_checked = default_checked("manual_upload_delete_explicit_content")
     cookie_value = html.escape(cookie_text)
 
     youtube_cards = []
@@ -4337,6 +4393,12 @@ def _render_settings(
             <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
           </div>
         </div>
+
+        <label class="checkbox-label" for="manual_upload_delete_explicit_content">
+          <input id="manual_upload_delete_explicit_content" type="checkbox" name="manual_upload_delete_explicit_content" value="1"{manual_upload_filter_checked} />
+          Delete drag-and-drop uploads containing profanity or sexual content
+        </label>
+        <p class="field-help">Reviews the generated audio transcript before retaining media uploaded through the browser.</p>
 
         <div class="actions">
           <button type="submit" class="primary">Save general settings</button>
@@ -5325,6 +5387,9 @@ def make_handler(state: AppState):
                         "output_root": (form.get("output_root") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                        "manual_upload_delete_explicit_content": "1"
+                        if (form.get("manual_upload_delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
+                        else "0",
                     }
                     sanitized_updates = {
                         k: str(v).strip()

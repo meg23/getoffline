@@ -29,6 +29,7 @@ from webapp import (  # noqa: E402
     _resolve_safe_media_path,
     _mark_all_downloads_played_from_webapp,
     _mark_download_played_from_webapp,
+    _postprocess_imported_media,
     _run_android_delete_job,
     _infer_media_type_for_redownload,
     fetch_downloaded_media_row_by_id,
@@ -822,8 +823,69 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('name="max_downloads_0"', body)
         self.assertIn('name="delete_explicit_content_0"', body)
         self.assertIn("Delete downloads containing profanity or sexual content", body)
+        self.assertIn('name="manual_upload_delete_explicit_content"', body)
+        self.assertIn("Delete drag-and-drop uploads containing profanity or sexual content", body)
         self.assertIn('Save YouTube sources</button>', body)
         self.assertIn('Save podcast sources</button>', body)
+
+    def test_manual_upload_filter_deletes_explicit_media_and_marks_row_filtered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            media_path = root / "manual" / "episode.mp4"
+            media_path.parent.mkdir(parents=True, exist_ok=True)
+            media_path.write_bytes(b"video")
+            item_uid = "manual-test-item"
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "manual",
+                    "source_name": "Manual Uploads",
+                    "item_uid": item_uid,
+                    "item_id": item_uid,
+                    "title": "episode",
+                    "file_path": str(media_path),
+                    "storage_root": str(root),
+                    "file_ext": "mp4",
+                    "file_size_bytes": media_path.stat().st_size,
+                    "subtitle_enabled": False,
+                    "download_status": "downloaded",
+                },
+            )
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"manual_upload_delete_explicit_content": True}},
+                update_runner=lambda config, items: None,
+            )
+
+            def create_explicit_subtitle(**kwargs):
+                subtitle_path = Path(kwargs["media_file"]).with_suffix(".srt")
+                subtitle_path.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\nThis is fucking explicit.\n",
+                    encoding="utf-8",
+                )
+                return subtitle_path
+
+            with mock.patch("webapp.create_subtitles", side_effect=create_explicit_subtitle), mock.patch(
+                "webapp.log_filtered_deletion"
+            ) as deletion_log:
+                _postprocess_imported_media(state, item_uid=item_uid, media_path=media_path)
+
+            self.assertFalse(media_path.exists())
+            self.assertFalse(media_path.with_suffix(".srt").exists())
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT download_status, file_path, subtitle_path, error_message FROM downloads WHERE item_uid = ?",
+                    (item_uid,),
+                ).fetchone()
+            self.assertEqual(row[0], "filtered")
+            self.assertIsNone(row[1])
+            self.assertIsNone(row[2])
+            self.assertIn("profanity", row[3])
+            deletion_log.assert_called_once()
+            self.assertEqual(deletion_log.call_args.kwargs["source_type"], "manual")
 
     def test_render_settings_hides_android_fields_for_local_disk(self):
         body = _render_settings(
