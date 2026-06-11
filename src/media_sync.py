@@ -110,9 +110,9 @@ def _combined_output(completed: object) -> str:
     return stdout or stderr
 
 
-def _append_error(result: AndroidSyncResult, message: str) -> None:
+def _append_error(result: AndroidSyncResult, message: str, sync_name: str = "Android sync") -> None:
     result.errors.append(message)
-    log.warning("Android sync: %s", message)
+    log.warning("%s: %s", sync_name, message)
 
 
 def _run_adb_command(
@@ -121,8 +121,9 @@ def _run_adb_command(
     description: str,
     timeout: int,
     runner: Callable[..., subprocess.CompletedProcess],
+    log_context: str = "Android sync adb command",
 ) -> subprocess.CompletedProcess:
-    log.debug("Android sync adb command starting: %s (%s)", description, _command_for_log(args))
+    log.debug("%s starting: %s (%s)", log_context, description, _command_for_log(args))
     try:
         completed = runner(
             args,
@@ -133,15 +134,16 @@ def _run_adb_command(
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        log.warning("Android sync adb command timed out during %s after %ss", description, timeout)
+        log.warning("%s timed out during %s after %ss", log_context, description, timeout)
         raise RuntimeError(f"{description} timed out after {timeout}s") from exc
     except (OSError, subprocess.SubprocessError) as exc:
-        log.warning("Android sync adb command failed during %s: %s", description, exc)
+        log.warning("%s failed during %s: %s", log_context, description, exc)
         raise RuntimeError(f"{description} failed: {exc}") from exc
 
     output = _combined_output(completed)
     log.debug(
-        "Android sync adb command finished: %s returncode=%s output=%s",
+        "%s finished: %s returncode=%s output=%s",
+        log_context,
         description,
         getattr(completed, "returncode", "unknown"),
         output or "none",
@@ -200,10 +202,10 @@ def _download_artwork(artwork_url: Optional[str]) -> Optional[Path]:
             payload = response.read(20 * 1024 * 1024)
             content_type = str(response.headers.get("Content-Type") or "").lower()
     except Exception as exc:
-        log.warning("Android sync artwork download failed url=%s: %s", url, exc)
+        log.warning("Media sync artwork download failed url=%s: %s", url, exc)
         return None
     if not payload:
-        log.warning("Android sync artwork download returned empty payload url=%s", url)
+        log.warning("Media sync artwork download returned empty payload url=%s", url)
         return None
     suffix = ".jpg"
     if "png" in content_type:
@@ -256,12 +258,12 @@ def _copy_with_embedded_metadata(
     runner: Callable[..., subprocess.CompletedProcess],
 ) -> Path:
     if source_path.suffix.lower() not in MEDIA_METADATA_EXTENSIONS:
-        log.info("Android sync metadata skipped: unsupported extension path=%s", source_path)
+        log.info("Media sync metadata skipped: unsupported extension path=%s", source_path)
         return source_path
 
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
-        log.info("Android sync metadata skipped: ffmpeg not found")
+        log.info("Media sync metadata skipped: ffmpeg not found")
         return source_path
 
     artwork_path = None
@@ -282,9 +284,10 @@ def _copy_with_embedded_metadata(
             description=f"embedding VLC-visible metadata for row {item.row_id}",
             timeout=300,
             runner=runner,
+            log_context="Media sync command",
         )
     except RuntimeError as exc:
-        log.warning("Android sync metadata embedding failed for row_id=%s: %s", item.row_id, exc)
+        log.warning("Media sync metadata embedding failed for row_id=%s: %s", item.row_id, exc)
         output_path.unlink(missing_ok=True)
         if artwork_path is not None and downloaded_artwork:
             artwork_path.unlink(missing_ok=True)
@@ -295,7 +298,7 @@ def _copy_with_embedded_metadata(
 
     if int(getattr(completed, "returncode", 1) or 0) != 0:
         log.warning(
-            "Android sync metadata embedding failed for row_id=%s: %s",
+            "Media sync metadata embedding failed for row_id=%s: %s",
             item.row_id,
             _combined_output(completed) or "ffmpeg returned non-zero status",
         )
@@ -303,11 +306,11 @@ def _copy_with_embedded_metadata(
         return source_path
 
     if not output_path.exists() or output_path.stat().st_size <= 0:
-        log.warning("Android sync metadata embedding produced no output for row_id=%s", item.row_id)
+        log.warning("Media sync metadata embedding produced no output for row_id=%s", item.row_id)
         output_path.unlink(missing_ok=True)
         return source_path
 
-    log.info("Android sync metadata embedded: row_id=%s temp=%s", item.row_id, output_path)
+    log.info("Media sync metadata embedded: row_id=%s temp=%s", item.row_id, output_path)
     return output_path
 
 
@@ -879,7 +882,7 @@ def _copy_item_to_directory(
     source_path = item.file_path.expanduser().resolve()
     if not source_path.is_file():
         result.failed += 1
-        _append_error(result, f"missing local file for row {item.row_id}: {source_path}")
+        _append_error(result, f"missing local file for row {item.row_id}: {source_path}", "Directory sync")
         return False
     if destination_path.is_file() and destination_path.stat().st_size == source_path.stat().st_size:
         result.skipped += 1
@@ -892,7 +895,7 @@ def _copy_item_to_directory(
         return True
     except OSError as exc:
         result.failed += 1
-        _append_error(result, f"copy failed for row {item.row_id}: {exc}")
+        _append_error(result, f"copy failed for row {item.row_id}: {exc}", "Directory sync")
         return False
     finally:
         if copy_source != source_path:
@@ -911,7 +914,7 @@ def _copy_subtitle_to_directory(item: AndroidSyncItem, destination_path: Path, r
             shutil.copy2(subtitle_source, subtitle_destination)
     except OSError as exc:
         result.failed += 1
-        _append_error(result, f"subtitle copy failed for row {item.row_id}: {exc}")
+        _append_error(result, f"subtitle copy failed for row {item.row_id}: {exc}", "Directory sync")
 
 
 def _write_directory_playlist(
@@ -927,7 +930,7 @@ def _write_directory_playlist(
         result.vlc_playlist_path = str(playlist_path)
     except OSError as exc:
         result.failed += 1
-        _append_error(result, f"VLC playlist write failed: {exc}")
+        _append_error(result, f"VLC playlist write failed: {exc}", "Directory sync")
 
 
 def _prepare_sync_directory(config: AndroidSyncConfig, item_count: int, result: AndroidSyncResult) -> Optional[Path]:
@@ -938,8 +941,42 @@ def _prepare_sync_directory(config: AndroidSyncConfig, item_count: int, result: 
     except OSError as exc:
         result.failed = item_count
         result.message = f"unable to prepare sync directory: {exc}"
-        _append_error(result, result.message)
+        _append_error(result, result.message, "Directory sync")
         return None
+
+
+def _read_directory_syncdb(destination: Path, result: AndroidSyncResult) -> set[str]:
+    syncdb_path = destination / "syncdb.txt"
+    if not syncdb_path.is_file():
+        return set()
+    try:
+        lines = syncdb_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        _append_error(result, f"sync history read failed; continuing with empty history: {exc}", "Directory sync")
+        return set()
+    synced_paths: set[str] = set()
+    for line in lines:
+        synced_path = line.strip()
+        if synced_path:
+            synced_paths.add(synced_path)
+    return synced_paths
+
+
+def _write_directory_syncdb(destination: Path, synced_paths: Iterable[str], result: AndroidSyncResult) -> None:
+    syncdb_path = destination / "syncdb.txt"
+    normalized_paths: set[str] = set()
+    for path in synced_paths:
+        normalized_path = str(path).strip()
+        if normalized_path:
+            normalized_paths.add(normalized_path)
+    payload = ""
+    for normalized_path in sorted(normalized_paths):
+        payload += normalized_path + "\n"
+    try:
+        syncdb_path.write_text(payload, encoding="utf-8")
+        log.info("Directory sync history written: path=%s entries=%s", syncdb_path, len(normalized_paths))
+    except OSError as exc:
+        _append_error(result, f"sync history write failed: {exc}", "Directory sync")
 
 
 def _set_sync_result_message(result: AndroidSyncResult) -> None:
@@ -947,6 +984,32 @@ def _set_sync_result_message(result: AndroidSyncResult) -> None:
         result.message = f"copied {result.copied}, skipped {result.skipped}, failed {result.failed}"
     else:
         result.message = f"copied {result.copied}, skipped {result.skipped}"
+
+
+def _sync_item_to_directory(
+    item: AndroidSyncItem,
+    destination: Path,
+    synced_paths: set[str],
+    playlist_entries: List[Tuple[AndroidSyncItem, str]],
+    config: AndroidSyncConfig,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> bool:
+    destination_path = destination / Path(build_remote_media_path("", item)).name
+    destination_path_text = str(destination_path)
+    if destination_path_text in synced_paths:
+        result.skipped += 1
+        playlist_entries.append((item, destination_path_text))
+        log.info("Directory sync item skipped: row_id=%s path already recorded in syncdb.txt", item.row_id)
+        return False
+    if not _copy_item_to_directory(item, destination_path, result, runner):
+        return False
+    synced_paths.add(destination_path_text)
+    playlist_entries.append((item, destination_path_text))
+    log.info("Directory sync item completed: row_id=%s path=%s", item.row_id, destination_path)
+    if config.include_subtitles:
+        _copy_subtitle_to_directory(item, destination_path, result)
+    return True
 
 
 def sync_items_to_directory(
@@ -964,17 +1027,28 @@ def sync_items_to_directory(
     destination = _prepare_sync_directory(config, len(sync_items), result)
     if destination is None:
         return result
+    log.info("Directory sync starting: items=%s destination=%s", len(sync_items), destination)
     playlist_entries: List[Tuple[AndroidSyncItem, str]] = []
+    syncdb_path = destination / "syncdb.txt"
+    syncdb_paths = _read_directory_syncdb(destination, result)
+    syncdb_changed = False
     for item in sync_items:
         result.attempted += 1
-        destination_path = destination / Path(build_remote_media_path("", item)).name
-        if not _copy_item_to_directory(item, destination_path, result, runner):
-            continue
-        playlist_entries.append((item, str(destination_path)))
-        if config.include_subtitles:
-            _copy_subtitle_to_directory(item, destination_path, result)
+        item_changed = _sync_item_to_directory(
+            item, destination, syncdb_paths, playlist_entries, config, result, runner
+        )
+        syncdb_changed = syncdb_changed or item_changed
+    if syncdb_changed or not syncdb_path.exists():
+        _write_directory_syncdb(destination, syncdb_paths, result)
     _write_directory_playlist(destination, playlist_entries, result)
     _set_sync_result_message(result)
+    log.info(
+        "Directory sync finished: attempted=%s copied=%s skipped=%s failed=%s",
+        result.attempted,
+        result.copied,
+        result.skipped,
+        result.failed,
+    )
     return result
 
 

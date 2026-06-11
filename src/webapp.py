@@ -1338,7 +1338,7 @@ def _android_sync_items_from_rows(
         try:
             exclude_pattern = re.compile(str(exclude_regex), re.IGNORECASE)
         except re.error as exc:
-            log.warning("Android sync exclusion regex ignored because it is invalid: %s", exc)
+            log.warning("Media sync exclusion regex ignored because it is invalid: %s", exc)
     for row in rows:
         position_seconds = max(0.0, float(getattr(row, "last_position_seconds", 0.0) or 0.0))
         is_started = bool(position_seconds > 0 and not row.played)
@@ -1388,6 +1388,8 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
     sync_config = config_from_defaults(defaults)
     if force:
         sync_config.enabled = True
+    sync_name = "Directory sync" if sync_config.target == "directory" else "Android sync"
+    sync_destination = sync_config.directory if sync_config.target == "directory" else sync_config.destination
     with state.android_sync_status.lock:
         state.android_sync_status.is_running = True
         state.android_sync_status.last_started_at = time.time()
@@ -1398,11 +1400,12 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
 
     try:
         log.info(
-            "Android sync job starting: force=%s enabled=%s max_items=%s destination=%s",
+            "%s job starting: force=%s enabled=%s max_items=%s destination=%s",
+            sync_name,
             "yes" if force else "no",
             "yes" if sync_config.enabled else "no",
             sync_config.max_items,
-            sync_config.destination,
+            sync_destination,
         )
         rows = fetch_downloaded_media_rows(state.database_path, state.output_root)
         items = _android_sync_items_from_rows(
@@ -1414,10 +1417,11 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
             include_played=sync_config.include_played,
             exclude_regex=sync_config.exclude_regex,
         )
-        log.info("Android sync job selected %s local item(s) from %s downloaded row(s)", len(items), len(rows))
+        log.info("%s job selected %s local item(s) from %s downloaded row(s)", sync_name, len(items), len(rows))
         result = sync_items(items, sync_config)
         log.info(
-            "Android sync job completed: result=%s copied=%s skipped=%s failed=%s device=%s",
+            "%s job completed: result=%s copied=%s skipped=%s failed=%s device=%s",
+            sync_name,
             result.message,
             result.copied,
             result.skipped,
@@ -1430,7 +1434,7 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
             state.android_sync_status.last_copied_count = result.copied
             state.android_sync_status.last_skipped_count = result.skipped
     except Exception as exc:
-        log.exception("Android sync job failed unexpectedly: %s", exc)
+        log.exception("%s job failed unexpectedly: %s", sync_name, exc)
         with state.android_sync_status.lock:
             state.android_sync_status.last_result = "failed"
             state.android_sync_status.last_error = str(exc)
@@ -1443,17 +1447,18 @@ def _run_android_sync_job(state: AppState, force: bool = False) -> None:
 def trigger_android_sync(state: AppState, *, force: bool = False) -> bool:
     defaults = state.config.get("defaults") or {}
     sync_config = config_from_defaults(defaults)
+    sync_name = "Directory sync" if sync_config.target == "directory" else "Android sync"
     if not force and not sync_config.enabled:
-        log.info("Android sync trigger ignored: disabled")
+        log.info("%s trigger ignored: disabled", sync_name)
         return False
     with state.android_sync_status.lock:
         if state.android_sync_status.is_running:
-            log.info("Android sync trigger ignored: already running")
+            log.info("%s trigger ignored: already running", sync_name)
             return False
 
     thread = threading.Thread(target=_run_android_sync_job, args=(state, force), daemon=True)
     thread.start()
-    log.info("Android sync trigger accepted: force=%s", "yes" if force else "no")
+    log.info("%s trigger accepted: force=%s", sync_name, "yes" if force else "no")
     return True
 
 
@@ -1617,7 +1622,10 @@ def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
         interval_seconds = _auto_update_interval_seconds(state)
         if stop_event.wait(interval_seconds):
             break
-        log.info("Android sync periodic check running after %ss interval", interval_seconds)
+        defaults = state.config.get("defaults") or {}
+        sync_config = config_from_defaults(defaults)
+        sync_name = "Directory sync" if sync_config.target == "directory" else "Android sync"
+        log.info("%s periodic check running after %ss interval", sync_name, interval_seconds)
         trigger_android_sync(state)
 
 
@@ -5142,7 +5150,10 @@ def make_handler(state: AppState):
 
             if path == "/android-sync":
                 started = trigger_android_sync(state, force=True)
-                log.info("Manual Android sync requested (started=%s)", "yes" if started else "no")
+                defaults = state.config.get("defaults") or {}
+                sync_config = config_from_defaults(defaults)
+                sync_name = "Directory sync" if sync_config.target == "directory" else "Android sync"
+                log.info("Manual %s requested (started=%s)", sync_name, "yes" if started else "no")
                 redirect_to = (query.get("next") or ["/"])[0]
                 if redirect_to not in {"/", "/settings"}:
                     redirect_to = "/"
