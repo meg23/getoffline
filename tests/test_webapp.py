@@ -36,6 +36,7 @@ from webapp import (  # noqa: E402
     _stream_media,
     _enqueue_progress_update,
     _flush_pending_progress_updates,
+    _generate_missing_summaries_on_startup,
     _descriptor_cleanup_loop,
     fetch_downloaded_media_rows,
     get_download_position_seconds,
@@ -69,6 +70,36 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('Create or rename a profile', body)
         self.assertIn('class="profile-action-button"', body)
         self.assertNotIn('<label for="profile-switcher">', body)
+
+    def test_startup_summary_database_error_does_not_abort_startup(self):
+        state = AppState(
+            output_root=Path("/tmp/downloads"),
+            database_path=Path("/tmp/downloads.sqlite3"),
+            config={},
+            update_runner=mock.Mock(),
+        )
+        error = sqlite3.OperationalError("unable to open database file")
+
+        with (
+            mock.patch("webapp.generate_missing_summaries", side_effect=error) as generate_mock,
+            mock.patch("webapp.log.warning") as warning_mock,
+        ):
+            _generate_missing_summaries_on_startup(
+                state,
+                {"summary_model": "test-model", "summary_timeout_seconds": 12},
+            )
+
+        generate_mock.assert_called_once_with(
+            "/tmp/downloads.sqlite3",
+            limit=500,
+            model_name="test-model",
+            timeout_seconds=12,
+        )
+        warning_mock.assert_called_once_with(
+            "Startup summary regeneration skipped (db=%s): %s",
+            state.database_path,
+            error,
+        )
 
     def test_background_update_triggers_every_profile(self):
         with tempfile.TemporaryDirectory() as tmpdir:

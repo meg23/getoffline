@@ -5688,6 +5688,24 @@ def make_handler(state: AppState):
     return _Handler
 
 
+def _generate_missing_summaries_on_startup(state: AppState, configured_defaults: Dict) -> None:
+    try:
+        regenerated = generate_missing_summaries(
+            str(state.database_path),
+            limit=500,
+            model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
+            timeout_seconds=int(configured_defaults.get("summary_timeout_seconds") or 90),
+        )
+    except Exception as exc:
+        log.warning(
+            "Startup summary regeneration skipped (db=%s): %s",
+            state.database_path,
+            exc,
+        )
+        return
+    log.info("Startup summary regeneration complete regenerated=%s", regenerated)
+
+
 def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     defaults = config["defaults"]
     init_database(str(defaults["database_path"]))
@@ -5721,13 +5739,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     transcript_indexing_enabled = str(os.getenv("GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if transcript_indexing_enabled:
         _index_transcripts_on_startup(state)
-        regenerated = generate_missing_summaries(
-            str(state.database_path),
-            limit=500,
-            model_name=str(configured_defaults.get("summary_model") or "qwen2.5:0.5b"),
-            timeout_seconds=int(configured_defaults.get("summary_timeout_seconds") or 90),
-        )
-        log.info("Startup summary regeneration complete regenerated=%s", regenerated)
+        _generate_missing_summaries_on_startup(state, configured_defaults)
     else:
         log.info("Transcript startup indexing disabled (GETOFFLINE_ENABLE_TRANSCRIPT_INDEXING=0).")
     auto_update_stop_event = threading.Event()
