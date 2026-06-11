@@ -80,6 +80,26 @@ You can still run the Python entrypoint directly if needed:
 python src/main.py
 ```
 
+To import every supported video in a local directory through the same workflow
+as browser drag-and-drop (copy to `manual`, database registration, Whisper
+transcription, optional explicit-content filtering, audit logging, and summary
+generation), run:
+
+```bash
+python src/main.py import-directory /path/to/videos
+```
+
+Add `--recursive` to include videos in subdirectories:
+
+```bash
+python src/main.py import-directory /path/to/videos --recursive
+```
+
+Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The command
+skips non-video files and skips GetOffline's destination `manual` directory. It
+uses the **Delete drag-and-drop uploads containing profanity or sexual content**
+setting under **Settings → General**.
+
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
 Audio and video files dragged into the library page are copied into the `manual`

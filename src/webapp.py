@@ -353,7 +353,13 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
     return None
 
 
-def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_bytes: int) -> None:
+def _import_dropped_media_stream(
+    state: AppState,
+    file_name: str,
+    stream,
+    total_bytes: int,
+    ingest_method: str = "drag-and-drop",
+) -> Path:
     if not file_name:
         raise ValueError("Missing filename")
     suffix = Path(file_name).suffix.lower()
@@ -396,10 +402,14 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
         "item_uid": item_uid,
         "item_id": item_uid,
         "title": stem,
-        "description": "Imported via browser drag-and-drop",
+        "description": (
+            "Imported via browser drag-and-drop"
+            if ingest_method == "drag-and-drop"
+            else "Imported from local directory"
+        ),
         "uploader": "local",
         "channel": "Manual Uploads",
-        "extractor": "browser-drop",
+        "extractor": "browser-drop" if ingest_method == "drag-and-drop" else "directory-import",
         "upload_date": now_iso[:10],
         "file_path": str(destination_path),
         "file_ext": suffix.lstrip("."),
@@ -410,7 +420,7 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
         "download_status": "downloaded",
         "raw_metadata": {
             "ingested_at": now_iso,
-            "ingest_method": "drag-and-drop",
+            "ingest_method": ingest_method,
             "original_filename": file_name,
             "sha1": hasher.hexdigest(),
         },
@@ -418,6 +428,25 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
     }
     upsert_download(str(state.database_path), metadata)
     _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+    return destination_path
+
+
+def import_local_media_file(state: AppState, source_path: Path) -> Path:
+    """Import one local media file through the browser-upload workflow."""
+    resolved_source = Path(source_path).expanduser().resolve()
+    if not resolved_source.is_file():
+        raise ValueError(f"Media file does not exist: {resolved_source}")
+    if resolved_source.suffix.lower() not in MEDIA_EXTENSIONS:
+        raise ValueError(f"Unsupported media type: {resolved_source.name}")
+    total_bytes = resolved_source.stat().st_size
+    with resolved_source.open("rb") as stream:
+        return _import_dropped_media_stream(
+            state,
+            file_name=resolved_source.name,
+            stream=stream,
+            total_bytes=total_bytes,
+            ingest_method="directory-import",
+        )
 
 
 def _manual_upload_filter_enabled(defaults: Dict) -> bool:

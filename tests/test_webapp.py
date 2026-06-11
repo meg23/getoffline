@@ -40,6 +40,7 @@ from webapp import (  # noqa: E402
     fetch_downloaded_media_rows,
     get_download_position_seconds,
     get_total_listened_seconds,
+    import_local_media_file,
     trigger_background_update,
     update_download_position_seconds,
     trigger_single_youtube_download,
@@ -886,6 +887,39 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertIn("profanity", row[3])
             deletion_log.assert_called_once()
             self.assertEqual(deletion_log.call_args.kwargs["source_type"], "manual")
+
+    def test_local_file_import_copies_media_and_records_directory_ingest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "incoming" / "movie.mp4"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_bytes(b"video-content")
+            output_root = root / "output"
+            db_path = output_root / "downloads.sqlite3"
+            init_database(str(db_path))
+            def unused_update_runner(config, items):
+                _ = config, items
+
+            state = AppState(
+                output_root=output_root,
+                database_path=db_path,
+                config={"defaults": {}},
+                update_runner=unused_update_runner,
+            )
+
+            with mock.patch("webapp._postprocess_imported_media") as postprocess:
+                destination_path = import_local_media_file(state, source_path)
+
+            self.assertEqual(destination_path.read_bytes(), b"video-content")
+            self.assertEqual(destination_path.parent, (output_root / "manual").resolve())
+            postprocess.assert_called_once()
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT extractor, description, raw_metadata_json FROM downloads WHERE source_type = 'manual'"
+                ).fetchone()
+            self.assertEqual(row[0], "directory-import")
+            self.assertEqual(row[1], "Imported from local directory")
+            self.assertEqual(json.loads(row[2])["ingest_method"], "directory-import")
 
     def test_render_settings_hides_android_fields_for_local_disk(self):
         body = _render_settings(
