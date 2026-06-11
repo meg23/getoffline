@@ -10,6 +10,7 @@ from pathlib import Path
 import feedparser
 
 from database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
+from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
 from logger import get_logger
 from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from summary_tasks import generate_missing_summaries
@@ -252,6 +253,7 @@ def _download_podcasts_in_process(config, downloaded_items):
             name = sanitize_channel_name(entry["name"])
             url = entry["url"]
             entry_subtitles_enabled = entry.get("subtitles", True)
+            delete_explicit_content = bool(entry.get("delete_explicit_content", False))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 entry_subtitles_enabled = False
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
@@ -312,6 +314,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                         "name": name,
                         "source_url": url,
                         "entry_subtitles_enabled": entry_subtitles_enabled,
+                        "delete_explicit_content": delete_explicit_content,
                         "subtitle_offset_seconds": subtitle_offset_seconds,
                         "episode_title": episode_title,
                         "description": _entry_summary(ep),
@@ -365,12 +368,52 @@ def _download_podcasts_in_process(config, downloaded_items):
                     subtitle_path = create_subtitles(
                         media_file=job["final_audio"],
                         subtitle_offset_seconds=job["subtitle_offset_seconds"],
-                        entry_subtitles_enabled=job["entry_subtitles_enabled"],
+                        entry_subtitles_enabled=(job["entry_subtitles_enabled"] or job["delete_explicit_content"]),
                         subtitle_transcription_mode=defaults.get("subtitle_transcription_mode", "subprocess"),
                         logger=log,
                         context_name=f"podcast {job['name']}",
                         context_label="podcast",
                     )
+                    explicit_match = screen_transcript(subtitle_path) if job["delete_explicit_content"] else None
+                    if explicit_match is not None:
+                        deleted_paths = delete_media_artifacts(job["final_audio"])
+                        log_filtered_deletion(
+                            source_type="podcast",
+                            source_name=job["name"],
+                            title=job["episode_title"],
+                            media_path=job["final_audio"],
+                            match=explicit_match,
+                            deleted_paths=deleted_paths,
+                        )
+                        upsert_download(
+                            db_path,
+                            _episode_payload(
+                                db_path=db_path,
+                                source_name=job["name"],
+                                source_url=job["source_url"],
+                                storage_root=defaults["output_root"],
+                                media_url=job["mp3_url"],
+                                title=job["episode_title"],
+                                description=job["description"],
+                                file_path=None,
+                                subtitle_enabled=job["entry_subtitles_enabled"],
+                                subtitle_path=None,
+                                download_status="filtered",
+                                error_message=f"Deleted by transcript filter: {explicit_match.category}",
+                                artwork_url=job.get("artwork_url"),
+                            ),
+                        )
+                        downloaded_items.append(f"Filtered podcast: {job['name']} – {job['episode_title']}")
+                        log.warning(
+                            "Deleted podcast after transcript screening: %s – %s (%s)",
+                            job["name"],
+                            job["episode_title"],
+                            explicit_match.category,
+                        )
+                        continue
+                    if subtitle_path and not job["entry_subtitles_enabled"]:
+                        subtitle_path.unlink(missing_ok=True)
+                        subtitle_path = None
                     if subtitle_path:
                         downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
 

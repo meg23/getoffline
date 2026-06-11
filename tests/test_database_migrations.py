@@ -81,6 +81,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0008_add_transcript_search_tables",
                     "0009_add_media_summaries_table",
                     "0010_add_source_max_downloads",
+                    "0011_add_source_explicit_content_filter",
                 ],
             )
             self.assertIn("played", columns)
@@ -90,6 +91,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertIn("file_path_relative", columns)
             self.assertIn("subtitle_path_relative", columns)
             self.assertIn("max_downloads", source_columns)
+            self.assertIn("delete_explicit_content", source_columns)
 
     def test_apply_migrations_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -101,7 +103,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
-            self.assertEqual(count, 10)
+            self.assertEqual(count, 11)
 
     def test_download_artifact_path_prefers_relative_reference(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -126,6 +128,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "deno_path": "/opt/bin/deno",
                     "android_sync_target": "directory",
                     "android_sync_directory": "/mnt/offline",
+                    "manual_upload_delete_explicit_content": "1",
                 },
             )
             update_download_settings(db_path, "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\txyz")
@@ -139,6 +142,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(config["defaults"]["deno_path"], "/opt/bin/deno")
             self.assertEqual(config["defaults"]["android_sync_target"], "directory")
             self.assertEqual(config["defaults"]["android_sync_directory"], "/mnt/offline")
+            self.assertTrue(config["defaults"]["manual_upload_delete_explicit_content"])
             self.assertIn("SID", config["download_settings"]["youtube_cookie_text"])
 
     def test_sources_seed_and_replace(self):
@@ -149,7 +153,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                 db_path,
                 {
                     "defaults": {"output_root": tmpdir},
-                    "youtube": [{"name": "YT 1", "url": "https://youtube.com/@one", "type": "audio", "subtitles": True, "max_downloads": 4}],
+                    "youtube": [{"name": "YT 1", "url": "https://youtube.com/@one", "type": "audio", "subtitles": True, "max_downloads": 4, "delete_explicit_content": True}],
                     "podcasts": [{"name": "Pod 1", "url": "https://example.com/rss", "subtitles": False, "max_downloads": 2}],
                 },
             )
@@ -158,6 +162,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(len(first["youtube"]), 1)
             self.assertEqual(len(first["podcasts"]), 1)
             self.assertEqual(first["youtube"][0]["max_downloads"], 4)
+            self.assertTrue(first["youtube"][0]["delete_explicit_content"])
             self.assertEqual(first["podcasts"][0]["max_downloads"], 2)
 
             replace_sources(db_path, [{"name": "YT 2", "url": "https://youtube.com/@two", "type": "video", "max_downloads": 5}], [])
@@ -200,6 +205,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                 subtitles=False,
                 subtitle_offset_seconds=1.25,
                 max_downloads=6,
+                delete_explicit_content=True,
             )
 
             self.assertTrue(updated)
@@ -210,6 +216,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertFalse(config["youtube"][0]["subtitles"])
             self.assertEqual(config["youtube"][0]["subtitle_offset_seconds"], 1.25)
             self.assertEqual(config["youtube"][0]["max_downloads"], 6)
+            self.assertTrue(config["youtube"][0]["delete_explicit_content"])
 
     def test_get_download_position_seconds_returns_zero_when_locked(self):
         if HAS_SQLALCHEMY:

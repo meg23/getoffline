@@ -11,6 +11,7 @@
 - Automatic Whisper subtitle (`.srt`) generation for new audio downloads when `subtitles: true`
 - YouTube Whisper subtitle generation is serialized to one worker for runtime stability on current Python/Whisper stacks
 - Per-entry `subtitles` flag for YouTube and podcast sources (`true`/`false`)
+- Optional per-source transcript filter that deletes newly downloaded YouTube videos or podcast episodes when conservative profanity or sexual-content terms are detected
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams in configured sources while allowing a live video to be downloaded from the web app's **+** button
 - Browser cookie support for private or age-restricted YouTube videos
@@ -79,9 +80,36 @@ You can still run the Python entrypoint directly if needed:
 python src/main.py
 ```
 
+To import every supported video in a local directory through the same workflow
+as browser drag-and-drop (copy to `manual`, database registration, Whisper
+transcription, optional explicit-content filtering, audit logging, and summary
+generation), run:
+
+```bash
+python src/main.py import-directory /path/to/videos
+```
+
+Add `--recursive` to include videos in subdirectories:
+
+```bash
+python src/main.py import-directory /path/to/videos --recursive
+```
+
+Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The command
+skips non-video files and skips GetOffline's destination `manual` directory. It
+uses the **Delete drag-and-drop uploads containing profanity or sexual content**
+setting under **Settings → General**.
+
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
-Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls.
+Audio and video files dragged into the library page are copied into the `manual`
+folder and transcribed. In **Settings → General**, enable **Delete drag-and-drop
+uploads containing profanity or sexual content** to screen those generated
+transcripts with the same filter used for configured YouTube and podcast
+sources. Matching uploads and their sidecars are deleted, marked as filtered in
+the database, and recorded with a `CONTENT_FILTER_DELETION` audit event.
+
+Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls. Each source also has a **Delete downloads containing profanity or sexual content** checkbox. When enabled, GetOffline transcribes every new item for screening, deletes matching media and sidecars, and records it as filtered so it is not downloaded again. This local term-based filter is intentionally conservative and can miss context, euphemisms, or transcription errors.
 
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
@@ -142,3 +170,13 @@ Logs are written to:
 ```
 
 And streamed to your terminal.
+
+Every media deletion performed by the transcript filter writes a warning-level
+`CONTENT_FILTER_DELETION` audit event to this log. The event includes the source
+type and name, item title, matched category and term, original media path, and
+the list of artifacts that were successfully deleted. For example, these events
+can be reviewed with:
+
+```bash
+grep 'CONTENT_FILTER_DELETION' ~/youtube/youtube_batch_dl.log
+```

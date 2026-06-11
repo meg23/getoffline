@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
 from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
 from profiles import Profile, ProfileManager
 from logger import get_logger
@@ -352,7 +353,13 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
     return None
 
 
-def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_bytes: int) -> None:
+def _import_dropped_media_stream(
+    state: AppState,
+    file_name: str,
+    stream,
+    total_bytes: int,
+    ingest_method: str = "drag-and-drop",
+) -> Path:
     if not file_name:
         raise ValueError("Missing filename")
     suffix = Path(file_name).suffix.lower()
@@ -395,10 +402,14 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
         "item_uid": item_uid,
         "item_id": item_uid,
         "title": stem,
-        "description": "Imported via browser drag-and-drop",
+        "description": (
+            "Imported via browser drag-and-drop"
+            if ingest_method == "drag-and-drop"
+            else "Imported from local directory"
+        ),
         "uploader": "local",
         "channel": "Manual Uploads",
-        "extractor": "browser-drop",
+        "extractor": "browser-drop" if ingest_method == "drag-and-drop" else "directory-import",
         "upload_date": now_iso[:10],
         "file_path": str(destination_path),
         "file_ext": suffix.lstrip("."),
@@ -409,7 +420,7 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
         "download_status": "downloaded",
         "raw_metadata": {
             "ingested_at": now_iso,
-            "ingest_method": "drag-and-drop",
+            "ingest_method": ingest_method,
             "original_filename": file_name,
             "sha1": hasher.hexdigest(),
         },
@@ -417,6 +428,76 @@ def _import_dropped_media_stream(state: AppState, file_name: str, stream, total_
     }
     upsert_download(str(state.database_path), metadata)
     _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+    return destination_path
+
+
+def import_local_media_file(state: AppState, source_path: Path) -> Path:
+    """Import one local media file through the browser-upload workflow."""
+    resolved_source = Path(source_path).expanduser().resolve()
+    if not resolved_source.is_file():
+        raise ValueError(f"Media file does not exist: {resolved_source}")
+    if resolved_source.suffix.lower() not in MEDIA_EXTENSIONS:
+        raise ValueError(f"Unsupported media type: {resolved_source.name}")
+    total_bytes = resolved_source.stat().st_size
+    with resolved_source.open("rb") as stream:
+        return _import_dropped_media_stream(
+            state,
+            file_name=resolved_source.name,
+            stream=stream,
+            total_bytes=total_bytes,
+            ingest_method="directory-import",
+        )
+
+
+def _manual_upload_filter_enabled(defaults: Dict) -> bool:
+    value = defaults.get("manual_upload_delete_explicit_content", False)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _mark_manual_upload_filtered(state: AppState, item_uid: str, category: str) -> None:
+    with sqlite3.connect(str(state.database_path)) as conn:
+        conn.execute(
+            """
+            UPDATE downloads
+            SET file_path = NULL, file_path_relative = NULL, file_size_bytes = NULL,
+                subtitle_enabled = 0, subtitle_path = NULL, subtitle_path_relative = NULL,
+                download_status = 'filtered', error_message = ?, last_seen_at = ?
+            WHERE source_type = 'manual' AND source_name = 'Manual Uploads' AND item_uid = ?
+            """,
+            (
+                f"Deleted by transcript filter: {category}",
+                datetime.now(timezone.utc).isoformat(),
+                str(item_uid),
+            ),
+        )
+        conn.commit()
+
+
+def _filter_imported_media(
+    state: AppState,
+    item_uid: str,
+    media_path: Path,
+    subtitle_path: Optional[Path],
+    defaults: Dict,
+) -> bool:
+    if not _manual_upload_filter_enabled(defaults):
+        return False
+    explicit_match = screen_transcript(subtitle_path)
+    if explicit_match is None:
+        return False
+    deleted_paths = delete_media_artifacts(Path(media_path))
+    log_filtered_deletion(
+        source_type="manual",
+        source_name="Manual Uploads",
+        title=_normalize_stem(Path(media_path).stem),
+        media_path=Path(media_path),
+        match=explicit_match,
+        deleted_paths=deleted_paths,
+    )
+    _mark_manual_upload_filtered(state, item_uid, explicit_match.category)
+    return True
 
 
 def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path) -> None:
@@ -436,6 +517,9 @@ def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path
     except Exception as exc:
         log.warning("Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc)
         subtitle_path = None
+
+    if _filter_imported_media(state, item_uid, Path(media_path), subtitle_path, defaults):
+        return
 
     if subtitle_path:
         with sqlite3.connect(str(state.database_path)) as conn:
@@ -4006,6 +4090,7 @@ def _render_settings(
     resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
+    manual_upload_filter_checked = default_checked("manual_upload_delete_explicit_content")
     cookie_value = html.escape(cookie_text)
 
     youtube_cards = []
@@ -4015,6 +4100,7 @@ def _render_settings(
         url = html.escape(str(item.get("url") or ""))
         media_type_value = str(item.get("type") or "audio")
         subtitles_enabled = bool(item.get("subtitles", True))
+        explicit_filter_checked = " checked" if bool(item.get("delete_explicit_content", False)) else ""
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         subtitle_offset = item.get("subtitle_offset_seconds")
@@ -4062,6 +4148,10 @@ def _render_settings(
                   <input id="youtube_max_downloads_{row_id}" type="number" min="1" step="1" name="max_downloads_{row_id}" value="{source_max_downloads_text}" placeholder="use default" />
                 </div>
                 <div>
+                  <label class="checkbox-label" for="youtube_explicit_filter_{row_id}"><input id="youtube_explicit_filter_{row_id}" type="checkbox" name="delete_explicit_content_{row_id}" value="1"{explicit_filter_checked} /> Delete downloads containing profanity or sexual content</label>
+                  <span class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as filtered.</span>
+                </div>
+                <div>
                   <label for="youtube_enabled_{row_id}">Status</label>
                   <select id="youtube_enabled_{row_id}" name="enabled_{row_id}"><option value="1"{enabled_selected}>enabled</option><option value="0"{disabled_selected}>disabled</option></select>
                 </div>
@@ -4077,6 +4167,7 @@ def _render_settings(
         name = html.escape(str(item.get("name") or ""))
         url = html.escape(str(item.get("url") or ""))
         subtitles_enabled = bool(item.get("subtitles", True))
+        explicit_filter_checked = " checked" if bool(item.get("delete_explicit_content", False)) else ""
         enabled = bool(item.get("enabled", True))
         status = "enabled" if enabled else "disabled"
         subtitle_offset = item.get("subtitle_offset_seconds")
@@ -4116,6 +4207,10 @@ def _render_settings(
                 <div>
                   <label for="podcast_max_downloads_{row_id}">Max downloads</label>
                   <input id="podcast_max_downloads_{row_id}" type="number" min="1" step="1" name="max_downloads_{row_id}" value="{source_max_downloads_text}" placeholder="use default" />
+                </div>
+                <div>
+                  <label class="checkbox-label" for="podcast_explicit_filter_{row_id}"><input id="podcast_explicit_filter_{row_id}" type="checkbox" name="delete_explicit_content_{row_id}" value="1"{explicit_filter_checked} /> Delete downloads containing profanity or sexual content</label>
+                  <span class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as filtered.</span>
                 </div>
                 <div>
                   <label for="podcast_enabled_{row_id}">Status</label>
@@ -4328,6 +4423,12 @@ def _render_settings(
           </div>
         </div>
 
+        <label class="checkbox-label" for="manual_upload_delete_explicit_content">
+          <input id="manual_upload_delete_explicit_content" type="checkbox" name="manual_upload_delete_explicit_content" value="1"{manual_upload_filter_checked} />
+          Delete drag-and-drop uploads containing profanity or sexual content
+        </label>
+        <p class="field-help">Reviews the generated audio transcript before retaining media uploaded through the browser.</p>
+
         <div class="actions">
           <button type="submit" class="primary">Save general settings</button>
         </div>
@@ -4495,6 +4596,7 @@ def _render_settings(
             <select name="subtitles"><option value="1">yes</option><option value="0">no</option></select>
           </div>
           <div><label>Max downloads (optional)</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div>
+          <div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete downloads containing profanity or sexual content</label></div>
         </div>
         <label>Subtitle offset seconds (optional)</label>
         <input name="subtitle_offset_seconds" />
@@ -4525,6 +4627,7 @@ def _render_settings(
           </div>
           <div><label>Max downloads (optional)</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div>
           <div><label>Subtitle offset seconds (optional)</label><input name="subtitle_offset_seconds" /></div>
+          <div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete downloads containing profanity or sexual content</label></div>
         </div>
         <div class="actions"><button type="submit" class="primary">Add podcast source</button></div>
       </form>
@@ -5313,6 +5416,9 @@ def make_handler(state: AppState):
                         "output_root": (form.get("output_root") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                        "manual_upload_delete_explicit_content": "1"
+                        if (form.get("manual_upload_delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
+                        else "0",
                     }
                     sanitized_updates = {
                         k: str(v).strip()
@@ -5435,6 +5541,7 @@ def make_handler(state: AppState):
                         except ValueError:
                             self.send_error(400, "Invalid subtitle_offset_seconds")
                             return
+                        delete_explicit_content = (form.get(f"delete_explicit_content_{source_id}") or ["0"])[0] in {"1", "true", "yes", "on"}
                         enabled = (form.get(f"enabled_{source_id}") or ["1"])[0] in {"1", "true", "yes", "on"}
                         raw_max_downloads = str((form.get(f"max_downloads_{source_id}") or [""])[0]).strip()
                         try:
@@ -5454,6 +5561,7 @@ def make_handler(state: AppState):
                             subtitles=subtitles,
                             subtitle_offset_seconds=subtitle_offset,
                             max_downloads=source_max_downloads,
+                            delete_explicit_content=delete_explicit_content,
                         )
                         set_source_enabled(str(state.database_path), source_id, enabled)
 
@@ -5469,6 +5577,7 @@ def make_handler(state: AppState):
                         return
                     media_type = (form.get("media_type") or [None])[0] if source_type == "youtube" else None
                     subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                    delete_explicit_content = (form.get("delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
                     raw_offset = str((form.get("subtitle_offset_seconds") or [""])[0]).strip()
                     try:
                         subtitle_offset = float(raw_offset) if raw_offset else None
@@ -5493,6 +5602,7 @@ def make_handler(state: AppState):
                         subtitles=subtitles,
                         subtitle_offset_seconds=subtitle_offset,
                         max_downloads=source_max_downloads,
+                        delete_explicit_content=delete_explicit_content,
                         enabled=True,
                     )
 
@@ -5523,6 +5633,7 @@ def make_handler(state: AppState):
                                     self.send_error(400, "Invalid media_type")
                                     return
                             subtitles = (form.get("subtitles") or ["1"])[0] in {"1", "true", "yes", "on"}
+                            delete_explicit_content = (form.get("delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
                             raw_max_downloads = str((form.get("max_downloads") or [""])[0]).strip()
                             try:
                                 source_max_downloads = int(raw_max_downloads) if raw_max_downloads else None
@@ -5547,6 +5658,7 @@ def make_handler(state: AppState):
                                 subtitles=subtitles,
                                 subtitle_offset_seconds=subtitle_offset,
                                 max_downloads=source_max_downloads,
+                                delete_explicit_content=delete_explicit_content,
                             )
 
                 try:

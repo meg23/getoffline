@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -65,6 +66,14 @@ def _fake_subtitle_generator(media_path, subtitle_settings):
     media_path = Path(media_path)
     srt_path = media_path.with_suffix(".srt")
     srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nTest\n", encoding="utf-8")
+    return srt_path
+
+
+def _fake_explicit_subtitle_generator(media_path, subtitle_settings):
+    _ = subtitle_settings
+    media_path = Path(media_path)
+    srt_path = media_path.with_suffix(".srt")
+    srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nThis is fucking explicit.\n", encoding="utf-8")
     return srt_path
 
 
@@ -176,6 +185,66 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("YouTube: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Podcast: ") for item in downloaded_items))
             self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+
+    def test_explicit_filter_deletes_youtube_download_and_records_filtered_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["youtube"][0]["subtitles"] = False
+            config["youtube"][0]["delete_explicit_content"] = True
+            downloaded_items = []
+
+            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator
+            ), patch("youtube.log_filtered_deletion") as deletion_log:
+                youtube.download_youtube_items(config, downloaded_items)
+
+            youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(config["youtube"][0]["name"])
+            self.assertFalse(any(youtube_folder.glob("*.mp3")))
+            self.assertFalse(any(youtube_folder.glob("*.srt")))
+            self.assertTrue(any(item.startswith("Filtered YouTube:") for item in downloaded_items))
+            with sqlite3.connect(Path(tmpdir) / "downloads.sqlite3") as conn:
+                status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
+            self.assertEqual(status, "filtered")
+            self.assertTrue(is_downloaded(str(Path(tmpdir) / "downloads.sqlite3"), "youtube", "TestYouTubeSource", "video-1"))
+            deletion_log.assert_called_once()
+            self.assertEqual(deletion_log.call_args.kwargs["source_type"], "youtube")
+            self.assertEqual(deletion_log.call_args.kwargs["match"].category, "profanity")
+
+    def test_explicit_filter_deletes_podcast_download_and_records_filtered_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["podcasts"][0]["subtitles"] = False
+            config["podcasts"][0]["delete_explicit_content"] = True
+            fake_feed = SimpleNamespace(
+                entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-1.mp3")])]
+            )
+            downloaded_items = []
+
+            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator), patch(
+                "podcasts.log_filtered_deletion"
+            ) as deletion_log:
+                podcasts.download_podcasts(config, downloaded_items)
+
+            podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(config["podcasts"][0]["name"])
+            self.assertFalse(any(podcast_folder.glob("*.mp3")))
+            self.assertFalse(any(podcast_folder.glob("*.srt")))
+            self.assertTrue(any(item.startswith("Filtered podcast:") for item in downloaded_items))
+            with sqlite3.connect(Path(tmpdir) / "downloads.sqlite3") as conn:
+                status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
+            self.assertEqual(status, "filtered")
+            self.assertTrue(
+                is_downloaded(
+                    str(Path(tmpdir) / "downloads.sqlite3"),
+                    "podcast",
+                    "TestPodcastSource",
+                    "https://cdn.example.com/episode-1.mp3",
+                )
+            )
+            deletion_log.assert_called_once()
+            self.assertEqual(deletion_log.call_args.kwargs["source_type"], "podcast")
+            self.assertEqual(deletion_log.call_args.kwargs["match"].category, "profanity")
 
 
     def test_podcast_artwork_prefers_highest_resolution_image(self):
