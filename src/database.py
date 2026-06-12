@@ -46,6 +46,8 @@ PROCESSED_DOWNLOAD_STATUSES = (
     DOWNLOAD_STATUS_MISSING,
     DOWNLOAD_STATUS_RETENTION_DELETED,
 )
+
+
 def _is_sqlite_lock_error_message(message: str) -> bool:
     text = str(message or "").lower()
     return "database is locked" in text or "database table is locked" in text
@@ -913,10 +915,10 @@ def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item
             WHERE source_type = ?
               AND source_name = ?
               AND item_uid = ?
-              AND download_status IN ('downloaded', 'filtered', 'missing', 'retention_deleted')
+              AND download_status IN (?, ?, ?, ?)
             LIMIT 1
             """,
-            (source_type, source_name, item_uid),
+            (source_type, source_name, item_uid, *PROCESSED_DOWNLOAD_STATUSES),
         ).fetchone()
         return row is not None
 
@@ -1186,7 +1188,7 @@ if HAS_SQLALCHEMY:
                 select(DownloadRecord.title).where(
                     DownloadRecord.source_type == source_type,
                     DownloadRecord.source_name == source_name,
-                    DownloadRecord.download_status == "downloaded",
+                    DownloadRecord.download_status.in_(PROCESSED_DOWNLOAD_STATUSES),
                     DownloadRecord.title.is_not(None),
                 )
             ).all()
@@ -1390,10 +1392,10 @@ else:
                     FROM downloads
                     WHERE source_type = ?
                       AND source_name = ?
-                      AND download_status = 'downloaded'
+                      AND download_status IN (?, ?, ?, ?)
                       AND COALESCE(title, '') != ''
                     """,
-                    (source_type, source_name),
+                    (source_type, source_name, *PROCESSED_DOWNLOAD_STATUSES),
                 ).fetchall()
                 return any(str(row[0] or "").strip().casefold() == normalized for row in rows)
         except sqlite3.OperationalError as exc:
