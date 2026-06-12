@@ -36,6 +36,16 @@ except ModuleNotFoundError:  # pragma: no cover
 log = get_logger("database")
 
 
+DOWNLOAD_STATUS_DOWNLOADED = "downloaded"
+DOWNLOAD_STATUS_FILTERED = "filtered"
+DOWNLOAD_STATUS_MISSING = "missing"
+DOWNLOAD_STATUS_RETENTION_DELETED = "retention_deleted"
+PROCESSED_DOWNLOAD_STATUSES = (
+    DOWNLOAD_STATUS_DOWNLOADED,
+    DOWNLOAD_STATUS_FILTERED,
+    DOWNLOAD_STATUS_MISSING,
+    DOWNLOAD_STATUS_RETENTION_DELETED,
+)
 def _is_sqlite_lock_error_message(message: str) -> bool:
     text = str(message or "").lower()
     return "database is locked" in text or "database table is locked" in text
@@ -900,7 +910,10 @@ def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item
         row = conn.execute(
             """
             SELECT 1 FROM downloads
-            WHERE source_type = ? AND source_name = ? AND item_uid = ? AND download_status IN ('downloaded', 'filtered')
+            WHERE source_type = ?
+              AND source_name = ?
+              AND item_uid = ?
+              AND download_status IN ('downloaded', 'filtered', 'missing', 'retention_deleted')
             LIMIT 1
             """,
             (source_type, source_name, item_uid),
@@ -1156,7 +1169,7 @@ if HAS_SQLALCHEMY:
                 DownloadRecord.source_type == source_type,
                 DownloadRecord.source_name == source_name,
                 DownloadRecord.item_uid == item_uid,
-                DownloadRecord.download_status.in_(("downloaded", "filtered")),
+                DownloadRecord.download_status.in_(PROCESSED_DOWNLOAD_STATUSES),
             )
             row_id = session.execute(stmt).scalar_one_or_none()
             return row_id is not None

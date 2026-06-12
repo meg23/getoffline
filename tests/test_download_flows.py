@@ -1573,6 +1573,28 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
 
             self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
 
+    def test_is_downloaded_true_for_terminal_missing_statuses(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            for item_uid, download_status in (
+                ("missing-1", "missing"),
+                ("retained-1", "retention_deleted"),
+            ):
+                upsert_download(
+                    db_path,
+                    {
+                        "source_type": "podcast",
+                        "source_name": "My Podcast",
+                        "item_uid": item_uid,
+                        "title": item_uid,
+                        "download_status": download_status,
+                    },
+                )
+                self.assertTrue(
+                    is_downloaded(db_path, "podcast", "My Podcast", item_uid)
+                )
+
     def test_is_downloaded_true_when_downloaded_row_exists_even_if_file_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "downloads.sqlite3")

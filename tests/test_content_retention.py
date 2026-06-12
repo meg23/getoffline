@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from content_retention import enforce_content_retention  # noqa: E402
-from database import init_database, upsert_download  # noqa: E402
+from database import init_database, is_downloaded, upsert_download  # noqa: E402
 
 
 class ContentRetentionTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class ContentRetentionTests(unittest.TestCase):
             },
         )
 
-    def test_deletes_expired_automatic_content_and_marks_it_missing(self):
+    def test_deletes_expired_automatic_content_and_retains_terminal_record(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             db_path = str(root / "downloads.sqlite3")
@@ -50,13 +50,26 @@ class ContentRetentionTests(unittest.TestCase):
 
             self.assertFalse(media_path.exists())
             self.assertEqual(result.deleted_files, 1)
-            self.assertEqual(result.marked_missing, 1)
+            self.assertEqual(result.marked_missing, 0)
+            self.assertEqual(result.marked_retention_deleted, 1)
             with sqlite3.connect(db_path) as conn:
                 status, error = conn.execute(
                     "SELECT download_status, error_message FROM downloads WHERE item_uid = 'old'"
                 ).fetchone()
-            self.assertEqual(status, "missing")
-            self.assertEqual(error, "Media file is missing")
+            self.assertEqual(status, "retention_deleted")
+            self.assertEqual(error, "Media file removed by content retention")
+            self.assertTrue(is_downloaded(db_path, "youtube", "Test Source", "old"))
+
+            second_result = enforce_content_retention(db_path, str(root), 30)
+
+            self.assertEqual(second_result.deleted_files, 0)
+            self.assertEqual(second_result.marked_missing, 0)
+            self.assertEqual(second_result.marked_retention_deleted, 0)
+            with sqlite3.connect(db_path) as conn:
+                retained_status = conn.execute(
+                    "SELECT download_status FROM downloads WHERE item_uid = 'old'"
+                ).fetchone()[0]
+            self.assertEqual(retained_status, "retention_deleted")
 
     def test_marks_already_absent_automatic_content_missing_even_when_recent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -75,6 +88,7 @@ class ContentRetentionTests(unittest.TestCase):
                     "SELECT download_status FROM downloads WHERE item_uid = 'missing'"
                 ).fetchone()[0]
             self.assertEqual(status, "missing")
+            self.assertTrue(is_downloaded(db_path, "youtube", "Test Source", "missing"))
 
     def test_manual_content_is_ignored_even_when_expired_or_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:

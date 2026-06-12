@@ -345,6 +345,41 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn("existing.textTrack.removeEventListener('cuechange', existing.cuechange)", body)
         self.assertIn("player._miniPersistentHandlers.subtitleLoad = onSubtitleLoad", body)
 
+    def test_fetch_downloaded_media_rows_includes_retained_and_missing_records(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            for item_uid, download_status in (
+                ("missing-item", "missing"),
+                ("retained-item", "retention_deleted"),
+            ):
+                upsert_download(
+                    str(db_path),
+                    {
+                        "source_type": "podcast",
+                        "source_name": "Test Podcast",
+                        "item_uid": item_uid,
+                        "title": item_uid,
+                        "file_path": str(root / f"{item_uid}.mp3"),
+                        "download_status": download_status,
+                    },
+                )
+
+            rows = fetch_downloaded_media_rows(db_path, root)
+
+            self.assertEqual(
+                {row.download_status for row in rows},
+                {"missing", "retention_deleted"},
+            )
+            retained = next(
+                row for row in rows if row.download_status == "retention_deleted"
+            )
+            self.assertEqual(
+                fetch_downloaded_media_row_by_id(db_path, retained.row_id, root).download_status,
+                "retention_deleted",
+            )
+
     def test_fetch_downloaded_media_row_by_id_returns_single_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1755,6 +1790,41 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn('>MISSING</span>', body)
             self.assertIn('/redownload?id=1', body)
             self.assertIn('name="ids" value="1"', body)
+
+    def test_index_labels_retention_deleted_rows_as_removed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            row = SimpleNamespace(
+                row_id=2,
+                source_type="podcast",
+                source_name="ShowA",
+                title="Retained Item",
+                file_path=str(root / "removed.mp3"),
+                file_ext="mp3",
+                file_size_bytes=100,
+                upload_date=None,
+                played=False,
+                favorite=False,
+                download_status="retention_deleted",
+            )
+
+            body = _render_index(
+                rows=[row],
+                output_root=root,
+                database_path=root / "downloads.sqlite3",
+                status={
+                    "is_running": "no",
+                    "last_started_at": "never",
+                    "last_finished_at": "never",
+                    "last_result": "idle",
+                    "last_error": "none",
+                    "last_items_count": "0",
+                },
+            )
+
+            self.assertIn(">REMOVED</span>", body)
+            self.assertIn("database record retained", body)
+            self.assertIn("/redownload?id=2", body)
 
     def test_mark_download_favorite_updates_row_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
