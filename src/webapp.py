@@ -2197,23 +2197,29 @@ def _render_index(
       --new-bg: #e7ecff;
       --new-text: #3147aa;
       --border: #dbe3f3;
-      --shadow: 0 10px 30px rgba(40, 65, 120, .08);
+      --shadow: 0 14px 38px rgba(40, 65, 120, .09);
+      --shadow-soft: 0 6px 20px rgba(40, 65, 120, .07);
+      --radius-lg: 20px;
+      --radius-md: 14px;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
-      background: linear-gradient(180deg, #f8faff 0%, #f3f6fc 100%);
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(98, 132, 255, .12), transparent 32rem),
+        linear-gradient(180deg, #f9fbff 0%, #f1f5fc 100%);
       color: var(--text);
-      padding: 1rem;
+      padding: clamp(.75rem, 2vw, 1.25rem);
     }}
-    .container {{ max-width: 1280px; margin: 0 auto; }}
+    .container {{ width: 100%; max-width: 1280px; margin: 0 auto; }}
     .hero {{
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: var(--radius-lg);
       box-shadow: var(--shadow);
-      padding: 1.1rem 1.1rem .95rem;
+      padding: clamp(1rem, 2.5vw, 1.4rem);
       margin-bottom: 1rem;
     }}
     h1 {{ margin: 0 0 .35rem 0; font-size: clamp(1.5rem, 2.8vw, 2.1rem); }}
@@ -2246,6 +2252,7 @@ def _render_index(
       gap: .35rem;
     }}
     .toolbar {{ margin-bottom: .35rem; }}
+    .toolbar-label {{ display: none; }}
     .toolbar-actions {{
       display: flex;
       gap: .6rem;
@@ -2494,6 +2501,7 @@ def _render_index(
     .icon-button:hover {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
     .icon-button:disabled {{ opacity: .5; cursor: not-allowed; }}
     .icon-button .bi {{ width: 1.1rem; height: 1.1rem; fill: currentColor; }}
+    .icon-button-label {{ display: none; }}
     .icon-button .is-spinning {{ animation: spin 1s linear infinite; transform-origin: center; }}
     .icon-button-primary {{
       color: #fff;
@@ -2631,26 +2639,126 @@ def _render_index(
     }}
 
     @media (max-width: 980px) {{
-      .summary-grid {{ grid-template-columns: 1fr; }}
+      .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .profile-switch-form select {{ max-width: 7rem; }}
       .actions {{ white-space: normal; justify-content: flex-start; }}
       .mini-player-backdrop {{ padding: .5rem; }}
       .mini-player {{ right: .5rem; bottom: .5rem; width: calc(100vw - 1rem); max-height: 95vh; }}
       .mini-player.is-maximized {{ width: calc(100vw - 1rem); }}
-      table {{ table-layout: auto; }}
+      table {{ table-layout: auto; border: 0; background: transparent; box-shadow: none; overflow: visible; }}
       table, thead, tbody, th, td, tr {{ display: block; }}
-      thead {{ display: none; }}
-      tr {{ border-bottom: 1px solid var(--border); padding: .4rem 0; }}
-      td {{ border: none; display: flex; gap: .6rem; align-items: center; }}
-      tbody tr:nth-child(even) td {{ background: transparent; }}
-      td::before {{
-        content: attr(data-label);
-        min-width: 70px;
-        font-size: .75rem;
-        text-transform: uppercase;
-        color: var(--muted);
-        letter-spacing: .05em;
+      thead, colgroup {{ display: none; }}
+      tbody {{ display: grid; gap: .75rem; }}
+      tbody tr {{
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: .35rem .6rem;
+        padding: 1rem 3.25rem 1rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow-soft);
       }}
+      tbody tr:nth-child(even) td {{ background: transparent; }}
+      td {{ border: none; padding: 0; min-width: 0; }}
+      td::before {{ display: none; }}
+      td.channel-col {{
+        grid-column: 1 / -1;
+        padding: 0;
+        color: var(--muted);
+        font-size: .82rem;
+        font-weight: 650;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }}
+      td.episode-col {{ grid-column: 1 / -1; padding: 0 0 .35rem; white-space: normal; }}
+      .episode-link {{ display: block; font-size: 1rem; line-height: 1.4; }}
+      td[data-label="Source"], td[data-label="Type"], td[data-label="Size"], td[data-label="Status"] {{
+        display: inline-flex;
+        align-items: center;
+        grid-row: 3;
+        width: max-content;
+      }}
+      td[data-label="Source"] {{ grid-column: 1; }}
+      td[data-label="Type"], td[data-label="Size"] {{ display: none; }}
+      td[data-label="Status"] {{ grid-column: 2; justify-self: end; }}
+      td.selection-cell {{
+        position: absolute;
+        top: .85rem;
+        right: .85rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+      }}
+      .row-selector {{ width: 1.25rem; height: 1.25rem; }}
+    }}
+
+    @media (max-width: 640px) {{
+      body {{ padding: 0 0 1rem; background: #f3f6fc; }}
+      .container {{ max-width: none; }}
+      .hero {{
+        margin: 0;
+        padding: 1rem;
+        border-width: 0 0 1px;
+        border-radius: 0 0 24px 24px;
+        box-shadow: 0 8px 24px rgba(40, 65, 120, .08);
+      }}
+      .hero-heading {{ align-items: flex-start; }}
+      h1 {{ font-size: 1.55rem; letter-spacing: -.025em; }}
+      .profile-switch-form {{ max-width: 9rem; }}
+      .profile-avatar {{ display: none; }}
+      .profile-switch-form select {{ max-width: 6.7rem; }}
+      .summary-grid {{ gap: .5rem; margin-top: .9rem; }}
+      .summary-card {{ min-height: 4.4rem; padding: .65rem .75rem; border-radius: 12px; }}
+      .summary-card:last-child {{ grid-column: 1 / -1; min-height: auto; }}
+      .summary-label {{ font-size: .68rem; }}
+      .summary-value {{ margin-top: .28rem; font-size: 1.08rem; }}
+      .panel {{
+        margin: .75rem .75rem 1rem;
+        padding: .75rem;
+        border-radius: 18px;
+        box-shadow: var(--shadow-soft);
+      }}
+      .toolbar-actions {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; }}
+      .toolbar-form {{ width: 100%; }}
+      .icon-button {{
+        width: 100%;
+        height: 3.25rem;
+        border-radius: 13px;
+        flex-direction: column;
+        gap: .22rem;
+        font-size: .68rem;
+        font-weight: 700;
+      }}
+      .toolbar-form .icon-button {{ width: 100%; }}
+      .icon-button .bi {{ width: 1.15rem; height: 1.15rem; }}
+      .icon-button-label {{ display: block; }}
+      .library-filter-wrap {{ grid-column: 1 / -1; width: 100%; border-radius: 13px; }}
+      .library-filter-input {{ min-width: 0; width: 100%; padding: .7rem .75rem; }}
+      .library-filter-select {{ min-width: 6.9rem; padding-top: .7rem; padding-bottom: .7rem; }}
+      .library-filter-clear {{ min-width: 2.65rem; }}
+      .toolbar-spacer {{ display: none; }}
+      .batch-toolbar-form {{ grid-column: 1 / -1; width: 100%; margin: 0; gap: .5rem; }}
+      .batch-select {{ flex: 1 1 auto; min-width: 0; height: 2.75rem; padding: .5rem .65rem; }}
+      .batch-apply {{ height: 2.75rem; padding: .5rem .9rem; }}
+      tbody {{ gap: .65rem; }}
+      tbody tr {{ padding: .9rem 3rem .9rem .9rem; border-radius: 16px; }}
+      .quick-add-backdrop {{ align-items: flex-end; padding: 0; }}
+      .quick-add-modal {{
+        width: 100%;
+        max-height: 92vh;
+        overflow-y: auto;
+        border-radius: 22px 22px 0 0;
+        padding: 1.1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+      }}
+      .quick-add-result {{ grid-template-columns: 88px minmax(0, 1fr); }}
+      .quick-add-thumb {{ width: 88px; height: 50px; }}
+      .quick-add-result button {{ grid-column: 1 / -1; width: 100%; min-height: 2.5rem; }}
+      .mini-player {{ bottom: max(.5rem, env(safe-area-inset-bottom)); border-radius: 18px; }}
     }}
   </style>
 </head>
@@ -2686,11 +2794,11 @@ def _render_index(
     <div class="panel">
       <div class="toolbar toolbar-actions">
       <form id="sync-form" method="post" action="/update" class="toolbar-form">
-        <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg></button>
+        <button id="sync-button" class="icon-button icon-button-primary" type="submit" title="Sync downloads" aria-label="Sync downloads" {button_disabled}><svg class="bi{sync_icon_class}" aria-hidden="true" focusable="false"><use href="{sync_icon_href}"></use></svg><span class="icon-button-label">Sync</span></button>
       </form>
-      <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}</button>
-      <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}</button>
-        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}</a>
+      <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}<span class="icon-button-label">Add</span></button>
+      <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}<span class="icon-button-label">Search</span></button>
+        <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}<span class="icon-button-label">Settings</span></a>
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
           <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
