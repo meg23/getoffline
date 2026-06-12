@@ -43,6 +43,7 @@ from webapp import (  # noqa: E402
     get_total_listened_seconds,
     import_local_media_file,
     trigger_background_update,
+    trigger_batch_redownloads,
     update_download_position_seconds,
     trigger_single_podcast_download,
     trigger_single_youtube_download,
@@ -815,6 +816,125 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertFalse(_trigger_redownload_for_row(state, row))
 
         mock_reset_playback.assert_not_called()
+
+
+    def test_batch_redownload_processes_every_selected_row_sequentially(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+            rows = [
+                SimpleNamespace(
+                    row_id=1, source_type="youtube", source_name="Video Source", title="Video One",
+                    item_url="https://youtube.com/watch?v=one", file_ext="mp4", file_path="/tmp/one.mp4",
+                ),
+                SimpleNamespace(
+                    row_id=2, source_type="podcast", source_name="Podcast Source", title="Episode Two",
+                    item_url="https://cdn.example.com/two.mp3", file_ext="mp3", file_path="/tmp/two.mp3",
+                    source_url="https://feeds.example.com/show.xml", subtitle_path=None, raw_metadata_json=None,
+                ),
+                SimpleNamespace(
+                    row_id=3, source_type="youtube", source_name="Video Source", title="Video Three",
+                    item_url="https://youtube.com/watch?v=three", file_ext="webm", file_path="/tmp/three.webm",
+                ),
+            ]
+            calls = []
+
+            def _fake_youtube(config, downloaded_items):
+                calls.append(("youtube", config["marker"]))
+                downloaded_items.append(config["marker"])
+
+            def _fake_podcast(config, downloaded_items):
+                calls.append(("podcast", config["marker"]))
+                downloaded_items.append(config["marker"])
+
+            youtube_configs = iter([{"marker": "one"}, {"marker": "three"}])
+
+            def _next_youtube_config(*args, **kwargs):
+                _ = args, kwargs
+                return next(youtube_configs)
+
+            with mock.patch("webapp._single_youtube_download_config", side_effect=_next_youtube_config), mock.patch(
+                "webapp._single_podcast_redownload_config", return_value={"marker": "two"}
+            ), mock.patch("youtube.download_youtube_items", side_effect=_fake_youtube), mock.patch(
+                "podcasts.download_podcasts", side_effect=_fake_podcast
+            ), mock.patch("webapp.reset_download_playback") as reset_playback, mock.patch(
+                "webapp.log.info"
+            ) as log_info:
+                self.assertTrue(trigger_batch_redownloads(state, rows))
+                deadline = time.time() + 2
+                while time.time() < deadline:
+                    with state.update_status.lock:
+                        if not state.update_status.is_running:
+                            break
+                    time.sleep(0.05)
+
+            self.assertEqual(calls, [("youtube", "one"), ("podcast", "two"), ("youtube", "three")])
+            self.assertEqual([call.args[1] for call in reset_playback.call_args_list], [1, 2, 3])
+            with state.update_status.lock:
+                self.assertEqual(state.update_status.last_result, "ok")
+                self.assertEqual(state.update_status.last_items_count, 3)
+            self.assertTrue(any(call.args[:2] == ("Batch redownload started: selected=%s", 3) for call in log_info.call_args_list))
+            self.assertTrue(
+                any(
+                    call.args == ("Batch redownload finished: selected=%s completed=%s failed=%s result=%s", 3, 3, 0, "ok")
+                    for call in log_info.call_args_list
+                )
+            )
+
+    def test_batch_redownload_continues_after_an_item_fails(self):
+        state = AppState(
+            output_root=Path("/tmp"),
+            database_path=Path("/tmp/not-used.sqlite3"),
+            config={"defaults": {}},
+            update_runner=lambda config, items: None,
+        )
+        rows = [
+            SimpleNamespace(row_id=1, source_type="youtube", source_name="One", title="Fails", item_url="one"),
+            SimpleNamespace(row_id=2, source_type="youtube", source_name="Two", title="Works", item_url="two"),
+        ]
+        processed = []
+
+        def _execute(state_arg, row, downloaded_items):
+            _ = state_arg
+            processed.append(row.row_id)
+            if row.row_id == 1:
+                raise RuntimeError("first failed")
+            downloaded_items.append("second")
+
+        with mock.patch("webapp._execute_redownload_row", side_effect=_execute), mock.patch("webapp.log.exception"):
+            self.assertTrue(trigger_batch_redownloads(state, rows))
+            deadline = time.time() + 2
+            while time.time() < deadline:
+                with state.update_status.lock:
+                    if not state.update_status.is_running:
+                        break
+                time.sleep(0.05)
+
+        self.assertEqual(processed, [1, 2])
+        with state.update_status.lock:
+            self.assertEqual(state.update_status.last_result, "partial")
+            self.assertEqual(state.update_status.last_items_count, 1)
+            self.assertIn("row 1: first failed", state.update_status.last_error)
+
+
+    def test_batch_redownload_rejects_second_job_while_running(self):
+        state = SimpleNamespace(update_status=SimpleNamespace(
+            lock=threading.Lock(), is_running=True, last_started_at=None, last_result="running",
+            last_error=None, last_items_count=0, last_finished_at=None,
+        ))
+        row = SimpleNamespace(row_id=1, source_type="youtube", source_name="Source", title="Title", item_url="url")
+
+        with mock.patch("webapp.log.warning") as log_warning:
+            self.assertFalse(trigger_batch_redownloads(state, [row]))
+
+        log_warning.assert_called_once_with("%s rejected: another download job is already running", "Batch redownload")
 
 
     def test_trigger_single_podcast_download_targets_selected_episode(self):
