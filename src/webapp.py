@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from content_retention import enforce_content_retention
 from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
 from profiles import Profile, ProfileManager
 from logger import get_logger
@@ -78,6 +79,7 @@ PROGRESS_FLUSH_COALESCE_SECONDS = 30.0
 PROGRESS_FLUSH_POLL_SECONDS = 1.0
 PROGRESS_MIN_DELTA_SECONDS = 5.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
+CONTENT_RETENTION_INTERVAL_SECONDS = 60 * 60
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 HEAPDUMP_TOP_ALLOCATIONS = 250
 IDLE_RSS_LOG_INTERVAL_SECONDS = 300
@@ -1699,6 +1701,32 @@ def _auto_update_loop(state: AppState, stop_event: threading.Event) -> None:
         if stop_event.wait(_auto_update_interval_seconds(state)):
             break
         _trigger_all_profile_updates(state)
+
+
+def _run_content_retention_for_all_profiles(state: AppState) -> None:
+    profiles = state.profile_manager.list_profiles() if state.profile_manager is not None else [None]
+    for profile in profiles:
+        profile_state = state if profile is None else _profile_update_state(state, profile)
+        defaults = get_stored_config(str(profile_state.database_path)).get("defaults") or {}
+        try:
+            retention_days = max(0, int(defaults.get("auto_delete_content_days") or 0))
+        except (TypeError, ValueError):
+            retention_days = 0
+        enforce_content_retention(
+            str(profile_state.database_path),
+            str(defaults.get("output_root") or profile_state.output_root),
+            retention_days,
+        )
+
+
+def _content_retention_loop(state: AppState, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            _run_content_retention_for_all_profiles(state)
+        except Exception as exc:
+            log.warning("Content retention loop error: %s", exc)
+        if stop_event.wait(CONTENT_RETENTION_INTERVAL_SECONDS):
+            break
 
 
 def _android_sync_loop(state: AppState, stop_event: threading.Event) -> None:
@@ -4053,6 +4081,7 @@ def _render_settings(
     playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
     auto_update_minutes = html.escape(str(defaults.get("auto_update_minutes") or str(DEFAULT_AUTO_UPDATE_MINUTES)))
+    auto_delete_content_days = html.escape(str(defaults.get("auto_delete_content_days") or "0"))
     summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
     ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
     deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
@@ -4420,6 +4449,11 @@ def _render_settings(
           <div>
             <label for="auto_update_minutes">Auto update interval (minutes)</label>
             <input id="auto_update_minutes" name="auto_update_minutes" value="{auto_update_minutes}" required />
+          </div>
+          <div>
+            <label for="auto_delete_content_days">Automatically delete content after (days)</label>
+            <input id="auto_delete_content_days" type="number" name="auto_delete_content_days" value="{auto_delete_content_days}" min="0" step="1" required />
+            <p class="field-help">Use 0 to disable. Manual uploads are always ignored. Deleted or already absent files are marked missing.</p>
           </div>
         </div>
 
@@ -5416,6 +5450,7 @@ def make_handler(state: AppState):
                         "output_root": (form.get("output_root") or [""])[0],
                         "processing_workers": (form.get("processing_workers") or [""])[0],
                         "auto_update_minutes": (form.get("auto_update_minutes") or [""])[0],
+                        "auto_delete_content_days": (form.get("auto_delete_content_days") or ["0"])[0],
                         "manual_upload_delete_explicit_content": "1"
                         if (form.get("manual_upload_delete_explicit_content") or ["0"])[0] in {"1", "true", "yes", "on"}
                         else "0",
@@ -5750,6 +5785,14 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     )
     auto_update_thread.start()
 
+    content_retention_stop_event = threading.Event()
+    content_retention_thread = threading.Thread(
+        target=_content_retention_loop,
+        args=(state, content_retention_stop_event),
+        daemon=True,
+    )
+    content_retention_thread.start()
+
     progress_flush_stop_event = threading.Event()
     progress_flush_thread = threading.Thread(
         target=_progress_flush_loop,
@@ -5800,6 +5843,7 @@ def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
         pass
     finally:
         auto_update_stop_event.set()
+        content_retention_stop_event.set()
         progress_flush_stop_event.set()
         android_sync_stop_event.set()
         rss_stop_event.set()
