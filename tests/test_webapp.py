@@ -826,7 +826,7 @@ class WebAppHelpersTests(unittest.TestCase):
         )
         self.assertIn("yt-dlp configuration", body)
         self.assertIn('name="auto_delete_content_days"', body)
-        self.assertIn("Manual uploads are always ignored", body)
+        self.assertIn("favorites are never automatically deleted", body)
         self.assertIn("/settings", body)
         self.assertIn("youtube_cookie_text", body)
         self.assertIn("Add YouTube source", body)

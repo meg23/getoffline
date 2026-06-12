@@ -4453,7 +4453,7 @@ def _render_settings(
           <div>
             <label for="auto_delete_content_days">Automatically delete content after (days)</label>
             <input id="auto_delete_content_days" type="number" name="auto_delete_content_days" value="{auto_delete_content_days}" min="0" step="1" required />
-            <p class="field-help">Use 0 to disable. Manual uploads are always ignored. Deleted or already absent files are marked missing.</p>
+            <p class="field-help">Use 0 to disable. Manual uploads are always ignored, and favorites are never automatically deleted. Already absent files are marked missing.</p>
           </div>
         </div>
 

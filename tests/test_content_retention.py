@@ -97,6 +97,39 @@ class ContentRetentionTests(unittest.TestCase):
                 status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
             self.assertEqual(status, "downloaded")
 
+    def test_favorite_content_is_not_deleted_but_absent_favorites_are_marked_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = str(root / "downloads.sqlite3")
+            init_database(db_path)
+            existing_path = root / "favorite.mp4"
+            existing_path.write_bytes(b"favorite")
+            missing_path = root / "missing-favorite.mp4"
+            self._insert_download(db_path, existing_path, item_uid="favorite-existing")
+            self._insert_download(db_path, missing_path, item_uid="favorite-missing")
+            old_time = datetime.now(timezone.utc) - timedelta(days=365)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "UPDATE downloads SET favorite = 1, completed_at = ?, first_seen_at = ?",
+                    (old_time.isoformat(), old_time.isoformat()),
+                )
+                conn.commit()
+
+            result = enforce_content_retention(db_path, str(root), 1)
+
+            self.assertTrue(existing_path.exists())
+            self.assertEqual(result.deleted_files, 0)
+            self.assertEqual(result.marked_missing, 1)
+            self.assertEqual(result.ignored_favorites, 1)
+            with sqlite3.connect(db_path) as conn:
+                statuses = conn.execute(
+                    "SELECT item_uid, download_status FROM downloads ORDER BY item_uid"
+                ).fetchall()
+            self.assertEqual(
+                statuses,
+                [("favorite-existing", "downloaded"), ("favorite-missing", "missing")],
+            )
+
     def test_zero_days_disables_deletion_and_missing_reconciliation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

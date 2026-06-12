@@ -18,6 +18,7 @@ class RetentionCleanupResult:
     deleted_files: int = 0
     marked_missing: int = 0
     ignored_manual: int = 0
+    ignored_favorites: int = 0
 
 
 def _parse_database_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -43,8 +44,9 @@ def enforce_content_retention(
     """Delete expired automatic downloads and mark absent media as missing.
 
     A retention value of zero disables cleanup. Manual uploads are never deleted or
-    marked missing by this task. Non-manual downloaded rows whose files are already
-    absent are marked missing regardless of age while retention is enabled.
+    marked missing by this task, and favorite items are never automatically deleted.
+    Non-manual rows whose files are absent are marked missing regardless of favorite
+    state or age while retention is enabled.
     """
     try:
         days = int(retention_days)
@@ -64,14 +66,15 @@ def enforce_content_retention(
         rows = conn.execute(
             """
             SELECT id, source_type, file_path, file_path_relative,
-                   completed_at, first_seen_at
+                   completed_at, first_seen_at, COALESCE(favorite, 0)
             FROM downloads
             WHERE download_status = 'downloaded'
             """
         ).fetchall()
 
         ignored_manual = sum(1 for row in rows if str(row[1]).lower() == "manual")
-        for row_id, source_type, file_path, relative_path, completed_at, first_seen_at in rows:
+        ignored_favorites = 0
+        for row_id, source_type, file_path, relative_path, completed_at, first_seen_at, favorite in rows:
             if str(source_type).lower() == "manual":
                 continue
 
@@ -79,6 +82,9 @@ def enforce_content_retention(
             media_path = Path(resolved) if resolved else None
             if media_path is None or not media_path.is_file():
                 marked_ids.append(int(row_id))
+                continue
+            if bool(favorite):
+                ignored_favorites += 1
                 continue
 
             content_date = _parse_database_timestamp(completed_at) or _parse_database_timestamp(first_seen_at)
@@ -114,12 +120,14 @@ def enforce_content_retention(
         deleted_files=deleted_files,
         marked_missing=len(marked_ids),
         ignored_manual=ignored_manual,
+        ignored_favorites=ignored_favorites,
     )
     if result.deleted_files or result.marked_missing:
         log.info(
-            "Content retention complete: deleted=%s marked_missing=%s ignored_manual=%s",
+            "Content retention complete: deleted=%s marked_missing=%s ignored_manual=%s ignored_favorites=%s",
             result.deleted_files,
             result.marked_missing,
             result.ignored_manual,
+            result.ignored_favorites,
         )
     return result
