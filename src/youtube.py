@@ -818,6 +818,8 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 "progress_hooks": [record_download_progress],
                 "postprocessor_hooks": [record_postprocess_file],
                 "match_filter": skip_known_downloads,
+                "overwrites": is_forced_redownload,
+                "continuedl": not is_forced_redownload,
                 "ignoreerrors": True,
                 "quiet": True,
                 "no_warnings": False,

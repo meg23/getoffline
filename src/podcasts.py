@@ -262,16 +262,36 @@ def _download_podcasts_in_process(config, downloaded_items):
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)
 
-            feed = feedparser.parse(url)
-            entries = feed.entries[:source_max_downloads]
+            forced_redownload = bool(entry.get("redownload", False))
+            forced_episode_url = str(entry.get("episode_url") or "").strip()
+            if forced_redownload and forced_episode_url:
+                episode_candidates = [
+                    {
+                        "mp3_url": forced_episode_url,
+                        "title": str(entry.get("episode_title") or "Untitled Episode"),
+                        "description": entry.get("episode_description"),
+                        "artwork_url": entry.get("episode_artwork_url"),
+                    }
+                ]
+            else:
+                feed = feedparser.parse(url)
+                episode_candidates = []
+                for ep in feed.entries[:source_max_downloads]:
+                    if not ep.enclosures:
+                        continue
+                    episode_candidates.append(
+                        {
+                            "mp3_url": ep.enclosures[0].href,
+                            "title": _entry_title(ep) or "Untitled Episode",
+                            "description": _entry_summary(ep),
+                            "artwork_url": _podcast_artwork_url(feed, ep),
+                        }
+                    )
 
             episode_jobs = []
-            for ep in entries:
-                if not ep.enclosures:
-                    continue
-
-                mp3_url = ep.enclosures[0].href
-                episode_title = _entry_title(ep) or "Untitled Episode"
+            for candidate in episode_candidates:
+                mp3_url = candidate["mp3_url"]
+                episode_title = candidate["title"]
                 safe_episode_title = sanitize(episode_title)
                 item_uid = build_item_uid(
                     item_id=None,
@@ -280,7 +300,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                     title=episode_title,
                 )
 
-                if is_downloaded(db_path, "podcast", name, item_uid):
+                if not forced_redownload and is_downloaded(db_path, "podcast", name, item_uid):
                     continue
 
                 out_path = f"{folder}/{safe_episode_title}.%(ext)s"
@@ -292,7 +312,8 @@ def _download_podcasts_in_process(config, downloaded_items):
                     "restrictfilenames": True,
                     "outtmpl_na_placeholder": "NA",
                     "outtmpl": out_path,
-                    "continuedl": True,
+                    "continuedl": not forced_redownload,
+                    "overwrites": forced_redownload,
                     "retries": 10,
                     "file_access_retries": 3,
                     "fragment_retries": 10,
@@ -317,8 +338,8 @@ def _download_podcasts_in_process(config, downloaded_items):
                         "delete_explicit_content": delete_explicit_content,
                         "subtitle_offset_seconds": subtitle_offset_seconds,
                         "episode_title": episode_title,
-                        "description": _entry_summary(ep),
-                        "artwork_url": _podcast_artwork_url(feed, ep),
+                        "description": candidate["description"],
+                        "artwork_url": candidate["artwork_url"],
                         "mp3_url": mp3_url,
                         "final_audio": Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}",
                         "ydl_opts": ydl_opts,

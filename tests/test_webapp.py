@@ -44,6 +44,7 @@ from webapp import (  # noqa: E402
     import_local_media_file,
     trigger_background_update,
     update_download_position_seconds,
+    trigger_single_podcast_download,
     trigger_single_youtube_download,
     _render_profile_menu,
     _trigger_all_profile_updates,
@@ -758,6 +759,50 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertTrue(cfg["youtube"][0]["subtitles"])
             self.assertFalse(cfg["youtube"][0]["redownload"])
             self.assertTrue(cfg["youtube"][0]["allow_live_streams"])
+
+
+    def test_trigger_single_podcast_download_targets_selected_episode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            init_database(str(db_path))
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+            row = SimpleNamespace(
+                item_url="https://cdn.example.com/old-episode.mp3",
+                source_url="https://feeds.example.com/show.xml",
+                source_name="Old Show",
+                title="Old Episode",
+                subtitle_path=None,
+                raw_metadata_json=json.dumps(
+                    {"description": "Archived episode", "artwork_url": "https://img.example.com/show.jpg"}
+                ),
+            )
+            captured = {}
+
+            def _fake_download(config, downloaded_items):
+                captured["config"] = config
+                downloaded_items.append("one")
+
+            with mock.patch("podcasts.download_podcasts", side_effect=_fake_download):
+                self.assertTrue(trigger_single_podcast_download(state, row))
+                deadline = time.time() + 2
+                while time.time() < deadline:
+                    with state.update_status.lock:
+                        if not state.update_status.is_running and state.update_status.last_result == "ok":
+                            break
+                    time.sleep(0.05)
+
+            podcast = captured["config"]["podcasts"][0]
+            self.assertTrue(podcast["redownload"])
+            self.assertEqual(podcast["episode_url"], row.item_url)
+            self.assertEqual(podcast["episode_title"], row.title)
+            self.assertEqual(podcast["url"], row.source_url)
+            self.assertEqual(captured["config"]["youtube"], [])
 
 
     def test_trigger_single_youtube_download_marks_forced_redownload_entry(self):
