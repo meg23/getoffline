@@ -47,6 +47,7 @@ from database import (
     mark_all_downloads_played,
     mark_download_favorite,
     mark_download_played,
+    reset_download_playback,
     set_source_enabled,
     update_source_config,
     update_download_settings,
@@ -98,6 +99,7 @@ class MediaRow:
     source_type: str
     source_name: str
     item_url: Optional[str]
+    source_url: Optional[str]
     title: str
     file_path: str
     file_ext: Optional[str]
@@ -756,7 +758,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             rows = conn.execute(
                 """
-                SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
+                SELECT d.id, d.source_type, d.source_name, d.item_url, d.source_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
                        played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, ''), d.download_status
                 FROM downloads d
@@ -777,19 +779,20 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             source_type=row[1],
             source_name=row[2],
             item_url=row[3],
-            title=row[4],
-            file_path=resolve_download_artifact_path(str(repair_root), row[5], row[6]) or row[5] or row[6],
-            file_ext=row[7],
-            file_size_bytes=row[8],
-            upload_date=row[9],
-            played=bool(row[10]),
-            favorite=bool(row[11]),
-            played_at=row[12],
-            last_position_seconds=float(row[13] or 0.0),
-            subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
-            summary_text=row[16] or None,
-            raw_metadata_json=row[17] or None,
-            download_status=row[18],
+            source_url=row[4],
+            title=row[5],
+            file_path=resolve_download_artifact_path(str(repair_root), row[6], row[7]) or row[6] or row[7],
+            file_ext=row[8],
+            file_size_bytes=row[9],
+            upload_date=row[10],
+            played=bool(row[11]),
+            favorite=bool(row[12]),
+            played_at=row[13],
+            last_position_seconds=float(row[14] or 0.0),
+            subtitle_path=resolve_download_artifact_path(str(repair_root), row[15], row[16]) or row[15] or row[16] or None,
+            summary_text=row[17] or None,
+            raw_metadata_json=row[18] or None,
+            download_status=row[19],
         )
         for row in rows
     ]
@@ -814,7 +817,7 @@ def fetch_downloaded_media_row_by_id(
         with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
             row = conn.execute(
                 """
-                SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
+                SELECT d.id, d.source_type, d.source_name, d.item_url, d.source_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
                        played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, ''), d.download_status
                 FROM downloads d
@@ -839,19 +842,20 @@ def fetch_downloaded_media_row_by_id(
         source_type=row[1],
         source_name=row[2],
         item_url=row[3],
-        title=row[4],
-        file_path=resolve_download_artifact_path(str(artifact_root), row[5], row[6]) or row[5] or row[6],
-        file_ext=row[7],
-        file_size_bytes=row[8],
-        upload_date=row[9],
-        played=bool(row[10]),
-        favorite=bool(row[11]),
-        played_at=row[12],
-        last_position_seconds=float(row[13] or 0.0),
-        subtitle_path=resolve_download_artifact_path(str(artifact_root), row[14], row[15]) or row[14] or row[15] or None,
-        summary_text=row[16] or None,
-        raw_metadata_json=row[17] or None,
-        download_status=row[18],
+        source_url=row[4],
+        title=row[5],
+        file_path=resolve_download_artifact_path(str(artifact_root), row[6], row[7]) or row[6] or row[7],
+        file_ext=row[8],
+        file_size_bytes=row[9],
+        upload_date=row[10],
+        played=bool(row[11]),
+        favorite=bool(row[12]),
+        played_at=row[13],
+        last_position_seconds=float(row[14] or 0.0),
+        subtitle_path=resolve_download_artifact_path(str(artifact_root), row[15], row[16]) or row[15] or row[16] or None,
+        summary_text=row[17] or None,
+        raw_metadata_json=row[18] or None,
+        download_status=row[19],
     )
 
 
@@ -1754,30 +1758,160 @@ def _descriptor_cleanup_loop(state: AppState, stop_event: threading.Event) -> No
             log.info("Descriptor cleanup: disposed %s cached database engine(s)", closed_count)
 
 
-def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
-    from youtube import download_youtube_items
-
-    downloaded_items: List[str] = []
+def _set_download_job_running(state: AppState, item_count: int, job_name: str) -> bool:
     with state.update_status.lock:
+        if state.update_status.is_running:
+            log.warning("%s rejected: another download job is already running", job_name)
+            return False
         state.update_status.is_running = True
         state.update_status.last_started_at = time.time()
         state.update_status.last_result = "running"
         state.update_status.last_error = None
         state.update_status.last_items_count = 0
+    log.info("%s accepted: items=%s", job_name, item_count)
+    return True
 
+
+def _finish_download_job(
+    state: AppState,
+    *,
+    result: str,
+    item_count: int,
+    error: Optional[str] = None,
+) -> None:
+    with state.update_status.lock:
+        state.update_status.last_result = result
+        state.update_status.last_items_count = item_count
+        state.update_status.last_error = error
+        state.update_status.is_running = False
+        state.update_status.last_finished_at = time.time()
+
+
+def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
+    from youtube import download_youtube_items
+
+    downloaded_items: List[str] = []
+    entry = (single_config.get("youtube") or [{}])[0]
+    log.info(
+        "YouTube download job started: source=%s url=%s redownload=%s",
+        entry.get("name"),
+        entry.get("url"),
+        bool(entry.get("redownload")),
+    )
     try:
         download_youtube_items(single_config, downloaded_items)
-        with state.update_status.lock:
-            state.update_status.last_result = "ok"
-            state.update_status.last_items_count = len(downloaded_items)
+        log.info("YouTube download job finished: source=%s items=%s", entry.get("name"), len(downloaded_items))
+        _finish_download_job(state, result="ok", item_count=len(downloaded_items))
     except Exception as exc:
-        with state.update_status.lock:
-            state.update_status.last_result = "failed"
-            state.update_status.last_error = str(exc)
-    finally:
-        with state.update_status.lock:
-            state.update_status.is_running = False
-            state.update_status.last_finished_at = time.time()
+        log.exception("YouTube download job failed: source=%s url=%s", entry.get("name"), entry.get("url"))
+        _finish_download_job(state, result="failed", item_count=0, error=str(exc))
+
+
+def _run_single_podcast_download(state: AppState, single_config: Dict) -> None:
+    from podcasts import download_podcasts
+
+    downloaded_items: List[str] = []
+    entry = (single_config.get("podcasts") or [{}])[0]
+    log.info(
+        "Podcast download job started: source=%s title=%s url=%s redownload=%s",
+        entry.get("name"),
+        entry.get("episode_title"),
+        entry.get("episode_url") or entry.get("url"),
+        bool(entry.get("redownload")),
+    )
+    try:
+        download_podcasts(single_config, downloaded_items)
+        log.info("Podcast download job finished: source=%s items=%s", entry.get("name"), len(downloaded_items))
+        _finish_download_job(state, result="ok", item_count=len(downloaded_items))
+    except Exception as exc:
+        log.exception(
+            "Podcast download job failed: source=%s title=%s url=%s",
+            entry.get("name"),
+            entry.get("episode_title"),
+            entry.get("episode_url") or entry.get("url"),
+        )
+        _finish_download_job(state, result="failed", item_count=0, error=str(exc))
+
+
+def _podcast_redownload_metadata(row: MediaRow) -> Dict:
+    if not row.raw_metadata_json:
+        return {}
+    try:
+        metadata = json.loads(row.raw_metadata_json)
+    except (TypeError, ValueError):
+        return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _single_podcast_redownload_config(state: AppState, row: MediaRow) -> Dict:
+    metadata = _podcast_redownload_metadata(row)
+    stored = get_stored_config(str(state.database_path))
+    podcast_entry = {
+        "name": row.source_name,
+        "url": row.source_url or metadata.get("feed_url") or "",
+        "enabled": True,
+        "subtitles": bool(row.subtitle_path),
+        "redownload": True,
+        "episode_url": row.item_url,
+        "episode_title": row.title,
+        "episode_description": metadata.get("description"),
+        "episode_artwork_url": metadata.get("artwork_url") or metadata.get("image_url"),
+    }
+    return {
+        "defaults": dict(stored["defaults"]),
+        "download_settings": dict(stored["download_settings"]),
+        "youtube": [],
+        "podcasts": [podcast_entry],
+    }
+
+
+def _single_youtube_download_config(
+    state: AppState,
+    *,
+    url: str,
+    media_type: str,
+    force_redownload: bool,
+    subtitles_enabled: Optional[bool],
+    allow_live_streams: bool,
+) -> Dict:
+    from youtube import resolve_youtube_source_name
+
+    cookie_path = materialize_youtube_cookie_file(str(state.database_path))
+    source_name = resolve_youtube_source_name(url, cookie_path)
+    stored = get_stored_config(str(state.database_path))
+    youtube_entry = {
+        "name": source_name,
+        "url": url,
+        "type": media_type,
+        "enabled": True,
+        "subtitles": media_type == "audio" if subtitles_enabled is None else bool(subtitles_enabled),
+        "redownload": bool(force_redownload),
+        "allow_live_streams": bool(allow_live_streams),
+    }
+    return {
+        "defaults": dict(stored["defaults"]),
+        "download_settings": dict(stored["download_settings"]),
+        "youtube": [youtube_entry],
+        "podcasts": [],
+    }
+
+
+def trigger_single_podcast_download(state: AppState, row: MediaRow) -> bool:
+    if not row.item_url:
+        log.warning("Podcast redownload rejected: row=%s title=%s has no item URL", row.row_id, row.title)
+        return False
+    if not _set_download_job_running(state, 1, "Podcast redownload"):
+        return False
+
+    try:
+        single_config = _single_podcast_redownload_config(state, row)
+    except Exception as exc:
+        log.exception("Podcast redownload setup failed: row=%s title=%s", row.row_id, row.title)
+        _finish_download_job(state, result="failed", item_count=0, error=str(exc))
+        return False
+    thread = threading.Thread(target=_run_single_podcast_download, args=(state, single_config), daemon=True)
+    thread.start()
+    return True
 
 
 def trigger_single_youtube_download(
@@ -1789,34 +1923,129 @@ def trigger_single_youtube_download(
     subtitles_enabled: Optional[bool] = None,
     allow_live_streams: bool = False,
 ) -> bool:
-    from youtube import resolve_youtube_source_name
+    job_name = "YouTube redownload" if force_redownload else "YouTube download"
+    if not _set_download_job_running(state, 1, job_name):
+        return False
 
-    with state.update_status.lock:
-        if state.update_status.is_running:
-            return False
-
-    cookie_path = materialize_youtube_cookie_file(str(state.database_path))
-    source_name = resolve_youtube_source_name(url, cookie_path)
-    stored = get_stored_config(str(state.database_path))
-    single_config = {
-        "defaults": dict(stored["defaults"]),
-        "download_settings": dict(stored["download_settings"]),
-        "youtube": [
-            {
-                "name": source_name,
-                "url": url,
-                "type": media_type,
-                "enabled": True,
-                "subtitles": media_type == "audio" if subtitles_enabled is None else bool(subtitles_enabled),
-                "redownload": bool(force_redownload),
-                "allow_live_streams": bool(allow_live_streams),
-            }
-        ],
-        "podcasts": [],
-    }
-
+    try:
+        single_config = _single_youtube_download_config(
+            state,
+            url=url,
+            media_type=media_type,
+            force_redownload=force_redownload,
+            subtitles_enabled=subtitles_enabled,
+            allow_live_streams=allow_live_streams,
+        )
+    except Exception as exc:
+        log.exception("%s setup failed: url=%s", job_name, url)
+        _finish_download_job(state, result="failed", item_count=0, error=str(exc))
+        return False
     thread = threading.Thread(target=_run_single_youtube_download, args=(state, single_config), daemon=True)
     thread.start()
+    return True
+
+
+def _redownload_row_context(row: MediaRow) -> str:
+    row_id = getattr(row, "row_id", "?")
+    source_type = getattr(row, "source_type", "?")
+    source_name = getattr(row, "source_name", "")
+    title = getattr(row, "title", "")
+    item_url = getattr(row, "item_url", None)
+    return f"row={row_id} type={source_type} source={source_name!r} title={title!r} url={item_url!r}"
+
+
+def _execute_redownload_row(state: AppState, row: MediaRow, downloaded_items: List[str]) -> None:
+    from podcasts import download_podcasts
+    from youtube import download_youtube_items
+
+    reset_download_playback(str(state.database_path), row.row_id)
+    if row.source_type == "youtube" and row.item_url:
+        config = _single_youtube_download_config(
+            state,
+            url=row.item_url,
+            media_type=_infer_media_type_for_redownload(row),
+            force_redownload=True,
+            subtitles_enabled=None,
+            allow_live_streams=False,
+        )
+        download_youtube_items(config, downloaded_items)
+        return
+    if row.source_type == "podcast" and row.item_url:
+        download_podcasts(_single_podcast_redownload_config(state, row), downloaded_items)
+        return
+    raise ValueError(f"Unsupported redownload row or missing item URL: {_redownload_row_context(row)}")
+
+
+def _batch_redownload_result(completed_count: int, errors: List[str]) -> str:
+    if errors and completed_count:
+        return "partial"
+    if errors:
+        return "failed"
+    return "ok"
+
+
+def _run_redownload_batch(state: AppState, rows: List[MediaRow]) -> None:
+    completed_count = 0
+    errors: List[str] = []
+    log.info("Batch redownload started: selected=%s", len(rows))
+    for index, row in enumerate(rows, start=1):
+        context = _redownload_row_context(row)
+        log.info("Batch redownload item started: index=%s/%s %s", index, len(rows), context)
+        downloaded_items: List[str] = []
+        try:
+            _execute_redownload_row(state, row, downloaded_items)
+            completed_count += 1
+            log_method = log.info if downloaded_items else log.warning
+            log_method(
+                "Batch redownload item finished: index=%s/%s outputs=%s %s",
+                index, len(rows), len(downloaded_items), context,
+            )
+        except Exception as exc:
+            errors.append(f"row {row.row_id}: {exc}")
+            log.exception("Batch redownload item failed: index=%s/%s %s", index, len(rows), context)
+
+    result = _batch_redownload_result(completed_count, errors)
+    log.info(
+        "Batch redownload finished: selected=%s completed=%s failed=%s result=%s",
+        len(rows), completed_count, len(errors), result,
+    )
+    _finish_download_job(
+        state, result=result, item_count=completed_count, error="; ".join(errors[:5]) if errors else None,
+    )
+
+
+def trigger_batch_redownloads(state: AppState, rows: List[MediaRow]) -> bool:
+    selected_rows = list(rows)
+    if not selected_rows:
+        log.warning("Batch redownload rejected: no rows selected")
+        return False
+    if not _set_download_job_running(state, len(selected_rows), "Batch redownload"):
+        return False
+
+    thread = threading.Thread(target=_run_redownload_batch, args=(state, selected_rows), daemon=True)
+    thread.start()
+    return True
+
+
+def _trigger_redownload_for_row(state: AppState, row: MediaRow) -> bool:
+    log.info("Redownload requested: %s", _redownload_row_context(row))
+    started = False
+    if row.source_type == "youtube" and row.item_url:
+        started = trigger_single_youtube_download(
+            state,
+            url=row.item_url,
+            media_type=_infer_media_type_for_redownload(row),
+            force_redownload=True,
+        )
+    elif row.source_type == "podcast":
+        started = trigger_single_podcast_download(state, row)
+
+    if not started:
+        log.warning("Redownload did not start: %s", _redownload_row_context(row))
+        return False
+
+    reset_download_playback(str(state.database_path), row.row_id)
+    log.info("Redownload playback reset to unplayed: %s", _redownload_row_context(row))
     return True
 
 
@@ -5132,15 +5361,7 @@ def make_handler(state: AppState):
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
-                if row.source_type == "youtube" and row.item_url:
-                    trigger_single_youtube_download(
-                        state,
-                        url=row.item_url,
-                        media_type=_infer_media_type_for_redownload(row),
-                        force_redownload=True,
-                    )
-                elif row.source_type == "podcast":
-                    trigger_background_update(state)
+                _trigger_redownload_for_row(state, row)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -5369,41 +5590,34 @@ def make_handler(state: AppState):
                 row_ids = [int(raw_id) for raw_id in (form.get("ids") or []) if str(raw_id).isdigit()]
 
                 if batch_action in {"played", "unplayed", "favorite", "unfavorite", "delete", "download"} and row_ids:
-                    should_trigger_podcast_redownload = False
-                    for row_id in row_ids:
-                        if batch_action == "played":
-                            _mark_download_played_from_webapp(state, row_id, played=True)
-                        elif batch_action == "unplayed":
-                            _mark_download_played_from_webapp(state, row_id, played=False)
-                        elif batch_action == "favorite":
-                            mark_download_favorite(str(state.database_path), row_id, favorite=True)
-                        elif batch_action == "unfavorite":
-                            mark_download_favorite(str(state.database_path), row_id, favorite=False)
-                        elif batch_action == "delete":
+                    if batch_action == "download":
+                        rows = []
+                        for row_id in row_ids:
                             row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
                             if row is None:
+                                log.warning("Batch redownload selection skipped: row=%s was not found", row_id)
                                 continue
-                            media_path = _resolve_safe_media_path(state.output_root, row.file_path)
-                            if media_path is not None and media_path.exists():
-                                media_path.unlink(missing_ok=True)
-                            else:
-                                delete_download_entry(str(state.database_path), row_id)
-                        elif batch_action == "download":
-                            row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
-                            if row is None:
-                                continue
-                            if row.source_type == "youtube" and row.item_url:
-                                trigger_single_youtube_download(
-                                    state,
-                                    url=row.item_url,
-                                    media_type=_infer_media_type_for_redownload(row),
-                                    force_redownload=True,
-                                )
-                            elif row.source_type == "podcast":
-                                should_trigger_podcast_redownload = True
-
-                    if batch_action == "download" and should_trigger_podcast_redownload:
-                        trigger_background_update(state)
+                            rows.append(row)
+                        trigger_batch_redownloads(state, rows)
+                    else:
+                        for row_id in row_ids:
+                            if batch_action == "played":
+                                _mark_download_played_from_webapp(state, row_id, played=True)
+                            elif batch_action == "unplayed":
+                                _mark_download_played_from_webapp(state, row_id, played=False)
+                            elif batch_action == "favorite":
+                                mark_download_favorite(str(state.database_path), row_id, favorite=True)
+                            elif batch_action == "unfavorite":
+                                mark_download_favorite(str(state.database_path), row_id, favorite=False)
+                            elif batch_action == "delete":
+                                row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
+                                if row is None:
+                                    continue
+                                media_path = _resolve_safe_media_path(state.output_root, row.file_path)
+                                if media_path is not None and media_path.exists():
+                                    media_path.unlink(missing_ok=True)
+                                else:
+                                    delete_download_entry(str(state.database_path), row_id)
 
                 if _is_async_request(self):
                     self.send_response(204)

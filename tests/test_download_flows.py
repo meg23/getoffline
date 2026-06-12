@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import podcasts  # noqa: E402
 import youtube  # noqa: E402
-from database import has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
+from database import build_item_uid, has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -1549,6 +1549,62 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 youtube.download_youtube_items(config, [])
 
             self.assertIsNone(FakeYoutubeDLForFilter.match_filter_result)
+            opts = FakeYoutubeDLForFilter.instances[-1].opts
+            self.assertTrue(opts["overwrites"])
+            self.assertFalse(opts["continuedl"])
+
+    def test_forced_podcast_redownload_targets_episode_and_overwrites_existing_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            media_url = "https://cdn.example.com/archive.mp3"
+            upsert_download(
+                db_path,
+                {
+                    "source_type": "podcast",
+                    "source_name": "ArchiveCast",
+                    "source_url": "https://feeds.example.com/archive.xml",
+                    "item_uid": build_item_uid(
+                        item_id=None,
+                        item_url=media_url,
+                        media_url=media_url,
+                        title="Archived Episode",
+                    ),
+                    "item_url": media_url,
+                    "title": "Archived Episode",
+                    "download_status": "downloaded",
+                },
+            )
+            config = {
+                "defaults": {
+                    "output_root": tmpdir,
+                    "database_path": db_path,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "max_downloads": 1,
+                },
+                "podcasts": [
+                    {
+                        "name": "ArchiveCast",
+                        "url": "https://feeds.example.com/archive.xml",
+                        "redownload": True,
+                        "episode_url": media_url,
+                        "episode_title": "Archived Episode",
+                        "subtitles": False,
+                    }
+                ],
+            }
+
+            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "podcasts.feedparser.parse", side_effect=AssertionError("feed should not be fetched")
+            ):
+                podcasts.download_podcasts(config, [])
+
+            opts = FakeYoutubeDL.instances[-1].opts
+            self.assertEqual(FakeYoutubeDL.instances[-1].urls, [media_url])
+            self.assertTrue(opts["overwrites"])
+            self.assertFalse(opts["continuedl"])
 
     def test_skip_filter_excludes_shorts_and_duplicate_titles(self):
         class FakeYoutubeDLForFilter(FakeYoutubeDL):
