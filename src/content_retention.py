@@ -6,7 +6,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from database import resolve_download_artifact_path
+from database import (
+    DOWNLOAD_STATUS_MISSING,
+    DOWNLOAD_STATUS_RETENTION_DELETED,
+    resolve_download_artifact_path,
+)
 from logger import get_logger
 
 
@@ -17,6 +21,7 @@ log = get_logger("content_retention")
 class RetentionCleanupResult:
     deleted_files: int = 0
     marked_missing: int = 0
+    marked_retention_deleted: int = 0
     ignored_manual: int = 0
     ignored_favorites: int = 0
 
@@ -41,12 +46,14 @@ def enforce_content_retention(
     *,
     now: Optional[datetime] = None,
 ) -> RetentionCleanupResult:
-    """Delete expired automatic downloads and mark absent media as missing.
+    """Delete expired automatic media while retaining terminal database records.
 
     A retention value of zero disables cleanup. Manual uploads are never deleted or
     marked missing by this task, and favorite items are never automatically deleted.
-    Non-manual rows whose files are absent are marked missing regardless of favorite
-    state or age while retention is enabled.
+    Non-manual rows whose files are already absent are marked missing regardless of
+    favorite state or age while retention is enabled. Files deleted because they have
+    expired receive a terminal retention status so feed updates do not download them
+    again.
     """
     try:
         days = int(retention_days)
@@ -61,7 +68,9 @@ def enforce_content_retention(
     cutoff = current_time.astimezone(timezone.utc) - timedelta(days=days)
 
     deleted_files = 0
-    marked_ids = []
+    marked_missing = 0
+    marked_retention_deleted = 0
+    status_updates = []
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
             """
@@ -81,7 +90,10 @@ def enforce_content_retention(
             resolved = resolve_download_artifact_path(output_root, file_path, relative_path)
             media_path = Path(resolved) if resolved else None
             if media_path is None or not media_path.is_file():
-                marked_ids.append(int(row_id))
+                status_updates.append(
+                    (DOWNLOAD_STATUS_MISSING, "Media file is missing", int(row_id))
+                )
+                marked_missing += 1
                 continue
             if bool(favorite):
                 ignored_favorites += 1
@@ -100,33 +112,48 @@ def enforce_content_retention(
                 continue
             else:
                 deleted_files += 1
-            marked_ids.append(int(row_id))
+            status_updates.append(
+                (
+                    DOWNLOAD_STATUS_RETENTION_DELETED,
+                    "Media file removed by content retention",
+                    int(row_id),
+                )
+            )
+            marked_retention_deleted += 1
 
-        if marked_ids:
+        if status_updates:
             timestamp = current_time.astimezone(timezone.utc).isoformat()
+            update_parameters = []
+            for download_status, error_message, row_id in status_updates:
+                update_parameters.append(
+                    (download_status, error_message, timestamp, row_id)
+                )
             conn.executemany(
                 """
                 UPDATE downloads
-                SET download_status = 'missing',
-                    error_message = 'Media file is missing',
+                SET download_status = ?,
+                    error_message = ?,
                     last_seen_at = ?
                 WHERE id = ? AND download_status = 'downloaded'
                 """,
-                [(timestamp, row_id) for row_id in marked_ids],
+                update_parameters,
             )
             conn.commit()
 
     result = RetentionCleanupResult(
         deleted_files=deleted_files,
-        marked_missing=len(marked_ids),
+        marked_missing=marked_missing,
+        marked_retention_deleted=marked_retention_deleted,
         ignored_manual=ignored_manual,
         ignored_favorites=ignored_favorites,
     )
-    if result.deleted_files or result.marked_missing:
+    if result.deleted_files or result.marked_missing or result.marked_retention_deleted:
         log.info(
-            "Content retention complete: deleted=%s marked_missing=%s ignored_manual=%s ignored_favorites=%s",
+            "Content retention complete: deleted=%s marked_missing=%s "
+            "marked_retention_deleted=%s ignored_manual=%s ignored_favorites=%s",
             result.deleted_files,
             result.marked_missing,
+            result.marked_retention_deleted,
             result.ignored_manual,
             result.ignored_favorites,
         )

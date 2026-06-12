@@ -34,6 +34,7 @@ from summarization import ensure_local_summary_model, summarize_segments
 from summary_tasks import clear_all_summaries, generate_missing_summaries
 from subtitles import create_subtitles
 from database import (
+    DOWNLOAD_STATUS_RETENTION_DELETED,
     resolve_download_artifact_path,
     add_source_config,
     delete_source_config,
@@ -109,6 +110,7 @@ class MediaRow:
     subtitle_path: Optional[str] = None
     summary_text: Optional[str] = None
     raw_metadata_json: Optional[str] = None
+    download_status: str = "downloaded"
 
 
 @dataclass
@@ -756,10 +758,10 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
                 """
                 SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, '')
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, ''), d.download_status
                 FROM downloads d
                 LEFT JOIN media_summaries ms ON ms.download_id = d.id
-                WHERE d.download_status = 'downloaded'
+                WHERE d.download_status IN ('downloaded', 'missing', 'retention_deleted')
                 ORDER BY d.last_seen_at DESC, d.id DESC
                 """
             ).fetchall()
@@ -787,6 +789,7 @@ def fetch_downloaded_media_rows(db_path: Path, output_root: Optional[Path] = Non
             subtitle_path=resolve_download_artifact_path(str(repair_root), row[14], row[15]) or row[14] or row[15] or None,
             summary_text=row[16] or None,
             raw_metadata_json=row[17] or None,
+            download_status=row[18],
         )
         for row in rows
     ]
@@ -813,10 +816,10 @@ def fetch_downloaded_media_row_by_id(
                 """
                 SELECT d.id, d.source_type, d.source_name, d.item_url, COALESCE(d.title, ''), COALESCE(d.file_path, ''), COALESCE(d.file_path_relative, ''),
                        file_ext, file_size_bytes, upload_date, COALESCE(played, 0), COALESCE(favorite, 0),
-                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, '')
+                       played_at, COALESCE(last_position_seconds, 0), subtitle_path, COALESCE(subtitle_path_relative, ''), COALESCE(ms.summary_text, ''), COALESCE(d.raw_metadata_json, ''), d.download_status
                 FROM downloads d
                 LEFT JOIN media_summaries ms ON ms.download_id = d.id
-                WHERE d.id = ? AND d.download_status = 'downloaded'
+                WHERE d.id = ? AND d.download_status IN ('downloaded', 'missing', 'retention_deleted')
                 LIMIT 1
                 """,
                 (int(row_id),),
@@ -848,6 +851,7 @@ def fetch_downloaded_media_row_by_id(
         subtitle_path=resolve_download_artifact_path(str(artifact_root), row[14], row[15]) or row[14] or row[15] or None,
         summary_text=row[16] or None,
         raw_metadata_json=row[17] or None,
+        download_status=row[18],
     )
 
 
@@ -1873,6 +1877,9 @@ def _render_index(
             status_label = "MISSING"
             status_class = "status-missing"
             status_title = "File missing locally"
+            if getattr(row, "download_status", "") == DOWNLOAD_STATUS_RETENTION_DELETED:
+                status_label = "REMOVED"
+                status_title = "File removed by content retention; database record retained"
         play_or_download_href = f"/play?id={row.row_id}" if file_exists else f"/redownload?id={row.row_id}"
         play_or_download_label = "Play this item" if file_exists else "Redownload this item"
         resume_seconds = 0.0
@@ -4453,7 +4460,7 @@ def _render_settings(
           <div>
             <label for="auto_delete_content_days">Automatically delete content after (days)</label>
             <input id="auto_delete_content_days" type="number" name="auto_delete_content_days" value="{auto_delete_content_days}" min="0" step="1" required />
-            <p class="field-help">Use 0 to disable. Manual uploads are always ignored, and favorites are never automatically deleted. Already absent files are marked missing.</p>
+            <p class="field-help">Use 0 to disable. Manual uploads are always ignored, and favorites are never automatically deleted. Already absent files are marked missing; expired files are removed while their database records remain available.</p>
           </div>
         </div>
 

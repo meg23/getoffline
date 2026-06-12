@@ -1352,6 +1352,74 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
 
             self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
 
+    def _run_youtube_match_filter(self, tmpdir, database_row, incoming_info):
+        class FakeYoutubeDLForFilter(FakeYoutubeDL):
+            match_filter_result = None
+
+            def download(self, urls):
+                self.urls.extend(urls)
+                match_filter = self.opts.get("match_filter")
+                self.__class__.match_filter_result = match_filter(
+                    incoming_info,
+                    incomplete=False,
+                )
+
+        db_path = os.path.join(tmpdir, "downloads.sqlite3")
+        init_database(db_path)
+        upsert_download(db_path, database_row)
+        config = _build_sample_config(tmpdir)
+        config["defaults"]["database_path"] = db_path
+        config["youtube"] = [
+            {
+                "name": "MyChannel",
+                "url": "https://youtube.com/playlist?list=123",
+                "type": "video",
+            }
+        ]
+        with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+            youtube.download_youtube_items(config, [])
+        return FakeYoutubeDLForFilter.match_filter_result
+
+    def test_skip_filter_skips_retention_deleted_youtube_video(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_youtube_match_filter(
+                tmpdir,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "retained-video",
+                    "title": "Retained Video",
+                    "download_status": "retention_deleted",
+                },
+                {
+                    "id": "retained-video",
+                    "title": "Retained Video",
+                    "webpage_url": "https://www.youtube.com/watch?v=retained-video",
+                },
+            )
+
+        self.assertIn("Skipping already downloaded item in DB", result)
+
+    def test_skip_filter_matches_retention_deleted_youtube_title_when_uid_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_youtube_match_filter(
+                tmpdir,
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "old-video-id",
+                    "title": "Retained Video",
+                    "download_status": "retention_deleted",
+                },
+                {
+                    "id": "new-video-id",
+                    "title": "Retained Video",
+                    "webpage_url": "https://www.youtube.com/watch?v=new-video-id",
+                },
+            )
+
+        self.assertIn("Skipping duplicate title in DB", result)
+
     def test_skip_filter_matches_legacy_url_uid_rows_when_id_missing(self):
         class FakeYoutubeDLForFilter(FakeYoutubeDL):
             match_filter_result = None
@@ -1572,6 +1640,28 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
             )
 
             self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
+
+    def test_is_downloaded_true_for_terminal_missing_statuses(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "downloads.sqlite3")
+            init_database(db_path)
+            for item_uid, download_status in (
+                ("missing-1", "missing"),
+                ("retained-1", "retention_deleted"),
+            ):
+                upsert_download(
+                    db_path,
+                    {
+                        "source_type": "podcast",
+                        "source_name": "My Podcast",
+                        "item_uid": item_uid,
+                        "title": item_uid,
+                        "download_status": download_status,
+                    },
+                )
+                self.assertTrue(
+                    is_downloaded(db_path, "podcast", "My Podcast", item_uid)
+                )
 
     def test_is_downloaded_true_when_downloaded_row_exists_even_if_file_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
