@@ -159,6 +159,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             )
 
             first = get_stored_config(db_path)
+            self.assertEqual(first["defaults"]["auto_delete_content_days"], 0)
             self.assertEqual(len(first["youtube"]), 1)
             self.assertEqual(len(first["podcasts"]), 1)
             self.assertEqual(first["youtube"][0]["max_downloads"], 4)
