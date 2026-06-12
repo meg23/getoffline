@@ -1251,6 +1251,24 @@ if HAS_SQLALCHEMY:
             _log_sqlite_lock_if_needed(db_path, "marking download played", exc)
             raise
 
+    def reset_download_playback(db_path: str, row_id: int) -> bool:
+        now = _utcnow()
+        try:
+            with Session(_engine_for(db_path)) as session:
+                record = session.get(DownloadRecord, int(row_id))
+                if record is None:
+                    return False
+                record.played = False
+                record.played_at = None
+                record.last_position_seconds = 0.0
+                record.last_position_updated_at = now
+                record.last_seen_at = now
+                session.commit()
+                return True
+        except Exception as exc:
+            _log_sqlite_lock_if_needed(db_path, "resetting download playback", exc)
+            raise
+
     def mark_all_downloads_played(db_path: str) -> int:
         now = _utcnow()
         try:
@@ -1417,6 +1435,25 @@ else:
                 return cur.rowcount > 0
         except sqlite3.OperationalError as exc:
             _log_sqlite_lock_if_needed(db_path, "marking download played", exc)
+            raise
+
+    def reset_download_playback(db_path: str, row_id: int) -> bool:
+        now = _utcnow().isoformat()
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.execute(
+                    """
+                    UPDATE downloads
+                    SET played = 0, played_at = NULL, last_position_seconds = 0,
+                        last_position_updated_at = ?, last_seen_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, int(row_id)),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(db_path, "resetting download playback", exc)
             raise
 
     def mark_all_downloads_played(db_path: str) -> int:

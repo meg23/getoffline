@@ -48,6 +48,7 @@ from webapp import (  # noqa: E402
     trigger_single_youtube_download,
     _render_profile_menu,
     _trigger_all_profile_updates,
+    _trigger_redownload_for_row,
 )
 
 
@@ -759,6 +760,61 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertTrue(cfg["youtube"][0]["subtitles"])
             self.assertFalse(cfg["youtube"][0]["redownload"])
             self.assertTrue(cfg["youtube"][0]["allow_live_streams"])
+
+
+    def test_redownload_resets_playback_state_to_unplayed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "downloads.sqlite3"
+            media_path = root / "episode.mp4"
+            media_path.write_text("video", encoding="utf-8")
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "youtube",
+                    "source_name": "MyChannel",
+                    "item_uid": "video-1",
+                    "item_url": "https://www.youtube.com/watch?v=video-1",
+                    "title": "Played Episode",
+                    "file_path": str(media_path),
+                    "file_ext": "mp4",
+                    "download_status": "downloaded",
+                    "played": True,
+                },
+            )
+            row = fetch_downloaded_media_rows(db_path, root)[0]
+            update_download_position_seconds(str(db_path), row.row_id, 42.0)
+            state = AppState(
+                output_root=root,
+                database_path=db_path,
+                config={"defaults": {"output_root": str(root), "database_path": str(db_path)}},
+                update_runner=lambda config, items: None,
+            )
+
+            with mock.patch("webapp.trigger_single_youtube_download", return_value=True):
+                self.assertTrue(_trigger_redownload_for_row(state, row))
+
+            updated = fetch_downloaded_media_row_by_id(db_path, row.row_id, root)
+            self.assertIsNotNone(updated)
+            self.assertFalse(updated.played)
+            self.assertEqual(updated.last_position_seconds, 0.0)
+
+    def test_rejected_redownload_preserves_playback_state(self):
+        state = SimpleNamespace(database_path=Path("/tmp/not-used.sqlite3"))
+        row = SimpleNamespace(
+            row_id=1,
+            source_type="youtube",
+            item_url="https://www.youtube.com/watch?v=video-1",
+            file_ext="mp4",
+            file_path="/tmp/video.mp4",
+        )
+        with mock.patch("webapp.trigger_single_youtube_download", return_value=False), mock.patch(
+            "webapp.reset_download_playback"
+        ) as mock_reset_playback:
+            self.assertFalse(_trigger_redownload_for_row(state, row))
+
+        mock_reset_playback.assert_not_called()
 
 
     def test_trigger_single_podcast_download_targets_selected_episode(self):

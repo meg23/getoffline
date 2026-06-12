@@ -47,6 +47,7 @@ from database import (
     mark_all_downloads_played,
     mark_download_favorite,
     mark_download_played,
+    reset_download_playback,
     set_source_enabled,
     update_source_config,
     update_download_settings,
@@ -1891,6 +1892,25 @@ def trigger_single_youtube_download(
 
     thread = threading.Thread(target=_run_single_youtube_download, args=(state, single_config), daemon=True)
     thread.start()
+    return True
+
+
+def _trigger_redownload_for_row(state: AppState, row: MediaRow) -> bool:
+    started = False
+    if row.source_type == "youtube" and row.item_url:
+        started = trigger_single_youtube_download(
+            state,
+            url=row.item_url,
+            media_type=_infer_media_type_for_redownload(row),
+            force_redownload=True,
+        )
+    elif row.source_type == "podcast":
+        started = trigger_single_podcast_download(state, row)
+
+    if not started:
+        return False
+
+    reset_download_playback(str(state.database_path), row.row_id)
     return True
 
 
@@ -5206,15 +5226,7 @@ def make_handler(state: AppState):
                 if row is None:
                     self.send_error(404, "Item not found")
                     return
-                if row.source_type == "youtube" and row.item_url:
-                    trigger_single_youtube_download(
-                        state,
-                        url=row.item_url,
-                        media_type=_infer_media_type_for_redownload(row),
-                        force_redownload=True,
-                    )
-                elif row.source_type == "podcast":
-                    trigger_single_podcast_download(state, row)
+                _trigger_redownload_for_row(state, row)
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -5465,15 +5477,7 @@ def make_handler(state: AppState):
                             row = fetch_downloaded_media_row_by_id(state.database_path, row_id, state.output_root)
                             if row is None:
                                 continue
-                            if row.source_type == "youtube" and row.item_url:
-                                trigger_single_youtube_download(
-                                    state,
-                                    url=row.item_url,
-                                    media_type=_infer_media_type_for_redownload(row),
-                                    force_redownload=True,
-                                )
-                            elif row.source_type == "podcast":
-                                trigger_single_podcast_download(state, row)
+                            _trigger_redownload_for_row(state, row)
 
                 if _is_async_request(self):
                     self.send_response(204)
