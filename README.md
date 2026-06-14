@@ -102,6 +102,51 @@ setting under **Settings → General**.
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
+## Deploying from GitHub Actions on Debian
+
+The GitHub Actions workflow runs tests for pushes and pull requests. After a
+successful push to the repository's default branch, its `deploy` job installs
+the checked-out revision in `/opt/getoffline` and runs it as the existing
+`jellyfin` user through `systemd`.
+
+The installed service executes the equivalent of:
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m main serve \
+  --host 0.0.0.0 \
+  --port 8080 2>&1 | tee app.log
+```
+
+Using `systemd` is important because GitHub Actions cleans up processes spawned
+directly by a completed job. The service restarts the app after a failure and
+starts it again when Debian boots. Persistent downloads and the SQLite database
+live under `/var/lib/getoffline/downloads`; `/opt/getoffline/downloads` is a
+symlink to that directory, so a deployment does not replace application data.
+
+The self-hosted runner account must be allowed to run the deployment script
+non-interactively as root. For a runner account named `github-runner`, use
+`visudo` to create `/etc/sudoers.d/getoffline-actions` with:
+
+```sudoers
+github-runner ALL=(root) NOPASSWD: /opt/actions-runner/_work/getoffline/getoffline/scripts/deploy-local.sh *
+```
+
+Replace the runner name and checkout path with the values used on your server.
+The path must match the command shown in the Actions log. The runner also needs
+Debian's `python3-venv` package, and the host needs the system dependencies
+listed above. The first deployment enables and starts `getoffline.service`;
+later deployments stop it, update the application and virtual environment, and
+start it again.
+
+Useful server-side commands are:
+
+```bash
+sudo systemctl status getoffline
+sudo journalctl -u getoffline -f
+sudo -u jellyfin tail -f /opt/getoffline/app.log
+sudo systemctl restart getoffline
+```
+
 Audio and video files dragged into the library page are copied into the `manual`
 folder and transcribed. In **Settings → General**, enable **Delete drag-and-drop
 uploads containing profanity or sexual content** to screen those generated
