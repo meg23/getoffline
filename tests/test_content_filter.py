@@ -22,7 +22,17 @@ class ContentFilterTests(unittest.TestCase):
         match = find_explicit_content("That was fucking ridiculous.")
         self.assertIsNotNone(match)
         self.assertEqual(match.category, "profanity")
+        self.assertEqual(match.sentence, "That was fucking ridiculous.")
         self.assertIsNone(find_explicit_content("The shiitake mushrooms were delicious."))
+
+    def test_returns_only_the_sentence_containing_the_match(self):
+        match = find_explicit_content(
+            "This sentence is clean. The next sentence contains bullshit! This is also clean."
+        )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.term, "bullshit")
+        self.assertEqual(match.sentence, "The next sentence contains bullshit!")
 
     def test_detects_sexual_phrase(self):
         match = find_explicit_content("The discussion included oral sex and consent.")
@@ -60,7 +70,11 @@ class ContentFilterTests(unittest.TestCase):
     def test_filtered_deletion_writes_stable_audit_event(self):
         media_path = Path("/tmp/episode.mp3")
         deleted_paths = [media_path, media_path.with_suffix(".srt")]
-        match = ExplicitContentMatch(category="profanity", term="fucking")
+        match = ExplicitContentMatch(
+            category="profanity",
+            term="fucking",
+            sentence="That was fucking ridiculous.",
+        )
 
         with patch("content_filter.log.warning") as warning:
             log_filtered_deletion(
@@ -80,8 +94,9 @@ class ContentFilterTests(unittest.TestCase):
         self.assertEqual(arguments[2], "Episode 7")
         self.assertEqual(arguments[3], "profanity")
         self.assertEqual(arguments[4], "fucking")
-        self.assertIn("episode.mp3", arguments[6])
-        self.assertIn("episode.srt", arguments[6])
+        self.assertEqual(arguments[5], "That was fucking ridiculous.")
+        self.assertIn("episode.mp3", arguments[7])
+        self.assertIn("episode.srt", arguments[7])
 
 
 if __name__ == "__main__":

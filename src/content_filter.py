@@ -51,12 +51,14 @@ _SRT_METADATA_RE = re.compile(
     r"^(?:\d+|\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}.*)$"
 )
 _NON_WORD_RE = re.compile(r"[^a-z0-9']+")
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 @dataclass(frozen=True)
 class ExplicitContentMatch:
     category: str
     term: str
+    sentence: str = ""
 
 
 def transcript_text(subtitle_path: Path) -> str:
@@ -73,11 +75,18 @@ def transcript_text(subtitle_path: Path) -> str:
 
 def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
     """Find a conservative profanity or sexual-content term in transcript text."""
-    normalized = " " + _NON_WORD_RE.sub(" ", str(text or "").lower()).strip() + " "
+    transcript = str(text or "").strip()
+    sentences = _SENTENCE_BOUNDARY_RE.split(transcript)
     for category, terms in (("profanity", _PROFANITY_TERMS), ("sexual content", _SEXUAL_TERMS)):
         for term in sorted(terms, key=len, reverse=True):
-            if f" {term} " in normalized:
-                return ExplicitContentMatch(category=category, term=term)
+            for sentence in sentences:
+                normalized = " " + _NON_WORD_RE.sub(" ", sentence.lower()).strip() + " "
+                if f" {term} " in normalized:
+                    return ExplicitContentMatch(
+                        category=category,
+                        term=term,
+                        sentence=sentence.strip(),
+                    )
     return None
 
 
@@ -119,12 +128,13 @@ def log_filtered_deletion(
     deleted_artifacts = ", ".join(str(path) for path in deleted_paths) or "none"
     log.warning(
         "CONTENT_FILTER_DELETION source_type=%s source_name=%r title=%r "
-        "category=%r matched_term=%r media_path=%s deleted_artifacts=%s",
+        "category=%r matched_term=%r matched_sentence=%r media_path=%s deleted_artifacts=%s",
         source_type,
         source_name,
         title,
         match.category,
         match.term,
+        match.sentence,
         Path(media_path).expanduser().resolve(),
         deleted_artifacts,
     )

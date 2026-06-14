@@ -494,10 +494,11 @@ def _filter_imported_media(
         return None
     log.warning(
         "Manual upload profanity check finished item_uid=%s result=matched category=%r "
-        "matched_term=%r elapsed_seconds=%.3f",
+        "matched_term=%r matched_sentence=%r elapsed_seconds=%.3f",
         item_uid,
         explicit_match.category,
         explicit_match.term,
+        explicit_match.sentence,
         elapsed_seconds,
     )
     deleted_paths = delete_media_artifacts(Path(media_path))
