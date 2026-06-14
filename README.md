@@ -123,20 +123,40 @@ starts it again when Debian boots. Persistent downloads and the SQLite database
 live under `/var/lib/getoffline/downloads`; `/opt/getoffline/downloads` is a
 symlink to that directory, so a deployment does not replace application data.
 
-The self-hosted runner account must be allowed to run the deployment script
-non-interactively as root. For a runner account named `github-runner`, use
-`visudo` to create `/etc/sudoers.d/getoffline-actions` with:
+The deployment script needs root access because it writes under `/opt`,
+`/var/lib`, and `/etc/systemd/system` and manages a system service. GitHub
+Actions cannot grant this access to itself. Configure a command-specific
+`NOPASSWD` rule once on the server so deployments do not use or store a
+password.
 
-```sudoers
-github-runner ALL=(root) NOPASSWD: /opt/actions-runner/_work/getoffline/getoffline/scripts/deploy-local.sh *
+From a checkout at the same path used by the self-hosted runner, run the setup
+helper once for the `github-actions` Linux account that runs the Actions
+runner:
+
+```bash
+sudo ./scripts/configure-deploy-sudo.sh github-actions "$PWD"
 ```
 
-Replace the runner name and checkout path with the values used on your server.
-The path must match the command shown in the Actions log. The runner also needs
-Debian's `python3-venv` package, and the host needs the system dependencies
-listed above. The first deployment enables and starts `getoffline.service`;
-later deployments stop it, update the application and virtual environment, and
-start it again.
+The helper verifies the account and deployment path, validates the generated
+rule with `visudo`, and installs it as
+`/etc/sudoers.d/getoffline-actions` with mode `0440`. The rule permits only the
+exact deployment command used by the workflow. No GitHub secret is required.
+
+The workspace path is part of the rule. If the runner checkout moves, rerun the
+helper from the new checkout. To confirm the configured command, run:
+
+```bash
+sudo -u github-actions sudo --non-interactive --list
+```
+
+If Actions reports `sudo: a password is required`, the rule does not match the
+account or checkout path used by that job. Check the job's `GITHUB_WORKSPACE`
+value and rerun the helper with that exact path.
+
+The runner also needs Debian's `python3-venv` package, and the host needs the
+system dependencies listed above. The first deployment enables and starts
+`getoffline.service`; later deployments stop it, update the application and
+virtual environment, and start it again.
 
 Useful server-side commands are:
 
