@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from profiles import Profile, ProfileManager  # noqa: E402
+from content_filter import find_explicit_content  # noqa: E402
 from database import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
 from webapp import (  # noqa: E402
     AppState,
@@ -1127,22 +1128,6 @@ class WebAppHelpersTests(unittest.TestCase):
             media_path.parent.mkdir(parents=True, exist_ok=True)
             media_path.write_bytes(b"video")
             item_uid = "manual-test-item"
-            upsert_download(
-                str(db_path),
-                {
-                    "source_type": "manual",
-                    "source_name": "Manual Uploads",
-                    "item_uid": item_uid,
-                    "item_id": item_uid,
-                    "title": "episode",
-                    "file_path": str(media_path),
-                    "storage_root": str(root),
-                    "file_ext": "mp4",
-                    "file_size_bytes": media_path.stat().st_size,
-                    "subtitle_enabled": False,
-                    "download_status": "downloaded",
-                },
-            )
             state = AppState(
                 output_root=root,
                 database_path=db_path,
@@ -1158,10 +1143,33 @@ class WebAppHelpersTests(unittest.TestCase):
                 )
                 return subtitle_path
 
+            metadata = {
+                "source_type": "manual",
+                "source_name": "Manual Uploads",
+                "item_uid": item_uid,
+                "item_id": item_uid,
+                "title": "episode",
+                "file_path": str(media_path),
+                "storage_root": str(root),
+                "file_ext": "mp4",
+                "file_size_bytes": media_path.stat().st_size,
+                "subtitle_enabled": False,
+                "download_status": "downloaded",
+            }
+
+            def assert_not_registered_before_screen(subtitle_path):
+                with sqlite3.connect(db_path) as conn:
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM downloads WHERE item_uid = ?",
+                        (item_uid,),
+                    ).fetchone()[0]
+                self.assertEqual(count, 0)
+                return find_explicit_content(Path(subtitle_path).read_text(encoding="utf-8"))
+
             with mock.patch("webapp.create_subtitles", side_effect=create_explicit_subtitle), mock.patch(
-                "webapp.log_filtered_deletion"
-            ) as deletion_log:
-                _postprocess_imported_media(state, item_uid=item_uid, media_path=media_path)
+                "webapp.screen_transcript", side_effect=assert_not_registered_before_screen
+            ), mock.patch("webapp.log_filtered_deletion") as deletion_log:
+                _postprocess_imported_media(state, metadata=metadata, media_path=media_path)
 
             self.assertFalse(media_path.exists())
             self.assertFalse(media_path.with_suffix(".srt").exists())
@@ -1196,12 +1204,11 @@ class WebAppHelpersTests(unittest.TestCase):
                 update_runner=unused_update_runner,
             )
 
-            with mock.patch("webapp._postprocess_imported_media") as postprocess:
+            with mock.patch("webapp.create_subtitles", return_value=None):
                 destination_path = import_local_media_file(state, source_path)
 
             self.assertEqual(destination_path.read_bytes(), b"video-content")
             self.assertEqual(destination_path.parent, (output_root / "manual").resolve())
-            postprocess.assert_called_once()
             with sqlite3.connect(db_path) as conn:
                 row = conn.execute(
                     "SELECT extractor, description, raw_metadata_json FROM downloads WHERE source_type = 'manual'"
