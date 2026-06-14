@@ -354,8 +354,7 @@ def _import_dropped_media_file(state: AppState, file_name: str, payload: bytes) 
         },
         "storage_root": str(destination_root),
     }
-    upsert_download(str(state.database_path), metadata)
-    _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+    _postprocess_imported_media(state, metadata=metadata, media_path=destination_path)
     return None
 
 
@@ -432,8 +431,7 @@ def _import_dropped_media_stream(
         },
         "storage_root": str(destination_root),
     }
-    upsert_download(str(state.database_path), metadata)
-    _postprocess_imported_media(state, item_uid=item_uid, media_path=destination_path)
+    _postprocess_imported_media(state, metadata=metadata, media_path=destination_path)
     return destination_path
 
 
@@ -462,37 +460,47 @@ def _manual_upload_filter_enabled(defaults: Dict) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _mark_manual_upload_filtered(state: AppState, item_uid: str, category: str) -> None:
-    with sqlite3.connect(str(state.database_path)) as conn:
-        conn.execute(
-            """
-            UPDATE downloads
-            SET file_path = NULL, file_path_relative = NULL, file_size_bytes = NULL,
-                subtitle_enabled = 0, subtitle_path = NULL, subtitle_path_relative = NULL,
-                download_status = 'filtered', error_message = ?, last_seen_at = ?
-            WHERE source_type = 'manual' AND source_name = 'Manual Uploads' AND item_uid = ?
-            """,
-            (
-                f"Deleted by transcript filter: {category}",
-                datetime.now(timezone.utc).isoformat(),
-                str(item_uid),
-            ),
-        )
-        conn.commit()
-
-
 def _filter_imported_media(
-    state: AppState,
     item_uid: str,
     media_path: Path,
     subtitle_path: Optional[Path],
     defaults: Dict,
-) -> bool:
+) -> Optional[str]:
     if not _manual_upload_filter_enabled(defaults):
-        return False
+        log.info("Manual upload profanity check skipped item_uid=%s reason=disabled", item_uid)
+        return None
+    if subtitle_path is None or not Path(subtitle_path).exists():
+        log.warning(
+            "Manual upload profanity check skipped item_uid=%s reason=transcript-unavailable media_path=%s",
+            item_uid,
+            media_path,
+        )
+        return None
+    started_at = time.perf_counter()
+    log.info(
+        "Manual upload profanity check started item_uid=%s transcript_path=%s media_path=%s",
+        item_uid,
+        subtitle_path,
+        media_path,
+    )
     explicit_match = screen_transcript(subtitle_path)
+    elapsed_seconds = time.perf_counter() - started_at
     if explicit_match is None:
-        return False
+        log.info(
+            "Manual upload profanity check finished item_uid=%s result=clean elapsed_seconds=%.3f",
+            item_uid,
+            elapsed_seconds,
+        )
+        return None
+    log.warning(
+        "Manual upload profanity check finished item_uid=%s result=matched category=%r "
+        "matched_term=%r matched_sentence=%r elapsed_seconds=%.3f",
+        item_uid,
+        explicit_match.category,
+        explicit_match.term,
+        explicit_match.sentence,
+        elapsed_seconds,
+    )
     deleted_paths = delete_media_artifacts(Path(media_path))
     log_filtered_deletion(
         source_type="manual",
@@ -502,12 +510,12 @@ def _filter_imported_media(
         match=explicit_match,
         deleted_paths=deleted_paths,
     )
-    _mark_manual_upload_filtered(state, item_uid, explicit_match.category)
-    return True
+    return explicit_match.category
 
 
-def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path) -> None:
+def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Path) -> None:
     defaults = (state.config or {}).get("defaults") or {}
+    item_uid = str(metadata["item_uid"])
     subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "subprocess")
     subtitle_offset = defaults.get("subtitle_time_offset_seconds")
     try:
@@ -524,34 +532,36 @@ def _postprocess_imported_media(state: AppState, item_uid: str, media_path: Path
         log.warning("Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc)
         subtitle_path = None
 
-    if _filter_imported_media(state, item_uid, Path(media_path), subtitle_path, defaults):
+    filtered_category = _filter_imported_media(
+        item_uid,
+        Path(media_path),
+        subtitle_path,
+        defaults,
+    )
+    if filtered_category is not None:
+        metadata["file_path"] = None
+        metadata["file_size_bytes"] = None
+        metadata["subtitle_enabled"] = False
+        metadata["subtitle_path"] = None
+        metadata["download_status"] = "filtered"
+        metadata["error_message"] = f"Deleted by transcript filter: {filtered_category}"
+        upsert_download(str(state.database_path), metadata)
+        log.info(
+            "Manual upload added to database after profanity check item_uid=%s status=filtered",
+            item_uid,
+        )
         return
 
     if subtitle_path:
-        with sqlite3.connect(str(state.database_path)) as conn:
-            output_root = state.output_root.expanduser().resolve()
-            subtitle_relative = None
-            try:
-                subtitle_relative = str(Path(subtitle_path).resolve().relative_to(output_root))
-            except ValueError:
-                subtitle_relative = None
-            conn.execute(
-                """
-                UPDATE downloads
-                SET subtitle_enabled = 1,
-                    subtitle_path = ?,
-                    subtitle_path_relative = ?,
-                    last_seen_at = ?
-                WHERE source_type = 'manual' AND source_name = 'Manual Uploads' AND item_uid = ?
-                """,
-                (
-                    str(subtitle_path),
-                    subtitle_relative,
-                    datetime.now(timezone.utc).isoformat(),
-                    str(item_uid),
-                ),
-            )
-            conn.commit()
+        metadata["subtitle_enabled"] = True
+        metadata["subtitle_path"] = str(subtitle_path)
+    upsert_download(str(state.database_path), metadata)
+    log.info(
+        "Manual upload added to database after profanity check item_uid=%s status=%s",
+        item_uid,
+        metadata["download_status"],
+    )
+    if subtitle_path:
         try:
             generate_missing_summaries(
                 str(state.database_path),
