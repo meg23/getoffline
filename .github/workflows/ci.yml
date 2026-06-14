@@ -42,5 +42,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Deploy and restart GetOffline
-        run: sudo --non-interactive "$GITHUB_WORKSPACE/scripts/deploy-local.sh" "$GITHUB_WORKSPACE"
+      - name: Install Pystrano
+        run: |
+          python3.12 -m venv .deploy-venv
+          .deploy-venv/bin/python -m pip install --upgrade pip
+          .deploy-venv/bin/python -m pip install pystrano==2.0.0
+
+      - name: Deploy with Pystrano
+        env:
+          GETOFFLINE_DEPLOY_REVISION: ${{ github.sha }}
+          GETOFFLINE_SOURCE_CODE_URL: git@github.com:${{ github.repository }}.git
+        run: .deploy-venv/bin/python scripts/deploy.py

@@ -102,68 +102,85 @@ setting under **Settings → General**.
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
-## Deploying from GitHub Actions on Debian
+## Deploying with Pystrano on Debian
 
 The GitHub Actions workflow runs tests for pushes and pull requests. After a
-successful push to the repository's default branch, its `deploy` job installs
-the checked-out revision in `/opt/getoffline` and runs it as the existing
-`jellyfin` user through `systemd`.
+successful push to the repository's default branch, its `deploy` job uses
+Pystrano 2.0 to create a release-oriented deployment and runs GetOffline as the
+existing `jellyfin` user through `systemd`.
 
 The installed service executes the equivalent of:
 
 ```bash
-PYTHONPATH="$PWD/src" .venv/bin/python -m main serve \
+PYTHONPATH="$PWD/src" /var/lib/jellyfin/.venv/bin/python -m main serve \
   --host 0.0.0.0 \
-  --port 8080 2>&1 | tee app.log
+  --port 8080 2>&1 | tee /var/lib/getoffline/app.log
 ```
 
 Using `systemd` is important because GitHub Actions cleans up processes spawned
 directly by a completed job. The service restarts the app after a failure and
-starts it again when Debian boots. Persistent downloads and the SQLite database
-live under `/var/lib/getoffline/downloads`; `/opt/getoffline/downloads` is a
-symlink to that directory, so a deployment does not replace application data.
+starts it again when Debian boots. Debian's Jellyfin package uses
+`/var/lib/jellyfin` as the `jellyfin` account's home. Pystrano keeps timestamped
+releases under `/var/lib/jellyfin/getoffline/releases` and points
+`/var/lib/jellyfin/getoffline/current` at the active release. Persistent downloads,
+the SQLite database, and the application log live under `/var/lib/getoffline`,
+outside the release tree.
 
-The deployment script needs root access because it writes under `/opt`,
-`/var/lib`, and `/etc/systemd/system` and manages a system service. GitHub
-Actions cannot grant this access to itself. Configure a command-specific
-`NOPASSWD` rule once on the server so deployments do not use or store a
-password.
-
-From a checkout at the same path used by the self-hosted runner, run the setup
-helper once for the `github-actions` Linux account that runs the Actions
-runner:
+Pystrano requires Python 3.12 or newer on the Actions runner. Before the first
+deployment, install Pystrano and run its setup phase from a checkout:
 
 ```bash
-sudo ./scripts/configure-deploy-sudo.sh github-actions "$PWD"
+python3.12 -m venv .deploy-venv
+.deploy-venv/bin/pip install pystrano==2.0.0
+.deploy-venv/bin/pystrano setup production getoffline
 ```
 
-The helper verifies the account and deployment path, validates the generated
-rule with `visudo`, and installs it as
-`/etc/sudoers.d/getoffline-actions` with mode `0440`. The rule permits only the
-exact deployment command used by the workflow. No GitHub secret is required.
-
-The workspace path is part of the rule. If the runner checkout moves, rerun the
-helper from the new checkout. To confirm the configured command, run:
+The setup command connects to `localhost` as root, creates the deployment
+account and release directories, installs the configured system packages, and
+installs `deploy/getoffline/production/getoffline.service`. The Debian package
+normally gives the existing `jellyfin` account the `/bin/false` shell. Pystrano
+needs that account to execute deployment commands over SSH, so enable a shell
+once:
 
 ```bash
-sudo -u github-actions sudo --non-interactive --list
+sudo usermod --shell /bin/bash jellyfin
 ```
 
-If Actions reports `sudo: a password is required`, the rule does not match the
-account or checkout path used by that job. Check the job's `GITHUB_WORKSPACE`
-value and rerun the helper with that exact path.
+Install the self-hosted runner's public key in
+`/var/lib/jellyfin/.ssh/authorized_keys` (not `/home/jellyfin`) and preserve
+strict SSH ownership and modes:
 
-The runner also needs Debian's `python3-venv` package, and the host needs the
-system dependencies listed above. The first deployment enables and starts
-`getoffline.service`; later deployments stop it, update the application and
-virtual environment, and start it again.
+```bash
+sudo install -d -o jellyfin -g jellyfin -m 0700 /var/lib/jellyfin/.ssh
+sudo touch /var/lib/jellyfin/.ssh/authorized_keys
+sudo chown jellyfin:jellyfin /var/lib/jellyfin/.ssh/authorized_keys
+sudo chmod 0600 /var/lib/jellyfin/.ssh/authorized_keys
+sudo sh -c 'cat /home/github-actions/.ssh/getoffline_deploy.pub >> /var/lib/jellyfin/.ssh/authorized_keys'
+sudo -u github-actions -H ssh -o BatchMode=yes jellyfin@localhost id
+```
+
+The last command must report the `jellyfin` user before running a deployment.
+Also ensure the `jellyfin` account has an SSH key that can clone this repository.
+For a private repository, use a read-only GitHub deploy key. The workflow uses
+the SSH repository URL so that key is used for cloning.
+
+```bash
+sudo install -d -o jellyfin -g jellyfin /var/lib/getoffline/downloads
+```
+
+The tracked playbook uses a full clone so the workflow can deploy the exact
+commit SHA that passed CI. `scripts/deploy.py` obtains the repository URL and
+revision from GitHub Actions, renders a temporary playbook without modifying
+the tracked template, and invokes `pystrano deploy`. Pystrano installs
+dependencies, switches the `current` symlink atomically, restarts the service,
+and retains the five most recent releases.
 
 Useful server-side commands are:
 
 ```bash
 sudo systemctl status getoffline
 sudo journalctl -u getoffline -f
-sudo -u jellyfin tail -f /opt/getoffline/app.log
+sudo -u jellyfin tail -f /var/lib/getoffline/app.log
 sudo systemctl restart getoffline
 ```
 
