@@ -124,19 +124,33 @@ live under `/var/lib/getoffline/downloads`; `/opt/getoffline/downloads` is a
 symlink to that directory, so a deployment does not replace application data.
 
 The self-hosted runner account must be allowed to run the deployment script
-non-interactively as root. For a runner account named `github-runner`, use
-`visudo` to create `/etc/sudoers.d/getoffline-actions` with:
+non-interactively as root. The workflow invokes the script by its absolute path
+so that the command exactly matches its `sudoers` rule. For a runner account
+named `github-runner`, use `visudo` to create
+`/etc/sudoers.d/getoffline-actions` with:
 
 ```sudoers
 github-runner ALL=(root) NOPASSWD: /opt/actions-runner/_work/getoffline/getoffline/scripts/deploy-local.sh *
 ```
 
 Replace the runner name and checkout path with the values used on your server.
-The path must match the command shown in the Actions log. The runner also needs
-Debian's `python3-venv` package, and the host needs the system dependencies
-listed above. The first deployment enables and starts `getoffline.service`;
-later deployments stop it, update the application and virtual environment, and
-start it again.
+The script path must exactly match the value of
+`$GITHUB_WORKSPACE/scripts/deploy-local.sh` on the runner. Ensure the sudoers
+file is owned by `root`, has mode `0440`, and passes validation:
+
+```bash
+sudo chown root:root /etc/sudoers.d/getoffline-actions
+sudo chmod 0440 /etc/sudoers.d/getoffline-actions
+sudo visudo --check
+sudo -u github-runner sudo --non-interactive --list
+```
+
+If Actions reports `sudo: a password is required`, the runner account does not
+have a matching `NOPASSWD` rule; confirm both the account name and the absolute
+workspace path in the rule. The runner also needs Debian's `python3-venv`
+package, and the host needs the system dependencies listed above. The first
+deployment enables and starts `getoffline.service`; later deployments stop it,
+update the application and virtual environment, and start it again.
 
 Useful server-side commands are:
 

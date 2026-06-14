@@ -43,4 +43,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy and restart GetOffline
-        run: sudo --non-interactive ./scripts/deploy-local.sh "$GITHUB_WORKSPACE"
+        run: sudo --non-interactive "$GITHUB_WORKSPACE/scripts/deploy-local.sh" "$GITHUB_WORKSPACE"
