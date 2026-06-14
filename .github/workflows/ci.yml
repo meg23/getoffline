@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: getoffline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: [self-hosted, Linux, X64]
@@ -25,3 +29,18 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+  deploy:
+    name: Deploy on Debian server
+    needs: build-and-test
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: [self-hosted, Linux, X64]
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy and restart GetOffline
+        run: sudo --non-interactive ./scripts/deploy-local.sh "$GITHUB_WORKSPACE"
