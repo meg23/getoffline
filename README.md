@@ -130,11 +130,11 @@ Actions cannot grant this access to itself. Configure a command-specific
 password.
 
 From a checkout at the same path used by the self-hosted runner, run the setup
-helper once. Replace `github-runner` with the Linux account that runs the
-Actions runner:
+helper once for the `github-actions` Linux account that runs the Actions
+runner:
 
 ```bash
-sudo ./scripts/configure-deploy-sudo.sh github-runner "$PWD"
+sudo ./scripts/configure-deploy-sudo.sh github-actions "$PWD"
 ```
 
 The helper verifies the account and deployment path, validates the generated
@@ -146,7 +146,7 @@ The workspace path is part of the rule. If the runner checkout moves, rerun the
 helper from the new checkout. To confirm the configured command, run:
 
 ```bash
-sudo -u github-runner sudo --non-interactive --list
+sudo -u github-actions sudo --non-interactive --list
 ```
 
 If Actions reports `sudo: a password is required`, the rule does not match the
