@@ -311,7 +311,7 @@ def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profi
         lock_button = f"""
       <form class="profile-lock-form" method="post" action="/profiles/lock">
         <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
-        <button class="profile-lock-button" type="submit" aria-label="Lock {profile_name}" title="Lock {profile_name}">Lock</button>
+        <button class="profile-lock-button" type="submit" aria-label="Lock {profile_name}" title="Lock {profile_name}"><span aria-hidden="true">🔒</span></button>
       </form>
         """
     return f"""
@@ -2512,7 +2512,7 @@ def _render_index(
     }}
     .quick-add-thumb {{ width: 120px; height: 68px; object-fit: cover; border-radius: 8px; background: #edf2ff; }}
     .quick-add-meta-title {{ font-weight: 600; color: #253559; }}
-    .quick-add-meta-sub {{ font-size: .82rem; color: #5f6d90; margin-top: .15rem; }}
+    .quick-add-meta-sub {{ font-size: 1rem; color: #5f6d90; margin-top: .15rem; }}
     .quick-add-empty {{ color: #5f6d90; font-size: .88rem; }}
 
     .hero-heading {{ display: flex; align-items: center; justify-content: space-between; gap: 1rem; }}
@@ -2526,7 +2526,7 @@ def _render_index(
     .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
     .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
     .profile-lock-form {{ margin: 0; }}
-    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0 .72rem; background: #fff7f9; color: var(--danger); font: inherit; font-size: .82rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0; background: #fff7f9; color: var(--danger); font: inherit; font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
     .profile-lock-button:hover {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
     .profile-manage-menu {{ position: relative; z-index: 20; }}
     .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
@@ -2542,7 +2542,7 @@ def _render_index(
     .profile-popover input:focus {{ outline: none; border-color: #8eb0ff; box-shadow: 0 0 0 3px rgba(63, 111, 241, .14); }}
     .profile-popover-divider {{ height: 1px; background: #e6ebf6; }}
     .profile-form-row {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }}
-    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }}
+    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; }}
     .profile-action-button:hover {{ background: #2f62f2; border-color: #2f62f2; }}
 
     table {{
@@ -2729,7 +2729,7 @@ def _render_index(
       grid-column: 2;
       align-self: center;
       justify-self: end;
-      font-size: .82rem;
+      font-size: 1rem;
       color: #d2ddff;
       border: 1px solid #3a4e84;
       border-radius: 999px;
@@ -2826,7 +2826,7 @@ def _render_index(
         grid-column: 1 / -1;
         padding: 0;
         color: var(--muted);
-        font-size: .82rem;
+        font-size: 1rem;
         font-weight: 650;
         white-space: nowrap;
         overflow: hidden;
@@ -4847,7 +4847,7 @@ def _render_settings(
     .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
     .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
     .profile-lock-form {{ margin: 0; }}
-    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0 .72rem; background: #fff7f9; color: var(--danger); font: inherit; font-size: .82rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0; background: #fff7f9; color: var(--danger); font: inherit; font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
     .profile-lock-button:hover {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
     .profile-manage-menu {{ position: relative; z-index: 20; }}
     .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
@@ -4863,7 +4863,7 @@ def _render_settings(
     .profile-popover input:focus {{ outline: none; border-color: #8eb0ff; box-shadow: 0 0 0 3px rgba(63, 111, 241, .14); }}
     .profile-popover-divider {{ height: 1px; background: #e6ebf6; }}
     .profile-form-row {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }}
-    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }}
+    .profile-action-button {{ height: 2.35rem; border: 1px solid #3f6ff1; border-radius: 9px; padding: 0 .75rem; background: #3f6ff1; color: #fff; font: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; }}
     .profile-action-button:hover {{ background: #2f62f2; border-color: #2f62f2; }}
 
     .section {{

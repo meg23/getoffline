@@ -92,7 +92,7 @@ class WebAppHelpersTests(unittest.TestCase):
 
         self.assertIn('action="/profiles/lock"', body)
         self.assertIn('class="profile-lock-button"', body)
-        self.assertIn(">Lock</button>", body)
+        self.assertIn("🔒", body)
 
     def test_clear_profile_auth_sessions_removes_profile_tokens(self):
         state = AppState(
