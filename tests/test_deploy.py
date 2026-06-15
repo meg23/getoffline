@@ -1,6 +1,9 @@
 import importlib.util
+import os
+import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +30,41 @@ class DeployScriptTests(unittest.TestCase):
             "--preserve-env=GETOFFLINE_DEPLOY_REVISION,GETOFFLINE_SOURCE_CODE_URL",
             workflow,
         )
+
+    def test_deployment_timeout_uses_default(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                deploy.deployment_timeout(),
+                deploy.DEFAULT_DEPLOY_TIMEOUT_SECONDS,
+            )
+
+    def test_deployment_timeout_rejects_invalid_value(self):
+        with mock.patch.dict(
+            os.environ,
+            {"GETOFFLINE_DEPLOY_TIMEOUT_SECONDS": "never"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(SystemExit, "must be an integer"):
+                deploy.deployment_timeout()
+
+    @mock.patch.object(deploy.os, "killpg")
+    @mock.patch.object(deploy.subprocess, "Popen")
+    def test_run_command_terminates_a_timed_out_process(self, popen, killpg):
+        process = popen.return_value
+        process.pid = 123
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd=["pystrano"], timeout=1),
+            0,
+        ]
+
+        with self.assertRaisesRegex(SystemExit, "timed out after 1s"):
+            deploy.run_command(
+                ["pystrano"],
+                description="Running deployment",
+                timeout=1,
+            )
+
+        killpg.assert_called_once_with(123, deploy.signal.SIGTERM)
 
 
 if __name__ == "__main__":
