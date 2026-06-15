@@ -6,24 +6,155 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from database import get_stored_config, init_database, update_stored_defaults  # noqa: E402
 from profiles import ProfileManager  # noqa: E402
 
 
 class ProfileManagerTests(unittest.TestCase):
-    def test_default_profile_reuses_existing_paths(self):
+    def test_default_profile_uses_profiles_directory_without_moving_existing_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             output_root = root / "downloads"
             database_path = output_root / "downloads.sqlite3"
+            output_root.mkdir()
+            (output_root / "existing.mp3").write_bytes(b"media")
 
             manager = ProfileManager(root / "profiles.json", output_root, database_path)
 
             profile = manager.get_active()
             self.assertEqual(profile.profile_id, "default")
             self.assertEqual(profile.name, "default")
-            self.assertEqual(profile.output_root, output_root.resolve())
-            self.assertEqual(profile.database_path, database_path.resolve())
-            self.assertTrue(database_path.exists())
+            self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
+            self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
+            self.assertTrue(profile.database_path.exists())
+            self.assertTrue((output_root / "existing.mp3").exists())
+            self.assertFalse((profile.output_root / "existing.mp3").exists())
+
+    def test_registered_default_profile_is_normalized_without_moving_existing_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            legacy_output = root / "legacy-media"
+            legacy_output.mkdir()
+            legacy_database = root / "legacy.sqlite3"
+            registry = root / "profiles.json"
+            registry.write_text(
+                (
+                    '{"active_profile_id":"default","profiles":[{'
+                    '"id":"default","name":"Home","output_root":"'
+                    f'{legacy_output}","database_path":"{legacy_database}"'
+                    "}]}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProfileManager(registry, root / "unused", root / "unused.sqlite3")
+
+            profile = manager.get_active()
+            self.assertEqual(profile.name, "Home")
+            self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
+            self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
+            self.assertTrue(legacy_output.exists())
+
+    def test_existing_profile_directories_are_discovered_without_a_registry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profiles_root = root / "profiles"
+            for profile_id in ("default", "max", "ozzie"):
+                profile_root = profiles_root / profile_id
+                (profile_root / "downloads").mkdir(parents=True)
+                (profile_root / "downloads.sqlite3").touch()
+            (profiles_root / ".DS_Store").write_text("", encoding="utf-8")
+
+            manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(
+                [profile.profile_id for profile in manager.list_profiles()],
+                ["default", "max", "ozzie"],
+            )
+            self.assertEqual(manager.profiles["max"].output_root, profiles_root / "max" / "downloads")
+            self.assertEqual(manager.profiles["ozzie"].database_path, profiles_root / "ozzie" / "downloads.sqlite3")
+
+    def test_profile_directory_with_content_at_root_uses_profile_root_as_output_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            channel_root = profile_root / "My Channel"
+            channel_root.mkdir(parents=True)
+            (channel_root / "episode.mp3").write_bytes(b"audio")
+            (profile_root / "downloads").mkdir()
+            (profile_root / "downloads.sqlite3").touch()
+
+            manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(manager.profiles["max"].output_root, profile_root)
+
+    def test_registry_name_is_preserved_for_discovered_profile_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            (profile_root / "downloads").mkdir(parents=True)
+            registry = root / "profiles.json"
+            registry.write_text(
+                (
+                    '{"profiles":[{"id":"max","name":"Max",'
+                    f'"output_root":"{profile_root / "downloads"}",'
+                    f'"database_path":"{profile_root / "downloads.sqlite3"}"'
+                    "}]}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProfileManager(registry, root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(manager.profiles["max"].name, "Max")
+
+    def test_registered_profile_paths_are_recomputed_from_content_layout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            channel_root = profile_root / "XboxReady"
+            channel_root.mkdir(parents=True)
+            (channel_root / "episode.mp3").write_bytes(b"audio")
+            (profile_root / "downloads").mkdir()
+            database_path = profile_root / "downloads.sqlite3"
+            database_path.touch()
+            registry = root / "profiles.json"
+            registry.write_text(
+                (
+                    '{"profiles":[{"id":"max","name":"Max",'
+                    f'"output_root":"{profile_root / "downloads"}",'
+                    f'"database_path":"{database_path}"'
+                    "}]}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProfileManager(registry, root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(manager.profiles["max"].name, "Max")
+            self.assertEqual(manager.profiles["max"].output_root, profile_root)
+            self.assertEqual(manager.profiles["max"].database_path, database_path)
+
+    def test_discovered_profile_database_paths_are_updated_to_canonical_locations(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            (profile_root / "downloads").mkdir(parents=True)
+            database_path = profile_root / "downloads.sqlite3"
+            init_database(str(database_path))
+            update_stored_defaults(
+                str(database_path),
+                {
+                    "output_root": str(root / "old-max"),
+                    "database_path": str(root / "old-max.sqlite3"),
+                },
+            )
+
+            ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+
+            defaults = get_stored_config(str(database_path))["defaults"]
+            self.assertEqual(Path(defaults["output_root"]), profile_root / "downloads")
+            self.assertEqual(Path(defaults["database_path"]), database_path)
 
     def test_create_profile_has_isolated_database_and_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:

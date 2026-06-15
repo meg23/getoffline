@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from database import ensure_config_seeded, get_stored_config, init_database
+from database import ensure_config_seeded, get_stored_config, init_database, update_stored_defaults
 
 
 @dataclass(frozen=True)
@@ -33,18 +33,56 @@ class ProfileManager:
                 profile = self._profile_from_entry(entry)
                 if profile is not None:
                     self.profiles[profile.profile_id] = profile
-        if "default" not in self.profiles:
-            self.profiles["default"] = Profile(
-                profile_id="default",
-                name="default",
-                output_root=default_output_root.expanduser().resolve(),
-                database_path=default_database_path.expanduser().resolve(),
-            )
+        self._discover_profiles()
+        existing_default = self.profiles.get("default")
+        default_profile_root = self._profiles_root / "default"
+        default_profile = Profile(
+            profile_id="default",
+            name=existing_default.name if existing_default else "default",
+            output_root=(
+                existing_default.output_root
+                if existing_default and existing_default.output_root in {default_profile_root, default_profile_root / "downloads"}
+                else self._output_root_for_profile(default_profile_root)
+            ),
+            database_path=default_profile_root / "downloads.sqlite3",
+        )
+        self.profiles["default"] = default_profile
         requested_active = str((payload or {}).get("active_profile_id") or "default")
         if requested_active in self.profiles:
             self.active_profile_id = requested_active
         self._initialize_all()
         self._write_registry()
+
+    @property
+    def _profiles_root(self) -> Path:
+        return self.registry_path.parent / "profiles"
+
+    def _discover_profiles(self) -> None:
+        if not self._profiles_root.is_dir():
+            return
+        for profile_root in self._profiles_root.iterdir():
+            if not profile_root.is_dir() or profile_root.name.startswith("."):
+                continue
+            profile_id = profile_root.name
+            existing_profile = self.profiles.get(profile_id)
+            output_root = self._output_root_for_profile(profile_root)
+            database_path = profile_root / "downloads.sqlite3"
+            self.profiles[profile_id] = Profile(
+                profile_id=profile_id,
+                name=existing_profile.name if existing_profile else profile_id,
+                output_root=output_root,
+                database_path=database_path,
+            )
+
+    def _output_root_for_profile(self, profile_root: Path) -> Path:
+        nested_output_root = profile_root / "downloads"
+        if not profile_root.is_dir():
+            return nested_output_root
+        ignored_names = {"downloads", "downloads.sqlite3", "cookies.txt"}
+        has_content_at_profile_root = any(child.name not in ignored_names for child in profile_root.iterdir())
+        if has_content_at_profile_root:
+            return profile_root
+        return nested_output_root
 
     def _read_registry(self) -> Dict[str, Any]:
         if not self.registry_path.exists():
@@ -79,6 +117,10 @@ class ProfileManager:
             profile.output_root.mkdir(parents=True, exist_ok=True)
             init_database(str(profile.database_path))
             ensure_config_seeded(
+                str(profile.database_path),
+                {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
+            )
+            update_stored_defaults(
                 str(profile.database_path),
                 {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
             )
@@ -127,7 +169,7 @@ class ProfileManager:
         with self.lock:
             self._ensure_unique_name(clean_name)
             profile_id = self._new_profile_id(clean_name)
-            profile_root = self.registry_path.parent / "profiles" / profile_id
+            profile_root = self._profiles_root / profile_id
             profile = Profile(
                 profile_id=profile_id,
                 name=clean_name,

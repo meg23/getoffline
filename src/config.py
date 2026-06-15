@@ -69,6 +69,15 @@ def _build_bootstrap_defaults(config_path: Optional[Path] = None):
     return defaults
 
 
+def load_bootstrap_config(config_path: Optional[Path] = None):
+    return {
+        "defaults": _build_bootstrap_defaults(config_path),
+        "download_settings": {"youtube_cookie_text": None},
+        "youtube": [],
+        "podcasts": [],
+    }
+
+
 def load_config(config_path: Optional[Path] = None):
     defaults = _build_bootstrap_defaults(config_path)
     init_database(defaults["database_path"])
