@@ -207,6 +207,14 @@ also logs in as the deployment account. Pystrano installs
 dependencies, switches the `current` symlink atomically, restarts the service,
 and retains the five most recent releases.
 
+The deployment wrapper prints each operation before it starts and first checks
+both SSH access to `jellyfin@localhost` and access to the Git repository. These
+checks use non-interactive authentication and short timeouts, so a missing key
+or unreachable SSH server fails with a useful error instead of appearing to
+hang. The Pystrano process itself has a 20-minute timeout. Override it when
+needed by setting `GETOFFLINE_DEPLOY_TIMEOUT_SECONDS` to a positive number of
+seconds in the deployment environment.
+
 Useful server-side commands are:
 
 ```bash
