@@ -221,30 +221,67 @@ def _create_profile_auth_session(state: AppState, profile_id: str) -> str:
 
 def _render_pin_page(state: AppState, message: str = "") -> str:
     profiles, active_profile = _profile_view(state)
-    profile_menu = _render_profile_menu(profiles, active_profile, "/pin")
     profile_name = html.escape(active_profile.name if active_profile else "Profile")
+    profile_initial = html.escape((active_profile.name[:1].upper() if active_profile else "P") or "P")
     message_html = f'<p class="error">{html.escape(message)}</p>' if message else ""
+    profile_options = []
+    for profile in profiles:
+        selected = " selected" if active_profile and profile.profile_id == active_profile.profile_id else ""
+        profile_options.append(
+            f'<option value="{html.escape(profile.profile_id)}"{selected}>{html.escape(profile.name)}</option>'
+        )
+    profile_switcher = ""
+    if active_profile is not None:
+        profile_switcher = f"""
+        <form class="pin-profile-switcher" method="post" action="/profiles/switch">
+          <input type="hidden" name="redirect_to" value="/pin" />
+          <span class="profile-avatar" aria-hidden="true">{profile_initial}</span>
+          <label class="sr-only" for="pin-profile-switcher">Switch profile</label>
+          <select id="pin-profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">
+            {"".join(profile_options)}
+          </select>
+        </form>
+        """
     if active_profile and active_profile.has_pin:
         pin_form = f"""
         <form method="post" action="/pin" class="pin-form">
-          <label for="pin">PIN for {profile_name}</label>
-          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autofocus required />
+          <label for="pin">Enter profile PIN</label>
+          <div class="pin-input-wrap">
+            <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autofocus required placeholder="••••" />
+          </div>
           <button type="submit" class="primary">Unlock for 1 hour</button>
         </form>
         """
     else:
-        pin_form = '<p>This profile does not have a PIN.</p><p><a href="/">Continue</a></p>'
+        pin_form = '<p class="unlocked-copy">This profile does not have a PIN.</p><p><a class="primary link-button" href="/">Continue to library</a></p>'
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Unlock profile</title>
 <style>
-body{{font-family:Inter,Segoe UI,Arial,sans-serif;background:#f3f6fc;color:#12203a;margin:0;padding:2rem}}
-.card{{max-width:28rem;margin:8vh auto;background:#fff;border:1px solid #dbe5f6;border-radius:16px;padding:1.4rem;box-shadow:0 16px 40px rgba(15,35,80,.08)}}
-input,select,button{{font:inherit}}input{{width:100%;padding:.7rem;border:1px solid #cdd9f1;border-radius:10px;margin:.4rem 0 1rem}}
-button,a{{border-radius:10px;border:1px solid #c9d7f2;padding:.55rem .9rem;text-decoration:none;color:inherit;background:#fff;font-weight:700}}
-.primary{{background:#275df0;color:#fff;border-color:#275df0}}.profile-controls{{display:flex;gap:.5rem;margin-bottom:1rem}}
-.profile-switch-form{{display:flex;gap:.5rem;align-items:center}}.profile-manage-menu{{display:none}}.error{{color:#be123c;font-weight:700}}
-</style></head><body><main class="card"><h1>Unlock {profile_name}</h1>{profile_menu}{message_html}{pin_form}</main></body></html>"""
+:root{{color-scheme:light;--bg:#eef3ff;--card:#ffffff;--text:#12203a;--muted:#64708a;--border:#dbe6f8;--primary:#275df0;--primary-strong:#1d4fd1;--danger:#be123c}}
+*{{box-sizing:border-box}}
+body{{min-height:100vh;margin:0;padding:2rem;font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);background:radial-gradient(circle at 50% 0%,#ffffff 0,#f8fbff 32%,var(--bg) 100%);display:grid;place-items:center}}
+.card{{width:min(30rem,100%);position:relative;overflow:hidden;background:linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);border:1px solid var(--border);border-radius:24px;padding:2rem;box-shadow:0 24px 80px rgba(39,93,240,.14),0 8px 24px rgba(18,32,58,.08)}}
+.card::before{{content:"";position:absolute;inset:0 0 auto;height:.42rem;background:linear-gradient(90deg,#275df0,#75a7ff,#68e1fd)}}
+.lock-badge{{width:3.25rem;height:3.25rem;border-radius:18px;display:grid;place-items:center;background:#eef4ff;color:var(--primary);box-shadow:inset 0 0 0 1px #d9e6ff;margin-bottom:1.15rem}}
+.lock-badge svg{{width:1.55rem;height:1.55rem;fill:currentColor}}
+h1{{font-size:clamp(2rem,7vw,3.15rem);line-height:.98;margin:.15rem 0 .45rem;letter-spacing:-.055em}}
+.subtitle{{margin:0 0 1.35rem;color:var(--muted);font-weight:600}}
+.pin-profile-switcher{{display:flex;align-items:center;gap:.65rem;margin:0 0 1.35rem;padding:.45rem .5rem;border:1px solid #d7e2f7;border-radius:16px;background:#f6f9ff}}
+.profile-avatar{{display:inline-flex;align-items:center;justify-content:center;flex:0 0 2.25rem;width:2.25rem;height:2.25rem;border-radius:12px;background:linear-gradient(135deg,#315ff2,#76a7ff);color:#fff;font-weight:900;text-transform:uppercase;box-shadow:0 8px 18px rgba(39,93,240,.22)}}
+select{{min-width:0;flex:1;height:2.45rem;border:0;background:transparent;color:#243251;font:inherit;font-weight:800;outline:0;cursor:pointer}}
+label{{display:block;margin:0 0 .45rem;font-size:.92rem;font-weight:800;color:#273655}}
+.pin-input-wrap{{position:relative;margin-bottom:1rem}}
+input{{width:100%;height:3.35rem;padding:.85rem 1rem;border:1px solid #cad8f2;border-radius:16px;background:#fff;color:var(--text);font:inherit;font-size:1.05rem;box-shadow:0 1px 0 rgba(18,32,58,.02)}}
+input:focus{{outline:none;border-color:#7da2ff;box-shadow:0 0 0 4px rgba(39,93,240,.14)}}
+button,.link-button{{width:100%;display:inline-flex;align-items:center;justify-content:center;min-height:3.15rem;border-radius:16px;border:1px solid var(--primary);padding:.75rem 1rem;text-decoration:none;font:inherit;font-weight:900;cursor:pointer;transition:transform .14s ease,box-shadow .14s ease,background .14s ease}}
+button:hover,.link-button:hover{{transform:translateY(-1px);box-shadow:0 12px 24px rgba(39,93,240,.22)}}
+.primary{{background:linear-gradient(135deg,var(--primary),#4778ff);color:#fff;border-color:transparent}}
+.error{{margin:.25rem 0 1rem;padding:.75rem .9rem;border:1px solid #fecdd3;border-radius:14px;background:#fff1f2;color:var(--danger);font-weight:800}}
+.unlocked-copy{{margin:0 0 1rem;color:var(--muted);font-weight:700}}
+.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
+@media (max-width:520px){{body{{padding:1rem}}.card{{padding:1.35rem;border-radius:20px}}}}
+</style></head><body><main class="card"><div class="lock-badge" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 1a3 3 0 0 0-3 3v2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1V4a3 3 0 0 0-3-3Zm2 5H6V4a2 2 0 1 1 4 0v2Z"/></svg></div><h1>Unlock {profile_name}</h1><p class="subtitle">Choose a profile and enter its PIN to continue.</p>{profile_switcher}{message_html}{pin_form}</main></body></html>"""
 
 
 def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profile], redirect_to: str) -> str:
