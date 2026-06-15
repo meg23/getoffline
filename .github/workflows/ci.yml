@@ -29,30 +29,3 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p 'test_*.py' -v
-
-  deploy:
-    name: Deploy on Debian server
-    needs: build-and-test
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: [self-hosted, Linux, X64]
-    environment: production
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Pystrano
-        run: |
-          python3 -m venv .deploy-venv
-          .deploy-venv/bin/python -m pip install --upgrade pip
-          .deploy-venv/bin/python -m pip install pystrano==2.0.0
-
-      - name: Deploy with Pystrano
-        env:
-          GETOFFLINE_DEPLOY_REVISION: ${{ github.sha }}
-          GETOFFLINE_SOURCE_CODE_URL: git@github.com:${{ github.repository }}.git
-        run: >-
-          sudo --preserve-env=GETOFFLINE_DEPLOY_REVISION,GETOFFLINE_SOURCE_CODE_URL
-          --set-home --user=jellyfin
-          "$PWD/.deploy-venv/bin/python" "$PWD/scripts/deploy.py"
