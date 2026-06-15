@@ -476,6 +476,35 @@ class WebAppHelpersTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(Path(rows[0].file_path), media)
 
+    def test_fetch_downloaded_media_rows_rebases_preserved_directory_suffix_after_move(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_root = Path(tmpdir) / "profiles" / "max"
+            db_path = profile_root / "downloads.sqlite3"
+            media = profile_root / "XboxReady" / "episode.mp3"
+            media.parent.mkdir(parents=True)
+            media.write_text("audio", encoding="utf-8")
+            old_media_path = Path("/old/listens/downloads/XboxReady/episode.mp3")
+
+            init_database(str(db_path))
+            upsert_download(
+                str(db_path),
+                {
+                    "source_type": "youtube",
+                    "source_name": "XboxReady",
+                    "item_uid": "uid-rebased-profile",
+                    "title": "Rebased Episode",
+                    "file_path": str(old_media_path),
+                    "file_ext": "mp3",
+                    "file_size_bytes": media.stat().st_size,
+                    "download_status": "downloaded",
+                },
+            )
+
+            rows = fetch_downloaded_media_rows(db_path, profile_root)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(Path(rows[0].file_path), media)
+
     def test_stream_disconnect_logging_is_throttled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "episode.mp3"

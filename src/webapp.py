@@ -728,6 +728,14 @@ def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
                         break
 
                 if repaired_path is None and raw.is_absolute():
+                    path_parts = raw.parts
+                    for part_count in range(min(len(path_parts), 8), 1, -1):
+                        relocated_candidate = root.joinpath(*path_parts[-part_count:]).resolve()
+                        if relocated_candidate.is_file() and _is_media_file(relocated_candidate):
+                            repaired_path = str(relocated_candidate)
+                            break
+
+                if repaired_path is None and raw.is_absolute():
                     if files_by_name is None:
                         files_by_name = {}
                         if root.is_dir():

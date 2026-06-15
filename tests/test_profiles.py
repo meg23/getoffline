@@ -108,6 +108,33 @@ class ProfileManagerTests(unittest.TestCase):
 
             self.assertEqual(manager.profiles["max"].name, "Max")
 
+    def test_registered_profile_paths_are_recomputed_from_content_layout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            channel_root = profile_root / "XboxReady"
+            channel_root.mkdir(parents=True)
+            (channel_root / "episode.mp3").write_bytes(b"audio")
+            (profile_root / "downloads").mkdir()
+            database_path = profile_root / "downloads.sqlite3"
+            database_path.touch()
+            registry = root / "profiles.json"
+            registry.write_text(
+                (
+                    '{"profiles":[{"id":"max","name":"Max",'
+                    f'"output_root":"{profile_root / "downloads"}",'
+                    f'"database_path":"{database_path}"'
+                    "}]}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProfileManager(registry, root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(manager.profiles["max"].name, "Max")
+            self.assertEqual(manager.profiles["max"].output_root, profile_root)
+            self.assertEqual(manager.profiles["max"].database_path, database_path)
+
     def test_discovered_profile_database_paths_are_updated_to_canonical_locations(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

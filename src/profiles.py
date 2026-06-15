@@ -64,15 +64,12 @@ class ProfileManager:
             if not profile_root.is_dir() or profile_root.name.startswith("."):
                 continue
             profile_id = profile_root.name
-            if profile_id in self.profiles:
-                continue
+            existing_profile = self.profiles.get(profile_id)
             output_root = self._output_root_for_profile(profile_root)
             database_path = profile_root / "downloads.sqlite3"
-            if not profile_root.is_dir() and not database_path.is_file():
-                continue
             self.profiles[profile_id] = Profile(
                 profile_id=profile_id,
-                name=profile_id,
+                name=existing_profile.name if existing_profile else profile_id,
                 output_root=output_root,
                 database_path=database_path,
             )
