@@ -54,6 +54,45 @@ class ProfileManagerTests(unittest.TestCase):
             self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
             self.assertTrue(legacy_output.exists())
 
+    def test_existing_profile_directories_are_discovered_without_a_registry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profiles_root = root / "profiles"
+            for profile_id in ("default", "max", "ozzie"):
+                profile_root = profiles_root / profile_id
+                (profile_root / "downloads").mkdir(parents=True)
+                (profile_root / "downloads.sqlite3").touch()
+            (profiles_root / ".DS_Store").write_text("", encoding="utf-8")
+
+            manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(
+                [profile.profile_id for profile in manager.list_profiles()],
+                ["default", "max", "ozzie"],
+            )
+            self.assertEqual(manager.profiles["max"].output_root, profiles_root / "max" / "downloads")
+            self.assertEqual(manager.profiles["ozzie"].database_path, profiles_root / "ozzie" / "downloads.sqlite3")
+
+    def test_registry_name_is_preserved_for_discovered_profile_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            (profile_root / "downloads").mkdir(parents=True)
+            registry = root / "profiles.json"
+            registry.write_text(
+                (
+                    '{"profiles":[{"id":"max","name":"Max",'
+                    f'"output_root":"{profile_root / "downloads"}",'
+                    f'"database_path":"{profile_root / "downloads.sqlite3"}"'
+                    "}]}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProfileManager(registry, root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(manager.profiles["max"].name, "Max")
+
     def test_create_profile_has_isolated_database_and_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

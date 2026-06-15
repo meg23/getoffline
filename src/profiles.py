@@ -33,8 +33,9 @@ class ProfileManager:
                 profile = self._profile_from_entry(entry)
                 if profile is not None:
                     self.profiles[profile.profile_id] = profile
+        self._discover_profiles()
         existing_default = self.profiles.get("default")
-        default_profile_root = self.registry_path.parent / "profiles" / "default"
+        default_profile_root = self._profiles_root / "default"
         default_profile = Profile(
             profile_id="default",
             name=existing_default.name if existing_default else "default",
@@ -47,6 +48,30 @@ class ProfileManager:
             self.active_profile_id = requested_active
         self._initialize_all()
         self._write_registry()
+
+    @property
+    def _profiles_root(self) -> Path:
+        return self.registry_path.parent / "profiles"
+
+    def _discover_profiles(self) -> None:
+        if not self._profiles_root.is_dir():
+            return
+        for profile_root in self._profiles_root.iterdir():
+            if not profile_root.is_dir() or profile_root.name.startswith("."):
+                continue
+            profile_id = profile_root.name
+            if profile_id in self.profiles:
+                continue
+            output_root = profile_root / "downloads"
+            database_path = profile_root / "downloads.sqlite3"
+            if not output_root.is_dir() and not database_path.is_file():
+                continue
+            self.profiles[profile_id] = Profile(
+                profile_id=profile_id,
+                name=profile_id,
+                output_root=output_root,
+                database_path=database_path,
+            )
 
     def _read_registry(self) -> Dict[str, Any]:
         if not self.registry_path.exists():
@@ -129,7 +154,7 @@ class ProfileManager:
         with self.lock:
             self._ensure_unique_name(clean_name)
             profile_id = self._new_profile_id(clean_name)
-            profile_root = self.registry_path.parent / "profiles" / profile_id
+            profile_root = self._profiles_root / profile_id
             profile = Profile(
                 profile_id=profile_id,
                 name=clean_name,
