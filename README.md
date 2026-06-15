@@ -115,7 +115,7 @@ Use the **Update Downloads** button in the web UI to trigger background download
 
 Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20). Automatic checks continue for every profile, not only the profile currently visible in the web app.
 
-Use the profile menu in the top-right corner of the library or Settings page to switch profiles, create a profile, or rename the current profile. Every profile, including the initial `default` profile, stores its database and downloads under `profiles/<profile-id>/`. Existing default-profile data is moved there automatically. Each profile has its own settings, source lists, playback history, and download directory.
+Use the profile menu in the top-right corner of the library or Settings page to switch profiles, create a profile, or rename the current profile. Every profile, including the initial `default` profile, stores its database and downloads under `profiles/<profile-id>/`. Existing default-profile data must be moved there manually before upgrading. Each profile has its own settings, source lists, playback history, and download directory.
 
 ## Directory sync
 

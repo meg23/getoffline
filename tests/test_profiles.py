@@ -10,7 +10,7 @@ from profiles import ProfileManager  # noqa: E402
 
 
 class ProfileManagerTests(unittest.TestCase):
-    def test_default_profile_migrates_existing_paths_into_profiles_directory(self):
+    def test_default_profile_uses_profiles_directory_without_moving_existing_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             output_root = root / "downloads"
@@ -26,10 +26,10 @@ class ProfileManagerTests(unittest.TestCase):
             self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
             self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
             self.assertTrue(profile.database_path.exists())
-            self.assertTrue((profile.output_root / "existing.mp3").exists())
-            self.assertFalse(output_root.exists())
+            self.assertTrue((output_root / "existing.mp3").exists())
+            self.assertFalse((profile.output_root / "existing.mp3").exists())
 
-    def test_registered_default_profile_is_migrated_into_profiles_directory(self):
+    def test_registered_default_profile_is_normalized_without_moving_existing_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             legacy_output = root / "legacy-media"
@@ -52,6 +52,7 @@ class ProfileManagerTests(unittest.TestCase):
             self.assertEqual(profile.name, "Home")
             self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
             self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
+            self.assertTrue(legacy_output.exists())
 
     def test_create_profile_has_isolated_database_and_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:

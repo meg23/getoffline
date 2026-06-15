@@ -1,6 +1,5 @@
 import json
 import re
-import shutil
 import threading
 import uuid
 from dataclasses import dataclass
@@ -35,8 +34,6 @@ class ProfileManager:
                 if profile is not None:
                     self.profiles[profile.profile_id] = profile
         existing_default = self.profiles.get("default")
-        source_output_root = existing_default.output_root if existing_default else default_output_root
-        source_database_path = existing_default.database_path if existing_default else default_database_path
         default_profile_root = self.registry_path.parent / "profiles" / "default"
         default_profile = Profile(
             profile_id="default",
@@ -44,41 +41,12 @@ class ProfileManager:
             output_root=default_profile_root / "downloads",
             database_path=default_profile_root / "downloads.sqlite3",
         )
-        self._migrate_default_profile(source_output_root, source_database_path, default_profile)
         self.profiles["default"] = default_profile
         requested_active = str((payload or {}).get("active_profile_id") or "default")
         if requested_active in self.profiles:
             self.active_profile_id = requested_active
         self._initialize_all()
         self._write_registry()
-
-    def _migrate_default_profile(
-        self,
-        source_output_root: Path,
-        source_database_path: Path,
-        destination: Profile,
-    ) -> None:
-        source_output_root = source_output_root.expanduser().resolve()
-        source_database_path = source_database_path.expanduser().resolve()
-        destination.database_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if source_database_path != destination.database_path and source_database_path.is_file():
-            if not destination.database_path.exists():
-                shutil.move(str(source_database_path), str(destination.database_path))
-
-        if source_output_root == destination.output_root or not source_output_root.is_dir():
-            return
-        if not destination.output_root.exists():
-            shutil.move(str(source_output_root), str(destination.output_root))
-            return
-        for child in source_output_root.iterdir():
-            target = destination.output_root / child.name
-            if not target.exists():
-                shutil.move(str(child), str(target))
-        try:
-            source_output_root.rmdir()
-        except OSError:
-            pass
 
     def _read_registry(self) -> Dict[str, Any]:
         if not self.registry_path.exists():
