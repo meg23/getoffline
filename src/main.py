@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 from typing import Dict, List
 
-from config import load_config
+from config import load_bootstrap_config, load_config
 from podcasts import download_podcasts
 from webapp import AppState, VIDEO_EXTENSIONS, import_local_media_file, run_webapp
 from youtube import download_youtube_items
@@ -24,7 +24,7 @@ def run_downloads() -> None:
 
 
 def run_server(host: str, port: int) -> None:
-    config = load_config()
+    config = load_bootstrap_config()
     run_webapp(config=config, host=host, port=port)
 
 

@@ -28,6 +28,17 @@ class MainCliTests(unittest.TestCase):
         run_server.assert_called_once_with(host="127.0.0.1", port=8080)
         run_downloads.assert_not_called()
 
+    def test_run_server_uses_bootstrap_config_without_loading_database(self):
+        bootstrap_config = {"defaults": {"output_root": "/tmp/downloads", "database_path": "/tmp/downloads.sqlite3"}}
+        with patch("main.load_bootstrap_config", return_value=bootstrap_config) as load_bootstrap_config, patch(
+            "main.load_config"
+        ) as load_config, patch("main.run_webapp") as run_webapp:
+            main.run_server(host="127.0.0.1", port=8080)
+
+        load_bootstrap_config.assert_called_once_with()
+        load_config.assert_not_called()
+        run_webapp.assert_called_once_with(config=bootstrap_config, host="127.0.0.1", port=8080)
+
     def test_parse_import_directory_arguments(self):
         with patch.object(sys, "argv", ["getoffline", "import-directory", "/media/incoming", "--recursive"]):
             args = main.parse_args()

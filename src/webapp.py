@@ -6102,13 +6102,6 @@ def _generate_missing_summaries_on_startup(state: AppState, configured_defaults:
 
 def run_webapp(config: Dict, host: str = "127.0.0.1", port: int = 8080):
     defaults = config["defaults"]
-    init_database(str(defaults["database_path"]))
-    stored = get_stored_config(str(defaults["database_path"]))
-    config["defaults"] = stored["defaults"]
-    config["download_settings"] = stored["download_settings"]
-    config["youtube"] = stored["youtube"]
-    config["podcasts"] = stored["podcasts"]
-    materialize_youtube_cookie_file(str(defaults["database_path"]))
     registry_value = os.getenv("GETOFFLINE_PROFILES_PATH")
     registry_path = Path(registry_value) if registry_value else Path(defaults["database_path"]).parent / "profiles.json"
     profile_manager = ProfileManager(
