@@ -219,6 +219,17 @@ def _create_profile_auth_session(state: AppState, profile_id: str) -> str:
     return token
 
 
+def _clear_profile_auth_sessions(state: AppState, profile_id: str) -> None:
+    with state.profile_auth_lock:
+        expired_tokens = [
+            token
+            for token, (session_profile_id, _expires_at) in state.profile_auth_sessions.items()
+            if session_profile_id == profile_id
+        ]
+        for token in expired_tokens:
+            state.profile_auth_sessions.pop(token, None)
+
+
 def _render_pin_page(state: AppState, message: str = "") -> str:
     profiles, active_profile = _profile_view(state)
     profile_name = html.escape(active_profile.name if active_profile else "Profile")
@@ -295,6 +306,14 @@ def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profi
         )
     profile_name = html.escape(active_profile.name)
     profile_initial = html.escape(active_profile.name[:1].upper() or "P")
+    lock_button = ""
+    if active_profile.has_pin:
+        lock_button = f"""
+      <form class="profile-lock-form" method="post" action="/profiles/lock">
+        <input type="hidden" name="redirect_to" value="{html.escape(redirect_to)}" />
+        <button class="profile-lock-button" type="submit" aria-label="Lock {profile_name}" title="Lock {profile_name}">Lock</button>
+      </form>
+        """
     return f"""
     <div class="profile-controls">
       <form class="profile-switch-form" method="post" action="/profiles/switch">
@@ -304,6 +323,7 @@ def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profi
           <select id="profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">{"".join(options)}</select>
         </span>
       </form>
+      {lock_button}
       <details class="profile-manage-menu">
         <summary class="profile-add-button" aria-label="Create or rename a profile" title="Create or rename a profile">+</summary>
         <div class="profile-popover">
@@ -2505,6 +2525,9 @@ def _render_index(
     .profile-select-wrap::after {{ content: ''; position: absolute; right: .35rem; width: .42rem; height: .42rem; border-right: 2px solid #56658a; border-bottom: 2px solid #56658a; transform: rotate(45deg) translateY(-2px); pointer-events: none; }}
     .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
     .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
+    .profile-lock-form {{ margin: 0; }}
+    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0 .72rem; background: #fff7f9; color: var(--danger); font: inherit; font-size: .82rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-lock-button:hover {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
     .profile-manage-menu {{ position: relative; z-index: 20; }}
     .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
     .profile-add-button::-webkit-details-marker {{ display: none; }}
@@ -4823,6 +4846,9 @@ def _render_settings(
     .profile-select-wrap::after {{ content: ''; position: absolute; right: .35rem; width: .42rem; height: .42rem; border-right: 2px solid #56658a; border-bottom: 2px solid #56658a; transform: rotate(45deg) translateY(-2px); pointer-events: none; }}
     .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
     .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
+    .profile-lock-form {{ margin: 0; }}
+    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0 .72rem; background: #fff7f9; color: var(--danger); font: inherit; font-size: .82rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-lock-button:hover {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
     .profile-manage-menu {{ position: relative; z-index: 20; }}
     .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
     .profile-add-button::-webkit-details-marker {{ display: none; }}
@@ -5752,6 +5778,26 @@ def make_handler(state: AppState):
                 self.send_header("Content-Length", str(len(body_bytes)))
                 self.end_headers()
                 self.wfile.write(body_bytes)
+                return
+
+            if path == "/profiles/lock":
+                if state.profile_manager is None:
+                    self.send_error(404, "Profiles are unavailable")
+                    return
+                length = int(self.headers.get("Content-Length") or 0)
+                form = parse_qs(self.rfile.read(length).decode("utf-8"))
+                redirect_to = str((form.get("redirect_to") or ["/pin"])[0])
+                if redirect_to not in {"/", "/settings", "/pin"}:
+                    redirect_to = "/pin"
+                active_profile = state.profile_manager.get_active()
+                _clear_profile_auth_sessions(state, active_profile.profile_id)
+                self.send_response(303)
+                self.send_header(
+                    "Set-Cookie",
+                    _profile_auth_cookie_header(active_profile.profile_id, "", max_age=0),
+                )
+                self.send_header("Location", "/pin" if active_profile.has_pin else redirect_to)
+                self.end_headers()
                 return
 
             if path in {"/profiles/switch", "/profiles/create", "/profiles/rename"}:

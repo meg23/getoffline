@@ -48,6 +48,8 @@ from webapp import (  # noqa: E402
     update_download_position_seconds,
     trigger_single_podcast_download,
     trigger_single_youtube_download,
+    _clear_profile_auth_sessions,
+    _create_profile_auth_session,
     _render_profile_menu,
     _render_pin_page,
     _trigger_all_profile_updates,
@@ -75,6 +77,37 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('Create or rename a profile', body)
         self.assertIn('class="profile-action-button"', body)
         self.assertNotIn('<label for="profile-switcher">', body)
+
+    def test_profile_menu_contains_lock_control_for_pinned_profile(self):
+        profile = Profile(
+            "default",
+            "default",
+            Path("/tmp/downloads"),
+            Path("/tmp/downloads.sqlite3"),
+            "salt",
+            "hash",
+        )
+
+        body = _render_profile_menu([profile], profile, "/")
+
+        self.assertIn('action="/profiles/lock"', body)
+        self.assertIn('class="profile-lock-button"', body)
+        self.assertIn(">Lock</button>", body)
+
+    def test_clear_profile_auth_sessions_removes_profile_tokens(self):
+        state = AppState(
+            output_root=Path("/tmp/downloads"),
+            database_path=Path("/tmp/downloads.sqlite3"),
+            config={},
+            update_runner=mock.Mock(),
+        )
+        default_token = _create_profile_auth_session(state, "default")
+        other_token = _create_profile_auth_session(state, "other")
+
+        _clear_profile_auth_sessions(state, "default")
+
+        self.assertNotIn(default_token, state.profile_auth_sessions)
+        self.assertIn(other_token, state.profile_auth_sessions)
 
     def test_pin_page_allows_profile_switching(self):
         with tempfile.TemporaryDirectory() as tmpdir:
