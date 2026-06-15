@@ -18,7 +18,7 @@ common:
   service_file: "./deploy/getoffline/production/getoffline.service"
   clone_depth: 0
 servers:
-  - host: "localhost"
+  - host: "jellyfin@localhost"
     port: 22
     run_migrations: false
     collect_static_files: false

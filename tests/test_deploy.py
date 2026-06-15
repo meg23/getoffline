@@ -1,8 +1,6 @@
 import importlib.util
-import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -15,18 +13,10 @@ SPEC.loader.exec_module(deploy)
 
 
 class DeployScriptTests(unittest.TestCase):
-    def test_deployment_environment_selects_project_user_for_ssh(self):
-        with patch.dict(os.environ, {"LOGNAME": "github-actions", "USER": "github-actions"}):
-            environment = deploy.deployment_environment()
+    def test_playbook_connects_as_project_user(self):
+        playbook = deploy.PLAYBOOK.read_text(encoding="utf-8")
 
-        self.assertEqual(environment["LOGNAME"], "jellyfin")
-        self.assertEqual(environment["USER"], "jellyfin")
-
-    def test_deployment_environment_preserves_existing_values(self):
-        with patch.dict(os.environ, {"GETOFFLINE_DEPLOY_REVISION": "abc123"}):
-            environment = deploy.deployment_environment()
-
-        self.assertEqual(environment["GETOFFLINE_DEPLOY_REVISION"], "abc123")
+        self.assertIn(f'host: "{deploy.DEPLOY_USER}@localhost"', playbook)
 
 
 if __name__ == "__main__":
