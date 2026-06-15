@@ -112,17 +112,18 @@ existing `jellyfin` user through `systemd`.
 The installed service executes the equivalent of:
 
 ```bash
-PYTHONPATH="$PWD/src" /var/lib/jellyfin/.venv/bin/python -m main serve \
+PYTHONPATH="$PWD/src" /home/jellyfin/.venv/bin/python -m main serve \
   --host 0.0.0.0 \
   --port 8080 2>&1 | tee /var/lib/getoffline/app.log
 ```
 
 Using `systemd` is important because GitHub Actions cleans up processes spawned
 directly by a completed job. The service restarts the app after a failure and
-starts it again when Debian boots. Debian's Jellyfin package uses
-`/var/lib/jellyfin` as the `jellyfin` account's home. Pystrano keeps timestamped
-releases under `/var/lib/jellyfin/getoffline/releases` and points
-`/var/lib/jellyfin/getoffline/current` at the active release. Persistent downloads,
+starts it again when Debian boots. Pystrano places project and virtualenv paths
+under `/home/<project_user>`; therefore, it keeps timestamped releases under
+`/home/jellyfin/getoffline/releases`, points
+`/home/jellyfin/getoffline/current` at the active release, and creates the
+virtualenv at `/home/jellyfin/.venv`. Persistent downloads,
 the SQLite database, and the application log live under `/var/lib/getoffline`,
 outside the release tree.
 
@@ -147,8 +148,10 @@ sudo usermod --shell /bin/bash jellyfin
 ```
 
 Install the self-hosted runner's public key in
-`/var/lib/jellyfin/.ssh/authorized_keys` (not `/home/jellyfin`) and preserve
-strict SSH ownership and modes:
+`/var/lib/jellyfin/.ssh/authorized_keys`, because `/var/lib/jellyfin` remains
+the account home recorded in `/etc/passwd`. This SSH location is separate from
+Pystrano's `/home/jellyfin` application layout. Preserve strict SSH ownership
+and modes:
 
 ```bash
 sudo install -d -o jellyfin -g jellyfin -m 0700 /var/lib/jellyfin/.ssh
@@ -165,7 +168,18 @@ For a private repository, use a read-only GitHub deploy key. The workflow uses
 the SSH repository URL so that key is used for cloning.
 
 ```bash
-sudo install -d -o jellyfin -g jellyfin /var/lib/getoffline/downloads
+sudo install -d -o jellyfin -g jellyfin \
+  /home/jellyfin \
+  /var/lib/getoffline \
+  /var/lib/getoffline/downloads
+```
+
+After setup, verify that Pystrano created the deployment directories where the
+service expects them:
+
+```bash
+sudo -u jellyfin test -d /home/jellyfin/getoffline/releases
+sudo -u jellyfin test -x /home/jellyfin/.venv/bin/python
 ```
 
 The tracked playbook uses a full clone so the workflow can deploy the exact
