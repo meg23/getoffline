@@ -1,0 +1,19 @@
+[Unit]
+Description=GetOffline media downloader and web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jellyfin
+Group=jellyfin
+WorkingDirectory=/home/jellyfin/getoffline/current
+Environment=PYTHONUNBUFFERED=1
+Environment=GETOFFLINE_OUTPUT_ROOT=/home/jellyfin/getoffline/shared/downloads
+Environment=GETOFFLINE_DATABASE_PATH=/home/jellyfin/getoffline/shared/downloads/downloads.sqlite3
+ExecStart=/bin/bash -o pipefail -c 'PYTHONPATH="$PWD/src" /home/jellyfin/.venv/bin/python -m main serve --host 0.0.0.0 --port 8080 2>&1 | tee /home/jellyfin/getoffline/shared/app.log'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
