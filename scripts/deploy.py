@@ -22,13 +22,6 @@ def required_environment(name: str) -> str:
     return value
 
 
-def deployment_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-    environment["LOGNAME"] = DEPLOY_USER
-    environment["USER"] = DEPLOY_USER
-    return environment
-
-
 def main() -> None:
     source_code_url = required_environment("GETOFFLINE_SOURCE_CODE_URL")
     revision = required_environment("GETOFFLINE_DEPLOY_REVISION")
@@ -51,7 +44,6 @@ def main() -> None:
             ],
             cwd=REPOSITORY_ROOT,
             check=True,
-            env=deployment_environment(),
         )
 
 
