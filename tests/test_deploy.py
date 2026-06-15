@@ -5,6 +5,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_SCRIPT = REPOSITORY_ROOT / "scripts/deploy.py"
+CI_WORKFLOW = REPOSITORY_ROOT / ".github/workflows/ci.yml"
 SPEC = importlib.util.spec_from_file_location("getoffline_deploy", DEPLOY_SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("Unable to load scripts/deploy.py")
@@ -17,6 +18,15 @@ class DeployScriptTests(unittest.TestCase):
         playbook = deploy.PLAYBOOK.read_text(encoding="utf-8")
 
         self.assertIn(f'host: "{deploy.DEPLOY_USER}@localhost"', playbook)
+
+    def test_workflow_runs_deployment_as_project_user(self):
+        workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("--set-home --user=jellyfin", workflow)
+        self.assertIn(
+            "--preserve-env=GETOFFLINE_DEPLOY_REVISION,GETOFFLINE_SOURCE_CODE_URL",
+            workflow,
+        )
 
 
 if __name__ == "__main__":

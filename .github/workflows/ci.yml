@@ -52,4 +52,7 @@ jobs:
         env:
           GETOFFLINE_DEPLOY_REVISION: ${{ github.sha }}
           GETOFFLINE_SOURCE_CODE_URL: git@github.com:${{ github.repository }}.git
-        run: .deploy-venv/bin/python scripts/deploy.py
+        run: >-
+          sudo --preserve-env=GETOFFLINE_DEPLOY_REVISION,GETOFFLINE_SOURCE_CODE_URL
+          --set-home --user=jellyfin
+          "$PWD/.deploy-venv/bin/python" "$PWD/scripts/deploy.py"
