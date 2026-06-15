@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from database import ensure_config_seeded, get_stored_config, init_database
+from database import ensure_config_seeded, get_stored_config, init_database, update_stored_defaults
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,11 @@ class ProfileManager:
         default_profile = Profile(
             profile_id="default",
             name=existing_default.name if existing_default else "default",
-            output_root=default_profile_root / "downloads",
+            output_root=(
+                existing_default.output_root
+                if existing_default and existing_default.output_root in {default_profile_root, default_profile_root / "downloads"}
+                else self._output_root_for_profile(default_profile_root)
+            ),
             database_path=default_profile_root / "downloads.sqlite3",
         )
         self.profiles["default"] = default_profile
@@ -62,9 +66,9 @@ class ProfileManager:
             profile_id = profile_root.name
             if profile_id in self.profiles:
                 continue
-            output_root = profile_root / "downloads"
+            output_root = self._output_root_for_profile(profile_root)
             database_path = profile_root / "downloads.sqlite3"
-            if not output_root.is_dir() and not database_path.is_file():
+            if not profile_root.is_dir() and not database_path.is_file():
                 continue
             self.profiles[profile_id] = Profile(
                 profile_id=profile_id,
@@ -72,6 +76,16 @@ class ProfileManager:
                 output_root=output_root,
                 database_path=database_path,
             )
+
+    def _output_root_for_profile(self, profile_root: Path) -> Path:
+        nested_output_root = profile_root / "downloads"
+        if not profile_root.is_dir():
+            return nested_output_root
+        ignored_names = {"downloads", "downloads.sqlite3", "cookies.txt"}
+        has_content_at_profile_root = any(child.name not in ignored_names for child in profile_root.iterdir())
+        if has_content_at_profile_root:
+            return profile_root
+        return nested_output_root
 
     def _read_registry(self) -> Dict[str, Any]:
         if not self.registry_path.exists():
@@ -106,6 +120,10 @@ class ProfileManager:
             profile.output_root.mkdir(parents=True, exist_ok=True)
             init_database(str(profile.database_path))
             ensure_config_seeded(
+                str(profile.database_path),
+                {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
+            )
+            update_stored_defaults(
                 str(profile.database_path),
                 {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
             )

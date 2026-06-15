@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from database import get_stored_config, init_database, update_stored_defaults  # noqa: E402
 from profiles import ProfileManager  # noqa: E402
 
 
@@ -73,6 +74,20 @@ class ProfileManagerTests(unittest.TestCase):
             self.assertEqual(manager.profiles["max"].output_root, profiles_root / "max" / "downloads")
             self.assertEqual(manager.profiles["ozzie"].database_path, profiles_root / "ozzie" / "downloads.sqlite3")
 
+    def test_profile_directory_with_content_at_root_uses_profile_root_as_output_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            channel_root = profile_root / "My Channel"
+            channel_root.mkdir(parents=True)
+            (channel_root / "episode.mp3").write_bytes(b"audio")
+            (profile_root / "downloads").mkdir()
+            (profile_root / "downloads.sqlite3").touch()
+
+            manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+
+            self.assertEqual(manager.profiles["max"].output_root, profile_root)
+
     def test_registry_name_is_preserved_for_discovered_profile_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -92,6 +107,27 @@ class ProfileManagerTests(unittest.TestCase):
             manager = ProfileManager(registry, root / "legacy", root / "legacy.sqlite3")
 
             self.assertEqual(manager.profiles["max"].name, "Max")
+
+    def test_discovered_profile_database_paths_are_updated_to_canonical_locations(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            profile_root = root / "profiles" / "max"
+            (profile_root / "downloads").mkdir(parents=True)
+            database_path = profile_root / "downloads.sqlite3"
+            init_database(str(database_path))
+            update_stored_defaults(
+                str(database_path),
+                {
+                    "output_root": str(root / "old-max"),
+                    "database_path": str(root / "old-max.sqlite3"),
+                },
+            )
+
+            ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+
+            defaults = get_stored_config(str(database_path))["defaults"]
+            self.assertEqual(Path(defaults["output_root"]), profile_root / "downloads")
+            self.assertEqual(Path(defaults["database_path"]), database_path)
 
     def test_create_profile_has_isolated_database_and_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -704,6 +704,7 @@ def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
             ).fetchall()
 
             updates = []
+            files_by_name: Optional[Dict[str, List[Path]]] = None
             for row_id, file_path, file_path_relative in stale_rows:
                 resolved_reference = resolve_download_artifact_path(str(root), file_path, file_path_relative)
                 if resolved_reference and _resolve_safe_media_path(root, resolved_reference):
@@ -725,6 +726,17 @@ def _repair_downloaded_file_paths(db_path: Path, output_root: Path) -> None:
                     if normalized_candidate.exists() and normalized_candidate.is_file() and _is_media_file(normalized_candidate):
                         repaired_path = str(normalized_candidate)
                         break
+
+                if repaired_path is None and raw.is_absolute():
+                    if files_by_name is None:
+                        files_by_name = {}
+                        if root.is_dir():
+                            for candidate in root.rglob("*"):
+                                if candidate.is_file() and _is_media_file(candidate):
+                                    files_by_name.setdefault(candidate.name, []).append(candidate.resolve())
+                    matching_files = files_by_name.get(raw.name, [])
+                    if len(matching_files) == 1:
+                        repaired_path = str(matching_files[0])
 
                 if repaired_path:
                     try:
