@@ -199,6 +199,33 @@ class ProfileManagerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 manager.create("alice")
 
+    def test_profile_pin_is_hashed_verified_and_persisted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            registry = root / "profiles.json"
+            manager = ProfileManager(registry, root / "downloads", root / "downloads.sqlite3")
+            profile = manager.set_pin("default", "1234")
+
+            self.assertTrue(profile.has_pin)
+            self.assertNotIn("1234", registry.read_text(encoding="utf-8"))
+            self.assertTrue(manager.verify_pin("default", "1234"))
+            self.assertFalse(manager.verify_pin("default", "9999"))
+
+            restored = ProfileManager(registry, root / "downloads", root / "downloads.sqlite3")
+            self.assertTrue(restored.get_active().has_pin)
+            self.assertTrue(restored.verify_pin("default", "1234"))
+
+    def test_blank_profile_pin_removes_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manager = ProfileManager(root / "profiles.json", root / "downloads", root / "downloads.sqlite3")
+            manager.set_pin("default", "1234")
+
+            profile = manager.set_pin("default", "")
+
+            self.assertFalse(profile.has_pin)
+            self.assertTrue(manager.verify_pin("default", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

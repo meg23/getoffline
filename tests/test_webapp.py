@@ -49,6 +49,7 @@ from webapp import (  # noqa: E402
     trigger_single_podcast_download,
     trigger_single_youtube_download,
     _render_profile_menu,
+    _render_pin_page,
     _trigger_all_profile_updates,
     _trigger_redownload_for_row,
 )
@@ -74,6 +75,26 @@ class WebAppHelpersTests(unittest.TestCase):
         self.assertIn('Create or rename a profile', body)
         self.assertIn('class="profile-action-button"', body)
         self.assertNotIn('<label for="profile-switcher">', body)
+
+    def test_pin_page_allows_profile_switching(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manager = ProfileManager(root / "profiles.json", root / "downloads", root / "downloads.sqlite3")
+            manager.set_pin("default", "1234")
+            state = AppState(
+                output_root=manager.get_active().output_root,
+                database_path=manager.get_active().database_path,
+                config=manager.load_config(manager.get_active()),
+                update_runner=mock.Mock(),
+                profile_manager=manager,
+            )
+
+            body = _render_pin_page(state)
+
+            self.assertIn('action="/profiles/switch"', body)
+            self.assertIn('value="/pin"', body)
+            self.assertIn('action="/pin"', body)
+            self.assertIn("Unlock for 1 hour", body)
 
     def test_startup_summary_database_error_does_not_abort_startup(self):
         state = AppState(

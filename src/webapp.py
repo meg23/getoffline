@@ -3,6 +3,7 @@ import json
 import mimetypes
 import os
 import hashlib
+import secrets
 import posixpath
 import re
 import gc
@@ -20,6 +21,7 @@ from io import StringIO
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from dataclasses import dataclass, field
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -82,6 +84,7 @@ PROGRESS_FLUSH_POLL_SECONDS = 1.0
 PROGRESS_MIN_DELTA_SECONDS = 5.0
 DESCRIPTOR_CLEANUP_INTERVAL_SECONDS = 180
 CONTENT_RETENTION_INTERVAL_SECONDS = 60 * 60
+PROFILE_AUTH_TTL_SECONDS = 60 * 60
 MEMORY_DIAGNOSTICS_INTERVAL_SECONDS = 60
 HEAPDUMP_TOP_ALLOCATIONS = 250
 IDLE_RSS_LOG_INTERVAL_SECONDS = 300
@@ -158,6 +161,8 @@ class AppState:
     profile_manager: Optional[ProfileManager] = None
     profile_lock: threading.RLock = field(default_factory=threading.RLock)
     profile_update_statuses: Dict[str, UpdateStatus] = field(default_factory=dict)
+    profile_auth_sessions: Dict[str, Tuple[str, float]] = field(default_factory=dict)
+    profile_auth_lock: threading.RLock = field(default_factory=threading.RLock)
 
 
 def _activate_profile(state: AppState, profile: Profile) -> None:
@@ -176,6 +181,70 @@ def _profile_view(state: AppState) -> Tuple[List[Profile], Optional[Profile]]:
     if state.profile_manager is None:
         return [], None
     return state.profile_manager.list_profiles(), state.profile_manager.get_active()
+
+
+def _profile_auth_cookie_name(profile_id: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", profile_id)
+    return f"getoffline_profile_auth_{safe_id}"
+
+
+def _profile_auth_cookie_header(profile_id: str, token: str, max_age: int = PROFILE_AUTH_TTL_SECONDS) -> str:
+    return f"{_profile_auth_cookie_name(profile_id)}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
+
+
+def _is_profile_unlocked(state: AppState, handler: BaseHTTPRequestHandler, profile: Profile) -> bool:
+    if state.profile_manager is None or not profile.has_pin:
+        return True
+    cookies = SimpleCookie(handler.headers.get("Cookie") or "")
+    morsel = cookies.get(_profile_auth_cookie_name(profile.profile_id))
+    if morsel is None:
+        return False
+    token = morsel.value
+    now = time.time()
+    with state.profile_auth_lock:
+        session = state.profile_auth_sessions.get(token)
+        if session is None:
+            return False
+        session_profile_id, expires_at = session
+        if session_profile_id != profile.profile_id or expires_at <= now:
+            state.profile_auth_sessions.pop(token, None)
+            return False
+        return True
+
+
+def _create_profile_auth_session(state: AppState, profile_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    with state.profile_auth_lock:
+        state.profile_auth_sessions[token] = (profile_id, time.time() + PROFILE_AUTH_TTL_SECONDS)
+    return token
+
+
+def _render_pin_page(state: AppState, message: str = "") -> str:
+    profiles, active_profile = _profile_view(state)
+    profile_menu = _render_profile_menu(profiles, active_profile, "/pin")
+    profile_name = html.escape(active_profile.name if active_profile else "Profile")
+    message_html = f'<p class="error">{html.escape(message)}</p>' if message else ""
+    if active_profile and active_profile.has_pin:
+        pin_form = f"""
+        <form method="post" action="/pin" class="pin-form">
+          <label for="pin">PIN for {profile_name}</label>
+          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autofocus required />
+          <button type="submit" class="primary">Unlock for 1 hour</button>
+        </form>
+        """
+    else:
+        pin_form = '<p>This profile does not have a PIN.</p><p><a href="/">Continue</a></p>'
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Unlock profile</title>
+<style>
+body{{font-family:Inter,Segoe UI,Arial,sans-serif;background:#f3f6fc;color:#12203a;margin:0;padding:2rem}}
+.card{{max-width:28rem;margin:8vh auto;background:#fff;border:1px solid #dbe5f6;border-radius:16px;padding:1.4rem;box-shadow:0 16px 40px rgba(15,35,80,.08)}}
+input,select,button{{font:inherit}}input{{width:100%;padding:.7rem;border:1px solid #cdd9f1;border-radius:10px;margin:.4rem 0 1rem}}
+button,a{{border-radius:10px;border:1px solid #c9d7f2;padding:.55rem .9rem;text-decoration:none;color:inherit;background:#fff;font-weight:700}}
+.primary{{background:#275df0;color:#fff;border-color:#275df0}}.profile-controls{{display:flex;gap:.5rem;margin-bottom:1rem}}
+.profile-switch-form{{display:flex;gap:.5rem;align-items:center}}.profile-manage-menu{{display:none}}.error{{color:#be123c;font-weight:700}}
+</style></head><body><main class="card"><h1>Unlock {profile_name}</h1>{profile_menu}{message_html}{pin_form}</main></body></html>"""
 
 
 def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profile], redirect_to: str) -> str:
@@ -4494,6 +4563,7 @@ def _render_settings(
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
     manual_upload_filter_checked = default_checked("manual_upload_delete_explicit_content")
+    pin_status = "PIN is set" if active_profile and active_profile.has_pin else "No PIN set"
     cookie_value = html.escape(cookie_text)
 
     youtube_cards = []
@@ -4840,6 +4910,18 @@ def _render_settings(
         <div class="actions">
           <button type="submit" class="primary">Save general settings</button>
         </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h2>Profile lock</h2>
+      <p class="section-help">Set a 4–12 digit PIN for this profile. After unlocking, access expires after one hour. Leave blank and save to remove the PIN.</p>
+      <p><strong>{pin_status}</strong></p>
+      <form method="post" action="/settings">
+        <input type="hidden" name="settings_action" value="update_profile_pin" />
+        <label for="profile_pin">Profile PIN</label>
+        <input id="profile_pin" name="profile_pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="Leave blank to remove PIN" />
+        <div class="actions"><button type="submit" class="primary">Save profile PIN</button></div>
       </form>
     </div>
 
@@ -5334,6 +5416,29 @@ def make_handler(state: AppState):
             query = parse_qs(parsed.query)
             rows_cache: Optional[List[MediaRow]] = None
 
+            if path == "/pin":
+                active_profile = _profile_view(state)[1]
+                if active_profile is not None and _is_profile_unlocked(state, self, active_profile):
+                    self.send_response(303)
+                    self.send_header("Location", "/")
+                    self.end_headers()
+                    return
+                body = _render_pin_page(state)
+                body_bytes = body.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            active_profile = _profile_view(state)[1]
+            if active_profile is not None and not _is_profile_unlocked(state, self, active_profile):
+                self.send_response(303)
+                self.send_header("Location", "/pin")
+                self.end_headers()
+                return
+
             def _rows() -> List[MediaRow]:
                 nonlocal rows_cache
                 if rows_cache is None:
@@ -5588,6 +5693,30 @@ def make_handler(state: AppState):
             path = posixpath.normpath(parsed.path)
             query = parse_qs(parsed.query)
 
+            if path == "/pin":
+                if state.profile_manager is None:
+                    self.send_error(404, "Profiles are unavailable")
+                    return
+                length = int(self.headers.get("Content-Length") or 0)
+                form = parse_qs(self.rfile.read(length).decode("utf-8"))
+                active_profile = state.profile_manager.get_active()
+                pin = str((form.get("pin") or [""])[0])
+                if state.profile_manager.verify_pin(active_profile.profile_id, pin):
+                    token = _create_profile_auth_session(state, active_profile.profile_id)
+                    self.send_response(303)
+                    self.send_header("Set-Cookie", _profile_auth_cookie_header(active_profile.profile_id, token))
+                    self.send_header("Location", "/")
+                    self.end_headers()
+                    return
+                body = _render_pin_page(state, "Incorrect PIN")
+                body_bytes = body.encode("utf-8")
+                self.send_response(403)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
             if path in {"/profiles/switch", "/profiles/create", "/profiles/rename"}:
                 if state.profile_manager is None:
                     self.send_error(404, "Profiles are unavailable")
@@ -5595,21 +5724,42 @@ def make_handler(state: AppState):
                 length = int(self.headers.get("Content-Length") or 0)
                 form = parse_qs(self.rfile.read(length).decode("utf-8"))
                 redirect_to = str((form.get("redirect_to") or ["/"])[0])
-                if redirect_to not in {"/", "/settings"}:
+                if redirect_to not in {"/", "/settings", "/pin"}:
                     redirect_to = "/"
                 try:
                     if path == "/profiles/switch":
                         profile = state.profile_manager.switch(str((form.get("profile_id") or [""])[0]))
                     elif path == "/profiles/create":
+                        active_profile = state.profile_manager.get_active()
+                        if not _is_profile_unlocked(state, self, active_profile):
+                            self.send_response(303)
+                            self.send_header("Location", "/pin")
+                            self.end_headers()
+                            return
                         profile = state.profile_manager.create(str((form.get("name") or [""])[0]))
                     else:
+                        active_profile = state.profile_manager.get_active()
+                        if not _is_profile_unlocked(state, self, active_profile):
+                            self.send_response(303)
+                            self.send_header("Location", "/pin")
+                            self.end_headers()
+                            return
                         profile = state.profile_manager.rename_active(str((form.get("name") or [""])[0]))
                     _activate_profile(state, profile)
                 except ValueError as exc:
                     self.send_error(400, str(exc))
                     return
+                if path == "/profiles/switch" and profile.has_pin and not _is_profile_unlocked(state, self, profile):
+                    redirect_to = "/pin"
                 self.send_response(303)
                 self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
+
+            active_profile = _profile_view(state)[1]
+            if active_profile is not None and not _is_profile_unlocked(state, self, active_profile):
+                self.send_response(303)
+                self.send_header("Location", "/pin")
                 self.end_headers()
                 return
 
@@ -5658,7 +5808,7 @@ def make_handler(state: AppState):
                 sync_name = "Directory sync" if sync_config.target == "directory" else "Android sync"
                 log.info("Manual %s requested (started=%s)", sync_name, "yes" if started else "no")
                 redirect_to = (query.get("next") or ["/"])[0]
-                if redirect_to not in {"/", "/settings"}:
+                if redirect_to not in {"/", "/settings", "/pin"}:
                     redirect_to = "/"
                 self.send_response(303)
                 self.send_header("Location", redirect_to)
@@ -5881,6 +6031,20 @@ def make_handler(state: AppState):
                         str(state.database_path),
                         {"telemetry_dumps_enabled": "1" if telemetry_dumps_enabled else "0"},
                     )
+
+                elif settings_action == "update_profile_pin":
+                    if state.profile_manager is None:
+                        self.send_error(404, "Profiles are unavailable")
+                        return
+                    try:
+                        profile = state.profile_manager.set_pin(
+                            state.profile_manager.get_active().profile_id,
+                            str((form.get("profile_pin") or [""])[0]),
+                        )
+                    except ValueError as exc:
+                        self.send_error(400, str(exc))
+                        return
+                    _activate_profile(state, profile)
 
                 elif settings_action == "update_cookie":
                     raw_cookie = (form.get("youtube_cookie_text") or [""])[0]
