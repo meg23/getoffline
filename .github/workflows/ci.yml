@@ -44,7 +44,7 @@ jobs:
 
       - name: Install Pystrano
         run: |
-          python3.12 -m venv .deploy-venv
+          python3 -m venv .deploy-venv
           .deploy-venv/bin/python -m pip install --upgrade pip
           .deploy-venv/bin/python -m pip install pystrano==2.0.0
 
