@@ -198,10 +198,12 @@ sudo -u jellyfin test -w /home/jellyfin/getoffline/shared/downloads
 The tracked playbook uses a full clone so the workflow can deploy the exact
 commit SHA that passed CI. `scripts/deploy.py` obtains the repository URL and
 revision from GitHub Actions, renders a temporary playbook without modifying
-the tracked template, and invokes `pystrano deploy`. The playbook's server
-target is explicitly `jellyfin@localhost`, ensuring Fabric logs in as the
-deployment account rather than inheriting the self-hosted runner's account.
-Pystrano installs
+the tracked template, and invokes `pystrano deploy`. The workflow runs that
+process as the `jellyfin` operating-system account so Paramiko reads the
+deployment account's home directory and SSH credentials. It preserves only the
+repository URL and revision environment variables needed by the script. The
+playbook's server target is explicitly `jellyfin@localhost`, ensuring Fabric
+also logs in as the deployment account. Pystrano installs
 dependencies, switches the `current` symlink atomically, restarts the service,
 and retains the five most recent releases.
 
