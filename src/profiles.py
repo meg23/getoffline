@@ -2,6 +2,8 @@ import json
 import re
 import threading
 import uuid
+import hashlib
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +17,12 @@ class Profile:
     name: str
     output_root: Path
     database_path: Path
+    pin_salt: str = ""
+    pin_hash: str = ""
+
+    @property
+    def has_pin(self) -> bool:
+        return bool(self.pin_salt and self.pin_hash)
 
 
 class ProfileManager:
@@ -45,6 +53,8 @@ class ProfileManager:
                 else self._output_root_for_profile(default_profile_root)
             ),
             database_path=default_profile_root / "downloads.sqlite3",
+            pin_salt=existing_default.pin_salt if existing_default else "",
+            pin_hash=existing_default.pin_hash if existing_default else "",
         )
         self.profiles["default"] = default_profile
         requested_active = str((payload or {}).get("active_profile_id") or "default")
@@ -72,6 +82,8 @@ class ProfileManager:
                 name=existing_profile.name if existing_profile else profile_id,
                 output_root=output_root,
                 database_path=database_path,
+                pin_salt=existing_profile.pin_salt if existing_profile else "",
+                pin_hash=existing_profile.pin_hash if existing_profile else "",
             )
 
     def _output_root_for_profile(self, profile_root: Path) -> Path:
@@ -110,6 +122,8 @@ class ProfileManager:
             name,
             Path(output_root).expanduser().resolve(),
             Path(database_path).expanduser().resolve(),
+            str(entry.get("pin_salt") or ""),
+            str(entry.get("pin_hash") or ""),
         )
 
     def _initialize_all(self) -> None:
@@ -134,6 +148,8 @@ class ProfileManager:
                     "name": profile.name,
                     "output_root": str(profile.output_root),
                     "database_path": str(profile.database_path),
+                    "pin_salt": profile.pin_salt,
+                    "pin_hash": profile.pin_hash,
                 }
             )
         payload = {"active_profile_id": self.active_profile_id, "profiles": entries}
@@ -194,10 +210,58 @@ class ProfileManager:
         with self.lock:
             self._ensure_unique_name(clean_name, ignored_id=self.active_profile_id)
             current = self.profiles[self.active_profile_id]
-            renamed = Profile(current.profile_id, clean_name, current.output_root, current.database_path)
+            renamed = Profile(
+                current.profile_id,
+                clean_name,
+                current.output_root,
+                current.database_path,
+                current.pin_salt,
+                current.pin_hash,
+            )
             self.profiles[current.profile_id] = renamed
             self._write_registry()
             return renamed
+
+    def set_pin(self, profile_id: str, pin: str) -> Profile:
+        clean_pin = str(pin or "").strip()
+        if clean_pin and (not clean_pin.isdigit() or len(clean_pin) < 4 or len(clean_pin) > 12):
+            raise ValueError("PIN must be 4 to 12 digits")
+        with self.lock:
+            if profile_id not in self.profiles:
+                raise ValueError("Unknown profile")
+            current = self.profiles[profile_id]
+            if clean_pin:
+                salt = secrets.token_hex(16)
+                pin_hash = self._hash_pin(salt, clean_pin)
+            else:
+                salt = ""
+                pin_hash = ""
+            updated = Profile(
+                current.profile_id,
+                current.name,
+                current.output_root,
+                current.database_path,
+                salt,
+                pin_hash,
+            )
+            self.profiles[profile_id] = updated
+            self._write_registry()
+            return updated
+
+    def verify_pin(self, profile_id: str, pin: str) -> bool:
+        with self.lock:
+            profile = self.profiles.get(profile_id)
+            if profile is None:
+                return False
+            if not profile.has_pin:
+                return True
+            return secrets.compare_digest(
+                profile.pin_hash,
+                self._hash_pin(profile.pin_salt, str(pin or "")),
+            )
+
+    def _hash_pin(self, salt: str, pin: str) -> str:
+        return hashlib.sha256(f"{salt}:{pin}".encode("utf-8")).hexdigest()
 
     def load_config(self, profile: Profile) -> Dict[str, Any]:
         stored = get_stored_config(str(profile.database_path))
