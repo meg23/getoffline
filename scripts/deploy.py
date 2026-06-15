@@ -12,6 +12,7 @@ import tempfile
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 PLAYBOOK = REPOSITORY_ROOT / "deploy/getoffline/production/deployment.yml"
+DEPLOY_USER = "jellyfin"
 
 
 def required_environment(name: str) -> str:
@@ -19,6 +20,13 @@ def required_environment(name: str) -> str:
     if not value:
         raise SystemExit(f"{name} must be set")
     return value
+
+
+def deployment_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["LOGNAME"] = DEPLOY_USER
+    environment["USER"] = DEPLOY_USER
+    return environment
 
 
 def main() -> None:
@@ -43,6 +51,7 @@ def main() -> None:
             ],
             cwd=REPOSITORY_ROOT,
             check=True,
+            env=deployment_environment(),
         )
 
 
