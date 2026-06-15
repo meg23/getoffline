@@ -2526,8 +2526,8 @@ def _render_index(
     .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
     .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
     .profile-lock-form {{ margin: 0; }}
-    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0; background: #fff7f9; color: var(--danger); font: inherit; font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
-    .profile-lock-button:hover {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
+    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; padding: 0; background: #eef3ff; color: #2c3e74; font: inherit; font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-lock-button:hover {{ background: #3f6ff1; border-color: #3f6ff1; color: #fff; }}
     .profile-manage-menu {{ position: relative; z-index: 20; }}
     .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
     .profile-add-button::-webkit-details-marker {{ display: none; }}
@@ -4847,8 +4847,8 @@ def _render_settings(
     .profile-switch-form select {{ width: auto; max-width: 10rem; height: 1.75rem; margin: 0; padding: 0 1.25rem 0 .15rem; border: 0; outline: 0; appearance: none; background: transparent; color: #243251; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }}
     .profile-switch-form select:focus-visible {{ border-radius: 6px; box-shadow: 0 0 0 3px rgba(63, 111, 241, .16); }}
     .profile-lock-form {{ margin: 0; }}
-    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #f2bfca; border-radius: 12px; padding: 0; background: #fff7f9; color: var(--danger); font: inherit; font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
-    .profile-lock-button:hover {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
+    .profile-lock-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; padding: 0; background: #eef3ff; color: #2c3e74; font: inherit; font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
+    .profile-lock-button:hover {{ background: #3f6ff1; border-color: #3f6ff1; color: #fff; }}
     .profile-manage-menu {{ position: relative; z-index: 20; }}
     .profile-add-button {{ display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.4rem; border: 1px solid #c9d5ef; border-radius: 12px; background: #eef3ff; color: #2c3e74; cursor: pointer; list-style: none; font-size: 1.35rem; line-height: 1; font-weight: 500; transition: background .15s ease, border-color .15s ease, color .15s ease; }}
     .profile-add-button::-webkit-details-marker {{ display: none; }}
