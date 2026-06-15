@@ -10,20 +10,48 @@ from profiles import ProfileManager  # noqa: E402
 
 
 class ProfileManagerTests(unittest.TestCase):
-    def test_default_profile_reuses_existing_paths(self):
+    def test_default_profile_migrates_existing_paths_into_profiles_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             output_root = root / "downloads"
             database_path = output_root / "downloads.sqlite3"
+            output_root.mkdir()
+            (output_root / "existing.mp3").write_bytes(b"media")
 
             manager = ProfileManager(root / "profiles.json", output_root, database_path)
 
             profile = manager.get_active()
             self.assertEqual(profile.profile_id, "default")
             self.assertEqual(profile.name, "default")
-            self.assertEqual(profile.output_root, output_root.resolve())
-            self.assertEqual(profile.database_path, database_path.resolve())
-            self.assertTrue(database_path.exists())
+            self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
+            self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
+            self.assertTrue(profile.database_path.exists())
+            self.assertTrue((profile.output_root / "existing.mp3").exists())
+            self.assertFalse(output_root.exists())
+
+    def test_registered_default_profile_is_migrated_into_profiles_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            legacy_output = root / "legacy-media"
+            legacy_output.mkdir()
+            legacy_database = root / "legacy.sqlite3"
+            registry = root / "profiles.json"
+            registry.write_text(
+                (
+                    '{"active_profile_id":"default","profiles":[{'
+                    '"id":"default","name":"Home","output_root":"'
+                    f'{legacy_output}","database_path":"{legacy_database}"'
+                    "}]}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProfileManager(registry, root / "unused", root / "unused.sqlite3")
+
+            profile = manager.get_active()
+            self.assertEqual(profile.name, "Home")
+            self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
+            self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
 
     def test_create_profile_has_isolated_database_and_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
