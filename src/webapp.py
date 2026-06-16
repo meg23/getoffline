@@ -2864,16 +2864,21 @@ def _render_index(
       .container {{ max-width: none; }}
       .hero {{
         margin: 0;
-        padding: 1rem;
+        padding: .55rem .7rem;
         border-width: 0 0 1px;
-        border-radius: 0 0 24px 24px;
-        box-shadow: 0 8px 24px rgba(40, 65, 120, .08);
+        border-radius: 0;
+        box-shadow: 0 3px 12px rgba(40, 65, 120, .06);
       }}
-      .hero-heading {{ align-items: flex-start; }}
-      h1 {{ font-size: 1.55rem; letter-spacing: -.025em; }}
-      .profile-switch-form {{ max-width: 9rem; }}
+      .hero-heading {{ align-items: center; gap: .55rem; min-height: 2.35rem; }}
+      h1 {{ font-size: 1.05rem; letter-spacing: -.02em; }}
+      .profile-controls {{ gap: .28rem; }}
+      .profile-switch-form {{ height: 2rem; max-width: 7.5rem; padding: .18rem .25rem; border-radius: 999px; background: transparent; }}
       .profile-avatar {{ display: none; }}
-      .profile-switch-form select {{ max-width: 6.7rem; }}
+      .profile-select-wrap::after {{ right: .3rem; width: .34rem; height: .34rem; border-width: 1.5px; }}
+      .profile-switch-form select {{ height: 1.6rem; max-width: 6.25rem; padding-right: 1rem; font-size: .76rem; }}
+      .profile-lock-button, .profile-add-button {{ width: 2rem; height: 2rem; border-radius: 999px; background: transparent; font-size: .95rem; }}
+      .profile-add-button {{ font-size: 1.12rem; }}
+      .profile-popover {{ right: -.35rem; top: calc(100% + .4rem); }}
       .mobile-collapse-summary {{
         display: flex;
         align-items: center;
