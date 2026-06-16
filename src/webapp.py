@@ -2396,6 +2396,9 @@ def _render_index(
     }}
     .summary-label {{ color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; }}
     .summary-value {{ font-weight: 700; margin-top: .15rem; }}
+    .mobile-collapse-summary {{ display: none; }}
+    .summary-collapse, .toolbar-collapse {{ display: contents; }}
+    .summary-collapse-body, .toolbar-collapse-body {{ display: contents; }}
 
     .panel {{
       margin: 0 0 1rem;
@@ -2871,7 +2874,29 @@ def _render_index(
       .profile-switch-form {{ max-width: 9rem; }}
       .profile-avatar {{ display: none; }}
       .profile-switch-form select {{ max-width: 6.7rem; }}
-      .summary-grid {{ gap: .5rem; margin-top: .9rem; }}
+      .mobile-collapse-summary {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        min-height: 2.75rem;
+        margin-top: .85rem;
+        padding: .65rem .8rem;
+        border: 1px solid var(--border);
+        border-radius: 13px;
+        background: var(--surface-2);
+        color: #243251;
+        font-weight: 800;
+        cursor: pointer;
+        list-style: none;
+      }}
+      .mobile-collapse-summary::-webkit-details-marker {{ display: none; }}
+      .mobile-collapse-summary::after {{ content: '▾'; color: #56658a; transition: transform .15s ease; }}
+      .summary-collapse:not([open]) .mobile-collapse-summary::after,
+      .toolbar-collapse:not([open]) .mobile-collapse-summary::after {{ transform: rotate(-90deg); }}
+      .summary-collapse, .toolbar-collapse {{ display: block; }}
+      .summary-collapse-body, .toolbar-collapse-body {{ display: block; }}
+      .summary-grid {{ gap: .5rem; margin-top: .55rem; }}
       .summary-card {{ min-height: 4.4rem; padding: .65rem .75rem; border-radius: 12px; }}
       .summary-card:last-child {{ grid-column: 1 / -1; min-height: auto; }}
       .summary-label {{ font-size: .68rem; }}
@@ -2883,6 +2908,8 @@ def _render_index(
         box-shadow: var(--shadow-soft);
       }}
       .toolbar-actions {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; }}
+      .toolbar-collapse {{ grid-column: 1 / -1; width: 100%; }}
+      .toolbar-collapse-body {{ display: grid; grid-template-columns: minmax(0, 1fr); gap: .55rem; margin-top: .55rem; }}
       .toolbar-form {{ width: 100%; }}
       .icon-button {{
         width: 100%;
@@ -2926,6 +2953,9 @@ def _render_index(
   <div class="container">
     <div class="hero">
       <div class="hero-heading"><h1>GetOffline</h1>{profile_menu}</div>
+      <details id="summary-collapse" class="summary-collapse" open>
+        <summary class="mobile-collapse-summary">Library summary</summary>
+        <div class="summary-collapse-body">
       <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
@@ -2948,6 +2978,8 @@ def _render_index(
           <div id="summary-listened-items" class="summary-value">{total_listened}</div>
         </div>
       </div>
+        </div>
+      </details>
     </div>
 
     <div class="panel">
@@ -2958,6 +2990,9 @@ def _render_index(
       <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link or search" aria-label="Add YouTube link or search">{_icon_use("bi-plus-lg")}<span class="icon-button-label">Add</span></button>
       <button id="transcript-search-open" class="icon-button" type="button" title="Search transcript text" aria-label="Search transcript text">{_icon_use("bi-search")}<span class="icon-button-label">Search</span></button>
         <a class="icon-button" href="/settings" title="Settings" aria-label="Settings">{_icon_use("bi-gear")}<span class="icon-button-label">Settings</span></a>
+        <details id="toolbar-collapse" class="toolbar-collapse" open>
+          <summary class="mobile-collapse-summary">Filters and batch actions</summary>
+          <div class="toolbar-collapse-body">
         <div class="library-filter-wrap" role="group" aria-label="Library filters">
           <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title..." aria-label="Filter by artist or title" autocomplete="off" />
           <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
@@ -2982,6 +3017,8 @@ def _render_index(
           </select>
           <button id="batch-apply" class="batch-apply" type="submit" title="Apply batch action" aria-label="Apply batch action" disabled>Apply</button>
         </form>
+          </div>
+        </details>
       </div>
     </div>
     <div id="transcript-search-backdrop" class="quick-add-backdrop" aria-hidden="true">
@@ -3091,6 +3128,7 @@ def _render_index(
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
+      const mobileCollapseQuery = window.matchMedia('(max-width: 640px)');
       const syncForm = document.getElementById('sync-form');
       const syncButton = document.getElementById('sync-button');
       const summaryTooltip = document.getElementById('summary-tooltip');
@@ -3100,6 +3138,19 @@ def _render_index(
       let suppressSyncAutoReload = false;
       const syncStatusPollIntervalMs = 1500;
       const mediaSettingsStorageKey = 'getofflineMediaElementSettings';
+
+      const syncMobileCollapseState = () => {{
+        document.querySelectorAll('.summary-collapse, .toolbar-collapse').forEach((details) => {{
+          details.open = !mobileCollapseQuery.matches;
+        }});
+      }};
+
+      syncMobileCollapseState();
+      if (typeof mobileCollapseQuery.addEventListener === 'function') {{
+        mobileCollapseQuery.addEventListener('change', syncMobileCollapseState);
+      }} else if (typeof mobileCollapseQuery.addListener === 'function') {{
+        mobileCollapseQuery.addListener(syncMobileCollapseState);
+      }}
 
       const isMediaPlaybackActive = () => {{
         return Array.from(document.querySelectorAll('audio,video')).some((media) => {{
