@@ -2397,8 +2397,8 @@ def _render_index(
     .summary-label {{ color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; }}
     .summary-value {{ font-weight: 700; margin-top: .15rem; }}
     .mobile-collapse-summary {{ display: none; }}
-    .summary-collapse, .toolbar-collapse {{ display: contents; }}
-    .summary-collapse-body, .toolbar-collapse-body {{ display: contents; }}
+    .toolbar-collapse {{ display: contents; }}
+    .toolbar-collapse-body {{ display: contents; }}
 
     .panel {{
       margin: 0 0 1rem;
@@ -2420,7 +2420,7 @@ def _render_index(
     }}
     .toolbar-form {{ margin: 0; }}
     .toolbar-spacer {{ flex: 1 1 auto; }}
-    .batch-toolbar-form {{ margin-left: auto; display: inline-flex; align-items: center; gap: .45rem; flex-wrap: nowrap; }}
+    .batch-toolbar-form {{ margin-left: auto; display: inline-flex; align-items: center; justify-content: flex-end; gap: .45rem; flex-wrap: nowrap; }}
     .batch-select {{ min-width: 10rem; border: 1px solid #c9d5ef; border-radius: 8px; padding: .22rem .42rem; font: inherit; color: #243251; background: #fff; }}
     .batch-apply {{ border: 1px solid #c9d5ef; border-radius: 8px; padding: .24rem .65rem; font: inherit; background: #eef3ff; color: #2c3e74; cursor: pointer; }}
     .batch-apply:hover {{ background: #dfe8ff; }}
@@ -2897,10 +2897,9 @@ def _render_index(
       }}
       .mobile-collapse-summary::-webkit-details-marker {{ display: none; }}
       .mobile-collapse-summary::after {{ content: '▾'; color: #56658a; transition: transform .15s ease; }}
-      .summary-collapse:not([open]) .mobile-collapse-summary::after,
       .toolbar-collapse:not([open]) .mobile-collapse-summary::after {{ transform: rotate(-90deg); }}
-      .summary-collapse, .toolbar-collapse {{ display: block; }}
-      .summary-collapse-body, .toolbar-collapse-body {{ display: block; }}
+      .toolbar-collapse {{ display: block; }}
+      .toolbar-collapse-body {{ display: block; }}
       .summary-grid {{ gap: .5rem; margin-top: .55rem; }}
       .summary-card {{ min-height: 4.4rem; padding: .65rem .75rem; border-radius: 12px; }}
       .summary-card:last-child {{ grid-column: 1 / -1; min-height: auto; }}
@@ -2933,8 +2932,8 @@ def _render_index(
       .library-filter-select {{ min-width: 6.9rem; padding-top: .7rem; padding-bottom: .7rem; }}
       .library-filter-clear {{ min-width: 2.65rem; }}
       .toolbar-spacer {{ display: none; }}
-      .batch-toolbar-form {{ grid-column: 1 / -1; width: 100%; margin: 0; gap: .5rem; }}
-      .batch-select {{ flex: 1 1 auto; min-width: 0; height: 2.75rem; padding: .5rem .65rem; }}
+      .batch-toolbar-form {{ grid-column: 1 / -1; width: 100%; margin: 0; gap: .5rem; justify-content: flex-end; }}
+      .batch-select {{ flex: 0 1 20rem; min-width: 0; height: 2.75rem; padding: .5rem .65rem; }}
       .batch-apply {{ height: 2.75rem; padding: .5rem .9rem; }}
       tbody {{ gap: .65rem; }}
       tbody tr {{ padding: .9rem 3rem .9rem .9rem; border-radius: 16px; }}
@@ -2958,9 +2957,6 @@ def _render_index(
   <div class="container">
     <div class="hero">
       <div class="hero-heading"><h1>GetOffline</h1>{profile_menu}</div>
-      <details id="summary-collapse" class="summary-collapse" open>
-        <summary class="mobile-collapse-summary">Library summary</summary>
-        <div class="summary-collapse-body">
       <div id="summary-grid" class="summary-grid">
         <div class="summary-card">
           <div class="summary-label">Visible Items</div>
@@ -2983,8 +2979,6 @@ def _render_index(
           <div id="summary-listened-items" class="summary-value">{total_listened}</div>
         </div>
       </div>
-        </div>
-      </details>
     </div>
 
     <div class="panel">
@@ -3145,7 +3139,7 @@ def _render_index(
       const mediaSettingsStorageKey = 'getofflineMediaElementSettings';
 
       const syncMobileCollapseState = () => {{
-        document.querySelectorAll('.summary-collapse, .toolbar-collapse').forEach((details) => {{
+        document.querySelectorAll('.toolbar-collapse').forEach((details) => {{
           details.open = !mobileCollapseQuery.matches;
         }});
       }};
