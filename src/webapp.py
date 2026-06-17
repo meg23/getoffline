@@ -2900,11 +2900,7 @@ def _render_index(
       .toolbar-collapse:not([open]) .mobile-collapse-summary::after {{ transform: rotate(-90deg); }}
       .toolbar-collapse {{ display: block; }}
       .toolbar-collapse-body {{ display: block; }}
-      .summary-grid {{ gap: .5rem; margin-top: .55rem; }}
-      .summary-card {{ min-height: 4.4rem; padding: .65rem .75rem; border-radius: 12px; }}
-      .summary-card:last-child {{ grid-column: 1 / -1; min-height: auto; }}
-      .summary-label {{ font-size: .68rem; }}
-      .summary-value {{ margin-top: .28rem; font-size: 1.08rem; }}
+      .summary-grid {{ display: none; }}
       .panel {{
         margin: .75rem .75rem 1rem;
         padding: .75rem;
