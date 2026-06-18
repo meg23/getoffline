@@ -2946,6 +2946,66 @@ def _render_index(
       .quick-add-result button {{ grid-column: 1 / -1; width: 100%; min-height: 2.5rem; }}
       .mini-player {{ bottom: max(.5rem, env(safe-area-inset-bottom)); border-radius: 18px; }}
     }}
+
+    @media (max-width: 600px) {{
+      .mini-player-backdrop {{
+        padding: .5rem;
+        padding-bottom: max(.5rem, env(safe-area-inset-bottom));
+      }}
+      .mini-player {{
+        left: .5rem;
+        right: .5rem;
+        bottom: max(.5rem, env(safe-area-inset-bottom));
+        width: auto;
+        max-height: calc(100dvh - 1rem - env(safe-area-inset-bottom));
+        padding: .65rem;
+        gap: .5rem;
+        overflow-x: hidden;
+      }}
+      .mini-player.is-maximized {{
+        left: .5rem;
+        right: .5rem;
+        top: 50%;
+        width: auto;
+        max-height: calc(100dvh - 1rem - env(safe-area-inset-bottom));
+      }}
+      .mini-player-header {{
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: .25rem .4rem;
+      }}
+      .mini-player-title {{ font-size: .95rem; }}
+      .mini-player-source {{ font-size: .82rem; }}
+      .mini-player-open {{
+        font-size: .9rem;
+        padding: .22rem .55rem;
+      }}
+      .mini-player-close {{
+        width: 1.9rem;
+        height: 1.9rem;
+        font-size: 1.1rem;
+      }}
+      .mini-player-media {{
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+      }}
+      #mini-player-audio {{
+        height: 54px;
+        border-radius: 12px;
+      }}
+      #mini-player-audio::-webkit-media-controls-enclosure {{
+        border-radius: 12px;
+      }}
+      #mini-player-video {{ max-height: 38dvh; }}
+      .mini-player-transcript {{
+        max-height: min(36dvh, 260px);
+        padding: .45rem;
+      }}
+      .mini-player-transcript-line {{
+        padding: .3rem .38rem;
+        font-size: .92rem;
+      }}
+    }}
   </style>
 </head>
 <body>
