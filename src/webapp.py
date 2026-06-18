@@ -2768,10 +2768,14 @@ def _render_index(
       max-width: 100%;
       box-sizing: border-box;
       border-radius: 12px;
-      background: #000;
+      background: transparent;
     }}
     #mini-player-video {{ aspect-ratio: 16 / 9; max-height: min(74vh, 780px); background: #000; }}
-    #mini-player-audio {{ border-radius: 999px; }}
+    #mini-player-audio {{
+      border-radius: 999px;
+      background: #1a2748;
+      overflow: hidden;
+    }}
     .mini-player-transcript-wrap {{ margin-top: .2rem; display: none; }}
     .mini-player.is-maximized .mini-player-transcript-wrap {{ display: block; }}
     .mini-player-transcript {{
