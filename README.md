@@ -64,6 +64,10 @@ Environment variables still override the file when needed:
 
 YouTube live streams are skipped automatically for configured playlist and channel sources. To download a specific live video, paste its URL into the web app's **+** dialog. The download remains active until the stream ends or the application stops.
 
+## Split app/workers deployment
+
+For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, and run multiple sync or summary workers if you need concurrency. See `docs/app-workers-mysql-rabbitmq.md`.
+
 ## Usage
 
 Build and run the app:

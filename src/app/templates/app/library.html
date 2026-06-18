@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>GetOffline</title></head>
+  <body>
+    <h1>GetOffline</h1>
+    <p>Profile: {{ profile_id }}</p>
+    <form method="post" action="{% url 'enqueue_job' %}">
+      {% csrf_token %}
+      <input type="hidden" name="profile_id" value="{{ profile_id }}">
+      <button name="job_type" value="update_downloads" type="submit">Update downloads</button>
+      <button name="job_type" value="summarize_missing" type="submit">Summarize</button>
+      <button name="job_type" value="sync_media" type="submit">Sync</button>
+    </form>
+    <form method="post" action="{% url 'enqueue_job' %}">
+      {% csrf_token %}
+      <input type="hidden" name="profile_id" value="{{ profile_id }}">
+      <input name="url" placeholder="YouTube URL">
+      <button name="job_type" value="download_single" type="submit">Queue download</button>
+    </form>
+    <h2>Recent jobs</h2>
+    <ul>{% for job in jobs %}<li>#{{ job.id }} {{ job.job_type }} — {{ job.status }}</li>{% empty %}<li>No jobs queued.</li>{% endfor %}</ul>
+    <h2>Downloads</h2>
+    <ul>{% for item in downloads %}<li>{{ item.title|default:"Untitled" }} — {{ item.download_status }}</li>{% empty %}<li>No downloads.</li>{% endfor %}</ul>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv
+.PHONY: build run run-no-pex test clean check-system-deps venv run-app run-worker-downloads run-worker-sync run-worker-summaries
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -53,3 +53,19 @@ clean:
 	rm -rf $(BUILD_DIR) $(VENV_DIR)
 	find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
+run-app: venv
+	@echo "Running Django frontend app..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m app
+
+run-worker-downloads: venv
+	@echo "Running single-concurrency downloads worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloads
+
+run-worker-sync: venv
+	@echo "Running sync worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers sync
+
+run-worker-summaries: venv
+	@echo "Running summaries worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers summaries
