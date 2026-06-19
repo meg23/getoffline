@@ -55,6 +55,20 @@ def _decorate_download(item: Download) -> Download:
     return item
 
 
+def _profile_choices(active_profile_id: str) -> list[dict[str, object]]:
+    profile_ids = {"default", active_profile_id}
+    for model in (Download, SourceConfig, ProfileConfigValue):
+        profile_ids.update(value for value in model.objects.values_list("profile_id", flat=True).distinct() if value)
+    return [
+        {
+            "id": profile_id,
+            "name": profile_id if profile_id != "default" else "max",
+            "selected": profile_id == active_profile_id,
+        }
+        for profile_id in sorted(profile_ids, key=lambda value: (value != "default", value.lower()))
+    ]
+
+
 def _profile_id(request: HttpRequest) -> str:
     return str(request.GET.get("profile_id") or request.POST.get("profile_id") or request.session.get("profile_id") or "default")
 
@@ -90,6 +104,7 @@ def library(request: HttpRequest) -> HttpResponse:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "profile_initial": (profile_name[:1] or "M").upper(),
+            "profiles": _profile_choices(profile_id),
             "stats": {
                 "visible": len(downloads),
                 "played": played_count,
@@ -195,6 +210,7 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "profile_initial": (profile_name[:1] or "M").upper(),
+            "profiles": _profile_choices(profile_id),
             "manual_upload_filter_checked": _checked(settings, "manual_upload_delete_explicit_content"),
             "android_sync_enabled_checked": _checked(settings, "android_sync_enabled"),
             "android_sync_include_subtitles_checked": _checked(settings, "android_sync_include_subtitles"),

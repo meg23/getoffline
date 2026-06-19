@@ -17,7 +17,9 @@
           <form class="profile-switch-form" method="get" action="{% url 'settings' %}">
             <span class="profile-avatar">{{ profile_initial }}</span>
             <span class="profile-name">{{ profile_name }}</span>
-            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+            <select id="settings-profile-switcher" class="profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">
+              {% for profile in profiles %}<option value="{{ profile.id }}" {% if profile.selected %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}
+            </select>
             <span class="profile-caret"></span>
           </form>
           <span class="profile-icon-button">🔒</span>
