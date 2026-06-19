@@ -158,9 +158,17 @@ def _ffmpeg_video_args(profile_id: str, target_ext: str) -> list[str]:
     return args
 
 
+def _tail_text(value: str | None, *, limit: int = 4000) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"...{text[-limit:]}"
+
+
 def transcode_media(job: Job) -> None:
     """FFmpeg worker: convert a downloaded file, update its row, then remove the original."""
     payload = job.payload if isinstance(job.payload, dict) else {}
+    log.info("FFmpeg worker received job job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, payload)
     download_id = payload.get("download_id")
     if not download_id:
         log.warning("FFmpeg worker skipped job with no download_id job_id=%s", job.id)
@@ -170,29 +178,95 @@ def transcode_media(job: Job) -> None:
         log.warning("FFmpeg worker skipped missing download job_id=%s download_id=%s", job.id, download_id)
         return
     source_path = Path(str(download.file_path or "")).expanduser().resolve()
+    log.info(
+        "FFmpeg worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s db_size_bytes=%s status=%s",
+        job.id,
+        download.id,
+        download.title,
+        download.source_type,
+        download.source_name,
+        download.file_path,
+        download.file_ext,
+        download.file_size_bytes,
+        download.download_status,
+    )
     if not source_path.exists():
+        log.error("FFmpeg worker input file is missing job_id=%s download_id=%s path=%s", job.id, download.id, source_path)
         raise FileNotFoundError(f"Downloaded file is missing: {source_path}")
+    input_size = source_path.stat().st_size
     media_kind = _preferred_media_kind(download, payload)
     target_ext = _profile_setting(job.profile_id, "audio_format" if media_kind == "audio" else "video_format", "mp3" if media_kind == "audio" else "mp4").strip().lower()
     target_path = _target_path(source_path, target_ext)
     ffmpeg_path = _profile_setting(job.profile_id, "ffmpeg_path", "ffmpeg")
     codec_args = _ffmpeg_audio_args(job.profile_id, target_ext) if media_kind == "audio" else _ffmpeg_video_args(job.profile_id, target_ext)
     command = [ffmpeg_path, "-y", "-i", str(source_path), *codec_args, str(target_path)]
-    log.info("FFmpeg conversion starting job_id=%s download_id=%s media_kind=%s command=%s", job.id, download.id, media_kind, command)
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    log.info(
+        "FFmpeg conversion prepared job_id=%s download_id=%s media_kind=%s input=%s input_size_bytes=%s target=%s target_ext=%s ffmpeg_path=%s codec_args=%s",
+        job.id,
+        download.id,
+        media_kind,
+        source_path,
+        input_size,
+        target_path,
+        target_ext,
+        ffmpeg_path,
+        codec_args,
+    )
+    log.info("FFmpeg conversion starting job_id=%s download_id=%s command=%s", job.id, download.id, command)
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        log.error(
+            "FFmpeg conversion failed job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
+            job.id,
+            download.id,
+            exc.returncode,
+            _tail_text(exc.stdout),
+            _tail_text(exc.stderr),
+        )
+        raise
+    log.info(
+        "FFmpeg conversion subprocess finished job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
+        job.id,
+        download.id,
+        result.returncode,
+        _tail_text(result.stdout, limit=1000),
+        _tail_text(result.stderr, limit=1000),
+    )
+    if not target_path.exists():
+        log.error("FFmpeg conversion output missing job_id=%s download_id=%s target=%s", job.id, download.id, target_path)
+        raise FileNotFoundError(f"FFmpeg output file was not created: {target_path}")
     old_path = source_path
+    output_size = target_path.stat().st_size
     output_root = _download_output_root(job.profile_id)
+    log.info(
+        "FFmpeg conversion updating database job_id=%s download_id=%s old_path=%s new_path=%s old_size_bytes=%s new_size_bytes=%s",
+        job.id,
+        download.id,
+        old_path,
+        target_path,
+        input_size,
+        output_size,
+    )
     download.file_path = str(target_path)
     download.file_path_relative = str(target_path.relative_to(output_root)) if target_path.is_relative_to(output_root) else None
     download.file_ext = target_path.suffix.lstrip(".")
-    download.file_size_bytes = target_path.stat().st_size
+    download.file_size_bytes = output_size
     download.download_status = "downloaded"
     download.completed_at = timezone.now()
     download.last_seen_at = timezone.now()
     download.save(update_fields=["file_path", "file_path_relative", "file_ext", "file_size_bytes", "download_status", "completed_at", "last_seen_at"])
     if old_path != target_path:
+        log.info("FFmpeg conversion deleting original file job_id=%s download_id=%s original=%s", job.id, download.id, old_path)
         old_path.unlink(missing_ok=True)
-    log.info("FFmpeg conversion finished job_id=%s download_id=%s output=%s original_deleted=%s", job.id, download.id, target_path, old_path != target_path)
+    log.info(
+        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s original_deleted=%s",
+        job.id,
+        download.id,
+        target_path,
+        output_size,
+        old_path != target_path,
+    )
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_transcript",
