@@ -103,6 +103,13 @@ downloader publish `job_type=transcode_media`, then a separate `worker-ffmpeg`
 container or `make run-worker-ffmpeg` process log `Worker starting
 worker_type=ffmpeg` and `FFmpeg conversion starting`.
 
+By default workers consume only messages that are already in RabbitMQ or are
+published while the worker is running. If RabbitMQ was reset and you need to
+recover queued database rows, restart the relevant worker once with
+`GETOFFLINE_REQUEUE_EXISTING_JOBS=1`. Leave this off for normal operation so a
+large backlog of older queued conversions does not run ahead of newly downloaded
+media.
+
 Sync work remains isolated on its own queue:
 
 ```bash

@@ -108,6 +108,10 @@ def requeue_existing_jobs(channel, worker_type: str) -> int:
     return len(rows)
 
 
+def requeue_existing_jobs_enabled() -> bool:
+    return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def run_worker(worker_type: str, *, prefetch_count: int | None = None) -> None:
     queue = QUEUE_BY_WORKER[worker_type]
     safe_prefetch = 1 if worker_type in SERIAL_WORKERS else max(1, int(prefetch_count or 4))
@@ -120,9 +124,14 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None) -> None:
         channel.queue_declare(queue=queue, durable=True)
         channel.queue_bind(queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue)
         channel.basic_qos(prefetch_count=safe_prefetch)
-        requeued = requeue_existing_jobs(channel, worker_type)
-        if requeued:
-            log.info("Worker requeued existing DB jobs worker_type=%s queue=%s count=%s", worker_type, queue, requeued)
+        if requeue_existing_jobs_enabled():
+            requeued = requeue_existing_jobs(channel, worker_type)
+            if requeued:
+                log.info("Worker requeued existing DB jobs worker_type=%s queue=%s count=%s", worker_type, queue, requeued)
+            else:
+                log.info("Worker requeue existing DB jobs found no queued rows worker_type=%s queue=%s", worker_type, queue)
+        else:
+            log.info("Worker skipped existing DB job requeue worker_type=%s queue=%s enable_with=GETOFFLINE_REQUEUE_EXISTING_JOBS=1", worker_type, queue)
         log.info("Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s", worker_type, queue, settings.RABBITMQ_EXCHANGE, safe_prefetch)
         for method_frame, _properties, body in channel.consume(queue, inactivity_timeout=1):
             if _STOP:
