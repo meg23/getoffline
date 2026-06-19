@@ -49,6 +49,14 @@ make migrate-db
 PYTHONPATH=src python -m app
 ```
 
+Run the app in Django debug mode with:
+
+```bash
+make run-app-debug
+```
+
+The debug target starts `python -m app` with `GETOFFLINE_DJANGO_DEBUG=1`.
+
 The frontend now covers the core legacy `webapp.py` screens and actions in Django:
 
 - library listing with played/favorite filters
