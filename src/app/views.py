@@ -335,10 +335,37 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         media_type=str(request.POST.get("media_type") or "audio").strip().lower() if source_type == SourceConfig.SOURCE_YOUTUBE else None,
         enabled=True,
         subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
+        max_downloads=int(request.POST["max_downloads"]) if str(request.POST.get("max_downloads") or "").strip().isdigit() else None,
         delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+
+
+@require_POST
+def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
+    source = get_object_or_404(SourceConfig, pk=source_id)
+    source.name = str(request.POST.get("name") or source.name).strip()
+    source.url = str(request.POST.get("url") or source.url).strip()
+    if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+        source.media_type = str(request.POST.get("media_type") or source.media_type or "audio").strip().lower()
+    source.subtitles = request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"}
+    raw_max = str(request.POST.get("max_downloads") or "").strip()
+    source.max_downloads = int(raw_max) if raw_max.isdigit() else None
+    source.delete_explicit_content = request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"}
+    source.updated_at = timezone.now()
+    source.save(
+        update_fields=[
+            "name",
+            "url",
+            "media_type",
+            "subtitles",
+            "max_downloads",
+            "delete_explicit_content",
+            "updated_at",
+        ]
+    )
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={source.profile_id}")
 
 
 @require_POST

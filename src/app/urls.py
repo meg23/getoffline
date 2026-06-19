@@ -13,6 +13,7 @@ urlpatterns = [
     path("settings/", views.settings_page, name="settings"),
     path("settings/save/", views.save_config, name="save_config"),
     path("sources/add/", views.add_source, name="add_source"),
+    path("sources/<int:source_id>/update/", views.update_source, name="update_source"),
     path("sources/<int:source_id>/toggle/", views.toggle_source, name="toggle_source"),
     path("sources/<int:source_id>/delete/", views.delete_source, name="delete_source"),
     path("downloads/<int:download_id>/played/", views.mark_played, name="mark_played"),
