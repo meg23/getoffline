@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import utils
+import workers.utils as utils
 
 
 class SanitizeChannelNameTests(unittest.TestCase):

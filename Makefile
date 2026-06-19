@@ -32,7 +32,7 @@ build: venv check-system-deps
 	$(PEX) --sources-directory=$(SRC_DIR) \
 	    -r $(REQ_FILE) \
 	    -o $(BUILD_OUTPUT) \
-	    -m main \
+	    -m workers.main \
 	    --venv append \
 	    -v
 
@@ -42,7 +42,7 @@ run: build
 
 run-no-pex: venv check-system-deps
 	@echo "Running $(APP_NAME) directly with Python (no pex)..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m main
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers.main
 
 test: clean build
 	@echo "Running unit tests in virtual environment..."

@@ -9,12 +9,12 @@ from pathlib import Path
 
 import feedparser
 
-from database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
-from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
-from logger import get_logger
-from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from summary_tasks import generate_missing_summaries
-from utils import ensure_dir, sanitize, sanitize_channel_name
+from workers.database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
+from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.logger import get_logger
+from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
+from workers.summary_tasks import generate_missing_summaries
+from workers.utils import ensure_dir, sanitize, sanitize_channel_name
 
 
 PODCAST_DOWNLOAD_RETRIES = 3
@@ -464,12 +464,6 @@ def _download_podcasts_in_process(config, downloaded_items):
         except Exception as e:
             log.error(f"Failed to process podcast {entry}: {e}")
 
-def _download_podcast_entry_in_subprocess(payload: dict) -> dict:
-    config = payload["config"]
-    downloaded_items = []
-    _download_podcasts_in_process(config, downloaded_items)
-    return {"downloaded_items": downloaded_items}
-
 
 def _parent_rss_mb() -> float:
     rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -487,9 +481,9 @@ def download_podcasts(config, downloaded_items):
         single_config = dict(base_config)
         single_config["podcasts"] = [entry]
         payload = {"config": single_config}
-        worker_script = Path(__file__).with_name("podcasts_subprocess.py")
+        worker_module = "workers.podcasts_subprocess"
         proc = subprocess.run(
-            [sys.executable, str(worker_script)],
+            [sys.executable, "-m", worker_module],
             input=json.dumps(payload),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

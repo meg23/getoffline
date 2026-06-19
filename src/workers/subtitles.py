@@ -1,8 +1,8 @@
 import re
 from pathlib import Path
 
-from logger import get_logger
-from transcription import transcribe_with_whisper
+from workers.logger import get_logger
+from workers.transcription import transcribe_with_whisper
 
 log = get_logger("subtitles")
 

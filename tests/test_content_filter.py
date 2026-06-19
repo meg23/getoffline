@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from content_filter import (  # noqa: E402
+from workers.content_filter import (  # noqa: E402
     ExplicitContentMatch,
     delete_media_artifacts,
     find_explicit_content,
@@ -76,7 +76,7 @@ class ContentFilterTests(unittest.TestCase):
             sentence="That was fucking ridiculous.",
         )
 
-        with patch("content_filter.log.warning") as warning:
+        with patch("workers.content_filter.log.warning") as warning:
             log_filtered_deletion(
                 source_type="podcast",
                 source_name="Example Show",

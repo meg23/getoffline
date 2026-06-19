@@ -8,7 +8,7 @@ import django
 import pika
 from django.conf import settings
 from django.db import close_old_connections
-from logger import get_logger
+from workers.logger import get_logger
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 django.setup()

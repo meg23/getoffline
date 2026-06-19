@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from urllib import error, request
 
-from logger import get_logger
+from workers.logger import get_logger
 
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it", "its",

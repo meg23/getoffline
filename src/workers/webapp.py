@@ -27,15 +27,15 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
-from content_retention import enforce_content_retention
-from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
-from profiles import Profile, ProfileManager
-from logger import get_logger
-from summarization import ensure_local_summary_model, summarize_segments
-from summary_tasks import clear_all_summaries, generate_missing_summaries
-from subtitles import create_subtitles
-from database import (
+from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.content_retention import enforce_content_retention
+from workers.media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
+from workers.profiles import Profile, ProfileManager
+from workers.logger import get_logger
+from workers.summarization import ensure_local_summary_model, summarize_segments
+from workers.summary_tasks import clear_all_summaries, generate_missing_summaries
+from workers.subtitles import create_subtitles
+from workers.database import (
     DOWNLOAD_STATUS_RETENTION_DELETED,
     resolve_download_artifact_path,
     add_source_config,
@@ -349,8 +349,8 @@ def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profi
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
-    from podcasts import download_podcasts
-    from youtube import download_youtube_items
+    from workers.podcasts import download_podcasts
+    from workers.youtube import download_youtube_items
 
     download_youtube_items(config, downloaded_items)
     download_podcasts(config, downloaded_items)
@@ -1944,7 +1944,7 @@ def _finish_download_job(
 
 
 def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
-    from youtube import download_youtube_items
+    from workers.youtube import download_youtube_items
 
     downloaded_items: List[str] = []
     entry = (single_config.get("youtube") or [{}])[0]
@@ -1964,7 +1964,7 @@ def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
 
 
 def _run_single_podcast_download(state: AppState, single_config: Dict) -> None:
-    from podcasts import download_podcasts
+    from workers.podcasts import download_podcasts
 
     downloaded_items: List[str] = []
     entry = (single_config.get("podcasts") or [{}])[0]
@@ -2030,7 +2030,7 @@ def _single_youtube_download_config(
     subtitles_enabled: Optional[bool],
     allow_live_streams: bool,
 ) -> Dict:
-    from youtube import resolve_youtube_source_name
+    from workers.youtube import resolve_youtube_source_name
 
     cookie_path = materialize_youtube_cookie_file(str(state.database_path))
     source_name = resolve_youtube_source_name(url, cookie_path)
@@ -2111,8 +2111,8 @@ def _redownload_row_context(row: MediaRow) -> str:
 
 
 def _execute_redownload_row(state: AppState, row: MediaRow, downloaded_items: List[str]) -> None:
-    from podcasts import download_podcasts
-    from youtube import download_youtube_items
+    from workers.podcasts import download_podcasts
+    from workers.youtube import download_youtube_items
 
     reset_download_playback(str(state.database_path), row.row_id)
     if row.source_type == "youtube" and row.item_url:
@@ -5691,7 +5691,7 @@ def make_handler(state: AppState):
                 return
 
             if path == "/youtube-search":
-                from youtube import search_youtube_videos
+                from workers.youtube import search_youtube_videos
 
                 query_text = str((query.get("q") or [""])[0]).strip()
                 results = search_youtube_videos(query_text, limit=10) if query_text else []

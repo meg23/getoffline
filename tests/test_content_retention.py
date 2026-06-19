@@ -8,8 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from content_retention import enforce_content_retention  # noqa: E402
-from database import init_database, is_downloaded, upsert_download  # noqa: E402
+from workers.content_retention import enforce_content_retention  # noqa: E402
+from workers.database import init_database, is_downloaded, upsert_download  # noqa: E402
 
 
 class ContentRetentionTests(unittest.TestCase):

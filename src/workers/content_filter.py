@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from logger import get_logger
+from workers.logger import get_logger
 
 log = get_logger("content_filter")
 

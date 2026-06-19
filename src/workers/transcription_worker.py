@@ -5,7 +5,7 @@ import json
 import sys
 import traceback
 
-from transcription import _normalize_faster_whisper_result
+from workers.transcription import _normalize_faster_whisper_result
 
 
 def transcribe_worker_once(input_file: str, model_name: str, language: str | None = None):

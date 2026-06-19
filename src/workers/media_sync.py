@@ -9,7 +9,7 @@ from urllib.parse import quote
 from xml.sax.saxutils import escape
 from typing import Callable, Iterable, List, Optional, Tuple
 
-from logger import get_logger
+from workers.logger import get_logger
 
 log = get_logger("media_sync")
 

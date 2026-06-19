@@ -3,8 +3,8 @@ import sqlite3
 from pathlib import Path
 from typing import List, Tuple
 
-from logger import get_logger
-from summarization import summarize_segments
+from workers.logger import get_logger
+from workers.summarization import summarize_segments
 
 log = get_logger("summary")
 

@@ -6,12 +6,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from database import (
+from workers.database import (
     DOWNLOAD_STATUS_MISSING,
     DOWNLOAD_STATUS_RETENTION_DELETED,
     resolve_download_artifact_path,
 )
-from logger import get_logger
+from workers.logger import get_logger
 
 
 log = get_logger("content_retention")

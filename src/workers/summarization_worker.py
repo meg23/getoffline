@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Dict
 
-from summarization import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_TIMEOUT_SECONDS, _ollama_summary, _utcnow_iso
+from workers.summarization import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_TIMEOUT_SECONDS, _ollama_summary, _utcnow_iso
 
 
 def summarize_worker_once(

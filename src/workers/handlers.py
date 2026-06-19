@@ -5,10 +5,10 @@ from typing import Iterable
 
 from app.queue import publish_job
 from django.utils import timezone
-from logger import get_logger
+from workers.logger import get_logger
 from models.jobs import create_job
 from models.models import Download, Job, ProfileConfigValue, SourceConfig
-from utils import sanitize_channel_name
+from workers.utils import sanitize_channel_name
 
 
 log = get_logger("workers.handlers")

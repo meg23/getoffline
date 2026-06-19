@@ -81,7 +81,7 @@ This command creates a virtual environment, installs Python dependencies, valida
 You can still run the Python entrypoint directly if needed:
 
 ```bash
-python src/main.py
+PYTHONPATH=src python -m workers.main
 ```
 
 To import every supported video in a local directory through the same workflow
@@ -90,13 +90,13 @@ transcription, optional explicit-content filtering, audit logging, and summary
 generation), run:
 
 ```bash
-python src/main.py import-directory /path/to/videos
+PYTHONPATH=src python -m workers.main import-directory /path/to/videos
 ```
 
 Add `--recursive` to include videos in subdirectories:
 
 ```bash
-python src/main.py import-directory /path/to/videos --recursive
+PYTHONPATH=src python -m workers.main import-directory /path/to/videos --recursive
 ```
 
 Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The command
