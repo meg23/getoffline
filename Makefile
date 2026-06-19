@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-episode-checker run-worker-downloader run-worker-transcripts run-worker-sync run-worker-summaries
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -53,3 +53,36 @@ clean:
 	rm -rf $(BUILD_DIR) $(VENV_DIR)
 	find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
+migrate-db: venv
+	@echo "Migrating split Django/MySQL database..."
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django migrate --run-syncdb
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django sync_model_schema
+
+run-app: venv
+	@echo "Running Django frontend app..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m app
+
+run-app-debug: venv
+	@echo "Running Django frontend app in debug mode..."
+	PYTHONPATH=$(SRC_DIR) GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
+
+run-worker-episode-checker: venv
+	@echo "Running single-concurrency episode checker worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers episode-checker
+
+run-worker-downloader: venv
+	@echo "Running single-concurrency downloader worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader
+
+run-worker-transcripts: venv
+	@echo "Running parallel transcript worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transcripts --prefetch $${PREFETCH:-4}
+
+run-worker-sync: venv
+	@echo "Running sync worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers sync
+
+run-worker-summaries: venv
+	@echo "Running summaries worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers summaries --prefetch $${PREFETCH:-4}

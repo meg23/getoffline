@@ -1,0 +1,417 @@
+import mimetypes
+from pathlib import Path
+
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
+from django.utils import timezone
+from django.db.models import Sum
+from django.views.decorators.http import require_POST
+
+from models.jobs import create_job
+from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig
+
+from .queue import publish_job
+
+
+ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "sync_media", "summarize_missing"}
+DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
+
+
+def _human_size(size: int | None) -> str:
+    if not size:
+        return "—"
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.2f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{value:.2f} GB"
+
+
+def _human_duration(seconds: float | int | None) -> str:
+    total = int(float(seconds or 0))
+    hours, remainder = divmod(total, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes}m" if hours else f"{minutes}m"
+
+
+def _decorate_download(item: Download) -> Download:
+    position = float(item.last_position_seconds or 0.0)
+    item.display_size = _human_size(item.file_size_bytes)
+    item.display_type = (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?").upper()
+    item.status_label = "UNPLAYED"
+    item.status_class = "status-unplayed"
+    if position > 0 and not item.played:
+        item.status_label = "STARTED"
+        item.status_class = "status-started"
+    if item.played:
+        item.status_label = "PLAYED"
+        item.status_class = "status-played"
+    if item.download_status in {"missing", "retention_deleted"}:
+        item.status_label = "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
+        item.status_class = "status-missing"
+    return item
+
+
+def _profile_id(request: HttpRequest) -> str:
+    return str(request.GET.get("profile_id") or request.POST.get("profile_id") or request.session.get("profile_id") or "default")
+
+
+def _redirect_back(request: HttpRequest, fallback: str = "library") -> HttpResponseRedirect:
+    return HttpResponseRedirect(request.POST.get("next") or request.headers.get("Referer") or reverse(fallback))
+
+
+def _safe_path(raw_path: str | None) -> Path:
+    if not raw_path:
+        raise Http404("File unavailable")
+    path = Path(raw_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        raise Http404("File unavailable")
+    return path
+
+
+def library(request: HttpRequest) -> HttpResponse:
+    profile_id = _profile_id(request)
+    downloads_qs = Download.objects.filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
+    downloads = [_decorate_download(item) for item in downloads_qs.order_by("-last_seen_at", "-id")[:500]]
+    played_count = sum(1 for item in downloads if item.played)
+    favorite_count = sum(1 for item in downloads if item.favorite)
+    listened_seconds = downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
+    recent_jobs = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10]
+    profile_name = profile_id if profile_id != "default" else "max"
+    return render(
+        request,
+        "app/library.html",
+        {
+            "downloads": downloads,
+            "jobs": recent_jobs,
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "profile_initial": (profile_name[:1] or "M").upper(),
+            "stats": {
+                "visible": len(downloads),
+                "played": played_count,
+                "new": max(len(downloads) - played_count, 0),
+                "favorites": favorite_count,
+                "listened": _human_duration(listened_seconds),
+            },
+        },
+    )
+
+
+def jobs(request: HttpRequest) -> HttpResponse:
+    profile_id = _profile_id(request)
+    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:100]
+    return render(request, "app/jobs.html", {"jobs": rows, "profile_id": profile_id})
+
+
+def player(request: HttpRequest, download_id: int) -> HttpResponse:
+    item = get_object_or_404(Download, pk=download_id)
+    return render(request, "app/player.html", {"item": item})
+
+
+def media(request: HttpRequest, download_id: int) -> FileResponse:
+    item = get_object_or_404(Download, pk=download_id)
+    path = _safe_path(item.file_path)
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path.open("rb"), content_type=content_type)
+
+
+def subtitle(request: HttpRequest, download_id: int) -> FileResponse:
+    item = get_object_or_404(Download, pk=download_id)
+    path = _safe_path(item.subtitle_path)
+    return FileResponse(path.open("rb"), content_type="text/vtt" if path.suffix == ".vtt" else "text/plain")
+
+
+PROFILE_DEFAULTS = {
+    "output_root": "./downloads/profiles/default",
+    "processing_workers": "2",
+    "auto_update_minutes": "20",
+    "auto_delete_content_days": "0",
+    "manual_upload_delete_explicit_content": "0",
+    "audio_format": "mp3",
+    "audio_quality": "0",
+    "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
+    "max_downloads": "3",
+    "deno_path": "deno",
+    "summary_model": "qwen2.5:0.5b",
+    "ollama_path": "ollama",
+    "android_sync_target": "android",
+    "android_sync_enabled": "0",
+    "android_sync_max_items": "10",
+    "android_sync_directory": "./offline-sync",
+    "android_sync_destination": "/sdcard/Movies/GetOffline",
+    "android_sync_adb_path": "adb",
+    "android_sync_connection_mode": "usb",
+    "android_sync_wifi_address": "",
+    "android_sync_include_subtitles": "1",
+    "android_sync_include_unplayed": "1",
+    "android_sync_include_started": "1",
+    "android_sync_include_played": "0",
+    "android_sync_exclude_regex": "",
+    "profile_pin": "",
+}
+
+
+def _profile_settings(profile_id: str) -> dict[str, str]:
+    values = dict(PROFILE_DEFAULTS)
+    values["output_root"] = f"./downloads/profiles/{profile_id}"
+    values.update({row.key: row.value for row in AppConfigValue.objects.order_by("key")})
+    values.update({row.key: row.value for row in ProfileConfigValue.objects.filter(profile_id=profile_id)})
+    return values
+
+
+def _checked(settings: dict[str, str], key: str) -> bool:
+    return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def settings_page(request: HttpRequest) -> HttpResponse:
+    profile_id = _profile_id(request)
+    settings = _profile_settings(profile_id)
+    sources = SourceConfig.objects.filter(profile_id=profile_id).order_by("source_type", "position", "id")
+    download_settings = ProfileDownloadSettings.objects.filter(profile_id=profile_id).first()
+    if download_settings is None and profile_id == "default":
+        legacy = DownloadSettings.objects.filter(pk=1).first()
+        if legacy is not None:
+            download_settings = ProfileDownloadSettings(profile_id=profile_id, youtube_cookie_text=legacy.youtube_cookie_text)
+    profile_name = profile_id if profile_id != "default" else "max"
+    return render(
+        request,
+        "app/settings.html",
+        {
+            "settings": settings,
+            "sources": sources,
+            "youtube_sources": sources.filter(source_type=SourceConfig.SOURCE_YOUTUBE),
+            "podcast_sources": sources.filter(source_type=SourceConfig.SOURCE_PODCAST),
+            "download_settings": download_settings,
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "profile_initial": (profile_name[:1] or "M").upper(),
+            "manual_upload_filter_checked": _checked(settings, "manual_upload_delete_explicit_content"),
+            "android_sync_enabled_checked": _checked(settings, "android_sync_enabled"),
+            "android_sync_include_subtitles_checked": _checked(settings, "android_sync_include_subtitles"),
+            "android_sync_include_unplayed_checked": _checked(settings, "android_sync_include_unplayed"),
+            "android_sync_include_started_checked": _checked(settings, "android_sync_include_started"),
+            "android_sync_include_played_checked": _checked(settings, "android_sync_include_played"),
+            "pin_status": "PIN is set" if settings.get("profile_pin") else "No PIN set",
+        },
+    )
+
+
+def enqueue_job(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST required")
+    profile_id = _profile_id(request)
+    job_type = str(request.POST.get("job_type") or "").strip()
+    if job_type not in ALLOWED_JOB_TYPES:
+        return HttpResponseBadRequest("Unsupported job_type")
+
+    payload = {"source": "django_app"}
+    if request.POST.get("url"):
+        payload["url"] = str(request.POST["url"]).strip()
+    idempotency_key = request.POST.get("idempotency_key") or f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
+    job = create_job(profile_id=profile_id, job_type=job_type, payload=payload, idempotency_key=idempotency_key)
+    publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    return HttpResponseRedirect(reverse("jobs") + f"?profile_id={profile_id}")
+
+
+@require_POST
+def mark_played(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
+    item = get_object_or_404(Download, pk=download_id)
+    item.played = True
+    item.played_at = timezone.now()
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["played", "played_at", "last_seen_at"])
+    return _redirect_back(request)
+
+
+@require_POST
+def mark_unplayed(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
+    item = get_object_or_404(Download, pk=download_id)
+    item.played = False
+    item.played_at = None
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["played", "played_at", "last_seen_at"])
+    return _redirect_back(request)
+
+
+@require_POST
+def favorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
+    item = get_object_or_404(Download, pk=download_id)
+    item.favorite = True
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["favorite", "last_seen_at"])
+    return _redirect_back(request)
+
+
+@require_POST
+def unfavorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
+    item = get_object_or_404(Download, pk=download_id)
+    item.favorite = False
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["favorite", "last_seen_at"])
+    return _redirect_back(request)
+
+
+@require_POST
+def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
+    item = get_object_or_404(Download, pk=download_id)
+    position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
+    delta = max(0.0, position - float(item.last_position_seconds or 0.0))
+    item.last_position_seconds = position
+    item.total_listened_seconds = float(item.total_listened_seconds or 0.0) + delta
+    item.last_position_updated_at = timezone.now()
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["last_position_seconds", "total_listened_seconds", "last_position_updated_at", "last_seen_at"])
+    return HttpResponse(status=204)
+
+
+@require_POST
+def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
+    item = get_object_or_404(Download, pk=download_id)
+    if item.file_path:
+        Path(item.file_path).expanduser().unlink(missing_ok=True)
+    item.download_status = "missing"
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["download_status", "last_seen_at"])
+    return _redirect_back(request)
+
+
+@require_POST
+def save_config(request: HttpRequest) -> HttpResponseRedirect:
+    profile_id = _profile_id(request)
+    now = timezone.now()
+    checkbox_keys = {
+        "manual_upload_delete_explicit_content",
+        "android_sync_enabled",
+        "android_sync_include_subtitles",
+        "android_sync_include_unplayed",
+        "android_sync_include_started",
+        "android_sync_include_played",
+    }
+    posted_config_keys = {key.removeprefix("config__") for key in request.POST if key.startswith("config__")}
+    for checkbox_key in checkbox_keys:
+        if checkbox_key in posted_config_keys and f"config__{checkbox_key}" not in request.POST:
+            ProfileConfigValue.objects.update_or_create(
+                profile_id=profile_id,
+                key=checkbox_key,
+                defaults={"value": "0", "updated_at": now},
+            )
+    for key, value in request.POST.items():
+        if not key.startswith("config__"):
+            continue
+        config_key = key.removeprefix("config__")
+        ProfileConfigValue.objects.update_or_create(
+            profile_id=profile_id,
+            key=config_key,
+            defaults={"value": str(value), "updated_at": now},
+        )
+    if "youtube_cookie_text" in request.POST:
+        ProfileDownloadSettings.objects.update_or_create(
+            profile_id=profile_id,
+            defaults={
+                "youtube_cookie_text": request.POST.get("youtube_cookie_text") or "",
+                "cookie_updated_at": now,
+                "updated_at": now,
+            },
+        )
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+
+
+@require_POST
+def add_source(request: HttpRequest) -> HttpResponseRedirect:
+    source_type = str(request.POST.get("source_type") or "").strip().lower()
+    if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
+        return HttpResponseBadRequest("Invalid source_type")
+    profile_id = _profile_id(request)
+    position = (SourceConfig.objects.filter(profile_id=profile_id, source_type=source_type).order_by("-position").values_list("position", flat=True).first() or -1) + 1
+    SourceConfig.objects.create(
+        profile_id=profile_id,
+        source_type=source_type,
+        position=position,
+        name=str(request.POST.get("name") or "").strip(),
+        url=str(request.POST.get("url") or "").strip(),
+        media_type=str(request.POST.get("media_type") or "audio").strip().lower() if source_type == SourceConfig.SOURCE_YOUTUBE else None,
+        enabled=True,
+        subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
+        max_downloads=int(request.POST["max_downloads"]) if str(request.POST.get("max_downloads") or "").strip().isdigit() else None,
+        delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
+        updated_at=timezone.now(),
+    )
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+
+
+@require_POST
+def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
+    source = get_object_or_404(SourceConfig, pk=source_id)
+    source.name = str(request.POST.get("name") or source.name).strip()
+    source.url = str(request.POST.get("url") or source.url).strip()
+    if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+        source.media_type = str(request.POST.get("media_type") or source.media_type or "audio").strip().lower()
+    source.subtitles = request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"}
+    raw_max = str(request.POST.get("max_downloads") or "").strip()
+    source.max_downloads = int(raw_max) if raw_max.isdigit() else None
+    source.delete_explicit_content = request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"}
+    source.updated_at = timezone.now()
+    source.save(
+        update_fields=[
+            "name",
+            "url",
+            "media_type",
+            "subtitles",
+            "max_downloads",
+            "delete_explicit_content",
+            "updated_at",
+        ]
+    )
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={source.profile_id}")
+
+
+@require_POST
+def toggle_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
+    source = get_object_or_404(SourceConfig, pk=source_id)
+    source.enabled = not source.enabled
+    source.updated_at = timezone.now()
+    source.save(update_fields=["enabled", "updated_at"])
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={source.profile_id}")
+
+
+@require_POST
+def delete_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
+    source = get_object_or_404(SourceConfig, pk=source_id)
+    profile_id = source.profile_id
+    source.delete()
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+
+
+@require_POST
+def batch_update(request: HttpRequest) -> HttpResponseRedirect:
+    ids = [int(value) for value in request.POST.getlist("ids") if str(value).isdigit()]
+    action = str(request.POST.get("batch_action") or "").strip()
+    now = timezone.now()
+    rows = Download.objects.filter(pk__in=ids)
+    if action == "played":
+        rows.update(played=True, played_at=now, last_seen_at=now)
+    elif action == "unplayed":
+        rows.update(played=False, played_at=None, last_seen_at=now)
+    elif action == "favorite":
+        rows.update(favorite=True, last_seen_at=now)
+    elif action == "unfavorite":
+        rows.update(favorite=False, last_seen_at=now)
+    elif action == "delete":
+        for item in rows:
+            if item.file_path:
+                Path(item.file_path).expanduser().unlink(missing_ok=True)
+        rows.update(download_status="missing", last_seen_at=now)
+    elif action == "download":
+        profile_id = _profile_id(request)
+        for item in rows:
+            job = create_job(
+                profile_id=profile_id,
+                job_type="download_single",
+                payload={"source": "django_app", "url": item.item_url or item.media_url or item.source_url},
+                idempotency_key=f"download_single:{profile_id}:{item.pk}",
+            )
+            publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    return _redirect_back(request)

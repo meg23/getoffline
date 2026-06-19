@@ -64,6 +64,10 @@ Environment variables still override the file when needed:
 
 YouTube live streams are skipped automatically for configured playlist and channel sources. To download a specific live video, paste its URL into the web app's **+** dialog. The download remains active until the stream ends or the application stops.
 
+## Split app/workers deployment
+
+For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, and run multiple sync or summary workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
+
 ## Usage
 
 Build and run the app:
@@ -180,3 +184,7 @@ can be reviewed with:
 ```bash
 grep 'CONTENT_FILTER_DELETION' ~/youtube/youtube_batch_dl.log
 ```
+
+### Docker Compose split deployment
+
+A Docker Compose deployment is available for the Django frontend, nginx proxy, RabbitMQ, MySQL, and all worker types. The Compose build uses separate Alpine images for the frontend/migration path and worker path so frontend containers avoid media-processing packages. MySQL data is persisted in the named `mysql-data` volume, RabbitMQ data is persisted in `rabbitmq-data`, and downloaded media is bind-mounted from `GETOFFLINE_DOWNLOADS_DIR` (default `./downloads`). Set `GETOFFLINE_DJANGO_SECRET_KEY` and optionally override `GETOFFLINE_DB_NAME`, `GETOFFLINE_DB_USER`, `GETOFFLINE_DB_PASSWORD`, and `GETOFFLINE_DB_ROOT_PASSWORD`, then run `docker compose up --build -d`. The frontend is served through nginx on `http://localhost:8080`, while RabbitMQ management is exposed on `http://localhost:15672`; set `GETOFFLINE_CSRF_TRUSTED_ORIGINS` if you expose the app on another host or scheme. The `migrate` service runs automatically before the frontend and workers start; rerun it manually with `docker compose run --rm migrate` after pulling model changes if needed.
