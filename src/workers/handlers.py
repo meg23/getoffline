@@ -116,6 +116,27 @@ def _find_downloaded_file(info: dict, ydl) -> Path | None:
     return None
 
 
+
+def _is_youtube_video_url(url: str) -> bool:
+    lowered = str(url or "").lower()
+    return "youtube.com/watch" in lowered or "youtu.be/" in lowered or "youtube.com/shorts/" in lowered
+
+
+def _youtube_video_url(entry: dict) -> str:
+    item_id = str(entry.get("id") or "").strip()
+    webpage_url = str(entry.get("webpage_url") or "").strip()
+    raw_url = str(entry.get("url") or "").strip()
+    if _is_youtube_video_url(webpage_url):
+        return webpage_url
+    if item_id and len(item_id) == 11:
+        return f"https://www.youtube.com/watch?v={item_id}"
+    if raw_url and len(raw_url) == 11 and raw_url.startswith("http") is False:
+        return f"https://www.youtube.com/watch?v={raw_url}"
+    if _is_youtube_video_url(raw_url):
+        return raw_url
+    return webpage_url or raw_url
+
+
 def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
     download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
     if not download_url:
@@ -123,6 +144,14 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
         return None
     source_name = str(payload.get("source_name") or payload.get("source_type") or "GetOffline").strip()
     source_type = str(payload.get("source_type") or "youtube").strip()
+    if source_type == SourceConfig.SOURCE_YOUTUBE and not _is_youtube_video_url(download_url):
+        fallback_uid = str(payload.get("item_uid") or "").strip()
+        if len(fallback_uid) == 11:
+            download_url = f"https://www.youtube.com/watch?v={fallback_uid}"
+            log.info("Downloader converted YouTube item uid to video URL job_id=%s item_uid=%s url=%s", job.id, fallback_uid, download_url)
+        else:
+            log.warning("Download worker skipped non-video YouTube URL job_id=%s url=%s payload=%s", job.id, download_url, payload)
+            return None
     output_root = _download_output_root(job.profile_id)
     output_dir = output_root / sanitize_channel_name(source_name)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -133,6 +162,8 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
         retries=3,
         fragment_retries=3,
         noplaylist=True,
+        playlist_items="1",
+        playlistend=1,
     )
     log.info(
         "yt-dlp download starting job_id=%s profile_id=%s source_type=%s source_name=%s url=%s output_template=%s options=%s",
@@ -192,6 +223,53 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
         downloaded_file.stat().st_size if downloaded_file.exists() else None,
     )
     return download
+
+
+
+def _source_from_payload(payload: dict) -> SourceConfig | None:
+    source_id = payload.get("source_id")
+    if not source_id:
+        return None
+    try:
+        return SourceConfig.objects.filter(pk=int(source_id)).first()
+    except (TypeError, ValueError):
+        return None
+
+
+def _downloaded_count_for_source(profile_id: str, source: SourceConfig) -> int:
+    return Download.objects.filter(
+        profile_id=profile_id,
+        source_type=source.source_type,
+        source_name=source.name,
+        download_status="downloaded",
+    ).count()
+
+
+def _source_download_limit_reached(profile_id: str, payload: dict) -> bool:
+    source = _source_from_payload(payload)
+    if source is None:
+        return False
+    limit = _source_limit(source)
+    downloaded_count = _downloaded_count_for_source(profile_id, source)
+    if downloaded_count >= limit:
+        log.info(
+            "Download worker skipped because source max downloads is already reached profile_id=%s source_id=%s source_name=%s downloaded=%s limit=%s",
+            profile_id,
+            source.id,
+            source.name,
+            downloaded_count,
+            limit,
+        )
+        return True
+    log.info(
+        "Download worker source max downloads check passed profile_id=%s source_id=%s source_name=%s downloaded=%s limit=%s",
+        profile_id,
+        source.id,
+        source.name,
+        downloaded_count,
+        limit,
+    )
+    return False
 
 
 def _publish_created_job(job: Job) -> None:
@@ -304,9 +382,7 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
         if not isinstance(entry, dict):
             continue
         item_id = str(entry.get("id") or "").strip()
-        item_url = str(entry.get("url") or entry.get("webpage_url") or "").strip()
-        if item_url and item_url.startswith("http") is False and item_id:
-            item_url = f"https://www.youtube.com/watch?v={item_id}"
+        item_url = _youtube_video_url(entry)
         title = str(entry.get("title") or item_url or "Untitled YouTube episode").strip()
         item_uid = item_id or item_url or _fallback_uid(source.url, title)
         yield {
@@ -459,6 +535,8 @@ def download_episode(job: Job) -> None:
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
     if not download_id:
+        if _source_download_limit_reached(job.profile_id, payload):
+            return
         downloaded = _download_with_yt_dlp(job, payload)
         if downloaded is None:
             log.warning("Download worker did not create a download row job_id=%s", job.id)
