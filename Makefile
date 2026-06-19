@@ -77,7 +77,7 @@ run-worker-downloader: venv
 
 run-worker-ffmpeg: venv
 	@echo "Running FFmpeg conversion worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers ffmpeg --prefetch $${PREFETCH:-2}
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers ffmpeg --prefetch $${PREFETCH:-1}
 
 run-worker-transcripts: venv
 	@echo "Running parallel transcript worker..."
