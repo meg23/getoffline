@@ -14,12 +14,16 @@
         <h1>Settings</h1>
         <div class="profile-controls">
           <a class="back-link" href="{% url 'library' %}?profile_id={{ profile_id }}">Library</a>
-          <form class="profile-switch-form" method="get" action="{% url 'settings' %}">
-            <span class="profile-avatar">{{ profile_initial }}</span>
-            <span class="profile-name">{{ profile_name }}</span>
-            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
-            <span class="profile-caret"></span>
-          </form>
+          <details class="profile-switch-form profile-menu">
+            <summary class="profile-menu-summary" aria-label="Switch profile">
+              <span class="profile-avatar">{{ profile_initial }}</span>
+              <span class="profile-name">{{ profile_name }}</span>
+              <span class="profile-caret"></span>
+            </summary>
+            <div class="profile-menu-list" role="menu">
+              {% for profile in profiles %}<a class="profile-menu-item{% if profile.selected %} is-selected{% endif %}" role="menuitem" href="{% url 'settings' %}?profile_id={{ profile.id }}">{% if profile.selected %}<span aria-hidden="true">✓</span>{% else %}<span aria-hidden="true"></span>{% endif %}{{ profile.name }}</a>{% endfor %}
+            </div>
+          </details>
           <span class="profile-icon-button">🔒</span>
           <span class="profile-icon-button">+</span>
         </div>

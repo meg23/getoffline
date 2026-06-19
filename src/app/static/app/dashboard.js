@@ -103,3 +103,133 @@
   bindSummaryTooltips();
   applyFilters();
 })();
+
+(() => {
+  const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+  const batchForm = document.getElementById('batch-form');
+  const batchAction = document.getElementById('batch-action');
+  const metadataBackdrop = document.getElementById('metadata-edit-backdrop');
+  const metadataForm = document.getElementById('metadata-edit-form');
+  const metadataId = document.getElementById('metadata-edit-id');
+  const metadataTitle = document.getElementById('metadata-edit-item-title');
+  const metadataSource = document.getElementById('metadata-edit-source-name');
+
+  function selectedRows() {
+    return Array.from(document.querySelectorAll('.row-selector:checked')).map((input) => input.closest('tr')).filter(Boolean);
+  }
+
+  batchForm?.addEventListener('submit', (event) => {
+    if (batchAction?.value !== 'edit-metadata') return;
+    event.preventDefault();
+    const rows = selectedRows();
+    if (rows.length !== 1) {
+      window.alert('Select exactly one row to edit metadata.');
+      return;
+    }
+    const row = rows[0];
+    if (metadataId) metadataId.value = row.dataset.rowId || '';
+    if (metadataTitle) metadataTitle.value = row.dataset.title || '';
+    if (metadataSource) metadataSource.value = row.dataset.channel || '';
+    metadataBackdrop?.classList.add('is-open');
+    metadataBackdrop?.setAttribute('aria-hidden', 'false');
+  });
+
+  metadataForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const response = await fetch(metadataForm.action, { method: 'POST', body: new FormData(metadataForm), headers: { 'X-CSRFToken': csrf } });
+    if (!response.ok) {
+      window.alert('Failed to update metadata.');
+      return;
+    }
+    window.location.reload();
+  });
+
+  const searchInput = document.getElementById('transcript-search-input');
+  const searchResults = document.getElementById('transcript-search-results');
+  let searchTimer = 0;
+  function renderResults(results) {
+    if (!searchResults) return;
+    if (!results.length) {
+      searchResults.innerHTML = '<div class="quick-add-empty">No transcript matches found.</div>';
+      return;
+    }
+    searchResults.innerHTML = results.map((item) => `<a class="quick-add-result" href="${item.url}"><div class="quick-add-meta-title">${escapeHtml(item.title)}</div><div class="quick-add-meta-sub">${escapeHtml(item.source_name)} · ${formatTime(item.start_seconds)}</div><div>${escapeHtml(item.text)}</div></a>`).join('');
+  }
+  function escapeHtml(value) { return String(value || '').replace(/[&<>'"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])); }
+  function formatTime(seconds) { const total = Math.max(0, Math.floor(Number(seconds) || 0)); const m = Math.floor(total / 60); const s = total % 60; return `${m}:${String(s).padStart(2, '0')}`; }
+  searchInput?.addEventListener('input', () => {
+    window.clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { if (searchResults) searchResults.innerHTML = '<div class="quick-add-empty">Type at least 2 characters.</div>'; return; }
+    searchTimer = window.setTimeout(async () => {
+      const response = await fetch(`/transcript-search/?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
+      renderResults(response.ok ? (await response.json()).results || [] : []);
+    }, 180);
+  });
+
+  const backdrop = document.getElementById('library-player-backdrop');
+  const modal = document.getElementById('library-player-modal');
+  const playerTitle = document.getElementById('library-player-title');
+  const playerSource = document.getElementById('library-player-source');
+  const playerDescription = document.getElementById('library-player-description');
+  const toggleSize = document.getElementById('library-player-toggle-size');
+  const audio = document.getElementById('mini-player-audio');
+  const video = document.getElementById('mini-player-video');
+
+  function stopLibraryPlayer() {
+    [audio, video].forEach((el) => {
+      if (!el) return;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+      el.classList.remove('is-active');
+      el.style.display = 'none';
+    });
+  }
+
+  function closeLibraryPlayer() {
+    stopLibraryPlayer();
+    backdrop?.classList.remove('is-open');
+    backdrop?.setAttribute('aria-hidden', 'true');
+    if (backdrop) backdrop.style.display = 'none';
+    modal?.classList.remove('is-minimized');
+  }
+
+  function openLibraryPlayer(row, link, minimized = false) {
+    const target = row?.dataset.kind === 'video' ? video : audio;
+    const other = target === video ? audio : video;
+    if (!target || !row?.dataset.mediaUrl) return;
+    stopLibraryPlayer();
+    other?.classList.remove('is-active');
+    target.src = row.dataset.mediaUrl;
+    target.style.display = 'block';
+    target.classList.add('is-active');
+    if (playerTitle) playerTitle.textContent = row.dataset.title || link?.dataset.title || 'Media';
+    if (playerSource) playerSource.textContent = row.dataset.channel || '';
+    if (playerDescription) playerDescription.textContent = link?.dataset.summary || '';
+    modal?.classList.toggle('is-minimized', minimized);
+    if (toggleSize) toggleSize.textContent = minimized ? 'Maximize' : 'Minimize';
+    if (backdrop) {
+      backdrop.style.display = 'flex';
+      backdrop.classList.add('is-open');
+      backdrop.setAttribute('aria-hidden', 'false');
+    }
+    target.play().catch(() => {});
+  }
+
+  document.getElementById('library-player-close')?.addEventListener('click', closeLibraryPlayer);
+  toggleSize?.addEventListener('click', () => {
+    const minimized = !modal?.classList.contains('is-minimized');
+    modal?.classList.toggle('is-minimized', minimized);
+    if (toggleSize) toggleSize.textContent = minimized ? 'Maximize' : 'Minimize';
+  });
+  backdrop?.addEventListener('click', (event) => { if (event.target === backdrop) closeLibraryPlayer(); });
+
+  document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      event.preventDefault();
+      openLibraryPlayer(link.closest('tr'), link, event.altKey);
+    });
+  });
+})();
