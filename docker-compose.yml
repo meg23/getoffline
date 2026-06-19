@@ -1,0 +1,109 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build: .
+    restart: unless-stopped
+    environment: &getoffline-env
+      GETOFFLINE_APP_ADDR: 0.0.0.0:8080
+      GETOFFLINE_DJANGO_DEBUG: "0"
+      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,frontend,nginx}
+      GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
+      GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:?set GETOFFLINE_DB_HOST to your external MySQL host}
+      GETOFFLINE_DB_PORT: ${GETOFFLINE_DB_PORT:-3306}
+      GETOFFLINE_DB_NAME: ${GETOFFLINE_DB_NAME:-getoffline}
+      GETOFFLINE_DB_USER: ${GETOFFLINE_DB_USER:-getoffline}
+      GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:?set GETOFFLINE_DB_PASSWORD}
+      GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+      - getoffline-static:/app/staticfiles
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - getoffline-static:/staticfiles:ro
+    depends_on:
+      - frontend
+
+  migrate:
+    build: .
+    profiles: ["tools"]
+    environment: *getoffline-env
+    command: sh -c "python -m django migrate --run-syncdb && python -m django sync_model_schema"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker-episode-checker:
+    build: .
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers episode-checker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker-downloader:
+    build: .
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers downloader
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker-transcripts:
+    build: .
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-4}"
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker-summaries:
+    build: .
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: sh -c "python -m workers summaries --prefetch $${PREFETCH:-4}"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker-sync:
+    build: .
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers sync
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  rabbitmq-data:
+  getoffline-static:

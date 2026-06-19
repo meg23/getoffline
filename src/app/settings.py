@@ -11,6 +11,7 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {"1", "true
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if host.strip()]
 ROOT_URLCONF = "app.urls"
 STATIC_URL = "/static/"
+STATIC_ROOT = Path(os.getenv("GETOFFLINE_STATIC_ROOT", "/app/staticfiles"))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 INSTALLED_APPS = [

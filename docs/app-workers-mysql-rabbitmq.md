@@ -111,3 +111,34 @@ make run-worker-sync
 
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
 The job payload and status live in MySQL.
+
+## Docker Compose without MySQL
+
+The repository includes `docker-compose.yml` for running everything except MySQL:
+
+- `nginx` publishes the frontend on host port `8080` and proxies requests to the Django `frontend` service.
+- `rabbitmq` runs the broker and exposes the management UI on host port `15672`.
+- `worker-episode-checker` discovers new episodes and publishes download jobs.
+- `worker-downloader` consumes download jobs one at a time.
+- `worker-transcripts`, `worker-summaries`, and `worker-sync` run the parallel/background processing queues.
+- `migrate` is a tools-profile service for applying Django schema updates to your existing MySQL database.
+
+Example startup:
+
+```bash
+export GETOFFLINE_DJANGO_SECRET_KEY='replace-me'
+export GETOFFLINE_DB_HOST='mysql.example.internal'
+export GETOFFLINE_DB_NAME='getoffline'
+export GETOFFLINE_DB_USER='getoffline'
+export GETOFFLINE_DB_PASSWORD='replace-me'
+export GETOFFLINE_DOWNLOADS_DIR='/srv/getoffline/downloads'
+
+docker compose --profile tools run --rm migrate
+docker compose up --build -d
+```
+
+Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
+
+```bash
+docker compose up -d --scale worker-transcripts=4 --scale worker-summaries=4
+```

@@ -184,3 +184,7 @@ can be reviewed with:
 ```bash
 grep 'CONTENT_FILTER_DELETION' ~/youtube/youtube_batch_dl.log
 ```
+
+### Docker Compose split deployment
+
+A Docker Compose deployment is available for the Django frontend, nginx proxy, RabbitMQ, and all worker types without starting MySQL. Point the services at an existing MySQL server with `GETOFFLINE_DB_HOST`, `GETOFFLINE_DB_NAME`, `GETOFFLINE_DB_USER`, and `GETOFFLINE_DB_PASSWORD`, then run `docker compose up --build -d`. The frontend is served through nginx on `http://localhost:8080`, while RabbitMQ management is exposed on `http://localhost:15672`. Run schema setup against the external database with `docker compose --profile tools run --rm migrate` before starting the stack or after pulling model changes.

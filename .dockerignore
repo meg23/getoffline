@@ -1,0 +1,12 @@
+.git
+.venv
+target
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+downloads
+*.sqlite
+*.sqlite3
+.env
