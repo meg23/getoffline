@@ -1,9 +1,7 @@
-import gc
 import json
 import subprocess
 import sys
 import threading
-import traceback
 from pathlib import Path
 
 from logger import get_logger
@@ -61,33 +59,9 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
     return _normalize_faster_whisper_result(segments)
 
 
-def _transcribe_worker_once(input_file: str, model_name: str, language: str = None):
-    model = None
-    segments = None
-    try:
-        from faster_whisper import WhisperModel
-
-        model = WhisperModel(model_name, device="cpu", compute_type="int8")
-        transcribe_kwargs = {"vad_filter": True}
-        if language:
-            transcribe_kwargs["language"] = language
-        try:
-            segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
-        except IndexError as exc:
-            if "tuple index out of range" in str(exc):
-                raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
-            raise
-        return _normalize_faster_whisper_result(segments)
-    finally:
-        del segments
-        if model is not None:
-            del model
-        gc.collect()
-
-
 def _transcribe_in_subprocess(input_file: Path, model_name: str, language: str = None):
     payload = {"input_file": str(input_file), "model_name": model_name, "language": language}
-    cmd = [sys.executable, "-m", "transcription", "--worker", json.dumps(payload)]
+    cmd = [sys.executable, "-m", "workers.transcription_worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
@@ -122,18 +96,3 @@ def transcribe_with_whisper(
     with _TRANSCRIPTION_CACHE_LOCK:
         _TRANSCRIPTION_CACHE[cache_key] = result
     return result
-
-
-if __name__ == "__main__":
-    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
-        try:
-            args = json.loads(sys.argv[2])
-            result = _transcribe_worker_once(
-                input_file=str(args["input_file"]),
-                model_name=str(args["model_name"]),
-                language=args.get("language"),
-            )
-            sys.stdout.write(json.dumps(result))
-        except Exception:
-            sys.stderr.write(traceback.format_exc())
-            sys.exit(1)
