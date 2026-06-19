@@ -9,6 +9,7 @@ from workers.logger import get_logger
 from models.jobs import create_job
 from models.models import Download, Job, ProfileConfigValue, SourceConfig
 from workers.utils import sanitize_channel_name
+from workers.youtube import _apply_ytdlp_player_js_variant_workaround, _enable_youtube_ejs_remote_component
 
 
 log = get_logger("workers.handlers")
@@ -165,6 +166,10 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
         playlist_items="1",
         playlistend=1,
     )
+    if source_type == SourceConfig.SOURCE_YOUTUBE:
+        _enable_youtube_ejs_remote_component(ydl_opts, f"download job {job.id}", _profile_setting(job.profile_id, "deno_path", "deno"))
+        _apply_ytdlp_player_js_variant_workaround(ydl_opts)
+
     log.info(
         "yt-dlp download starting job_id=%s profile_id=%s source_type=%s source_name=%s url=%s output_template=%s options=%s",
         job.id,
@@ -364,6 +369,8 @@ def _youtube_entries_from_url(url: str, limit: int, *, source: SourceConfig, rea
         playlistend=limit,
         playlist_items=f"1-{limit}",
     )
+    _enable_youtube_ejs_remote_component(ydl_opts, f"update source {source.name}", _profile_setting(source.profile_id, "deno_path", "deno"))
+    _apply_ytdlp_player_js_variant_workaround(ydl_opts)
     log.info(
         "yt-dlp extract starting source_id=%s source_name=%s reason=%s url=%s options=%s",
         source.id,

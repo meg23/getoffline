@@ -470,6 +470,40 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             opts = FakeYoutubeDL.instances[0].opts
             self.assertEqual(opts.get("remote_components"), ["ejs:github"])
 
+    def test_youtube_download_uses_configured_deno_path_for_ejs_remote_component(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            deno_dir = Path(tmpdir) / "deno-bin"
+            deno_dir.mkdir()
+            deno_path = deno_dir / "deno"
+            deno_path.write_text("#!/bin/sh\n", encoding="utf-8")
+            deno_path.chmod(0o755)
+            config = {
+                "defaults": {
+                    "cookie_path": os.path.join(tmpdir, "cookies.txt"),
+                    "playlist_end": 1,
+                    "max_downloads": 1,
+                    "output_root": tmpdir,
+                    "audio_format": "mp3",
+                    "audio_quality": 0,
+                    "processing_workers": 1,
+                    "deno_path": str(deno_path),
+                },
+                "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
+            }
+
+            original_path = os.environ.get("PATH", "")
+            try:
+                os.environ["PATH"] = os.pathsep.join(part for part in original_path.split(os.pathsep) if part != str(deno_dir))
+                with patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
+                    youtube.download_youtube_items(config, [])
+                path_after_download = os.environ["PATH"]
+            finally:
+                os.environ["PATH"] = original_path
+
+            opts = FakeYoutubeDL.instances[0].opts
+            self.assertEqual(opts.get("remote_components"), ["ejs:github"])
+            self.assertEqual(path_after_download.split(os.pathsep)[0], str(deno_dir.resolve()))
+
     def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
         class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):
             def download(self, urls):

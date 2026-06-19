@@ -148,12 +148,32 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
     return True
 
 
-def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str):
+def _resolve_deno_binary(deno_path: Optional[str] = None) -> Optional[str]:
+    candidate = str(deno_path or "deno").strip() or "deno"
+    if os.sep in candidate or (os.altsep and os.altsep in candidate):
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path.resolve())
+        return None
+    return shutil.which(candidate)
+
+
+def _prepend_deno_to_path(deno_binary: str) -> None:
+    deno_dir = str(Path(deno_binary).parent)
+    path_parts = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+    if deno_dir not in path_parts:
+        os.environ["PATH"] = os.pathsep.join([deno_dir, *path_parts])
+
+
+def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str, deno_path: Optional[str] = None):
     """Enable yt-dlp's YouTube EJS remote component when deno is available."""
-    deno_binary = shutil.which("deno")
+    deno_binary = _resolve_deno_binary(deno_path)
     if not deno_binary:
-        log.warning("deno was not found on PATH; skipping yt-dlp EJS remote component for %s. If challenge solving fails, upgrade with: pip install -U 'yt-dlp[default]'", context_label)
+        configured = str(deno_path or "deno").strip() or "deno"
+        log.warning("deno executable %r was not found; skipping yt-dlp EJS remote component for %s. If challenge solving fails, set the Deno executable in Settings or upgrade with: pip install -U 'yt-dlp[default]'", configured, context_label)
         return
+
+    _prepend_deno_to_path(deno_binary)
 
     existing_value = ydl_opts.get("remote_components")
     if isinstance(existing_value, list):
@@ -828,7 +848,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
-            _enable_youtube_ejs_remote_component(ydl_opts, f"download source {name}")
+            _enable_youtube_ejs_remote_component(ydl_opts, f"download source {name}", defaults.get("deno_path"))
             _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
             ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
