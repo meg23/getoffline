@@ -167,25 +167,69 @@
     }, 180);
   });
 
-  const mini = document.getElementById('mini-player');
-  const miniTitle = document.getElementById('mini-player-title');
+  const backdrop = document.getElementById('library-player-backdrop');
+  const modal = document.getElementById('library-player-modal');
+  const playerTitle = document.getElementById('library-player-title');
+  const playerSource = document.getElementById('library-player-source');
+  const playerDescription = document.getElementById('library-player-description');
+  const toggleSize = document.getElementById('library-player-toggle-size');
   const audio = document.getElementById('mini-player-audio');
   const video = document.getElementById('mini-player-video');
-  document.getElementById('mini-player-close')?.addEventListener('click', () => { [audio, video].forEach((el) => { if (el) { el.pause(); el.removeAttribute('src'); el.classList.remove('is-active'); } }); mini?.classList.remove('is-open'); mini?.setAttribute('aria-hidden', 'true'); });
+
+  function stopLibraryPlayer() {
+    [audio, video].forEach((el) => {
+      if (!el) return;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+      el.classList.remove('is-active');
+      el.style.display = 'none';
+    });
+  }
+
+  function closeLibraryPlayer() {
+    stopLibraryPlayer();
+    backdrop?.classList.remove('is-open');
+    backdrop?.setAttribute('aria-hidden', 'true');
+    if (backdrop) backdrop.style.display = 'none';
+    modal?.classList.remove('is-minimized');
+  }
+
+  function openLibraryPlayer(row, link, minimized = false) {
+    const target = row?.dataset.kind === 'video' ? video : audio;
+    const other = target === video ? audio : video;
+    if (!target || !row?.dataset.mediaUrl) return;
+    stopLibraryPlayer();
+    other?.classList.remove('is-active');
+    target.src = row.dataset.mediaUrl;
+    target.style.display = 'block';
+    target.classList.add('is-active');
+    if (playerTitle) playerTitle.textContent = row.dataset.title || link?.dataset.title || 'Media';
+    if (playerSource) playerSource.textContent = row.dataset.channel || '';
+    if (playerDescription) playerDescription.textContent = link?.dataset.summary || '';
+    modal?.classList.toggle('is-minimized', minimized);
+    if (toggleSize) toggleSize.textContent = minimized ? 'Maximize' : 'Minimize';
+    if (backdrop) {
+      backdrop.style.display = 'flex';
+      backdrop.classList.add('is-open');
+      backdrop.setAttribute('aria-hidden', 'false');
+    }
+    target.play().catch(() => {});
+  }
+
+  document.getElementById('library-player-close')?.addEventListener('click', closeLibraryPlayer);
+  toggleSize?.addEventListener('click', () => {
+    const minimized = !modal?.classList.contains('is-minimized');
+    modal?.classList.toggle('is-minimized', minimized);
+    if (toggleSize) toggleSize.textContent = minimized ? 'Maximize' : 'Minimize';
+  });
+  backdrop?.addEventListener('click', (event) => { if (event.target === backdrop) closeLibraryPlayer(); });
+
   document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {
     link.addEventListener('click', (event) => {
-      if (!event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
       event.preventDefault();
-      const row = link.closest('tr');
-      const target = row?.dataset.kind === 'video' ? video : audio;
-      const other = target === video ? audio : video;
-      if (!target || !row?.dataset.mediaUrl) return;
-      other?.pause(); other?.classList.remove('is-active');
-      target.src = row.dataset.mediaUrl;
-      target.classList.add('is-active');
-      if (miniTitle) miniTitle.textContent = row.dataset.title || 'Media';
-      mini?.classList.add('is-open'); mini?.setAttribute('aria-hidden', 'false');
-      target.play().catch(() => {});
+      openLibraryPlayer(link.closest('tr'), link, event.altKey);
     });
   });
 })();
