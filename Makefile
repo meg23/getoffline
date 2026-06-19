@@ -57,6 +57,7 @@ clean:
 migrate-db: venv
 	@echo "Migrating split Django/MySQL database..."
 	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django migrate --run-syncdb
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django sync_model_schema
 
 run-app: venv
 	@echo "Running Django frontend app..."

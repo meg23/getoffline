@@ -43,6 +43,8 @@ Create tables with Django's normal migration/sync workflow for this split app:
 make migrate-db
 ```
 
+This target runs Django migrations and then `sync_model_schema`, which adds missing shared-model columns to existing GetOffline tables. If MySQL reports an error such as `Unknown column downloads.source_url`, run this target before starting the app again.
+
 ## Running the app
 
 ```bash
