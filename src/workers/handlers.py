@@ -1,14 +1,17 @@
 import hashlib
 import os
+from pathlib import Path
 from typing import Iterable
 
 import feedparser
 from yt_dlp import YoutubeDL
 
 from app.queue import publish_job
+from django.utils import timezone
 from logger import get_logger
 from models.jobs import create_job
 from models.models import Download, Job, ProfileConfigValue, SourceConfig
+from utils import sanitize_channel_name
 
 
 log = get_logger("workers.handlers")
@@ -82,6 +85,114 @@ def _log_youtube_response(prefix: str, payload: dict) -> None:
         payload.get("live_status"),
         payload.get("availability"),
     )
+
+
+def _profile_setting(profile_id: str, key: str, default: str) -> str:
+    value = (
+        ProfileConfigValue.objects.filter(profile_id=profile_id, key=key)
+        .values_list("value", flat=True)
+        .first()
+    )
+    return str(value if value not in {None, ""} else default)
+
+
+def _download_output_root(profile_id: str) -> Path:
+    root = _profile_setting(profile_id, "output_root", f"./downloads/profiles/{profile_id}")
+    return Path(root).expanduser().resolve()
+
+
+def _find_downloaded_file(info: dict, ydl: YoutubeDL) -> Path | None:
+    requested = info.get("requested_downloads") if isinstance(info, dict) else None
+    if isinstance(requested, list):
+        for item in requested:
+            if isinstance(item, dict):
+                candidate = item.get("filepath") or item.get("filename")
+                if candidate and Path(candidate).exists():
+                    return Path(candidate).expanduser().resolve()
+    for key in ("filepath", "_filename", "filename"):
+        candidate = info.get(key) if isinstance(info, dict) else None
+        if candidate and Path(candidate).exists():
+            return Path(candidate).expanduser().resolve()
+    prepared = ydl.prepare_filename(info) if isinstance(info, dict) else ""
+    if prepared and Path(prepared).exists():
+        return Path(prepared).expanduser().resolve()
+    return None
+
+
+def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
+    download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
+    if not download_url:
+        log.warning("Download worker skipped job with no URL job_id=%s payload=%s", job.id, payload)
+        return None
+    source_name = str(payload.get("source_name") or payload.get("source_type") or "GetOffline").strip()
+    source_type = str(payload.get("source_type") or "youtube").strip()
+    output_root = _download_output_root(job.profile_id)
+    output_dir = output_root / sanitize_channel_name(source_name)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    outtmpl = str(output_dir / "%(title).200B [%(id)s].%(ext)s")
+    ydl_opts = _yt_dlp_base_options(
+        outtmpl=outtmpl,
+        continuedl=True,
+        retries=3,
+        fragment_retries=3,
+        noplaylist=True,
+    )
+    log.info(
+        "yt-dlp download starting job_id=%s profile_id=%s source_type=%s source_name=%s url=%s output_template=%s options=%s",
+        job.id,
+        job.profile_id,
+        source_type,
+        source_name,
+        download_url,
+        outtmpl,
+        {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
+    )
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(download_url, download=True) or {}
+        if isinstance(info, dict):
+            _log_youtube_response("yt-dlp download response", info)
+            downloaded_file = _find_downloaded_file(info, ydl)
+        else:
+            downloaded_file = None
+    if downloaded_file is None:
+        log.warning("yt-dlp download finished but file path was not found job_id=%s url=%s", job.id, download_url)
+        return None
+    now = timezone.now()
+    item_uid = str(payload.get("item_uid") or info.get("id") or download_url)[:255]
+    title = str(payload.get("title") or info.get("title") or downloaded_file.stem)
+    download, _created = Download.objects.update_or_create(
+        profile_id=job.profile_id,
+        source_type=source_type,
+        source_name=source_name,
+        item_uid=item_uid,
+        defaults={
+            "source_url": payload.get("source_url") or download_url,
+            "item_id": str(info.get("id") or item_uid)[:255],
+            "item_url": payload.get("item_url") or info.get("webpage_url") or download_url,
+            "media_url": download_url,
+            "title": title,
+            "description": info.get("description"),
+            "uploader": info.get("uploader"),
+            "channel": info.get("channel"),
+            "upload_date": str(payload.get("published") or info.get("upload_date") or ""),
+            "duration_seconds": int(info.get("duration")) if info.get("duration") else None,
+            "file_path": str(downloaded_file),
+            "file_path_relative": str(downloaded_file.relative_to(output_root)) if downloaded_file.is_relative_to(output_root) else None,
+            "file_ext": downloaded_file.suffix.lstrip("."),
+            "file_size_bytes": downloaded_file.stat().st_size if downloaded_file.exists() else None,
+            "download_status": "downloaded",
+            "last_seen_at": now,
+            "completed_at": now,
+        },
+    )
+    log.info(
+        "Download worker saved download row job_id=%s download_id=%s file_path=%s size_bytes=%s",
+        job.id,
+        download.id,
+        downloaded_file,
+        downloaded_file.stat().st_size if downloaded_file.exists() else None,
+    )
+    return download
 
 
 def _publish_created_job(job: Job) -> None:
@@ -292,20 +403,19 @@ def update_downloads(job: Job) -> None:
 
 
 def download_episode(job: Job) -> None:
-    """Serial downloader worker placeholder.
+    """Serial downloader worker: download one queued episode and enqueue transcript work.
 
     The queue is intentionally single-consumer/prefetch=1 so episode downloads happen one at a time.
-    After download code writes a Download row, enqueue transcript generation with that download_id.
     """
     log.info("Download worker started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
     payload = job.payload if isinstance(job.payload, dict) else {}
-    download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
-    if download_url:
-        log.info("Downloader received queued episode URL job_id=%s url=%s", job.id, download_url)
     download_id = payload.get("download_id")
     if not download_id:
-        log.info("Download worker has no download_id yet; actual downloader integration pending job_id=%s", job.id)
-        return
+        downloaded = _download_with_yt_dlp(job, payload)
+        if downloaded is None:
+            log.warning("Download worker did not create a download row job_id=%s", job.id)
+            return
+        download_id = downloaded.id
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_transcript",
