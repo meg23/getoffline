@@ -49,8 +49,12 @@ def _source_limit(source: SourceConfig) -> int:
 def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
     log.info("Checking podcast feed source_id=%s source_name=%s url=%s", source.id, source.name, source.url)
     feed = feedparser.parse(source.url)
+    if getattr(feed, "bozo", False):
+        log.warning("Podcast feed parse warning source_id=%s source_name=%s error=%s", source.id, source.name, getattr(feed, "bozo_exception", "unknown"))
     entries = list(getattr(feed, "entries", []) or [])[: _source_limit(source)]
-    log.info("Podcast feed parsed source_id=%s source_name=%s entries=%s", source.id, source.name, len(entries))
+    feed_meta = getattr(feed, "feed", {}) or {}
+    feed_title = str(getattr(feed_meta, "title", "") or getattr(feed_meta, "get", lambda _key, _default="": _default)("title", "") or "")
+    log.info("Podcast feed parsed source_id=%s source_name=%s feed_title=%s entries_considered=%s limit=%s", source.id, source.name, feed_title, len(entries), _source_limit(source))
     for entry in entries:
         enclosure_url = ""
         for enclosure in getattr(entry, "enclosures", []) or []:
@@ -62,6 +66,7 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
         published = str(getattr(entry, "published", "") or getattr(entry, "updated", "") or "").strip()
         item_uid = str(getattr(entry, "id", "") or getattr(entry, "guid", "") or item_url or "").strip()
         item_uid = item_uid or _fallback_uid(source.url, title, published)
+        log.info("Podcast episode candidate source_id=%s source_name=%s item_uid=%s title=%s media_url=%s published=%s", source.id, source.name, item_uid[:255], title, enclosure_url or item_url, published)
         yield {
             "item_uid": item_uid[:255],
             "item_url": item_url,
@@ -132,6 +137,7 @@ def check_for_episodes(job: Job) -> None:
             total_sources += 1
             source_seen = 0
             source_enqueued = 0
+            log.info("Episode check source started profile_id=%s source_id=%s source_type=%s source_name=%s url=%s", profile_id, source.id, source.source_type, source.name, source.url)
             for candidate in _candidates_for_source(source):
                 source_seen += 1
                 total_seen += 1
@@ -153,6 +159,10 @@ def check_for_episodes(job: Job) -> None:
                         title,
                     )
                     continue
+                if source.source_type == SourceConfig.SOURCE_PODCAST:
+                    log.info("New podcast episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s media_url=%s", profile_id, source.id, source.name, item_uid, title, candidate.get("media_url") or item_url)
+                elif source.source_type == SourceConfig.SOURCE_YOUTUBE:
+                    log.info("New YouTube episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s item_url=%s", profile_id, source.id, source.name, item_uid, title, item_url)
                 child = create_job(
                     profile_id=profile_id,
                     job_type="download_episode",
@@ -170,6 +180,7 @@ def check_for_episodes(job: Job) -> None:
                     idempotency_key=_idempotency_key("download_episode", profile_id, source.id, item_uid or item_url or title),
                 )
                 _publish_created_job(child)
+                log.info("Download episode job enqueued profile_id=%s source_id=%s child_job_id=%s item_uid=%s title=%s", profile_id, source.id, child.id, item_uid, title)
                 source_enqueued += 1
                 total_enqueued += 1
             log.info(
