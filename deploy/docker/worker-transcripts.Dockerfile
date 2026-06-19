@@ -5,8 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src \
     DJANGO_SETTINGS_MODULE=app.settings
 
+RUN apk add --no-cache ca-certificates ffmpeg libgomp libstdc++
+
 WORKDIR /app
-COPY deploy/requirements/worker-base.txt /tmp/requirements.txt
+COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 

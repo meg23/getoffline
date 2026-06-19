@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,11 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DENO_INSTALL=/usr/local \
     PATH=/usr/local/bin:$PATH
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg libgomp1 unzip \
+RUN apk add --no-cache ca-certificates ffmpeg \
+    && apk add --no-cache --virtual .deno-fetch curl unzip \
     && curl -fsSL https://deno.land/install.sh | sh \
-    && apt-get purge -y --auto-remove curl unzip \
-    && rm -rf /var/lib/apt/lists/*
+    && apk del .deno-fetch
 
 WORKDIR /app
 COPY deploy/requirements/worker-download.txt /tmp/requirements.txt

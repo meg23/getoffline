@@ -161,7 +161,7 @@ services:
   worker-transcripts:
     build:
       context: .
-      dockerfile: deploy/docker/worker-base.Dockerfile
+      dockerfile: deploy/docker/worker-transcripts.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-4}"
