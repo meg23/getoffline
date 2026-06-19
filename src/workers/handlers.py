@@ -183,31 +183,30 @@ def transcode_media(job: Job) -> None:
     payload = job.payload if isinstance(job.payload, dict) else {}
     log.info("FFmpeg worker received job job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, payload)
     download_id = payload.get("download_id")
-    if not download_id:
-        log.warning("FFmpeg worker skipped job with no download_id job_id=%s", job.id)
-        return
-    download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
-    if download is None:
+    download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first() if download_id else None
+    deferred_lookup = payload.get("download_lookup") if isinstance(payload.get("download_lookup"), dict) else None
+    deferred_defaults = payload.get("download_defaults") if isinstance(payload.get("download_defaults"), dict) else None
+    if download is None and not (deferred_lookup and deferred_defaults and payload.get("source_file_path")):
         log.warning("FFmpeg worker skipped missing download job_id=%s download_id=%s", job.id, download_id)
         return
-    source_path = Path(str(download.file_path or "")).expanduser().resolve()
+    source_path = Path(str(download.file_path if download is not None else payload.get("source_file_path"))).expanduser().resolve()
     log.info(
         "FFmpeg worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s db_size_bytes=%s status=%s",
         job.id,
-        download.id,
-        download.title,
-        download.source_type,
-        download.source_name,
-        download.file_path,
-        download.file_ext,
-        download.file_size_bytes,
-        download.download_status,
+        download.id if download is not None else "deferred",
+        download.title if download is not None else deferred_defaults.get("title"),
+        download.source_type if download is not None else deferred_lookup.get("source_type"),
+        download.source_name if download is not None else deferred_lookup.get("source_name"),
+        download.file_path if download is not None else payload.get("source_file_path"),
+        download.file_ext if download is not None else Path(str(payload.get("source_file_path"))).suffix.lstrip("."),
+        download.file_size_bytes if download is not None else deferred_defaults.get("file_size_bytes"),
+        download.download_status if download is not None else "deferred_insert",
     )
     if not source_path.exists():
-        log.error("FFmpeg worker input file is missing job_id=%s download_id=%s path=%s", job.id, download.id, source_path)
+        log.error("FFmpeg worker input file is missing job_id=%s download_id=%s path=%s", job.id, download.id if download is not None else "deferred", source_path)
         raise FileNotFoundError(f"Downloaded file is missing: {source_path}")
     input_size = source_path.stat().st_size
-    media_kind = _preferred_media_kind(download, payload)
+    media_kind = _preferred_media_kind(download, payload) if download is not None else str(payload.get("media_type") or "video")
     target_ext = _preferred_target_ext(job.profile_id, media_kind)
     target_path = _target_path(source_path, target_ext)
     ffmpeg_path = _profile_setting(job.profile_id, "ffmpeg_path", "ffmpeg")
@@ -216,7 +215,7 @@ def transcode_media(job: Job) -> None:
     log.info(
         "FFmpeg conversion prepared job_id=%s download_id=%s media_kind=%s input=%s input_size_bytes=%s target=%s target_ext=%s ffmpeg_path=%s codec_args=%s",
         job.id,
-        download.id,
+        download.id if download is not None else "deferred",
         media_kind,
         source_path,
         input_size,
@@ -225,14 +224,14 @@ def transcode_media(job: Job) -> None:
         ffmpeg_path,
         codec_args,
     )
-    log.info("FFmpeg conversion starting job_id=%s download_id=%s command=%s", job.id, download.id, command)
+    log.info("FFmpeg conversion starting job_id=%s download_id=%s command=%s", job.id, download.id if download is not None else "deferred", command)
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         log.error(
             "FFmpeg conversion failed job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
             job.id,
-            download.id,
+            download.id if download is not None else "deferred",
             exc.returncode,
             _tail_text(exc.stdout),
             _tail_text(exc.stderr),
@@ -241,34 +240,49 @@ def transcode_media(job: Job) -> None:
     log.info(
         "FFmpeg conversion subprocess finished job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
         job.id,
-        download.id,
+        download.id if download is not None else "deferred",
         result.returncode,
         _tail_text(result.stdout, limit=1000),
         _tail_text(result.stderr, limit=1000),
     )
     if not target_path.exists():
-        log.error("FFmpeg conversion output missing job_id=%s download_id=%s target=%s", job.id, download.id, target_path)
+        log.error("FFmpeg conversion output missing job_id=%s download_id=%s target=%s", job.id, download.id if download is not None else "deferred", target_path)
         raise FileNotFoundError(f"FFmpeg output file was not created: {target_path}")
     old_path = source_path
     output_size = target_path.stat().st_size
-    output_root = _download_output_root(job.profile_id)
+    output_root = Path(str(payload.get("output_root") or _download_output_root(job.profile_id))).expanduser().resolve()
     log.info(
         "FFmpeg conversion updating database job_id=%s download_id=%s old_path=%s new_path=%s old_size_bytes=%s new_size_bytes=%s",
         job.id,
-        download.id,
+        download.id if download is not None else "deferred",
         old_path,
         target_path,
         input_size,
         output_size,
     )
-    download.file_path = str(target_path)
-    download.file_path_relative = str(target_path.relative_to(output_root)) if target_path.is_relative_to(output_root) else None
-    download.file_ext = target_path.suffix.lstrip(".")
-    download.file_size_bytes = output_size
-    download.download_status = "downloaded"
-    download.completed_at = timezone.now()
-    download.last_seen_at = timezone.now()
-    download.save(update_fields=["file_path", "file_path_relative", "file_ext", "file_size_bytes", "download_status", "completed_at", "last_seen_at"])
+    if download is None:
+        final_defaults = dict(deferred_defaults)
+        final_defaults.update(
+            {
+                "file_path": str(target_path),
+                "file_path_relative": str(target_path.relative_to(output_root)) if target_path.is_relative_to(output_root) else None,
+                "file_ext": target_path.suffix.lstrip("."),
+                "file_size_bytes": output_size,
+                "download_status": "downloaded",
+                "completed_at": timezone.now(),
+                "last_seen_at": timezone.now(),
+            }
+        )
+        download, _created = Download.objects.update_or_create(**deferred_lookup, defaults=final_defaults)
+    else:
+        download.file_path = str(target_path)
+        download.file_path_relative = str(target_path.relative_to(output_root)) if target_path.is_relative_to(output_root) else None
+        download.file_ext = target_path.suffix.lstrip(".")
+        download.file_size_bytes = output_size
+        download.download_status = "downloaded"
+        download.completed_at = timezone.now()
+        download.last_seen_at = timezone.now()
+        download.save(update_fields=["file_path", "file_path_relative", "file_ext", "file_size_bytes", "download_status", "completed_at", "last_seen_at"])
     log.info(
         "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s original_deferred_delete=%s",
         job.id,
@@ -326,7 +340,7 @@ def _youtube_video_url(entry: dict) -> str:
     return webpage_url or raw_url
 
 
-def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
+def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
     if not download_url:
         log.warning("Download worker skipped job with no URL job_id=%s payload=%s", job.id, payload)
@@ -354,6 +368,10 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
         playlist_items="1",
         playlistend=1,
     )
+    max_height = _profile_setting(job.profile_id, "ytdlp_video_max_height", "720").strip()
+    requested_media_type = str(payload.get("media_type") or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")).strip().lower()
+    if source_type == SourceConfig.SOURCE_YOUTUBE and requested_media_type != "audio" and max_height.isdigit():
+        ydl_opts["format"] = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/best[height<={max_height}]/best"
     if source_type == SourceConfig.SOURCE_YOUTUBE:
         _enable_youtube_ejs_remote_component(ydl_opts, f"download job {job.id}", _profile_setting(job.profile_id, "deno_path", "deno"))
         _apply_ytdlp_player_js_variant_workaround(ydl_opts)
@@ -383,30 +401,53 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
     now = timezone.now()
     item_uid = str(payload.get("item_uid") or info.get("id") or download_url)[:255]
     title = str(payload.get("title") or info.get("title") or downloaded_file.stem)
+    download_lookup = {
+        "profile_id": job.profile_id,
+        "source_type": source_type,
+        "source_name": source_name,
+        "item_uid": item_uid,
+    }
+    download_defaults = {
+        "source_url": payload.get("source_url") or download_url,
+        "item_id": str(info.get("id") or item_uid)[:255],
+        "item_url": payload.get("item_url") or info.get("webpage_url") or download_url,
+        "media_url": download_url,
+        "title": title,
+        "description": info.get("description"),
+        "uploader": info.get("uploader"),
+        "channel": info.get("channel"),
+        "upload_date": str(payload.get("published") or info.get("upload_date") or ""),
+        "duration_seconds": int(info.get("duration")) if info.get("duration") else None,
+        "file_path": str(downloaded_file),
+        "file_path_relative": str(downloaded_file.relative_to(output_root)) if downloaded_file.is_relative_to(output_root) else None,
+        "file_ext": downloaded_file.suffix.lstrip("."),
+        "file_size_bytes": downloaded_file.stat().st_size if downloaded_file.exists() else None,
+        "download_status": "downloaded",
+        "last_seen_at": now,
+        "completed_at": now,
+    }
+    media_kind = str(payload.get("media_type") or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")).strip().lower()
+    target_ext = _preferred_target_ext(job.profile_id, media_kind)
+    if downloaded_file.suffix.lstrip(".").lower() != target_ext:
+        log.info(
+            "Download worker deferred database insert until conversion job_id=%s source_file=%s current_ext=%s target_ext=%s media_kind=%s",
+            job.id,
+            downloaded_file,
+            downloaded_file.suffix.lstrip("."),
+            target_ext,
+            media_kind,
+        )
+        return {
+            "source_file_path": str(downloaded_file),
+            "output_root": str(output_root),
+            "media_type": media_kind,
+            "download_lookup": download_lookup,
+            "download_defaults": {key: value for key, value in download_defaults.items() if key not in {"last_seen_at", "completed_at"}},
+            "item_uid": item_uid,
+        }
     download, _created = Download.objects.update_or_create(
-        profile_id=job.profile_id,
-        source_type=source_type,
-        source_name=source_name,
-        item_uid=item_uid,
-        defaults={
-            "source_url": payload.get("source_url") or download_url,
-            "item_id": str(info.get("id") or item_uid)[:255],
-            "item_url": payload.get("item_url") or info.get("webpage_url") or download_url,
-            "media_url": download_url,
-            "title": title,
-            "description": info.get("description"),
-            "uploader": info.get("uploader"),
-            "channel": info.get("channel"),
-            "upload_date": str(payload.get("published") or info.get("upload_date") or ""),
-            "duration_seconds": int(info.get("duration")) if info.get("duration") else None,
-            "file_path": str(downloaded_file),
-            "file_path_relative": str(downloaded_file.relative_to(output_root)) if downloaded_file.is_relative_to(output_root) else None,
-            "file_ext": downloaded_file.suffix.lstrip("."),
-            "file_size_bytes": downloaded_file.stat().st_size if downloaded_file.exists() else None,
-            "download_status": "downloaded",
-            "last_seen_at": now,
-            "completed_at": now,
-        },
+        **download_lookup,
+        defaults=download_defaults,
     )
     log.info(
         "Download worker saved download row job_id=%s download_id=%s file_path=%s size_bytes=%s",
@@ -781,11 +822,21 @@ def download_episode(job: Job) -> None:
     if not download_id:
         if _source_download_limit_reached(job.profile_id, payload):
             return
-        downloaded = _download_with_yt_dlp(job, payload)
-        if downloaded is None:
+        downloaded_result = _download_with_yt_dlp(job, payload)
+        if downloaded_result is None:
             log.warning("Download worker did not create a download row job_id=%s", job.id)
             return
-        download_id = downloaded.id
+        if isinstance(downloaded_result, dict):
+            child = create_job(
+                profile_id=job.profile_id,
+                job_type="transcode_media",
+                payload=downloaded_result,
+                idempotency_key=f"transcode_media:{job.profile_id}:{downloaded_result.get('item_uid') or downloaded_result.get('source_file_path')}",
+            )
+            _publish_created_job(child)
+            log.info("Download worker queued FFmpeg job before database insert parent_job_id=%s child_job_id=%s source_file=%s", job.id, child.id, downloaded_result.get("source_file_path"))
+            return
+        download_id = downloaded_result.id
     download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
     if download is None:
         log.warning("Download worker could not find downloaded row for next stage job_id=%s download_id=%s", job.id, download_id)

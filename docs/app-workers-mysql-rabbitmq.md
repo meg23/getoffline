@@ -108,6 +108,9 @@ the downloader skips FFmpeg when the file already matches the profile's target
 format or queues `transcode_media` when conversion is needed, transcripts run on
 the final media file, summaries run after transcripts, and the summary stage
 removes any pre-transcode original media once downstream work has completed.
+When conversion is needed, the downloader defers creating the library `Download`
+row until the FFmpeg worker has produced the final MP4/MP3 output, so partially
+processed video files do not appear in the database-backed library.
 The default video conversion target is H.264/AAC in MP4 with an ultrafast x264
 preset because it is much faster than HEVC and broadly compatible with Jellyfin
 clients.

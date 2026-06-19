@@ -82,6 +82,7 @@
           {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
           <div class="grid two">
             <div><label>Default max downloads</label><input name="config__max_downloads" value="{{ settings.max_downloads }}" required /><p class="field-help">Used when a YouTube or podcast source does not set its own max downloads.</p></div>
+            <div><label>Max YouTube video height</label><input type="number" min="144" step="1" name="config__ytdlp_video_max_height" value="{{ settings.ytdlp_video_max_height }}" required /><p class="field-help">Defaults to 720p. yt-dlp will prefer video formats at or below this height.</p></div>
             <div><label>Deno executable</label><input name="config__deno_path" value="{{ settings.deno_path }}" required /></div>
           </div>
           <label for="youtube_cookie_text">YouTube cookies.txt content</label>
