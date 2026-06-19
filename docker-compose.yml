@@ -13,6 +13,24 @@ services:
       timeout: 5s
       retries: 10
 
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${GETOFFLINE_DB_NAME:-getoffline}
+      MYSQL_USER: ${GETOFFLINE_DB_USER:-getoffline}
+      MYSQL_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
+      MYSQL_ROOT_PASSWORD: ${GETOFFLINE_DB_ROOT_PASSWORD:-getoffline-root}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   frontend:
     build: .
     restart: unless-stopped
@@ -21,17 +39,19 @@ services:
       GETOFFLINE_DJANGO_DEBUG: "0"
       GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,frontend,nginx}
       GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
-      GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:?set GETOFFLINE_DB_HOST to your external MySQL host}
+      GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:-mysql}
       GETOFFLINE_DB_PORT: ${GETOFFLINE_DB_PORT:-3306}
       GETOFFLINE_DB_NAME: ${GETOFFLINE_DB_NAME:-getoffline}
       GETOFFLINE_DB_USER: ${GETOFFLINE_DB_USER:-getoffline}
-      GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:?set GETOFFLINE_DB_PASSWORD}
+      GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
       GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
       GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
       - getoffline-static:/app/staticfiles
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -52,6 +72,8 @@ services:
     environment: *getoffline-env
     command: sh -c "python -m django migrate --run-syncdb && python -m django sync_model_schema"
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -61,6 +83,8 @@ services:
     environment: *getoffline-env
     command: python -m workers episode-checker
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -72,6 +96,8 @@ services:
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -83,6 +109,8 @@ services:
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -92,6 +120,8 @@ services:
     environment: *getoffline-env
     command: sh -c "python -m workers summaries --prefetch $${PREFETCH:-4}"
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -101,9 +131,12 @@ services:
     environment: *getoffline-env
     command: python -m workers sync
     depends_on:
+      mysql:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
 volumes:
+  mysql-data:
   rabbitmq-data:
   getoffline-static:

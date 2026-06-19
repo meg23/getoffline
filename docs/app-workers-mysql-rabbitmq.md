@@ -112,32 +112,33 @@ make run-worker-sync
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
 The job payload and status live in MySQL.
 
-## Docker Compose without MySQL
+## Docker Compose with persistent MySQL
 
-The repository includes `docker-compose.yml` for running everything except MySQL:
+The repository includes `docker-compose.yml` for running the frontend, nginx, RabbitMQ, workers, and a persistent MySQL database:
 
 - `nginx` publishes the frontend on host port `8080` and proxies requests to the Django `frontend` service.
-- `rabbitmq` runs the broker and exposes the management UI on host port `15672`.
+- `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.
+- `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
 - `worker-episode-checker` discovers new episodes and publishes download jobs.
 - `worker-downloader` consumes download jobs one at a time.
 - `worker-transcripts`, `worker-summaries`, and `worker-sync` run the parallel/background processing queues.
-- `migrate` is a tools-profile service for applying Django schema updates to your existing MySQL database.
+- `migrate` is a tools-profile service for applying Django schema updates to the configured MySQL database.
 
 Example startup:
 
 ```bash
 export GETOFFLINE_DJANGO_SECRET_KEY='replace-me'
-export GETOFFLINE_DB_HOST='mysql.example.internal'
 export GETOFFLINE_DB_NAME='getoffline'
 export GETOFFLINE_DB_USER='getoffline'
 export GETOFFLINE_DB_PASSWORD='replace-me'
+export GETOFFLINE_DB_ROOT_PASSWORD='replace-root-password'
 export GETOFFLINE_DOWNLOADS_DIR='/srv/getoffline/downloads'
 
 docker compose --profile tools run --rm migrate
 docker compose up --build -d
 ```
 
-Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
+The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
 
 ```bash
 docker compose up -d --scale worker-transcripts=4 --scale worker-summaries=4
