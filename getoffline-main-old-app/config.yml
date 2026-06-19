@@ -1,0 +1,3 @@
+defaults:
+  output_root: ./downloads
+  database_path: ./downloads/downloads.sqlite3

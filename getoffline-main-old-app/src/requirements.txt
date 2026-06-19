@@ -1,0 +1,5 @@
+yt-dlp>=2025.05.22
+feedparser>=6.0.10
+browser-cookie3>=0.19.1
+faster-whisper>=1.1.0
+SQLAlchemy>=2.0.36
