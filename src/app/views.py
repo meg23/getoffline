@@ -335,6 +335,7 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         media_type=str(request.POST.get("media_type") or "audio").strip().lower() if source_type == SourceConfig.SOURCE_YOUTUBE else None,
         enabled=True,
         subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
+        delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
