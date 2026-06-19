@@ -13,6 +13,72 @@ from models.models import Download, Job, SourceConfig
 log = get_logger("workers.handlers")
 
 
+class _WorkerYtDlpLogger:
+    def debug(self, msg):
+        if msg:
+            log.info("yt-dlp debug: %s", msg)
+
+    def warning(self, msg):
+        if msg:
+            log.warning("yt-dlp warning: %s", msg)
+
+    def error(self, msg):
+        if msg:
+            log.error("yt-dlp error: %s", msg)
+
+
+def _yt_dlp_progress_hook(event: dict) -> None:
+    status = event.get("status")
+    filename = event.get("filename") or event.get("tmpfilename")
+    downloaded = event.get("downloaded_bytes")
+    total = event.get("total_bytes") or event.get("total_bytes_estimate")
+    speed = event.get("speed")
+    eta = event.get("eta")
+    if status == "downloading":
+        log.info(
+            "yt-dlp downloading filename=%s downloaded_bytes=%s total_bytes=%s speed=%s eta=%s",
+            filename,
+            downloaded,
+            total,
+            speed,
+            eta,
+        )
+    elif status == "finished":
+        log.info("yt-dlp download finished filename=%s total_bytes=%s", filename, total or downloaded)
+    elif status == "error":
+        log.error("yt-dlp download error filename=%s event=%s", filename, event)
+    else:
+        log.info("yt-dlp progress status=%s filename=%s event=%s", status, filename, event)
+
+
+def _yt_dlp_base_options(**overrides) -> dict:
+    options = {
+        "logger": _WorkerYtDlpLogger(),
+        "progress_hooks": [_yt_dlp_progress_hook],
+        "verbose": True,
+        "quiet": False,
+        "no_warnings": False,
+    }
+    options.update(overrides)
+    return options
+
+
+def _log_youtube_response(prefix: str, payload: dict) -> None:
+    entries = payload.get("entries") if isinstance(payload, dict) else None
+    log.info(
+        "%s extractor=%s extractor_key=%s id=%s title=%s webpage_url=%s entries=%s live_status=%s availability=%s",
+        prefix,
+        payload.get("extractor"),
+        payload.get("extractor_key"),
+        payload.get("id"),
+        payload.get("title"),
+        payload.get("webpage_url"),
+        len(entries or []) if entries is not None else 0,
+        payload.get("live_status"),
+        payload.get("availability"),
+    )
+
+
 def _publish_created_job(job: Job) -> None:
     log.info("Publishing child job job_id=%s job_type=%s profile_id=%s", job.id, job.job_type, job.profile_id)
     publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
@@ -78,14 +144,16 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
 
 def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
     log.info("Checking YouTube source source_id=%s source_name=%s url=%s", source.id, source.name, source.url)
-    ydl_opts = {
-        "extract_flat": True,
-        "quiet": True,
-        "skip_download": True,
-        "playlistend": _source_limit(source),
-    }
+    ydl_opts = _yt_dlp_base_options(
+        extract_flat=True,
+        skip_download=True,
+        playlistend=_source_limit(source),
+    )
+    log.info("yt-dlp extract starting source_id=%s source_name=%s url=%s options=%s", source.id, source.name, source.url, {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}})
     with YoutubeDL(ydl_opts) as ydl:
         payload = ydl.extract_info(source.url, download=False) or {}
+    if isinstance(payload, dict):
+        _log_youtube_response("yt-dlp extract response", payload)
     entries = payload.get("entries") if isinstance(payload, dict) else None
     if not entries:
         entries = [payload]
@@ -214,7 +282,17 @@ def download_episode(job: Job) -> None:
     After download code writes a Download row, enqueue transcript generation with that download_id.
     """
     log.info("Download worker started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
-    download_id = job.payload.get("download_id") if isinstance(job.payload, dict) else None
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
+    if download_url:
+        ydl_opts = _yt_dlp_base_options(skip_download=True)
+        log.info("yt-dlp download preflight starting job_id=%s url=%s options=%s", job.id, download_url, {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}})
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(download_url, download=False) or {}
+        if isinstance(info, dict):
+            _log_youtube_response("yt-dlp download preflight response", info)
+        log.info("yt-dlp actual download integration pending job_id=%s url=%s", job.id, download_url)
+    download_id = payload.get("download_id")
     if not download_id:
         log.info("Download worker has no download_id yet; actual downloader integration pending job_id=%s", job.id)
         return
