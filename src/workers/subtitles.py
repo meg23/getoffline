@@ -228,16 +228,33 @@ def create_subtitles(
             if subtitle_transcription_mode:
                 subtitle_settings["subtitle_transcription_mode"] = str(subtitle_transcription_mode)
 
+            logger.info(
+                "Subtitle generation requested context=%s label=%s media=%s offset=%s mode=%s",
+                context_name,
+                context_label,
+                media_file,
+                subtitle_settings.get("subtitle_time_offset_seconds"),
+                subtitle_settings.get("subtitle_transcription_mode"),
+            )
             subtitle_path = _find_existing_whisper_subtitle(media_file)
+            reused_existing = subtitle_path is not None
             if subtitle_path is None:
+                logger.info("No existing subtitle sidecar found; generating Whisper subtitles for %s", media_file)
                 subtitle_path = generate_whisper_subtitles(media_file, subtitle_settings)
             if subtitle_path is None:
+                logger.warning("Subtitle generation returned no subtitle path for %s", media_file)
                 return None
-            logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)
+            if reused_existing:
+                logger.info("Reused existing %s subtitles: %s", context_label, subtitle_path.name)
+            else:
+                logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)
             return subtitle_path
         except Exception as subtitle_exc:
             logger.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
             return None
 
-    logger.info("Subtitles skipped for %s because subtitles are disabled", context_name)
+    if not media_file.exists():
+        logger.warning("Subtitles skipped for %s because media file is missing: %s", context_name, media_file)
+    else:
+        logger.info("Subtitles skipped for %s because subtitles are disabled", context_name)
     return None

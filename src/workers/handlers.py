@@ -905,12 +905,34 @@ def generate_transcript(job: Job) -> None:
         log.warning("Transcript worker skipped missing download job_id=%s download_id=%s profile_id=%s", job.id, download_id, job.profile_id)
         return
     media_path = Path(str(download.file_path or "")).expanduser().resolve()
+    log.info(
+        "Transcript worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s subtitle_path=%s",
+        job.id,
+        download_id,
+        download.title,
+        download.source_type,
+        download.source_name,
+        download.file_path,
+        download.file_ext,
+        download.subtitle_path,
+    )
     if not media_path.exists():
         log.warning("Transcript worker skipped missing media file job_id=%s download_id=%s path=%s", job.id, download_id, media_path)
     else:
         enabled = _subtitles_enabled_for_download(download, payload)
-        log.info("Transcript worker subtitle decision job_id=%s download_id=%s enabled=%s media_path=%s", job.id, download_id, enabled, media_path)
-        subtitle_path = create_subtitles(media_path, _subtitle_offset_for_download(download, payload), enabled, log, download.title or media_path.name, "download", _profile_setting(job.profile_id, "subtitle_transcription_mode", "in_process"))
+        subtitle_offset = _subtitle_offset_for_download(download, payload)
+        transcription_mode = _profile_setting(job.profile_id, "subtitle_transcription_mode", "in_process")
+        log.info(
+            "Transcript worker starting subtitle generation job_id=%s download_id=%s enabled=%s media_path=%s size_bytes=%s offset=%s mode=%s",
+            job.id,
+            download_id,
+            enabled,
+            media_path,
+            media_path.stat().st_size,
+            subtitle_offset,
+            transcription_mode,
+        )
+        subtitle_path = create_subtitles(media_path, subtitle_offset, enabled, log, download.title or media_path.name, "download", transcription_mode)
         if subtitle_path is not None:
             output_root = _download_output_root(job.profile_id)
             download.subtitle_path = str(subtitle_path)
@@ -920,6 +942,8 @@ def generate_transcript(job: Job) -> None:
             TranscriptSegment.objects.filter(download=download).delete()
             TranscriptSegment.objects.bulk_create([TranscriptSegment(download=download, subtitle_path=str(subtitle_path), start_seconds=0.0, end_seconds=None, text=text) for text in segments])
             log.info("Transcript worker saved subtitles job_id=%s download_id=%s subtitle_path=%s segments=%s", job.id, download_id, subtitle_path, len(segments))
+        else:
+            log.warning("Transcript worker completed without subtitle output job_id=%s download_id=%s enabled=%s media_path=%s", job.id, download_id, enabled, media_path)
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_summary",
