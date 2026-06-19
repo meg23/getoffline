@@ -73,7 +73,7 @@ def _safe_path(raw_path: str | None) -> Path:
 
 def library(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
-    downloads_qs = Download.objects.filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
+    downloads_qs = Download.objects.select_related("summary").filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
     downloads = [_decorate_download(item) for item in downloads_qs.order_by("-last_seen_at", "-id")[:500]]
     played_count = sum(1 for item in downloads if item.played)
     favorite_count = sum(1 for item in downloads if item.favorite)

@@ -81,7 +81,7 @@
             {% for item in downloads %}
               <tr data-row-id="{{ item.id }}" data-played="{% if item.played %}1{% else %}0{% endif %}" data-favorite="{% if item.favorite %}1{% else %}0{% endif %}" data-channel="{{ item.source_name|default:'' }}" data-title="{{ item.title|default:'' }}">
                 <td class="channel-col" title="{{ item.source_name|default:'' }}">{{ item.source_name|default:item.source_type }}</td>
-                <td class="episode-col"><a class="episode-link" href="{% url 'player' item.id %}">{{ item.title|default:'Untitled' }}</a></td>
+                <td class="episode-col"><a class="episode-link" href="{% url 'player' item.id %}" data-summary="{{ item.summary.summary_text|default:item.title|default:'Untitled' }}" data-title="{{ item.title|default:'Untitled' }}" data-play-link="1">{{ item.title|default:'Untitled' }}</a></td>
                 <td><span class="pill status-new">{{ item.source_type|upper }}</span></td>
                 <td><span class="pill">{{ item.display_type }}</span></td>
                 <td>{{ item.display_size }}</td>
@@ -94,6 +94,7 @@
           </tbody>
         </table>
       </main>
+      <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
     </div>
 
     <div id="quick-add-backdrop" class="modal-backdrop" aria-hidden="true">
