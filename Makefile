@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-episode-checker run-worker-downloader run-worker-transcripts run-worker-sync run-worker-summaries
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader run-worker-transcripts run-worker-sync run-worker-summaries
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -67,9 +67,9 @@ run-app-debug: venv
 	@echo "Running Django frontend app in debug mode..."
 	PYTHONPATH=$(SRC_DIR) GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
 
-run-worker-episode-checker: venv
-	@echo "Running single-concurrency episode checker worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers episode-checker
+run-worker-updates: venv
+	@echo "Running single-concurrency updates worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers updates
 
 run-worker-downloader: venv
 	@echo "Running single-concurrency downloader worker..."

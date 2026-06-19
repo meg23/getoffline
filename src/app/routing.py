@@ -1,5 +1,5 @@
-SERIAL_EPISODE_CHECK_QUEUE = "getoffline.episode_checks"
-SERIAL_DOWNLOAD_QUEUE = "getoffline.downloads"
+SERIAL_EPISODE_CHECK_QUEUE = "getoffline.jobs.updates"
+SERIAL_DOWNLOAD_QUEUE = "getoffline.jobs.downloads"
 TRANSCRIPT_QUEUE = "getoffline.transcripts"
 SUMMARY_QUEUE = "getoffline.summaries"
 SYNC_QUEUE = "getoffline.sync_media"
