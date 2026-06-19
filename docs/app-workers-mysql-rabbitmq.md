@@ -117,6 +117,7 @@ The job payload and status live in MySQL.
 The repository includes `docker-compose.yml` for running the frontend, nginx, RabbitMQ, workers, and a persistent MySQL database:
 
 - `nginx` publishes the frontend on host port `8080` and proxies requests to the Django `frontend` service.
+  It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
 - `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.
 - `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
 - `worker-episode-checker` discovers new episodes and publishes download jobs.
@@ -133,6 +134,8 @@ export GETOFFLINE_DB_USER='getoffline'
 export GETOFFLINE_DB_PASSWORD='replace-me'
 export GETOFFLINE_DB_ROOT_PASSWORD='replace-root-password'
 export GETOFFLINE_DOWNLOADS_DIR='/srv/getoffline/downloads'
+# Optional when exposing a different hostname or HTTPS URL:
+export GETOFFLINE_CSRF_TRUSTED_ORIGINS='http://localhost:8080'
 
 docker compose up --build -d
 ```

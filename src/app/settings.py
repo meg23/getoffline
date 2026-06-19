@@ -9,6 +9,17 @@ BASE_DIR = Path(__file__).resolve().parent
 SECRET_KEY = os.getenv("GETOFFLINE_DJANGO_SECRET_KEY", "getoffline-dev-secret")
 DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if host.strip()]
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "GETOFFLINE_CSRF_TRUSTED_ORIGINS",
+        "http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080",
+    ).split(",")
+    if origin.strip()
+]
+CSRF_COOKIE_SECURE = os.getenv("GETOFFLINE_CSRF_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+SESSION_COOKIE_SECURE = os.getenv("GETOFFLINE_SESSION_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
 ROOT_URLCONF = "app.urls"
 STATIC_URL = "/static/"
 STATIC_ROOT = Path(os.getenv("GETOFFLINE_STATIC_ROOT", "/app/staticfiles"))
