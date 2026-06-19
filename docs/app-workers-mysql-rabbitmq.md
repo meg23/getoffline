@@ -91,9 +91,17 @@ multiple worker processes for the same queue, or by setting `PREFETCH` for each
 process:
 
 ```bash
+PREFETCH=2 make run-worker-ffmpeg
 PREFETCH=4 make run-worker-transcripts
 PREFETCH=4 make run-worker-summaries
 ```
+
+The FFmpeg worker is required for new downloads to move past the downloaded
+state because the downloader now publishes `transcode_media` jobs before
+transcript generation. When checking logs after a download, expect to see the
+downloader publish `job_type=transcode_media`, then a separate `worker-ffmpeg`
+container or `make run-worker-ffmpeg` process log `Worker starting
+worker_type=ffmpeg` and `FFmpeg conversion starting`.
 
 Sync work remains isolated on its own queue:
 
@@ -105,6 +113,7 @@ make run-worker-sync
 
 - `getoffline.jobs.updates`: `update_downloads`, `check_for_episodes`
 - `getoffline.jobs.downloads`: `download_single`, `download_episode`
+- `getoffline.ffmpeg`: `transcode_media`
 - `getoffline.transcripts`: `generate_transcript`
 - `getoffline.summaries`: `summarize_missing`, `generate_summary`
 - `getoffline.sync_media`: `sync_media`
@@ -125,6 +134,8 @@ The repository includes `docker-compose.yml` for running the frontend, nginx, Ra
 - `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
 - `worker-updates` discovers new episodes and publishes download jobs.
 - `worker-downloader` consumes download jobs one at a time.
+- `worker-ffmpeg` consumes conversion jobs and must be running for downloaded
+  media to be transcoded and forwarded to transcript generation.
 - `worker-transcripts`, `worker-summaries`, and `worker-sync` run the parallel/background processing queues.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
 
@@ -146,5 +157,5 @@ docker compose up --build -d
 On startup, `frontend` and every worker wait for the one-shot `migrate` service to finish successfully, so tables such as `downloads` are created before the web UI serves requests. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
 
 ```bash
-docker compose up -d --scale worker-transcripts=4 --scale worker-summaries=4
+docker compose up -d --scale worker-ffmpeg=2 --scale worker-transcripts=4 --scale worker-summaries=4
 ```

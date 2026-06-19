@@ -115,6 +115,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      worker-ffmpeg:
+        condition: service_started
 
   worker-ffmpeg:
     build:
