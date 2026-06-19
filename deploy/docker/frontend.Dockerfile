@@ -14,4 +14,4 @@ COPY src ./src
 RUN python -m django collectstatic --noinput
 
 EXPOSE 8080
-CMD ["python", "-m", "app"]
+CMD ["sh", "-c", "python -m django collectstatic --noinput && python -m app"]

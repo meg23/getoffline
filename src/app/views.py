@@ -133,11 +133,33 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
     return render(request, "app/player.html", {"item": item, "seek_seconds": seek, "media_kind": media_kind})
 
 
-def media(request: HttpRequest, download_id: int) -> FileResponse:
+def media(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
     path = _safe_path(item.file_path)
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(path.open("rb"), content_type=content_type)
+    file_size = path.stat().st_size
+    range_header = request.headers.get("Range", "")
+    if range_header.startswith("bytes="):
+        start_text, _, end_text = range_header.removeprefix("bytes=").partition("-")
+        try:
+            start = int(start_text) if start_text else 0
+            end = int(end_text) if end_text else file_size - 1
+        except ValueError:
+            start, end = 0, file_size - 1
+        start = max(0, min(start, file_size - 1))
+        end = max(start, min(end, file_size - 1))
+        length = end - start + 1
+        with path.open("rb") as handle:
+            handle.seek(start)
+            data = handle.read(length)
+        response = HttpResponse(data, status=206, content_type=content_type)
+        response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        response["Content-Length"] = str(length)
+    else:
+        response = FileResponse(path.open("rb"), content_type=content_type)
+        response["Content-Length"] = str(file_size)
+    response["Accept-Ranges"] = "bytes"
+    return response
 
 
 def subtitle(request: HttpRequest, download_id: int) -> FileResponse:
@@ -281,12 +303,19 @@ def unfavorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
 def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
     position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
+    reason = str(request.POST.get("reason") or "").strip().lower()
+    completed = reason in {"ended", "mini-ended"}
     delta = max(0.0, position - float(item.last_position_seconds or 0.0))
-    item.last_position_seconds = position
+    item.last_position_seconds = 0.0 if completed else position
     item.total_listened_seconds = float(item.total_listened_seconds or 0.0) + delta
     item.last_position_updated_at = timezone.now()
     item.last_seen_at = timezone.now()
-    item.save(update_fields=["last_position_seconds", "total_listened_seconds", "last_position_updated_at", "last_seen_at"])
+    update_fields = ["last_position_seconds", "total_listened_seconds", "last_position_updated_at", "last_seen_at"]
+    if completed:
+        item.played = True
+        item.played_at = timezone.now()
+        update_fields.extend(["played", "played_at"])
+    item.save(update_fields=update_fields)
     return HttpResponse(status=204)
 
 
