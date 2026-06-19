@@ -82,7 +82,7 @@ workers so the app checks sources and downloads from YouTube/media hosts one at
 a time:
 
 ```bash
-make run-worker-episode-checker
+make run-worker-updates
 make run-worker-downloader
 ```
 
@@ -103,8 +103,8 @@ make run-worker-sync
 
 ## Queue mapping
 
-- `getoffline.episode_checks`: `update_downloads`, `check_for_episodes`
-- `getoffline.downloads`: `download_single`, `download_episode`
+- `getoffline.jobs.updates`: `update_downloads`, `check_for_episodes`
+- `getoffline.jobs.downloads`: `download_single`, `download_episode`
 - `getoffline.transcripts`: `generate_transcript`
 - `getoffline.summaries`: `summarize_missing`, `generate_summary`
 - `getoffline.sync_media`: `sync_media`
@@ -117,13 +117,13 @@ The job payload and status live in MySQL.
 The repository includes `docker-compose.yml` for running the frontend, nginx, RabbitMQ, workers, and a persistent MySQL database. It builds separate Alpine images so the frontend/migration image installs only Django/PyMySQL/pika, while the worker image carries the heavier media-processing dependencies only where they are needed:
 
 - `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, a small Alpine image with only web/database/queue dependencies.
-- episode-checker/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
+- updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
 - transcript, summary, and sync workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies until heavier processing packages are actually needed.
 - `nginx` publishes the frontend on host port `8080` and proxies requests to the Django `frontend` service.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
 - `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.
 - `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
-- `worker-episode-checker` discovers new episodes and publishes download jobs.
+- `worker-updates` discovers new episodes and publishes download jobs.
 - `worker-downloader` consumes download jobs one at a time.
 - `worker-transcripts`, `worker-summaries`, and `worker-sync` run the parallel/background processing queues.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.

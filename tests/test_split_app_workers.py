@@ -111,10 +111,10 @@ class SharedDjangoModelTests(TestCase):
 
 class QueueRoutingTests(unittest.TestCase):
     def test_download_jobs_share_single_download_queue(self):
-        self.assertEqual(queue_name("update_downloads"), "getoffline.episode_checks")
-        self.assertEqual(queue_name("check_for_episodes"), "getoffline.episode_checks")
-        self.assertEqual(queue_name("download_single"), "getoffline.downloads")
-        self.assertEqual(queue_name("download_episode"), "getoffline.downloads")
+        self.assertEqual(queue_name("update_downloads"), "getoffline.jobs.updates")
+        self.assertEqual(queue_name("check_for_episodes"), "getoffline.jobs.updates")
+        self.assertEqual(queue_name("download_single"), "getoffline.jobs.downloads")
+        self.assertEqual(queue_name("download_episode"), "getoffline.jobs.downloads")
 
     def test_non_download_jobs_get_separate_queues(self):
         self.assertEqual(queue_name("sync_media"), "getoffline.sync_media")

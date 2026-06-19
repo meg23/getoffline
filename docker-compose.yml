@@ -84,13 +84,13 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  worker-episode-checker:
+  worker-updates:
     build:
       context: .
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
-    command: python -m workers episode-checker
+    command: python -m workers updates
     depends_on:
       mysql:
         condition: service_healthy

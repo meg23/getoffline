@@ -29,14 +29,14 @@ log = get_logger("workers.runner")
 _STOP = False
 
 QUEUE_BY_WORKER = {
-    "episode-checker": SERIAL_EPISODE_CHECK_QUEUE,
+    "updates": SERIAL_EPISODE_CHECK_QUEUE,
     "downloader": SERIAL_DOWNLOAD_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
     "summaries": SUMMARY_QUEUE,
     "sync": SYNC_QUEUE,
 }
 
-SERIAL_WORKERS = {"episode-checker", "downloader"}
+SERIAL_WORKERS = {"updates", "downloader"}
 
 
 def _handle_signal(signum, _frame) -> None:
