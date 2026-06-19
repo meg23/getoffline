@@ -231,7 +231,7 @@
     [audio, video].forEach((el) => { if (!el) return; el.pause(); el.removeAttribute('src'); while (el.firstChild) el.removeChild(el.firstChild); el.load(); el.style.display = 'none'; el.classList.remove('is-active'); el.onvolumechange = null; el.ontimeupdate = null; el.onpause = null; el.onended = null; });
     clearTranscript();
   }
-  function setExpanded(expanded) { miniPlayer?.classList.toggle('is-maximized', expanded); miniBackdrop?.classList.toggle('is-open', expanded); miniBackdrop?.setAttribute('aria-hidden', expanded ? 'false' : 'true'); if (miniOpen) miniOpen.textContent = expanded ? 'Minimize' : 'Maximize'; }
+  function setExpanded(expanded) { const isExpanded = !!expanded; miniPlayer?.classList.toggle('is-maximized', isExpanded); miniBackdrop?.classList.toggle('is-open', isExpanded); miniBackdrop?.setAttribute('aria-hidden', isExpanded ? 'false' : 'true'); if (miniOpen) { miniOpen.textContent = isExpanded ? 'Minimize' : 'Maximize'; miniOpen.setAttribute('aria-label', isExpanded ? 'Minimize player' : 'Maximize player'); } }
   function closeMini() { try { const state = JSON.parse(localStorage.getItem(stateKey) || 'null'); const media = activeMedia(state?.kind); postProgress(state, media, true, 'mini-close'); } catch (_) {} localStorage.removeItem(stateKey); stopMini(); miniPlayer?.classList.remove('is-visible'); setExpanded(false); }
   function renderMini(state) {
     if (!state?.rowId || !state.src || !miniPlayer) return;
@@ -255,6 +255,7 @@
   miniClose?.addEventListener('click', closeMini);
   miniOpen?.addEventListener('click', () => setExpanded(!miniPlayer?.classList.contains('is-maximized')));
   miniBackdrop?.addEventListener('click', (event) => { if (event.target === miniBackdrop) closeMini(); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && miniBackdrop?.classList.contains('is-open')) closeMini(); });
 
   document.addEventListener('click', (event) => {
     const link = event.target?.closest?.('a[data-play-link="1"]');
