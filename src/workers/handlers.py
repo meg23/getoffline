@@ -1,4 +1,5 @@
 import hashlib
+import os
 from typing import Iterable
 
 import feedparser
@@ -7,7 +8,7 @@ from yt_dlp import YoutubeDL
 from app.queue import publish_job
 from logger import get_logger
 from models.jobs import create_job
-from models.models import Download, Job, SourceConfig
+from models.models import Download, Job, ProfileConfigValue, SourceConfig
 
 
 log = get_logger("workers.handlers")
@@ -15,7 +16,7 @@ log = get_logger("workers.handlers")
 
 class _WorkerYtDlpLogger:
     def debug(self, msg):
-        if msg:
+        if msg and _yt_dlp_verbose_enabled():
             log.info("yt-dlp debug: %s", msg)
 
     def warning(self, msg):
@@ -51,11 +52,15 @@ def _yt_dlp_progress_hook(event: dict) -> None:
         log.info("yt-dlp progress status=%s filename=%s event=%s", status, filename, event)
 
 
+def _yt_dlp_verbose_enabled() -> bool:
+    return str(os.getenv("GETOFFLINE_YTDLP_VERBOSE", "0")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _yt_dlp_base_options(**overrides) -> dict:
     options = {
         "logger": _WorkerYtDlpLogger(),
         "progress_hooks": [_yt_dlp_progress_hook],
-        "verbose": True,
+        "verbose": _yt_dlp_verbose_enabled(),
         "quiet": False,
         "no_warnings": False,
     }
@@ -109,7 +114,16 @@ def _episode_was_downloaded(*, profile_id: str, source: SourceConfig, item_uid: 
 
 
 def _source_limit(source: SourceConfig) -> int:
-    return max(1, int(source.max_downloads or 10))
+    if source.max_downloads:
+        return max(1, int(source.max_downloads))
+    profile_default = (
+        ProfileConfigValue.objects.filter(profile_id=source.profile_id, key="max_downloads")
+        .values_list("value", flat=True)
+        .first()
+    )
+    if str(profile_default or "").strip().isdigit():
+        return max(1, int(str(profile_default).strip()))
+    return 10
 
 
 def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
@@ -144,10 +158,12 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
 
 def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
     log.info("Checking YouTube source source_id=%s source_name=%s url=%s", source.id, source.name, source.url)
+    limit = _source_limit(source)
     ydl_opts = _yt_dlp_base_options(
         extract_flat=True,
         skip_download=True,
-        playlistend=_source_limit(source),
+        playlistend=limit,
+        playlist_items=f"1-{limit}",
     )
     log.info("yt-dlp extract starting source_id=%s source_name=%s url=%s options=%s", source.id, source.name, source.url, {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}})
     with YoutubeDL(ydl_opts) as ydl:
@@ -157,7 +173,7 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
     entries = payload.get("entries") if isinstance(payload, dict) else None
     if not entries:
         entries = [payload]
-    entries = list(entries or [])[: _source_limit(source)]
+    entries = list(entries or [])[:limit]
     log.info("YouTube source parsed source_id=%s source_name=%s entries=%s", source.id, source.name, len(entries))
     for entry in entries:
         if not isinstance(entry, dict):
@@ -285,13 +301,7 @@ def download_episode(job: Job) -> None:
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
     if download_url:
-        ydl_opts = _yt_dlp_base_options(skip_download=True)
-        log.info("yt-dlp download preflight starting job_id=%s url=%s options=%s", job.id, download_url, {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}})
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(download_url, download=False) or {}
-        if isinstance(info, dict):
-            _log_youtube_response("yt-dlp download preflight response", info)
-        log.info("yt-dlp actual download integration pending job_id=%s url=%s", job.id, download_url)
+        log.info("Downloader received queued episode URL job_id=%s url=%s", job.id, download_url)
     download_id = payload.get("download_id")
     if not download_id:
         log.info("Download worker has no download_id yet; actual downloader integration pending job_id=%s", job.id)
