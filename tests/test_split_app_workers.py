@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -111,7 +112,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(candidates[0]["media_url"], "https://www.youtube.com/watch?v=abcdefghijk")
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_transcode_media_updates_row_deletes_original_and_queues_transcript(self):
+    def test_transcode_media_updates_row_defers_original_deletion_and_queues_transcript(self):
         source = SourceConfig.objects.create(
             profile_id="default",
             source_type=SourceConfig.SOURCE_PODCAST,
@@ -137,7 +138,7 @@ class SharedDjangoModelTests(TestCase):
             def fake_run(command, check, capture_output, text):
                 self.assertIn("-codec:a", command)
                 output.write_text("converted", encoding="utf-8")
-                return None
+                return SimpleNamespace(returncode=0, stdout="", stderr="ffmpeg done")
 
             job = Job.objects.create(profile_id="default", job_type="transcode_media", payload={"download_id": download.id})
             with patch("workers.handlers.subprocess.run", side_effect=fake_run) as run, patch("workers.handlers._publish_created_job") as publish:
@@ -145,9 +146,10 @@ class SharedDjangoModelTests(TestCase):
 
         download.refresh_from_db()
         self.assertEqual(download.file_ext, "mp3")
-        self.assertFalse(original.exists())
+        self.assertTrue(original.exists())
         self.assertEqual(download.file_size_bytes, len("converted"))
-        self.assertEqual(Job.objects.filter(job_type="generate_transcript", payload__download_id=download.id).count(), 1)
+        transcript_job = Job.objects.get(job_type="generate_transcript", payload__download_id=download.id)
+        self.assertEqual(transcript_job.payload["original_file_path"], str(original.resolve()))
         run.assert_called_once()
         publish.assert_called_once()
 

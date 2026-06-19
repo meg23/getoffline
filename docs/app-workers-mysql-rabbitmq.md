@@ -103,6 +103,12 @@ downloader publish `job_type=transcode_media`, then a separate `worker-ffmpeg`
 container or `make run-worker-ffmpeg` process log `Worker starting
 worker_type=ffmpeg` and `FFmpeg conversion starting`.
 
+The normal media workflow is: updates discover items, downloads fetch one item,
+the downloader skips FFmpeg when the file already matches the profile's target
+format or queues `transcode_media` when conversion is needed, transcripts run on
+the final media file, summaries run after transcripts, and the summary stage
+removes any pre-transcode original media once downstream work has completed.
+
 By default workers consume only messages that are already in RabbitMQ or are
 published while the worker is running. If RabbitMQ was reset and you need to
 recover queued database rows, restart the relevant worker once with

@@ -130,6 +130,17 @@ def _target_path(source_path: Path, target_ext: str) -> Path:
     return candidate
 
 
+def _preferred_target_ext(profile_id: str, media_kind: str) -> str:
+    return _profile_setting(profile_id, "audio_format" if media_kind == "audio" else "video_format", "mp3" if media_kind == "audio" else "mp4").strip().lower()
+
+
+def _download_requires_ffmpeg(download: Download, payload: dict) -> tuple[bool, str, str]:
+    media_kind = _preferred_media_kind(download, payload)
+    target_ext = _preferred_target_ext(download.profile_id, media_kind)
+    current_ext = (download.file_ext or Path(str(download.file_path or "")).suffix.lstrip(".")).strip().lower()
+    return current_ext != target_ext, media_kind, target_ext
+
+
 def _ffmpeg_audio_args(profile_id: str, target_ext: str) -> list[str]:
     quality = _profile_setting(profile_id, "audio_quality", "0").strip() or "0"
     audio_filter = _profile_setting(profile_id, "ffmpeg_audio_filter", "").strip()
@@ -195,7 +206,7 @@ def transcode_media(job: Job) -> None:
         raise FileNotFoundError(f"Downloaded file is missing: {source_path}")
     input_size = source_path.stat().st_size
     media_kind = _preferred_media_kind(download, payload)
-    target_ext = _profile_setting(job.profile_id, "audio_format" if media_kind == "audio" else "video_format", "mp3" if media_kind == "audio" else "mp4").strip().lower()
+    target_ext = _preferred_target_ext(job.profile_id, media_kind)
     target_path = _target_path(source_path, target_ext)
     ffmpeg_path = _profile_setting(job.profile_id, "ffmpeg_path", "ffmpeg")
     codec_args = _ffmpeg_audio_args(job.profile_id, target_ext) if media_kind == "audio" else _ffmpeg_video_args(job.profile_id, target_ext)
@@ -256,11 +267,8 @@ def transcode_media(job: Job) -> None:
     download.completed_at = timezone.now()
     download.last_seen_at = timezone.now()
     download.save(update_fields=["file_path", "file_path_relative", "file_ext", "file_size_bytes", "download_status", "completed_at", "last_seen_at"])
-    if old_path != target_path:
-        log.info("FFmpeg conversion deleting original file job_id=%s download_id=%s original=%s", job.id, download.id, old_path)
-        old_path.unlink(missing_ok=True)
     log.info(
-        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s original_deleted=%s",
+        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s original_deferred_delete=%s",
         job.id,
         download.id,
         target_path,
@@ -270,7 +278,7 @@ def transcode_media(job: Job) -> None:
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_transcript",
-        payload={"download_id": download.id},
+        payload={"download_id": download.id, "original_file_path": str(old_path) if old_path != target_path else ""},
         idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
     )
     _publish_created_job(child)
@@ -776,14 +784,30 @@ def download_episode(job: Job) -> None:
             log.warning("Download worker did not create a download row job_id=%s", job.id)
             return
         download_id = downloaded.id
+    download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
+    if download is None:
+        log.warning("Download worker could not find downloaded row for next stage job_id=%s download_id=%s", job.id, download_id)
+        return
+    requires_ffmpeg, media_kind, target_ext = _download_requires_ffmpeg(download, payload)
+    next_job_type = "transcode_media" if requires_ffmpeg else "generate_transcript"
+    next_payload = {"download_id": download_id, "media_type": media_kind} if requires_ffmpeg else {"download_id": download_id}
+    log.info(
+        "Download worker selected next stage parent_job_id=%s download_id=%s file_ext=%s media_kind=%s target_ext=%s next_job_type=%s",
+        job.id,
+        download_id,
+        download.file_ext,
+        media_kind,
+        target_ext,
+        next_job_type,
+    )
     child = create_job(
         profile_id=job.profile_id,
-        job_type="transcode_media",
-        payload={"download_id": download_id, "media_type": payload.get("media_type")},
-        idempotency_key=f"transcode_media:{job.profile_id}:{download_id}",
+        job_type=next_job_type,
+        payload=next_payload,
+        idempotency_key=f"{next_job_type}:{job.profile_id}:{download_id}",
     )
     _publish_created_job(child)
-    log.info("Download worker queued FFmpeg job parent_job_id=%s download_id=%s child_job_id=%s", job.id, download_id, child.id)
+    log.info("Download worker queued next stage parent_job_id=%s download_id=%s child_job_id=%s child_job_type=%s", job.id, download_id, child.id, child.job_type)
 
 
 def download_single(job: Job) -> None:
@@ -794,7 +818,8 @@ def download_single(job: Job) -> None:
 def generate_transcript(job: Job) -> None:
     """Parallel transcript worker placeholder; enqueue summary when transcript work is done."""
     log.info("Transcript worker started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
-    download_id = job.payload.get("download_id") if isinstance(job.payload, dict) else None
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
     if not download_id:
         log.warning("Transcript worker skipped job with no download_id job_id=%s", job.id)
         return
@@ -804,7 +829,7 @@ def generate_transcript(job: Job) -> None:
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_summary",
-        payload={"download_id": download_id},
+        payload={"download_id": download_id, "original_file_path": payload.get("original_file_path") or ""},
         idempotency_key=f"generate_summary:{job.profile_id}:{download_id}",
     )
     _publish_created_job(child)
@@ -813,7 +838,27 @@ def generate_transcript(job: Job) -> None:
 
 def generate_summary(job: Job) -> None:
     log.info("Summary worker started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
+    download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first() if download_id else None
     log.info("Summary worker finished placeholder job_id=%s", job.id)
+    original_file_path = str(payload.get("original_file_path") or "").strip()
+    if download is not None and original_file_path:
+        original_path = Path(original_file_path).expanduser().resolve()
+        current_path = Path(str(download.file_path or "")).expanduser().resolve() if download.file_path else None
+        if current_path is not None and original_path != current_path:
+            original_path.unlink(missing_ok=True)
+            log.info(
+                "Summary worker deleted pre-transcode original media job_id=%s download_id=%s original=%s current=%s",
+                job.id,
+                download.id,
+                original_path,
+                current_path,
+            )
+        else:
+            log.info("Summary worker kept original media because it matches current file job_id=%s download_id=%s path=%s", job.id, download.id, original_path)
+    if download is not None:
+        log.info("Summary worker finalized media row job_id=%s download_id=%s file_path=%s file_ext=%s", job.id, download.id, download.file_path, download.file_ext)
     return None
 
 
