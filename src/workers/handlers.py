@@ -225,7 +225,9 @@ def _episode_was_downloaded(*, profile_id: str, source: SourceConfig, item_uid: 
 
 def _source_limit(source: SourceConfig) -> int:
     if source.max_downloads:
-        return max(1, int(source.max_downloads))
+        limit = max(1, int(source.max_downloads))
+        log.info("Using source max downloads source_id=%s source_name=%s limit=%s", source.id, source.name, limit)
+        return limit
     profile_default = (
         ProfileConfigValue.objects.filter(profile_id=source.profile_id, key="max_downloads")
         .values_list("value", flat=True)
@@ -233,7 +235,16 @@ def _source_limit(source: SourceConfig) -> int:
     )
     if str(profile_default or "").strip().isdigit():
         return max(1, int(str(profile_default).strip()))
-    return 10
+    limit = 10
+    log.info("Using fallback max downloads source_id=%s source_name=%s limit=%s", source.id, source.name, limit)
+    return limit
+
+
+def _download_job_already_queued(idempotency_key: str) -> bool:
+    return Job.objects.filter(
+        idempotency_key=idempotency_key,
+        status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+    ).exists()
 
 
 def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
@@ -335,10 +346,30 @@ def check_for_episodes(job: Job) -> None:
             total_sources += 1
             source_seen = 0
             source_enqueued = 0
-            log.info("Episode check source started profile_id=%s source_id=%s source_type=%s source_name=%s url=%s", profile_id, source.id, source.source_type, source.name, source.url)
+            limit = _source_limit(source)
+            log.info(
+                "Episode check source started profile_id=%s source_id=%s source_type=%s source_name=%s url=%s max_downloads=%s",
+                profile_id,
+                source.id,
+                source.source_type,
+                source.name,
+                source.url,
+                limit,
+            )
             for candidate in _candidates_for_source(source):
                 source_seen += 1
                 total_seen += 1
+                if source_enqueued >= limit:
+                    log.info(
+                        "Source max downloads reached profile_id=%s source_id=%s source_name=%s limit=%s seen=%s enqueued=%s",
+                        profile_id,
+                        source.id,
+                        source.name,
+                        limit,
+                        source_seen,
+                        source_enqueued,
+                    )
+                    break
                 item_uid = str(candidate.get("item_uid") or "")[:255]
                 item_url = str(candidate.get("item_url") or "")
                 title = str(candidate.get("title") or "")
@@ -361,6 +392,19 @@ def check_for_episodes(job: Job) -> None:
                     log.info("New podcast episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s media_url=%s", profile_id, source.id, source.name, item_uid, title, candidate.get("media_url") or item_url)
                 elif source.source_type == SourceConfig.SOURCE_YOUTUBE:
                     log.info("New YouTube episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s item_url=%s", profile_id, source.id, source.name, item_uid, title, item_url)
+                idempotency_key = _idempotency_key("download_episode", profile_id, source.id, item_uid or item_url or title)
+                if _download_job_already_queued(idempotency_key):
+                    source_enqueued += 1
+                    log.info(
+                        "Download episode job already queued profile_id=%s source_id=%s item_uid=%s title=%s reserved_for_source=%s limit=%s",
+                        profile_id,
+                        source.id,
+                        item_uid,
+                        title,
+                        source_enqueued,
+                        limit,
+                    )
+                    continue
                 child = create_job(
                     profile_id=profile_id,
                     job_type="download_episode",
@@ -369,18 +413,19 @@ def check_for_episodes(job: Job) -> None:
                         "source_type": source.source_type,
                         "source_name": source.name,
                         "source_url": source.url,
+                        "source_max_downloads": limit,
                         "item_uid": item_uid,
                         "item_url": item_url,
                         "media_url": candidate.get("media_url") or item_url,
                         "title": title,
                         "published": candidate.get("published") or "",
                     },
-                    idempotency_key=_idempotency_key("download_episode", profile_id, source.id, item_uid or item_url or title),
+                    idempotency_key=idempotency_key,
                 )
                 _publish_created_job(child)
-                log.info("Download episode job enqueued profile_id=%s source_id=%s child_job_id=%s item_uid=%s title=%s", profile_id, source.id, child.id, item_uid, title)
                 source_enqueued += 1
                 total_enqueued += 1
+                log.info("Download episode job enqueued profile_id=%s source_id=%s child_job_id=%s item_uid=%s title=%s enqueued_for_source=%s limit=%s", profile_id, source.id, child.id, item_uid, title, source_enqueued, limit)
             log.info(
                 "Episode check source finished profile_id=%s source_id=%s source_type=%s seen=%s enqueued=%s",
                 profile_id,

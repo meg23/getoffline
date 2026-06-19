@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
@@ -22,7 +23,8 @@ from app.routing import queue_name  # noqa: E402
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import Job  # noqa: E402
+    from models.models import Job, SourceConfig  # noqa: E402
+    from workers.handlers import check_for_episodes  # noqa: E402
 
 
 @override_settings(
@@ -55,6 +57,29 @@ class SharedDjangoModelTests(TestCase):
         first = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         second = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         self.assertEqual(first.id, second.id)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_episode_checker_honors_source_max_downloads(self):
+        source = SourceConfig.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            name="Test Channel",
+            url="https://www.youtube.com/@example/videos",
+            enabled=True,
+            max_downloads=1,
+        )
+        job = Job.objects.create(profile_id="default", job_type="check_for_episodes", status=Job.STATUS_QUEUED)
+        candidates = iter([
+            {"item_uid": "video-1", "item_url": "https://youtu.be/1", "media_url": "https://youtu.be/1", "title": "One"},
+            {"item_uid": "video-2", "item_url": "https://youtu.be/2", "media_url": "https://youtu.be/2", "title": "Two"},
+            {"item_uid": "video-3", "item_url": "https://youtu.be/3", "media_url": "https://youtu.be/3", "title": "Three"},
+        ])
+        with patch("workers.handlers._candidates_for_source", return_value=candidates), patch("workers.handlers._publish_created_job") as publish:
+            check_for_episodes(job)
+        jobs = Job.objects.filter(job_type="download_episode", payload__source_id=source.id)
+        self.assertEqual(jobs.count(), 1)
+        self.assertEqual(jobs.first().payload["item_uid"], "video-1")
+        publish.assert_called_once()
 
 
 class QueueRoutingTests(unittest.TestCase):
