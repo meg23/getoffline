@@ -176,7 +176,7 @@ PROFILE_DEFAULTS = {
     "manual_upload_delete_explicit_content": "0",
     "audio_format": "mp3",
     "video_format": "mp4",
-    "video_codec": "hevc",
+    "video_codec": "h264",
     "ffmpeg_path": "ffmpeg",
     "audio_quality": "0",
     "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",

@@ -157,15 +157,17 @@ def _ffmpeg_audio_args(profile_id: str, target_ext: str) -> list[str]:
 
 
 def _ffmpeg_video_args(profile_id: str, target_ext: str) -> list[str]:
-    codec = _profile_setting(profile_id, "video_codec", "hevc").strip().lower()
+    codec = _profile_setting(profile_id, "video_codec", "h264").strip().lower()
     args = ["-map", "0:v:0?", "-map", "0:a:0?", "-map", "0:s?", "-c:s", "mov_text" if target_ext == "mp4" else "copy"]
     if codec == "copy":
         args.extend(["-c:v", "copy"])
     elif codec in {"h264", "avc"}:
-        args.extend(["-c:v", "libx264", "-crf", "23", "-preset", "medium"])
+        args.extend(["-c:v", "libx264", "-crf", "23", "-preset", "ultrafast", "-pix_fmt", "yuv420p"])
     else:
         args.extend(["-c:v", "libx265", "-tag:v", "hvc1", "-crf", "28", "-preset", "medium"])
     args.extend(["-c:a", "aac", "-b:a", "192k"])
+    if target_ext == "mp4":
+        args.extend(["-movflags", "+faststart"])
     return args
 
 
