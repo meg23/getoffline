@@ -5,6 +5,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
+from django.db.models import Sum
 from django.views.decorators.http import require_POST
 
 from models.jobs import create_job
@@ -15,6 +16,42 @@ from .queue import publish_job
 
 ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "sync_media", "summarize_missing"}
 DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
+
+
+def _human_size(size: int | None) -> str:
+    if not size:
+        return "—"
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.2f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{value:.2f} GB"
+
+
+def _human_duration(seconds: float | int | None) -> str:
+    total = int(float(seconds or 0))
+    hours, remainder = divmod(total, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes}m" if hours else f"{minutes}m"
+
+
+def _decorate_download(item: Download) -> Download:
+    position = float(item.last_position_seconds or 0.0)
+    item.display_size = _human_size(item.file_size_bytes)
+    item.display_type = (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?").upper()
+    item.status_label = "UNPLAYED"
+    item.status_class = "status-unplayed"
+    if position > 0 and not item.played:
+        item.status_label = "STARTED"
+        item.status_class = "status-started"
+    if item.played:
+        item.status_label = "PLAYED"
+        item.status_class = "status-played"
+    if item.download_status in {"missing", "retention_deleted"}:
+        item.status_label = "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
+        item.status_class = "status-missing"
+    return item
 
 
 def _profile_id(request: HttpRequest) -> str:
@@ -36,19 +73,30 @@ def _safe_path(raw_path: str | None) -> Path:
 
 def library(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
-    show_played = request.GET.get("show_played") in {"1", "true", "yes", "on"}
-    favorites = request.GET.get("favorites") in {"1", "true", "yes", "on"}
-    downloads = Download.objects.filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
-    if not show_played and not favorites:
-        downloads = downloads.filter(played=False)
-    if favorites:
-        downloads = downloads.filter(favorite=True)
-    downloads = downloads.order_by("-last_seen_at", "-id")[:200]
+    downloads_qs = Download.objects.filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
+    downloads = [_decorate_download(item) for item in downloads_qs.order_by("-last_seen_at", "-id")[:500]]
+    played_count = sum(1 for item in downloads if item.played)
+    favorite_count = sum(1 for item in downloads if item.favorite)
+    listened_seconds = downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
     recent_jobs = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10]
+    profile_name = profile_id if profile_id != "default" else "max"
     return render(
         request,
         "app/library.html",
-        {"downloads": downloads, "jobs": recent_jobs, "profile_id": profile_id, "show_played": show_played, "favorites": favorites},
+        {
+            "downloads": downloads,
+            "jobs": recent_jobs,
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "profile_initial": (profile_name[:1] or "M").upper(),
+            "stats": {
+                "visible": len(downloads),
+                "played": played_count,
+                "new": max(len(downloads) - played_count, 0),
+                "favorites": favorite_count,
+                "listened": _human_duration(listened_seconds),
+            },
+        },
     )
 
 
@@ -205,3 +253,35 @@ def toggle_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
 def delete_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     get_object_or_404(SourceConfig, pk=source_id).delete()
     return HttpResponseRedirect(reverse("settings"))
+
+
+@require_POST
+def batch_update(request: HttpRequest) -> HttpResponseRedirect:
+    ids = [int(value) for value in request.POST.getlist("ids") if str(value).isdigit()]
+    action = str(request.POST.get("batch_action") or "").strip()
+    now = timezone.now()
+    rows = Download.objects.filter(pk__in=ids)
+    if action == "played":
+        rows.update(played=True, played_at=now, last_seen_at=now)
+    elif action == "unplayed":
+        rows.update(played=False, played_at=None, last_seen_at=now)
+    elif action == "favorite":
+        rows.update(favorite=True, last_seen_at=now)
+    elif action == "unfavorite":
+        rows.update(favorite=False, last_seen_at=now)
+    elif action == "delete":
+        for item in rows:
+            if item.file_path:
+                Path(item.file_path).expanduser().unlink(missing_ok=True)
+        rows.update(download_status="missing", last_seen_at=now)
+    elif action == "download":
+        profile_id = _profile_id(request)
+        for item in rows:
+            job = create_job(
+                profile_id=profile_id,
+                job_type="download_single",
+                payload={"source": "django_app", "url": item.item_url or item.media_url or item.source_url},
+                idempotency_key=f"download_single:{profile_id}:{item.pk}",
+            )
+            publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    return _redirect_back(request)

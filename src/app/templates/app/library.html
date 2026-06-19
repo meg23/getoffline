@@ -1,42 +1,121 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>GetOffline</title></head>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GetOffline Media Library</title>
+    <link rel="stylesheet" href="{% static 'app/dashboard.css' %}" />
+    <script src="{% static 'app/dashboard.js' %}" defer></script>
+  </head>
   <body>
-    <h1>GetOffline</h1>
-    <nav><a href="{% url 'settings' %}">Settings</a> · <a href="{% url 'jobs' %}?profile_id={{ profile_id }}">Jobs</a></nav>
-    <p>Profile: {{ profile_id }}</p>
-    <p><a href="?profile_id={{ profile_id }}&show_played=1">Show played</a> · <a href="?profile_id={{ profile_id }}&favorites=1">Favorites</a></p>
-    <form method="post" action="{% url 'enqueue_job' %}">
-      {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}">
-      <button name="job_type" value="update_downloads" type="submit">Update downloads</button>
-      <button name="job_type" value="summarize_missing" type="submit">Summarize</button>
-      <button name="job_type" value="sync_media" type="submit">Sync</button>
-    </form>
-    <form method="post" action="{% url 'enqueue_job' %}">
-      {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}">
-      <input name="url" placeholder="YouTube URL">
-      <button name="job_type" value="download_single" type="submit">Queue download</button>
-    </form>
-    <h2>Recent jobs</h2>
-    <ul>{% for job in jobs %}<li>#{{ job.id }} {{ job.job_type }} — {{ job.status }}</li>{% empty %}<li>No jobs queued.</li>{% endfor %}</ul>
-    <h2>Downloads</h2>
-    <table>
-      <thead><tr><th>Title</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>
-        {% for item in downloads %}
-          <tr>
-            <td><a href="{% url 'player' item.id %}">{{ item.title|default:"Untitled" }}</a>{% if item.favorite %} ★{% endif %}</td>
-            <td>{{ item.source_name }}</td><td>{{ item.download_status }}</td>
-            <td>
-              <form method="post" action="{% url 'mark_played' item.id %}" style="display:inline">{% csrf_token %}<button>Played</button></form>
-              <form method="post" action="{% url 'mark_unplayed' item.id %}" style="display:inline">{% csrf_token %}<button>Unplayed</button></form>
-              <form method="post" action="{% url 'favorite' item.id %}" style="display:inline">{% csrf_token %}<button>Favorite</button></form>
-              <form method="post" action="{% url 'unfavorite' item.id %}" style="display:inline">{% csrf_token %}<button>Unfavorite</button></form>
-              <form method="post" action="{% url 'delete_file' item.id %}" style="display:inline">{% csrf_token %}<button>Delete file</button></form>
-            </td>
-          </tr>
-        {% empty %}<tr><td colspan="4">No downloads.</td></tr>{% endfor %}
-      </tbody>
-    </table>
+    <div class="container">
+      <header class="hero">
+        <div class="hero-heading">
+          <h1>GetOffline</h1>
+          <div class="profile-controls" aria-label="Profile controls">
+            <form class="profile-switch-form" method="get" action="{% url 'library' %}">
+              <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
+              <span class="profile-name">{{ profile_name }}</span>
+              <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+              <span class="profile-caret" aria-hidden="true"></span>
+            </form>
+            <a class="profile-icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">🔒</a>
+            <button id="quick-add-open-hero" class="profile-icon-button" type="button" title="Add media" aria-label="Add media">+</button>
+          </div>
+        </div>
+        <section class="summary-grid" aria-label="Library summary">
+          <article class="summary-card"><div class="summary-label">Visible Items</div><div id="summary-visible-items" class="summary-value">{{ stats.visible }}</div></article>
+          <article class="summary-card"><div class="summary-label">Played</div><div id="summary-played-items" class="summary-value">{{ stats.played }}</div></article>
+          <article class="summary-card"><div class="summary-label">New</div><div id="summary-new-items" class="summary-value">{{ stats.new }}</div></article>
+          <article class="summary-card"><div class="summary-label">Favorites</div><div id="summary-favorite-items" class="summary-value">{{ stats.favorites }}</div></article>
+          <article class="summary-card"><div class="summary-label">Listened</div><div id="summary-listened-items" class="summary-value">{{ stats.listened }}</div></article>
+        </section>
+      </header>
+
+      <section class="panel toolbar-panel" aria-label="Dashboard controls">
+        <div class="toolbar-actions">
+          <form method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
+            {% csrf_token %}
+            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+            <button class="icon-button icon-button-primary" name="job_type" value="update_downloads" type="submit" title="Sync downloads" aria-label="Sync downloads">⟳</button>
+          </form>
+          <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link">+</button>
+          <button id="transcript-search-open" class="icon-button" type="button" title="Search transcripts" aria-label="Search transcripts">⌕</button>
+          <a class="icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">⚙</a>
+          <div class="library-filter-wrap" role="group" aria-label="Library filters">
+            <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
+            <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
+              <option value="unplayed" selected>Unplayed</option>
+              <option value="played">Played</option>
+              <option value="favorites">Favorites</option>
+              <option value="all">All</option>
+            </select>
+            <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">×</button>
+          </div>
+          <form id="batch-form" method="post" action="{% url 'batch_update' %}" class="batch-toolbar-form">
+            {% csrf_token %}
+            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+            <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
+              <option value="">Choose action</option>
+              <option value="played">played</option>
+              <option value="unplayed">unplayed</option>
+              <option value="favorite">favorite</option>
+              <option value="unfavorite">unfavorite</option>
+              <option value="download">download</option>
+              <option value="delete">delete</option>
+            </select>
+            <button id="batch-apply" class="batch-apply" type="submit" disabled>Apply</button>
+          </form>
+        </div>
+      </section>
+
+      <main class="table-card" aria-label="Media library">
+        <table>
+          <thead>
+            <tr>
+              <th>Channel</th><th>Episode</th><th>Source</th><th>Type</th><th>Size</th><th>Status</th><th><input id="select-all" type="checkbox" aria-label="Select all visible rows" /></th>
+            </tr>
+          </thead>
+          <tbody id="downloads-table-body">
+            {% for item in downloads %}
+              <tr data-row-id="{{ item.id }}" data-played="{% if item.played %}1{% else %}0{% endif %}" data-favorite="{% if item.favorite %}1{% else %}0{% endif %}" data-channel="{{ item.source_name|default:'' }}" data-title="{{ item.title|default:'' }}">
+                <td class="channel-col" title="{{ item.source_name|default:'' }}">{{ item.source_name|default:item.source_type }}</td>
+                <td class="episode-col"><a class="episode-link" href="{% url 'player' item.id %}">{{ item.title|default:'Untitled' }}</a></td>
+                <td><span class="pill status-new">{{ item.source_type|upper }}</span></td>
+                <td><span class="pill">{{ item.display_type }}</span></td>
+                <td>{{ item.display_size }}</td>
+                <td><span class="pill {{ item.status_class }}">{{ item.status_label }}</span></td>
+                <td class="selection-cell"><input form="batch-form" type="checkbox" class="row-selector" name="ids" value="{{ item.id }}" aria-label="Select {{ item.title|default:'item' }}" /></td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="7" class="empty-state">No media items found yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </main>
+    </div>
+
+    <div id="quick-add-backdrop" class="modal-backdrop" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
+        <h2 id="quick-add-title">Add YouTube link</h2>
+        <form method="post" action="{% url 'enqueue_job' %}" class="modal-form">
+          {% csrf_token %}
+          <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          <label for="quick-add-url">URL</label>
+          <input id="quick-add-url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          <div class="modal-actions"><button type="button" data-modal-close>Cancel</button><button name="job_type" value="download_single" type="submit">Queue download</button></div>
+        </form>
+      </section>
+    </div>
+
+    <div id="transcript-search-backdrop" class="modal-backdrop" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="search-title">
+        <h2 id="search-title">Search transcripts</h2>
+        <input id="transcript-search-input" type="search" placeholder="Search words in transcripts..." />
+        <p class="modal-note">Transcript search will run from indexed transcript records as worker support is expanded.</p>
+        <div class="modal-actions"><button type="button" data-modal-close>Close</button></div>
+      </section>
+    </div>
   </body>
 </html>

@@ -6,6 +6,7 @@ urlpatterns = [
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
     path("jobs/enqueue/", views.enqueue_job, name="enqueue_job"),
+    path("batch-update/", views.batch_update, name="batch_update"),
     path("play/<int:download_id>/", views.player, name="player"),
     path("media/<int:download_id>/", views.media, name="media"),
     path("subtitle/<int:download_id>/", views.subtitle, name="subtitle"),

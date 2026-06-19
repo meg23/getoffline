@@ -10,11 +10,13 @@ SECRET_KEY = os.getenv("GETOFFLINE_DJANGO_SECRET_KEY", "getoffline-dev-secret")
 DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if host.strip()]
 ROOT_URLCONF = "app.urls"
+STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
+    "django.contrib.staticfiles",
     "models.apps.SharedModelsConfig",
     "app",
 ]
