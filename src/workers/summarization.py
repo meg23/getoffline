@@ -1,7 +1,5 @@
 import json
 import re
-import subprocess
-import sys
 import threading
 from collections import Counter
 from datetime import datetime, timezone
@@ -123,51 +121,29 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL, t
 
 
 def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL, ollama_path: str = "ollama") -> bool:
+    del ollama_path
     global _MODEL_READY
     with _MODEL_READY_LOCK:
-        if _MODEL_READY:
-            return True
-        try:
-            check = subprocess.run([ollama_path, "list"], capture_output=True, text=True, check=False)
-            if check.returncode != 0:
-                log.warning("Ollama not ready for summaries (list failed): %s", (check.stderr or check.stdout).strip())
-                return False
-            if model_name not in (check.stdout or ""):
-                log.info("Downloading local summary model via Ollama: %s", model_name)
-                pull = subprocess.run([ollama_path, "pull", model_name], capture_output=True, text=True, check=False)
-                if pull.returncode != 0:
-                    log.warning("Failed to download Ollama summary model %s: %s", model_name, (pull.stderr or pull.stdout).strip())
-                    return False
-                log.info("Downloaded Ollama summary model: %s", model_name)
+        if not _MODEL_READY:
+            log.info("Summary model readiness will be checked via Ollama HTTP API model=%s", model_name)
             _MODEL_READY = True
-            return True
-        except FileNotFoundError:
-            log.warning("Ollama CLI not installed; summary generation will use extractive fallback.")
-            return False
+        return True
 
 
-def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "subprocess", timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> Dict[str, str]:
+def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MODEL, mode: str = "in_process", timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> Dict[str, str]:
     cleaned_segments: List[str] = []
     for segment in segments:
         cleaned_segment = str(segment or "").strip()
         if cleaned_segment:
             cleaned_segments.append(cleaned_segment)
     joined_text = " ".join(cleaned_segments)
-    model_ready = ensure_local_summary_model(model_name=model_name)
-    if not model_ready:
-        log.debug("Summary model readiness check failed model=%s; Ollama may still be tried.", model_name)
-    if mode == "in_process":
+    ensure_local_summary_model(model_name=model_name)
+    if mode != "in_process":
+        log.info("Ignoring deprecated summary mode=%s; using native in-process summary generation", mode)
+    try:
         llm_summary = _ollama_summary(joined_text, model_name=model_name, timeout_seconds=timeout_seconds)
         return {"summary_text": llm_summary, "model_name": model_name, "updated_at": _utcnow_iso()}
-    payload = {"text": joined_text, "model_name": model_name, "timeout_seconds": int(timeout_seconds)}
-    cmd = [sys.executable, "-m", "workers.summarization_worker", json.dumps(payload)]
-    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if completed.returncode != 0:
-        details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
-        log.error("Summary subprocess failed model=%s error=%s", model_name, details)
-        raise RuntimeError(f"summary subprocess failed: {details}")
-    result = json.loads(completed.stdout)
-    used_model = str(result.get("model_name") or "unknown")
-    if used_model == "extractive-local":
-        log.warning("Summary subprocess used extractive fallback requested_model=%s transcript_chars=%s", model_name, len(joined_text))
-    return result
+    except RuntimeError:
+        fallback = _extractive_summary(joined_text)
+        log.warning("Summary generation used extractive fallback requested_model=%s transcript_chars=%s", model_name, len(joined_text))
+        return {"summary_text": fallback, "model_name": "extractive-local", "updated_at": _utcnow_iso()}

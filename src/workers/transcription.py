@@ -1,6 +1,3 @@
-import json
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
@@ -59,21 +56,8 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
     return _normalize_faster_whisper_result(segments)
 
 
-def _transcribe_in_subprocess(input_file: Path, model_name: str, language: str = None):
-    payload = {"input_file": str(input_file), "model_name": model_name, "language": language}
-    cmd = [sys.executable, "-m", "workers.transcription_worker", json.dumps(payload)]
-    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if completed.returncode != 0:
-        details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
-        raise RuntimeError(f"faster-whisper subprocess failed: {details}")
-    try:
-        return json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("faster-whisper subprocess returned invalid JSON output") from exc
-
-
 def transcribe_with_whisper(
-    input_file: Path, model_name: str, log_prefix: str, language: str = None, mode: str = "subprocess"
+    input_file: Path, model_name: str, log_prefix: str, language: str = None, mode: str = "in_process"
 ):
     input_file = Path(input_file).resolve()
     cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name, language)
@@ -84,10 +68,9 @@ def transcribe_with_whisper(
         return cached
 
     try:
-        if mode == "in_process":
-            result = _transcribe_in_process(input_file, model_name, language=language)
-        else:
-            result = _transcribe_in_subprocess(input_file, model_name, language=language)
+        if mode != "in_process":
+            log.info("Ignoring deprecated transcription mode=%s; using native in-process transcription", mode)
+        result = _transcribe_in_process(input_file, model_name, language=language)
     except Exception as exc:
         raise TranscriptionError(
             f"Transcription failed for {input_file.name} ({model_name}): {exc}"

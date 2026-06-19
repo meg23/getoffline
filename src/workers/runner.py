@@ -129,10 +129,12 @@ def requeue_existing_jobs_enabled() -> bool:
     return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def run_worker(worker_type: str, *, prefetch_count: int | None = None) -> None:
+def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messages: int | None = None) -> None:
     queue = QUEUE_BY_WORKER[worker_type]
     safe_prefetch = 1 if worker_type in SERIAL_WORKERS else max(1, int(prefetch_count or 4))
-    log.info("Worker starting worker_type=%s queue=%s prefetch=%s serial=%s", worker_type, queue, safe_prefetch, worker_type in SERIAL_WORKERS)
+    safe_max_messages = max(1, int(max_messages if max_messages is not None else os.getenv("GETOFFLINE_WORKER_MAX_MESSAGES", "1")))
+    processed_messages = 0
+    log.info("Worker starting worker_type=%s queue=%s prefetch=%s serial=%s max_messages=%s", worker_type, queue, safe_prefetch, worker_type in SERIAL_WORKERS, safe_max_messages)
     connection = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     log.info("RabbitMQ connected worker_type=%s queue=%s", worker_type, queue)
     try:
@@ -167,10 +169,15 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None) -> None:
                 process_message(message)
             except Exception:
                 channel.basic_nack(method_frame.delivery_tag, requeue=False)
-                log.warning("Message nacked worker_type=%s queue=%s delivery_tag=%s", worker_type, queue, method_frame.delivery_tag)
+                processed_messages += 1
+                log.warning("Message nacked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s", worker_type, queue, method_frame.delivery_tag, processed_messages)
             else:
                 channel.basic_ack(method_frame.delivery_tag)
-                log.info("Message acked worker_type=%s queue=%s delivery_tag=%s", worker_type, queue, method_frame.delivery_tag)
+                processed_messages += 1
+                log.info("Message acked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s", worker_type, queue, method_frame.delivery_tag, processed_messages)
+            if processed_messages >= safe_max_messages:
+                log.info("Worker processed max messages; exiting for container restart worker_type=%s queue=%s processed_messages=%s max_messages=%s", worker_type, queue, processed_messages, safe_max_messages)
+                break
         channel.cancel()
         log.info("Worker consumer cancelled worker_type=%s queue=%s", worker_type, queue)
     finally:
@@ -182,10 +189,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a GetOffline worker")
     parser.add_argument("worker_type", choices=sorted(QUEUE_BY_WORKER), help="Which queue to consume")
     parser.add_argument("--prefetch", type=int, default=None, help="Prefetch for parallel workers; serial workers always use 1")
+    parser.add_argument("--max-messages", type=int, default=None, help="Exit after processing this many messages; defaults to GETOFFLINE_WORKER_MAX_MESSAGES or 1")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
-    run_worker(args.worker_type, prefetch_count=args.prefetch)
+    run_worker(args.worker_type, prefetch_count=args.prefetch, max_messages=args.max_messages)
 
 
 if __name__ == "__main__":

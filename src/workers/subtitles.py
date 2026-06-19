@@ -147,9 +147,10 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     subtitle_language = settings.get("subtitle_language", "en")
-    transcription_mode = str(settings.get("subtitle_transcription_mode", "subprocess")).strip().lower()
-    if transcription_mode not in {"subprocess", "in_process"}:
-        transcription_mode = "subprocess"
+    transcription_mode = str(settings.get("subtitle_transcription_mode", "in_process")).strip().lower()
+    if transcription_mode != "in_process":
+        log.info("Ignoring deprecated subtitle transcription mode: %s; using in_process", transcription_mode)
+        transcription_mode = "in_process"
     log.info(
         "Generating subtitles: %s (%s, language=%s, mode=%s)",
         input_file.name,
@@ -217,7 +218,7 @@ def create_subtitles(
     logger,
     context_name: str,
     context_label: str,
-    subtitle_transcription_mode: str = "subprocess",
+    subtitle_transcription_mode: str = "in_process",
 ):
     if entry_subtitles_enabled and media_file.exists():
         try:

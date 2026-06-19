@@ -1,8 +1,5 @@
-import json
 import os
 import resource
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -390,7 +387,7 @@ def _download_podcasts_in_process(config, downloaded_items):
                         media_file=job["final_audio"],
                         subtitle_offset_seconds=job["subtitle_offset_seconds"],
                         entry_subtitles_enabled=(job["entry_subtitles_enabled"] or job["delete_explicit_content"]),
-                        subtitle_transcription_mode=defaults.get("subtitle_transcription_mode", "subprocess"),
+                        subtitle_transcription_mode=defaults.get("subtitle_transcription_mode", "in_process"),
                         logger=log,
                         context_name=f"podcast {job['name']}",
                         context_label="podcast",
@@ -471,34 +468,9 @@ def _parent_rss_mb() -> float:
 
 
 def download_podcasts(config, downloaded_items):
-    if YoutubeDL is not None or str(os.getenv("GETOFFLINE_PODCAST_SUBPROCESS", "1")).strip().lower() in {"0", "false", "no", "off"}:
-        _download_podcasts_in_process(config, downloaded_items)
-        return
+    log.info("Downloading podcasts natively in current worker process")
+    _download_podcasts_in_process(config, downloaded_items)
 
-    base_config = dict(config)
-    podcast_entries = list(config.get("podcasts", []))
-    for entry in podcast_entries:
-        single_config = dict(base_config)
-        single_config["podcasts"] = [entry]
-        payload = {"config": single_config}
-        worker_module = "workers.podcasts_subprocess"
-        proc = subprocess.run(
-            [sys.executable, "-m", worker_module],
-            input=json.dumps(payload),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            log.error("Podcast subprocess failed for %s: %s", entry.get("name"), (proc.stderr or "").strip())
-            continue
-        try:
-            response = json.loads(proc.stdout or "{}")
-        except Exception as exc:
-            log.error("Invalid podcast subprocess response for %s: %s", entry.get("name"), exc)
-            continue
-        downloaded_items.extend(response.get("downloaded_items") or [])
 
 
 YoutubeDL = None

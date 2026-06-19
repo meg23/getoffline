@@ -910,7 +910,7 @@ def generate_transcript(job: Job) -> None:
     else:
         enabled = _subtitles_enabled_for_download(download, payload)
         log.info("Transcript worker subtitle decision job_id=%s download_id=%s enabled=%s media_path=%s", job.id, download_id, enabled, media_path)
-        subtitle_path = create_subtitles(media_path, _subtitle_offset_for_download(download, payload), enabled, log, download.title or media_path.name, "download", _profile_setting(job.profile_id, "subtitle_transcription_mode", "subprocess"))
+        subtitle_path = create_subtitles(media_path, _subtitle_offset_for_download(download, payload), enabled, log, download.title or media_path.name, "download", _profile_setting(job.profile_id, "subtitle_transcription_mode", "in_process"))
         if subtitle_path is not None:
             output_root = _download_output_root(job.profile_id)
             download.subtitle_path = str(subtitle_path)
@@ -944,7 +944,7 @@ def generate_summary(job: Job) -> None:
     if segments:
         model_name = _profile_setting(job.profile_id, "summary_model", "qwen2.5:0.5b")
         timeout_seconds = int(_profile_setting(job.profile_id, "summary_timeout_seconds", "90"))
-        result = summarize_segments(segments, model_name=model_name, mode="subprocess", timeout_seconds=timeout_seconds)
+        result = summarize_segments(segments, model_name=model_name, mode="in_process", timeout_seconds=timeout_seconds)
         summary = str(result.get("summary_text") or "").strip()
         if summary:
             MediaSummary.objects.update_or_create(download=download, defaults={"summary_text": summary, "model_name": str(result.get("model_name") or model_name), "source_segment_count": len(segments), "updated_at": timezone.now()})

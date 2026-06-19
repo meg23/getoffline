@@ -379,7 +379,7 @@ DEFAULT_APP_CONFIG = {
     "processing_workers": "2",
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
-    "subtitle_transcription_mode": "subprocess",
+    "subtitle_transcription_mode": "in_process",
     "manual_upload_delete_explicit_content": "0",
     "telemetry_dumps_enabled": "0",
     "summary_model": "qwen2.5:0.5b",
@@ -592,7 +592,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "android_sync_include_started": str(defaults.get("android_sync_include_started") or "1").strip().lower() in {"1", "true", "yes", "on"},
             "android_sync_include_played": str(defaults.get("android_sync_include_played") or "0").strip().lower() in {"1", "true", "yes", "on"},
             "android_sync_exclude_regex": str(defaults.get("android_sync_exclude_regex") or ""),
-            "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
+            "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "in_process"),
             "manual_upload_delete_explicit_content": str(
                 defaults.get("manual_upload_delete_explicit_content") or "0"
             ).strip().lower() in {"1", "true", "yes", "on"},
