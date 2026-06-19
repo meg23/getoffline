@@ -6,7 +6,11 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
-    DJANGO_SETTINGS_MODULE=app.settings
+    DJANGO_SETTINGS_MODULE=app.settings \
+    GETOFFLINE_MODEL_CACHE_DIR=/app/model-cache \
+    HF_HOME=/app/model-cache \
+    HUGGINGFACE_HUB_CACHE=/app/model-cache/hub \
+    XDG_CACHE_HOME=/app/model-cache/xdg
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 \

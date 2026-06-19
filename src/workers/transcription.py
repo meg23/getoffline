@@ -1,3 +1,4 @@
+import os
 import threading
 from pathlib import Path
 
@@ -61,7 +62,10 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
     with _WHISPER_MODEL_LOCK:
         model = _WHISPER_MODEL_CACHE.get(model_name)
         if model is None:
-            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            cache_dir = Path(os.getenv("GETOFFLINE_MODEL_CACHE_DIR") or os.getenv("HF_HOME") or "/app/model-cache").expanduser()
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            log.info("Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir)
+            model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(cache_dir))
             _WHISPER_MODEL_CACHE[model_name] = model
 
     transcribe_kwargs = {"vad_filter": True}

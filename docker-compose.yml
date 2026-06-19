@@ -167,6 +167,7 @@ services:
     command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-4}"
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+      - huggingface-cache:/app/model-cache
     depends_on:
       mysql:
         condition: service_healthy
@@ -209,3 +210,4 @@ volumes:
   mysql-data:
   rabbitmq-data:
   getoffline-static:
+  huggingface-cache:
