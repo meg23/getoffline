@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader run-worker-transcripts run-worker-sync run-worker-summaries
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader run-worker-ffmpeg run-worker-transcripts run-worker-sync run-worker-summaries
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -74,6 +74,10 @@ run-worker-updates: venv
 run-worker-downloader: venv
 	@echo "Running single-concurrency downloader worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader
+
+run-worker-ffmpeg: venv
+	@echo "Running FFmpeg conversion worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers ffmpeg --prefetch $${PREFETCH:-1}
 
 run-worker-transcripts: venv
 	@echo "Running parallel transcript worker..."

@@ -1,6 +1,9 @@
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -23,8 +26,8 @@ from app.routing import queue_name  # noqa: E402
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import Job, SourceConfig  # noqa: E402
-    from workers.handlers import check_for_episodes, _youtube_candidates  # noqa: E402
+    from models.models import Download, Job, SourceConfig  # noqa: E402
+    from workers.handlers import check_for_episodes, transcode_media, _youtube_candidates  # noqa: E402
 
 
 @override_settings(
@@ -108,6 +111,48 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(candidates[0]["item_uid"], "abcdefghijk")
         self.assertEqual(candidates[0]["media_url"], "https://www.youtube.com/watch?v=abcdefghijk")
 
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_transcode_media_updates_row_defers_original_deletion_and_queues_transcript(self):
+        source = SourceConfig.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_PODCAST,
+            name="Podcast",
+            url="https://example.com/feed.xml",
+            enabled=True,
+            media_type="audio",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original = Path(tmpdir) / "episode.webm"
+            original.write_text("downloaded", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=source.source_type,
+                source_name=source.name,
+                item_uid="episode-1",
+                file_path=str(original),
+                file_ext="webm",
+                file_size_bytes=original.stat().st_size,
+            )
+            output = Path(tmpdir) / "episode.converted.mp3"
+
+            def fake_run(command, check, capture_output, text):
+                self.assertIn("-codec:a", command)
+                output.write_text("converted", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stdout="", stderr="ffmpeg done")
+
+            job = Job.objects.create(profile_id="default", job_type="transcode_media", payload={"download_id": download.id})
+            with patch("workers.handlers.subprocess.run", side_effect=fake_run) as run, patch("workers.handlers._publish_created_job") as publish:
+                transcode_media(job)
+
+        download.refresh_from_db()
+        self.assertEqual(download.file_ext, "mp3")
+        self.assertTrue(original.exists())
+        self.assertEqual(download.file_size_bytes, len("converted"))
+        transcript_job = Job.objects.get(job_type="generate_transcript", payload__download_id=download.id)
+        self.assertEqual(transcript_job.payload["original_file_path"], str(original.resolve()))
+        run.assert_called_once()
+        publish.assert_called_once()
+
 
 class QueueRoutingTests(unittest.TestCase):
     def test_download_jobs_share_single_download_queue(self):
@@ -115,6 +160,7 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(queue_name("check_for_episodes"), "getoffline.jobs.updates")
         self.assertEqual(queue_name("download_single"), "getoffline.jobs.downloads")
         self.assertEqual(queue_name("download_episode"), "getoffline.jobs.downloads")
+        self.assertEqual(queue_name("transcode_media"), "getoffline.ffmpeg")
 
     def test_non_download_jobs_get_separate_queues(self):
         self.assertEqual(queue_name("sync_media"), "getoffline.sync_media")
