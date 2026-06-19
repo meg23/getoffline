@@ -32,7 +32,9 @@ services:
       retries: 20
 
   frontend:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
     restart: unless-stopped
     environment: &getoffline-env
       GETOFFLINE_APP_ADDR: 0.0.0.0:8080
@@ -70,7 +72,9 @@ services:
       - frontend
 
   migrate:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
     restart: "no"
     environment: *getoffline-env
     command: sh -c "python -m django migrate --run-syncdb && python -m django sync_model_schema"
@@ -81,7 +85,9 @@ services:
         condition: service_healthy
 
   worker-episode-checker:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: python -m workers episode-checker
@@ -94,7 +100,9 @@ services:
         condition: service_completed_successfully
 
   worker-downloader:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: python -m workers downloader
@@ -109,7 +117,9 @@ services:
         condition: service_completed_successfully
 
   worker-transcripts:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-base.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-4}"
@@ -124,7 +134,9 @@ services:
         condition: service_completed_successfully
 
   worker-summaries:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-base.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: sh -c "python -m workers summaries --prefetch $${PREFETCH:-4}"
@@ -137,7 +149,9 @@ services:
         condition: service_completed_successfully
 
   worker-sync:
-    build: .
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-base.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: python -m workers sync

@@ -3,9 +3,6 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-import feedparser
-from yt_dlp import YoutubeDL
-
 from app.queue import publish_job
 from django.utils import timezone
 from logger import get_logger
@@ -101,7 +98,7 @@ def _download_output_root(profile_id: str) -> Path:
     return Path(root).expanduser().resolve()
 
 
-def _find_downloaded_file(info: dict, ydl: YoutubeDL) -> Path | None:
+def _find_downloaded_file(info: dict, ydl) -> Path | None:
     requested = info.get("requested_downloads") if isinstance(info, dict) else None
     if isinstance(requested, list):
         for item in requested:
@@ -147,6 +144,8 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | None:
         outtmpl,
         {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
     )
+    from yt_dlp import YoutubeDL
+
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(download_url, download=True) or {}
         if isinstance(info, dict):
@@ -239,6 +238,8 @@ def _source_limit(source: SourceConfig) -> int:
 
 def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
     log.info("Checking podcast feed source_id=%s source_name=%s url=%s", source.id, source.name, source.url)
+    import feedparser
+
     feed = feedparser.parse(source.url)
     if getattr(feed, "bozo", False):
         log.warning("Podcast feed parse warning source_id=%s source_name=%s error=%s", source.id, source.name, getattr(feed, "bozo_exception", "unknown"))
@@ -277,6 +278,8 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
         playlist_items=f"1-{limit}",
     )
     log.info("yt-dlp extract starting source_id=%s source_name=%s url=%s options=%s", source.id, source.name, source.url, {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}})
+    from yt_dlp import YoutubeDL
+
     with YoutubeDL(ydl_opts) as ydl:
         payload = ydl.extract_info(source.url, download=False) or {}
     if isinstance(payload, dict):

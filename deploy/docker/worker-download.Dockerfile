@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.14-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,19 +6,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=app.settings \
     DENO_INSTALL=/usr/local
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg unzip \
+RUN apk add --no-cache ca-certificates ffmpeg \
+    && apk add --no-cache --virtual .deno-fetch curl unzip \
     && curl -fsSL https://deno.land/install.sh | sh \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apk del .deno-fetch
 
 WORKDIR /app
-COPY src/requirements.txt /tmp/requirements.txt
+COPY deploy/requirements/worker-download.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY src ./src
-RUN python -m django collectstatic --noinput
 
-EXPOSE 8080
-CMD ["python", "-m", "app"]
+CMD ["python", "-m", "workers"]
