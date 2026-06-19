@@ -2,8 +2,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
-import json
 import resource
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -563,7 +561,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             source_max_downloads = int(entry.get("max_downloads") or defaults.get("max_downloads") or defaults.get("playlist_end") or 3)
             source_max_downloads = max(1, source_max_downloads)
             should_generate_subtitles = entry_subtitles_enabled
-            subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "subprocess"))
+            subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "in_process"))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 should_generate_subtitles = False
             should_transcribe = should_generate_subtitles or delete_explicit_content
@@ -1133,34 +1131,11 @@ def _parent_rss_mb() -> float:
 
 
 def download_youtube_items(config, downloaded_items):
-    if YoutubeDL is not None or str(os.getenv("GETOFFLINE_YTDLP_SUBPROCESS", "1")).strip().lower() in {"0", "false", "no", "off"}:
-        _download_youtube_items_in_process(config, downloaded_items)
-        return
+    log.info("Downloading YouTube items natively in current worker process")
+    _download_youtube_items_in_process(config, downloaded_items)
 
-    base_config = dict(config)
-    youtube_entries = list(config.get("youtube", []))
-    for entry in youtube_entries:
-        single_config = dict(base_config)
-        single_config["youtube"] = [entry]
-        payload = {"config": single_config}
-        worker_module = "workers.youtube_subprocess"
-        proc = subprocess.run(
-            [sys.executable, "-m", worker_module],
-            input=json.dumps(payload),
-            stdout=subprocess.PIPE,
-            stderr=None,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            log.error("YouTube subprocess failed for %s: %s", entry.get("name"), (proc.stderr or "").strip())
-            continue
-        try:
-            response = json.loads(proc.stdout or "{}")
-        except Exception as exc:
-            log.error("Invalid YouTube subprocess response for %s: %s", entry.get("name"), exc)
-            continue
-        downloaded_items.extend(response.get("downloaded_items") or [])
+
+
 YoutubeDL = None
 
 

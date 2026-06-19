@@ -104,7 +104,7 @@ def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = 
             result = summarize_segments(
                 segments,
                 model_name=str(model_name or "qwen2.5:0.5b"),
-                mode="subprocess",
+                mode="in_process",
                 timeout_seconds=max(1, int(timeout_seconds)),
             )
         except Exception as exc:

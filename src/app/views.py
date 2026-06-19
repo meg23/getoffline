@@ -510,7 +510,7 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
             job = create_job(
                 profile_id=profile_id,
                 job_type="download_single",
-                payload={"source": "django_app", "url": item.item_url or item.media_url or item.source_url},
+                payload={"source": "django_app", "url": item.item_url or item.media_url or item.source_url, "source_type": item.source_type, "source_name": item.source_name, "media_type": "audio" if item.source_type == "podcast" else "video", "subtitles": True},
                 idempotency_key=f"download_single:{profile_id}:{item.pk}",
             )
             publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})

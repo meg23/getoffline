@@ -19,6 +19,10 @@ logging.basicConfig(
     ],
 )
 
+# Pika emits very chatty INFO logs for normal connection shutdown/reconnect cycles.
+# Keep GetOffline worker lifecycle logs visible without burying transcript/subtitle progress.
+logging.getLogger("pika").setLevel(logging.WARNING)
+
 
 def get_logger(channel: str):
     return YTDLPStyleAdapter(logging.getLogger("getoffline"), {"channel": channel})

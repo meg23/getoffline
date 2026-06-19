@@ -8,9 +8,12 @@ from app.queue import publish_job
 from django.utils import timezone
 from workers.logger import get_logger
 from models.jobs import create_job
-from models.models import Download, Job, ProfileConfigValue, SourceConfig
+from models.models import Download, Job, MediaSummary, ProfileConfigValue, SourceConfig, TranscriptSegment
 from workers.utils import sanitize_channel_name
 from workers.youtube import _apply_ytdlp_player_js_variant_workaround, _enable_youtube_ejs_remote_component
+from workers.subtitles import create_subtitles
+from workers.summary_tasks import _load_segments_from_subtitle
+from workers.summarization import summarize_segments
 
 
 log = get_logger("workers.handlers")
@@ -37,17 +40,19 @@ def _yt_dlp_progress_hook(event: dict) -> None:
     total = event.get("total_bytes") or event.get("total_bytes_estimate")
     speed = event.get("speed")
     eta = event.get("eta")
+    def mb(value):
+        return round(float(value) / (1024 * 1024), 2) if value is not None else None
     if status == "downloading":
         log.info(
-            "yt-dlp downloading filename=%s downloaded_bytes=%s total_bytes=%s speed=%s eta=%s",
+            "yt-dlp downloading filename=%s downloaded_mb=%s total_mb=%s speed_mb_s=%s eta=%s",
             filename,
-            downloaded,
-            total,
-            speed,
+            mb(downloaded),
+            mb(total),
+            mb(speed),
             eta,
         )
     elif status == "finished":
-        log.info("yt-dlp download finished filename=%s total_bytes=%s", filename, total or downloaded)
+        log.info("yt-dlp download finished filename=%s total_mb=%s", filename, mb(total or downloaded))
     elif status == "error":
         log.error("yt-dlp download error filename=%s event=%s", filename, event)
     else:
@@ -207,7 +212,7 @@ def transcode_media(job: Job) -> None:
         raise FileNotFoundError(f"Downloaded file is missing: {source_path}")
     input_size = source_path.stat().st_size
     media_kind = _preferred_media_kind(download, payload) if download is not None else str(payload.get("media_type") or "video")
-    target_ext = _preferred_target_ext(job.profile_id, media_kind)
+    target_ext = "mp3" if media_kind == "audio" else _preferred_target_ext(job.profile_id, media_kind)
     target_path = _target_path(source_path, target_ext)
     ffmpeg_path = _profile_setting(job.profile_id, "ffmpeg_path", "ffmpeg")
     codec_args = _ffmpeg_audio_args(job.profile_id, target_ext) if media_kind == "audio" else _ffmpeg_video_args(job.profile_id, target_ext)
@@ -294,7 +299,7 @@ def transcode_media(job: Job) -> None:
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_transcript",
-        payload={"download_id": download.id, "original_file_path": str(old_path) if old_path != target_path else ""},
+        payload={"download_id": download.id, "original_file_path": str(old_path) if old_path != target_path else "", "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds")},
         idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
     )
     _publish_created_job(child)
@@ -341,7 +346,7 @@ def _youtube_video_url(entry: dict) -> str:
 
 
 def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
-    download_url = str(payload.get("media_url") or payload.get("item_url") or "").strip()
+    download_url = str(payload.get("media_url") or payload.get("item_url") or payload.get("url") or "").strip()
     if not download_url:
         log.warning("Download worker skipped job with no URL job_id=%s payload=%s", job.id, payload)
         return None
@@ -427,8 +432,8 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         "completed_at": now,
     }
     media_kind = str(payload.get("media_type") or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")).strip().lower()
-    target_ext = _preferred_target_ext(job.profile_id, media_kind)
-    if downloaded_file.suffix.lstrip(".").lower() != target_ext:
+    target_ext = "mp3" if media_kind == "audio" else downloaded_file.suffix.lstrip(".").lower()
+    if media_kind == "audio" and downloaded_file.suffix.lstrip(".").lower() != target_ext:
         log.info(
             "Download worker deferred database insert until conversion job_id=%s source_file=%s current_ext=%s target_ext=%s media_kind=%s",
             job.id,
@@ -441,6 +446,8 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             "source_file_path": str(downloaded_file),
             "output_root": str(output_root),
             "media_type": media_kind,
+            "subtitles": payload.get("subtitles", True),
+            "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
             "download_lookup": download_lookup,
             "download_defaults": {key: value for key, value in download_defaults.items() if key not in {"last_seen_at", "completed_at"}},
             "item_uid": item_uid,
@@ -780,6 +787,8 @@ def check_for_episodes(job: Job) -> None:
                         "media_url": candidate.get("media_url") or item_url,
                         "title": title,
                         "published": candidate.get("published") or "",
+                        "subtitles": bool(source.subtitles),
+                        "subtitle_offset_seconds": source.subtitle_offset_seconds,
                     },
                     idempotency_key=idempotency_key,
                 )
@@ -841,9 +850,11 @@ def download_episode(job: Job) -> None:
     if download is None:
         log.warning("Download worker could not find downloaded row for next stage job_id=%s download_id=%s", job.id, download_id)
         return
-    requires_ffmpeg, media_kind, target_ext = _download_requires_ffmpeg(download, payload)
+    media_kind = _preferred_media_kind(download, payload)
+    target_ext = "mp3" if media_kind == "audio" else (download.file_ext or "")
+    requires_ffmpeg = media_kind == "audio" and (download.file_ext or "").lower() != "mp3"
     next_job_type = "transcode_media" if requires_ffmpeg else "generate_transcript"
-    next_payload = {"download_id": download_id, "media_type": media_kind} if requires_ffmpeg else {"download_id": download_id}
+    next_payload = {"download_id": download_id, "media_type": media_kind, "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds")} if requires_ffmpeg else {"download_id": download_id, "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds")}
     log.info(
         "Download worker selected next stage parent_job_id=%s download_id=%s file_ext=%s media_kind=%s target_ext=%s next_job_type=%s",
         job.id,
@@ -868,17 +879,71 @@ def download_single(job: Job) -> None:
     download_episode(job)
 
 
+def _subtitles_enabled_for_download(download: Download, payload: dict) -> bool:
+    if "subtitles" in payload:
+        return str(payload.get("subtitles")).strip().lower() not in {"0", "false", "no", "off"}
+    value = SourceConfig.objects.filter(profile_id=download.profile_id, source_type=download.source_type, name=download.source_name).values_list("subtitles", flat=True).first()
+    return True if value is None else bool(value)
+
+
+def _subtitle_offset_for_download(download: Download, payload: dict) -> float | None:
+    if payload.get("subtitle_offset_seconds") not in {None, ""}:
+        return float(payload.get("subtitle_offset_seconds"))
+    return SourceConfig.objects.filter(profile_id=download.profile_id, source_type=download.source_type, name=download.source_name).values_list("subtitle_offset_seconds", flat=True).first()
+
+
 def generate_transcript(job: Job) -> None:
-    """Parallel transcript worker placeholder; enqueue summary when transcript work is done."""
+    """Generate Whisper subtitles/transcript segments, then enqueue summary work."""
     log.info("Transcript worker started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
     if not download_id:
         log.warning("Transcript worker skipped job with no download_id job_id=%s", job.id)
         return
-    if not Download.objects.filter(pk=download_id, profile_id=job.profile_id).exists():
+    download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
+    if download is None:
         log.warning("Transcript worker skipped missing download job_id=%s download_id=%s profile_id=%s", job.id, download_id, job.profile_id)
         return
+    media_path = Path(str(download.file_path or "")).expanduser().resolve()
+    log.info(
+        "Transcript worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s subtitle_path=%s",
+        job.id,
+        download_id,
+        download.title,
+        download.source_type,
+        download.source_name,
+        download.file_path,
+        download.file_ext,
+        download.subtitle_path,
+    )
+    if not media_path.exists():
+        log.warning("Transcript worker skipped missing media file job_id=%s download_id=%s path=%s", job.id, download_id, media_path)
+    else:
+        enabled = _subtitles_enabled_for_download(download, payload)
+        subtitle_offset = _subtitle_offset_for_download(download, payload)
+        transcription_mode = _profile_setting(job.profile_id, "subtitle_transcription_mode", "in_process")
+        log.info(
+            "Transcript worker starting subtitle generation job_id=%s download_id=%s enabled=%s media_path=%s size_bytes=%s offset=%s mode=%s",
+            job.id,
+            download_id,
+            enabled,
+            media_path,
+            media_path.stat().st_size,
+            subtitle_offset,
+            transcription_mode,
+        )
+        subtitle_path = create_subtitles(media_path, subtitle_offset, enabled, log, download.title or media_path.name, "download", transcription_mode)
+        if subtitle_path is not None:
+            output_root = _download_output_root(job.profile_id)
+            download.subtitle_path = str(subtitle_path)
+            download.subtitle_path_relative = str(subtitle_path.relative_to(output_root)) if subtitle_path.is_relative_to(output_root) else None
+            download.save(update_fields=["subtitle_path", "subtitle_path_relative"])
+            segments = _load_segments_from_subtitle(Path(subtitle_path))
+            TranscriptSegment.objects.filter(download=download).delete()
+            TranscriptSegment.objects.bulk_create([TranscriptSegment(download=download, subtitle_path=str(subtitle_path), start_seconds=0.0, end_seconds=None, text=text) for text in segments])
+            log.info("Transcript worker saved subtitles job_id=%s download_id=%s subtitle_path=%s segments=%s", job.id, download_id, subtitle_path, len(segments))
+        else:
+            log.warning("Transcript worker completed without subtitle output job_id=%s download_id=%s enabled=%s media_path=%s", job.id, download_id, enabled, media_path)
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_summary",
@@ -894,7 +959,24 @@ def generate_summary(job: Job) -> None:
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
     download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first() if download_id else None
-    log.info("Summary worker finished placeholder job_id=%s", job.id)
+    if download is None:
+        log.warning("Summary worker skipped missing download job_id=%s download_id=%s", job.id, download_id)
+        return
+    segments = list(download.transcript_segments.order_by("start_seconds", "id").values_list("text", flat=True))
+    if not segments and download.subtitle_path:
+        segments = _load_segments_from_subtitle(Path(download.subtitle_path))
+    if segments:
+        model_name = _profile_setting(job.profile_id, "summary_model", "qwen2.5:0.5b")
+        timeout_seconds = int(_profile_setting(job.profile_id, "summary_timeout_seconds", "90"))
+        result = summarize_segments(segments, model_name=model_name, mode="in_process", timeout_seconds=timeout_seconds)
+        summary = str(result.get("summary_text") or "").strip()
+        if summary:
+            MediaSummary.objects.update_or_create(download=download, defaults={"summary_text": summary, "model_name": str(result.get("model_name") or model_name), "source_segment_count": len(segments), "updated_at": timezone.now()})
+            log.info("Summary worker generated summary job_id=%s download_id=%s segments=%s chars=%s", job.id, download_id, len(segments), len(summary))
+        else:
+            log.warning("Summary worker got empty summary job_id=%s download_id=%s", job.id, download_id)
+    else:
+        log.warning("Summary worker skipped generation with no transcript segments job_id=%s download_id=%s subtitle_path=%s", job.id, download_id, download.subtitle_path)
     original_file_path = str(payload.get("original_file_path") or "").strip()
     if download is not None and original_file_path:
         original_path = Path(original_file_path).expanduser().resolve()

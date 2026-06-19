@@ -642,7 +642,7 @@ def _filter_imported_media(
 def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Path) -> None:
     defaults = (state.config or {}).get("defaults") or {}
     item_uid = str(metadata["item_uid"])
-    subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "subprocess")
+    subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "in_process")
     subtitle_offset = defaults.get("subtitle_time_offset_seconds")
     try:
         subtitle_path = create_subtitles(
@@ -1243,7 +1243,7 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     result = summarize_segments(
         segment_texts,
         model_name=summary_model,
-        mode="subprocess",
+        mode="in_process",
         timeout_seconds=max(1, summary_timeout_seconds),
     )
     summary_text = str(result.get("summary_text") or "").strip()
