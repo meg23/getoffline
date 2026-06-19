@@ -14,16 +14,14 @@
         <div class="hero-heading">
           <h1>GetOffline</h1>
           <div class="profile-controls" aria-label="Profile controls">
-            <details class="profile-switch-form profile-menu">
-              <summary class="profile-menu-summary" aria-label="Switch profile">
-                <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
-                <span class="profile-name">{{ profile_name }}</span>
-                <span class="profile-caret" aria-hidden="true"></span>
-              </summary>
-              <div class="profile-menu-list" role="menu">
-                {% for profile in profiles %}<a class="profile-menu-item{% if profile.selected %} is-selected{% endif %}" role="menuitem" href="{% url 'library' %}?profile_id={{ profile.id }}">{% if profile.selected %}<span aria-hidden="true">✓</span>{% else %}<span aria-hidden="true"></span>{% endif %}{{ profile.name }}</a>{% endfor %}
-              </div>
-            </details>
+            <form class="profile-switch-form" method="get" action="{% url 'library' %}" aria-label="Switch profile">
+              <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
+              <span class="profile-select-wrap">
+                <select id="profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">
+                  {% for profile in profiles %}<option value="{{ profile.id }}" {% if profile.selected %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}
+                </select>
+              </span>
+            </form>
             <a class="profile-icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">🔒</a>
             <button id="quick-add-open-hero" class="profile-icon-button" type="button" title="Add media" aria-label="Add media">+</button>
           </div>
@@ -144,9 +142,10 @@
     <section id="mini-player-backdrop" class="mini-player-backdrop" aria-hidden="true">
       <section id="mini-player" class="mini-player" aria-live="polite">
         <div class="mini-player-header">
-          <div><div id="mini-player-title" class="mini-player-title"></div><div id="mini-player-source" class="mini-player-source"></div></div>
-          <button id="mini-player-open" class="mini-player-open" type="button" aria-label="Maximize player">Maximize</button>
+          <div id="mini-player-title" class="mini-player-title"></div>
+          <div id="mini-player-source" class="mini-player-source"></div>
           <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close mini player">×</button>
+          <button id="mini-player-open" class="mini-player-open" type="button" aria-label="Maximize player">Maximize</button>
         </div>
         <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
         <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>

@@ -105,7 +105,8 @@
 })();
 
 (() => {
-  const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+  function readCookie(name) { return document.cookie.split(';').map((v) => v.trim()).find((v) => v.startsWith(`${name}=`))?.slice(name.length + 1) || ''; }
+  const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || decodeURIComponent(readCookie('csrftoken') || '');
   const batchForm = document.getElementById('batch-form');
   const batchAction = document.getElementById('batch-action');
   const metadataBackdrop = document.getElementById('metadata-edit-backdrop');
@@ -181,7 +182,7 @@
   const stateKey = 'getofflineMiniPlayerState';
   let lastPersisted = -9999;
 
-  function saveMediaSettings(media) { localStorage.setItem(settingsKey, JSON.stringify({ volume: media.volume, muted: media.muted })); }
+  function saveMediaSettings(media) { localStorage.setItem(settingsKey, JSON.stringify({ volume: Number(media.volume), muted: !!media.muted })); }
   function applyMediaSettings(media) { try { const stored = JSON.parse(localStorage.getItem(settingsKey) || 'null'); if (stored) { if (Number.isFinite(Number(stored.volume))) media.volume = Math.max(0, Math.min(1, Number(stored.volume))); media.muted = !!stored.muted; } } catch (_) {} }
   function activeMedia(kind) { return kind === 'video' ? video : audio; }
   function progressUrl(rowId) { return `/downloads/${rowId}/position/`; }
@@ -195,11 +196,13 @@
     body.set('position_seconds', seconds.toFixed(3));
     body.set('reason', reason || 'mini-timeupdate');
     const url = progressUrl(state.rowId);
-    if (force && navigator.sendBeacon) {
-      const blob = new Blob([body.toString()], { type: 'application/x-www-form-urlencoded' });
-      if (navigator.sendBeacon(url, blob)) return;
-    }
-    fetch(url, { method: 'POST', body, headers: { 'X-CSRFToken': csrf } }).catch(() => {});
+    fetch(url, {
+      method: 'POST',
+      body,
+      credentials: 'same-origin',
+      keepalive: !!force,
+      headers: { 'X-CSRFToken': csrf },
+    }).catch(() => {});
   }
   function clearTranscript() { if (transcript) { transcript.textContent = ''; transcript.classList.remove('is-visible'); } }
   function buildTranscript(media) {
@@ -237,13 +240,13 @@
     if (!media) return;
     if (miniTitle) miniTitle.textContent = state.title || 'Now playing';
     if (miniSource) miniSource.textContent = state.source || '';
-    const source = document.createElement('source'); source.src = state.src; media.appendChild(source);
+    media.src = state.src;
     if (state.hasSubtitles && state.subtitleUrl) { const track = document.createElement('track'); track.kind = 'subtitles'; track.srclang = 'en'; track.label = 'English'; track.default = true; track.src = state.subtitleUrl; track.addEventListener('load', () => buildTranscript(media)); media.appendChild(track); }
     media.style.display = 'block'; media.classList.add('is-active'); applyMediaSettings(media);
-    media.addEventListener('loadedmetadata', () => { const resume = Math.max(0, Number(state.currentTime || 0)); if (resume && (!media.duration || resume < media.duration)) media.currentTime = resume; if (!state.paused) media.play().catch(() => {}); }, { once: true });
+    media.addEventListener('loadedmetadata', () => { applyMediaSettings(media); const resume = Math.max(0, Number(state.currentTime || 0)); if (resume && (!media.duration || resume < media.duration)) media.currentTime = resume; if (!state.paused) media.play().catch(() => {}); }, { once: true });
     media.ontimeupdate = () => { state.currentTime = media.currentTime || 0; state.paused = media.paused; localStorage.setItem(stateKey, JSON.stringify(state)); if (!media.paused) postProgress(state, media, false, 'mini-timeupdate'); };
     media.onpause = () => { state.currentTime = media.currentTime || 0; state.paused = true; localStorage.setItem(stateKey, JSON.stringify(state)); postProgress(state, media, true, 'mini-pause'); };
-    media.onplay = () => { state.paused = false; localStorage.setItem(stateKey, JSON.stringify(state)); };
+    media.onplay = () => { applyMediaSettings(media); state.paused = false; localStorage.setItem(stateKey, JSON.stringify(state)); };
     media.onvolumechange = () => saveMediaSettings(media);
     media.onended = () => { postProgress(state, media, true, 'mini-ended'); closeMini(); };
     media.load();
@@ -253,15 +256,26 @@
   miniOpen?.addEventListener('click', () => setExpanded(!miniPlayer?.classList.contains('is-maximized')));
   miniBackdrop?.addEventListener('click', (event) => { if (event.target === miniBackdrop) closeMini(); });
 
-  document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {
-    link.addEventListener('click', (event) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-      event.preventDefault();
-      const row = link.closest('tr');
-      const state = { rowId: Number(link.dataset.rowId || row?.dataset.rowId || 0), title: link.dataset.title || row?.dataset.title || '', source: link.dataset.source || row?.dataset.channel || '', kind: link.dataset.kind || row?.dataset.kind || 'audio', hasSubtitles: link.dataset.hasSubtitles === '1', subtitleUrl: row?.dataset.subtitleUrl || '', src: row?.dataset.mediaUrl || link.href, currentTime: Number(link.dataset.resumeSeconds || row?.dataset.resumeSeconds || 0), paused: false };
-      localStorage.setItem(stateKey, JSON.stringify(state));
-      renderMini(state);
-    });
-  });
+  document.addEventListener('click', (event) => {
+    const link = event.target?.closest?.('a[data-play-link="1"]');
+    if (!link) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const row = link.closest('tr');
+    const state = {
+      rowId: Number(link.dataset.rowId || row?.dataset.rowId || 0),
+      title: link.dataset.title || row?.dataset.title || '',
+      source: link.dataset.source || row?.dataset.channel || '',
+      kind: link.dataset.kind || row?.dataset.kind || 'audio',
+      hasSubtitles: link.dataset.hasSubtitles === '1',
+      subtitleUrl: row?.dataset.subtitleUrl || '',
+      src: row?.dataset.mediaUrl || link.href,
+      currentTime: Number(link.dataset.resumeSeconds || row?.dataset.resumeSeconds || 0),
+      paused: false,
+    };
+    localStorage.setItem(stateKey, JSON.stringify(state));
+    renderMini(state);
+  }, true);
   try { const saved = JSON.parse(localStorage.getItem(stateKey) || 'null'); if (saved && saved.paused === false) renderMini(saved); } catch (_) {}
 })();
