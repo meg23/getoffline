@@ -62,6 +62,7 @@
               <option value="unplayed">unplayed</option>
               <option value="favorite">favorite</option>
               <option value="unfavorite">unfavorite</option>
+              <option value="edit-metadata">edit</option>
               <option value="download">download</option>
               <option value="delete">delete</option>
             </select>
@@ -79,7 +80,7 @@
           </thead>
           <tbody id="downloads-table-body">
             {% for item in downloads %}
-              <tr data-row-id="{{ item.id }}" data-played="{% if item.played %}1{% else %}0{% endif %}" data-favorite="{% if item.favorite %}1{% else %}0{% endif %}" data-channel="{{ item.source_name|default:'' }}" data-title="{{ item.title|default:'' }}">
+              <tr data-row-id="{{ item.id }}" data-played="{% if item.played %}1{% else %}0{% endif %}" data-favorite="{% if item.favorite %}1{% else %}0{% endif %}" data-channel="{{ item.source_name|default:'' }}" data-title="{{ item.title|default:'' }}" data-kind="{{ item.display_kind }}" data-media-url="{% url 'media' item.id %}">
                 <td class="channel-col" title="{{ item.source_name|default:'' }}">{{ item.source_name|default:item.source_type }}</td>
                 <td class="episode-col"><a class="episode-link" href="{% url 'player' item.id %}" data-summary="{{ item.summary.summary_text|default:item.title|default:'Untitled' }}" data-title="{{ item.title|default:'Untitled' }}" data-play-link="1">{{ item.title|default:'Untitled' }}</a></td>
                 <td><span class="pill status-new">{{ item.source_type|upper }}</span></td>
@@ -114,9 +115,32 @@
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="search-title">
         <h2 id="search-title">Search transcripts</h2>
         <input id="transcript-search-input" type="search" placeholder="Search words in transcripts..." />
-        <p class="modal-note">Transcript search will run from indexed transcript records as worker support is expanded.</p>
+        <div id="transcript-search-results" class="quick-add-results" aria-live="polite"></div>
         <div class="modal-actions"><button type="button" data-modal-close>Close</button></div>
       </section>
+    </div>
+
+
+    <div id="metadata-edit-backdrop" class="modal-backdrop" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
+        <h2 id="metadata-edit-title">Edit media</h2>
+        <form id="metadata-edit-form" class="modal-form" method="post" action="{% url 'edit_metadata' %}">
+          {% csrf_token %}
+          <input id="metadata-edit-id" name="id" type="hidden" />
+          <label for="metadata-edit-item-title">Title</label>
+          <input id="metadata-edit-item-title" name="title" type="text" required />
+          <label for="metadata-edit-source-name">Source name</label>
+          <input id="metadata-edit-source-name" name="source_name" type="text" required />
+          <div class="modal-actions"><button id="metadata-edit-cancel" type="button" data-modal-close>Cancel</button><button type="submit">Save</button></div>
+        </form>
+      </section>
+    </div>
+
+    <div id="mini-player" class="mini-player" aria-hidden="true">
+      <button id="mini-player-close" class="mini-player-close" type="button" aria-label="Close player">×</button>
+      <div id="mini-player-title" class="mini-player-title"></div>
+      <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
+      <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
     </div>
   </body>
 </html>

@@ -1,7 +1,7 @@
 import mimetypes
 from pathlib import Path
 
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
@@ -9,7 +9,7 @@ from django.db.models import Sum
 from django.views.decorators.http import require_POST
 
 from models.jobs import create_job
-from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig
+from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig, TranscriptSegment
 
 from .queue import publish_job
 
@@ -40,6 +40,7 @@ def _decorate_download(item: Download) -> Download:
     position = float(item.last_position_seconds or 0.0)
     item.display_size = _human_size(item.file_size_bytes)
     item.display_type = (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?").upper()
+    item.display_kind = "video" if item.display_type.lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
     item.status_label = "UNPLAYED"
     item.status_class = "status-unplayed"
     if position > 0 and not item.played:
@@ -108,7 +109,13 @@ def jobs(request: HttpRequest) -> HttpResponse:
 
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
-    return render(request, "app/player.html", {"item": item})
+    try:
+        requested_seek = float(request.GET.get("t") or 0.0)
+    except (TypeError, ValueError):
+        requested_seek = 0.0
+    seek = max(float(item.last_position_seconds or 0.0), requested_seek)
+    media_kind = "video" if (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")).lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+    return render(request, "app/player.html", {"item": item, "seek_seconds": seek, "media_kind": media_kind})
 
 
 def media(request: HttpRequest, download_id: int) -> FileResponse:
@@ -278,6 +285,48 @@ def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     return _redirect_back(request)
 
 
+
+def transcript_search(request: HttpRequest) -> JsonResponse:
+    profile_id = _profile_id(request)
+    query = str(request.GET.get("q") or "").strip()
+    if len(query) < 2:
+        return JsonResponse({"results": []})
+    segments = (
+        TranscriptSegment.objects.select_related("download")
+        .filter(download__profile_id=profile_id, text__icontains=query)
+        .filter(download__download_status__in=DOWNLOAD_STATUSES)
+        .order_by("download_id", "start_seconds")[:50]
+    )
+    results = [
+        {
+            "id": segment.download_id,
+            "title": segment.download.title or "Untitled",
+            "source_name": segment.download.source_name or segment.download.source_type,
+            "start_seconds": segment.start_seconds,
+            "text": segment.text,
+            "url": reverse("player", args=[segment.download_id]) + f"?t={int(segment.start_seconds)}",
+        }
+        for segment in segments
+    ]
+    return JsonResponse({"results": results})
+
+
+@require_POST
+def edit_metadata(request: HttpRequest) -> JsonResponse:
+    raw_id = str(request.POST.get("id") or "").strip()
+    if not raw_id.isdigit():
+        return JsonResponse({"ok": False, "error": "Invalid id"}, status=400)
+    item = get_object_or_404(Download, pk=int(raw_id))
+    title = str(request.POST.get("title") or "").strip()
+    source_name = str(request.POST.get("source_name") or "").strip()
+    if not title or not source_name:
+        return JsonResponse({"ok": False, "error": "Title and source name are required"}, status=400)
+    item.title = title
+    item.source_name = source_name
+    item.last_seen_at = timezone.now()
+    item.save(update_fields=["title", "source_name", "last_seen_at"])
+    return JsonResponse({"ok": True})
+
 @require_POST
 def save_config(request: HttpRequest) -> HttpResponseRedirect:
     profile_id = _profile_id(request)
@@ -404,6 +453,8 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
             if item.file_path:
                 Path(item.file_path).expanduser().unlink(missing_ok=True)
         rows.update(download_status="missing", last_seen_at=now)
+    elif action == "edit-metadata":
+        return _redirect_back(request)
     elif action == "download":
         profile_id = _profile_id(request)
         for item in rows:

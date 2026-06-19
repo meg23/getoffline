@@ -1,19 +1,34 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>{{ item.title|default:"Player" }}</title></head>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ item.title|default:"Player" }}</title>
+    <style>
+      body{margin:0;font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;background:#0b1020;color:#e9eefc;padding:1.25rem}.wrap{max-width:1100px;margin:0 auto}a{color:#9dbbff;text-decoration:none}a:hover{text-decoration:underline}.meta{color:#a9b4d0;margin:.25rem 0 1rem}.player{width:100%;max-width:1000px;background:#000;border:1px solid #2a3761;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35)}.actions{display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0}.actions button{border:1px solid #40558d;border-radius:10px;background:#182446;color:#e9eefc;padding:.55rem .8rem;font:inherit;cursor:pointer}.transcript-wrap{margin-top:1rem;max-width:1000px}.transcript{max-height:300px;overflow-y:auto;border:1px solid #2a3761;border-radius:10px;background:#0f1730;padding:.6rem}.transcript-empty{color:#a9b4d0}
+    </style>
+  </head>
   <body>
-    <p><a href="{% url 'library' %}">Back to library</a></p>
-    <h1>{{ item.title|default:"Untitled" }}</h1>
-    <video controls autoplay style="max-width:100%;height:auto" src="{% url 'media' item.id %}">
-      {% if item.subtitle_path %}<track kind="subtitles" src="{% url 'subtitle' item.id %}" default>{% endif %}
-    </video>
-    <form id="position-form" method="post" action="{% url 'save_position' item.id %}">{% csrf_token %}<input type="hidden" name="position_seconds" id="position-seconds"></form>
+    <div class="wrap">
+      <p><a href="{% url 'library' %}?profile_id={{ item.profile_id }}">← Back to Library</a></p>
+      <h1>{{ item.title|default:"Untitled" }}</h1>
+      <p class="meta">{{ item.source_type }}: {{ item.source_name }}</p>
+      <{% if media_kind == 'video' %}video{% else %}audio{% endif %} id="player" class="player" controls autoplay preload="metadata" src="{% url 'media' item.id %}">{% if item.subtitle_path %}<track id="subtitle-track" kind="subtitles" srclang="en" label="English" src="{% url 'subtitle' item.id %}" default>{% endif %}</{% if media_kind == 'video' %}video{% else %}audio{% endif %}>
+      <div class="actions">
+        <form method="post" action="{% url 'mark_played' item.id %}">{% csrf_token %}<button type="submit">Mark played</button></form>
+        <form method="post" action="{% url 'mark_unplayed' item.id %}">{% csrf_token %}<button type="submit">Mark unplayed</button></form>
+        {% if item.favorite %}<form method="post" action="{% url 'unfavorite' item.id %}">{% csrf_token %}<button type="submit">Unfavorite</button></form>{% else %}<form method="post" action="{% url 'favorite' item.id %}">{% csrf_token %}<button type="submit">Favorite</button></form>{% endif %}
+      </div>
+      {% if item.summary.summary_text %}<section class="transcript-wrap"><h2>Summary</h2><div class="transcript">{{ item.summary.summary_text }}</div></section>{% endif %}
+      <form id="position-form" method="post" action="{% url 'save_position' item.id %}">{% csrf_token %}<input type="hidden" name="position_seconds" id="position-seconds"></form>
+    </div>
     <script>
-      const media = document.querySelector('video');
+      const media = document.getElementById('player');
       const form = document.getElementById('position-form');
       const input = document.getElementById('position-seconds');
-      if (media) media.currentTime = {{ item.last_position_seconds|default:0 }};
-      setInterval(() => { if (!media || media.paused) return; input.value = media.currentTime; fetch(form.action, {method:'POST', body:new FormData(form)}); }, 30000);
+      const seek = {{ seek_seconds|default:0 }};
+      media?.addEventListener('loadedmetadata', () => { if (seek > 0 && seek < media.duration) media.currentTime = seek; }, { once:true });
+      setInterval(() => { if (!media || media.paused || !form || !input) return; input.value = media.currentTime; fetch(form.action, {method:'POST', body:new FormData(form)}); }, 30000);
     </script>
   </body>
 </html>
