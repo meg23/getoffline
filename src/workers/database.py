@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from logger import get_logger
+from workers.logger import get_logger
 
 try:
     from sqlalchemy import (

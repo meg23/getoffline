@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import main  # noqa: E402
+import workers.main as main  # noqa: E402
 
 
 class MainCliTests(unittest.TestCase):
@@ -20,8 +20,8 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(args.port, 8080)
 
     def test_main_without_args_runs_server(self):
-        with patch.object(sys, "argv", ["getoffline"]), patch("main.run_server") as run_server, patch(
-            "main.run_downloads"
+        with patch.object(sys, "argv", ["getoffline"]), patch("workers.main.run_server") as run_server, patch(
+            "workers.main.run_downloads"
         ) as run_downloads:
             main.main()
 
@@ -30,9 +30,9 @@ class MainCliTests(unittest.TestCase):
 
     def test_run_server_uses_bootstrap_config_without_loading_database(self):
         bootstrap_config = {"defaults": {"output_root": "/tmp/downloads", "database_path": "/tmp/downloads.sqlite3"}}
-        with patch("main.load_bootstrap_config", return_value=bootstrap_config) as load_bootstrap_config, patch(
-            "main.load_config"
-        ) as load_config, patch("main.run_webapp") as run_webapp:
+        with patch("workers.main.load_bootstrap_config", return_value=bootstrap_config) as load_bootstrap_config, patch(
+            "workers.main.load_config"
+        ) as load_config, patch("workers.main.run_webapp") as run_webapp:
             main.run_server(host="127.0.0.1", port=8080)
 
         load_bootstrap_config.assert_called_once_with()
@@ -49,7 +49,7 @@ class MainCliTests(unittest.TestCase):
 
     def test_main_runs_directory_import_and_returns_its_status(self):
         with patch.object(sys, "argv", ["getoffline", "import-directory", "/media/incoming"]), patch(
-            "main.run_directory_import", return_value=3
+            "workers.main.run_directory_import", return_value=3
         ) as run_directory_import:
             with self.assertRaises(SystemExit) as exit_context:
                 main.main()
@@ -92,8 +92,8 @@ class MainCliTests(unittest.TestCase):
             }
             destination = output_root / "manual" / "movie.mp4"
 
-            with patch("main.load_config", return_value=config), patch(
-                "main.import_local_media_file", return_value=destination
+            with patch("workers.main.load_config", return_value=config), patch(
+                "workers.main.import_local_media_file", return_value=destination
             ) as import_local_media_file:
                 result = main.run_directory_import(str(source))
 

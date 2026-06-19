@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from database import get_stored_config, init_database, update_stored_defaults  # noqa: E402
-from profiles import ProfileManager  # noqa: E402
+from workers.database import get_stored_config, init_database, update_stored_defaults  # noqa: E402
+from workers.profiles import ProfileManager  # noqa: E402
 
 
 class ProfileManagerTests(unittest.TestCase):

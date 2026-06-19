@@ -4,7 +4,7 @@ import sys
 import threading
 from pathlib import Path
 
-from logger import get_logger
+from workers.logger import get_logger
 
 log = get_logger("transcription")
 

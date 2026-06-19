@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import podcasts  # noqa: E402
-import youtube  # noqa: E402
-from database import build_item_uid, has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
+import workers.podcasts as podcasts  # noqa: E402
+import workers.youtube as youtube  # noqa: E402
+from workers.database import build_item_uid, has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -114,8 +114,8 @@ class DownloadFlowTests(unittest.TestCase):
             config["defaults"]["playlist_end"] = 9
             config["youtube"][0]["max_downloads"] = 2
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -135,9 +135,9 @@ class DownloadFlowTests(unittest.TestCase):
             )
 
             downloaded_items = []
-            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 podcasts.download_podcasts(config, downloaded_items)
 
             self.assertEqual(len(FakeYoutubeDL.instances), 2)
@@ -158,9 +158,9 @@ class DownloadFlowTests(unittest.TestCase):
             )
 
             downloaded_items = []
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -193,9 +193,9 @@ class DownloadFlowTests(unittest.TestCase):
             config["youtube"][0]["delete_explicit_content"] = True
             downloaded_items = []
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator
-            ), patch("youtube.log_filtered_deletion") as deletion_log:
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator
+            ), patch("workers.youtube.log_filtered_deletion") as deletion_log:
                 youtube.download_youtube_items(config, downloaded_items)
 
             youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(config["youtube"][0]["name"])
@@ -220,10 +220,10 @@ class DownloadFlowTests(unittest.TestCase):
             )
             downloaded_items = []
 
-            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator), patch(
-                "podcasts.log_filtered_deletion"
+            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator), patch(
+                "workers.podcasts.log_filtered_deletion"
             ) as deletion_log:
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -307,7 +307,7 @@ class DownloadFlowTests(unittest.TestCase):
             downloaded_items = []
 
             fake_stdout = '{"downloaded_items":["YouTube: Test YouTube Source – Test Video"]}'
-            with patch("youtube.subprocess.run") as run_mock, patch("youtube._parent_rss_mb", side_effect=[120.0, 121.0]):
+            with patch("workers.youtube.subprocess.run") as run_mock, patch("workers.youtube._parent_rss_mb", side_effect=[120.0, 121.0]):
                 run_mock.return_value = SimpleNamespace(returncode=0, stdout=fake_stdout, stderr="")
                 youtube.download_youtube_items(config, downloaded_items)
 
@@ -322,7 +322,7 @@ class DownloadFlowTests(unittest.TestCase):
             downloaded_items = []
 
             fake_stdout = '{"downloaded_items":["Podcast: Test Podcast Source – Episode 1"]}'
-            with patch("podcasts.subprocess.run") as run_mock, patch("podcasts._parent_rss_mb", side_effect=[220.0, 221.0]):
+            with patch("workers.podcasts.subprocess.run") as run_mock, patch("workers.podcasts._parent_rss_mb", side_effect=[220.0, 221.0]):
                 run_mock.return_value = SimpleNamespace(returncode=0, stdout=fake_stdout, stderr="")
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -344,9 +344,9 @@ class DownloadFlowTests(unittest.TestCase):
             )
 
             downloaded_items = []
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -387,8 +387,8 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                         }],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -440,9 +440,9 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 }],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "youtube.ThreadPoolExecutor", RecordingExecutor
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.youtube.ThreadPoolExecutor", RecordingExecutor
+            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 youtube.download_youtube_items(config, [])
 
             self.assertEqual(len(RecordingExecutor.instances), 1)
@@ -464,7 +464,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
             }
 
-            with patch("youtube.shutil.which", return_value="/usr/bin/deno"), patch("youtube.YoutubeDL", FakeYoutubeDL):
+            with patch("workers.youtube.shutil.which", return_value="/usr/bin/deno"), patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
@@ -527,7 +527,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             }
 
             downloaded_items = []
-            with patch("youtube.YoutubeDL", FakeYoutubeDLWithSubtitleEvents):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithSubtitleEvents):
                 youtube.download_youtube_items(config, downloaded_items)
 
             youtube_items = [item for item in downloaded_items if item.startswith("YouTube: ")]
@@ -556,7 +556,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDL):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
@@ -592,7 +592,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 }
             ]
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLLiveFilter):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLLiveFilter):
                 youtube.download_youtube_items(config, [])
 
         self.assertEqual(filter_results, [None])
@@ -626,7 +626,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 }
             ]
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLLiveFilter):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLLiveFilter):
                 youtube.download_youtube_items(config, [])
 
         self.assertEqual(filter_results, ["Skipping live stream: Live now"])
@@ -666,7 +666,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLDuplicateFilterCalls), self.assertLogs("getoffline", level="WARNING") as logs:
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLDuplicateFilterCalls), self.assertLogs("getoffline", level="WARNING") as logs:
                 youtube.download_youtube_items(config, [])
 
             combined = "\n".join(logs.output)
@@ -709,7 +709,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLAnnouncedButNoProgress), self.assertLogs("getoffline", level="WARNING") as logs:
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLAnnouncedButNoProgress), self.assertLogs("getoffline", level="WARNING") as logs:
                 youtube.download_youtube_items(config, [])
 
             combined = "\n".join(logs.output)
@@ -754,7 +754,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLErrorStatus), self.assertLogs("getoffline", level="WARNING") as logs:
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLErrorStatus), self.assertLogs("getoffline", level="WARNING") as logs:
                 youtube.download_youtube_items(config, [])
 
             combined = "\n".join(logs.output)
@@ -781,9 +781,9 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             mp3_url = "https://cdn.example.com/episode-1.mp3"
             fake_feed = SimpleNamespace(entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)])])
 
-            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 downloaded_items = []
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -843,8 +843,8 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLWithOddDots), patch(
-                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithOddDots), patch(
+                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -924,8 +924,8 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLWithSeparatePostprocess), patch(
-                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithSeparatePostprocess), patch(
+                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -1003,7 +1003,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 "podcasts": [],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLVideoMerge):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLVideoMerge):
                 youtube.download_youtube_items(config, [])
 
             with sqlite3.connect(config["defaults"]["database_path"]) as conn:
@@ -1067,8 +1067,8 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 }],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLVideoOnly), patch(
-                "subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLVideoOnly), patch(
+                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -1081,7 +1081,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
 
 class SubtitleSidecarCleanupTests(unittest.TestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
-        import subtitles
+        import workers.subtitles as subtitles
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "20260311-Cuba_is_Next.mp3"
@@ -1094,7 +1094,7 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
             en_srt.write_text("en srt", encoding="utf-8")
             en_vtt.write_text("vtt", encoding="utf-8")
 
-            with patch("subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
                 subtitle_path = subtitles.create_subtitles(
                     media_file=media,
                     subtitle_offset_seconds=None,
@@ -1109,7 +1109,7 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
             self.assertTrue(media.with_suffix(".srt").exists())
 
     def test_folder_cleanup_removes_existing_en_sidecars_without_new_download(self):
-        import subtitles
+        import workers.subtitles as subtitles
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "20260310-Pakistan_and_Afghanistan_are_Still_At_War.mp3"
@@ -1131,7 +1131,7 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
 
 class SubtitleFailureCachingTests(unittest.TestCase):
     def test_known_empty_audio_transcription_failure_is_cached(self):
-        import subtitles
+        import workers.subtitles as subtitles
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "broken.mp3"
@@ -1147,7 +1147,7 @@ class SubtitleFailureCachingTests(unittest.TestCase):
                     "Transcription failed for broken.mp3 (base): cannot reshape tensor of 0 elements into shape [1, 0, 8, -1] because the unspecified dimension size -1 can be any value and is ambiguous"
                 )
 
-            with patch("subtitles.transcribe_with_whisper", side_effect=_boom):
+            with patch("workers.subtitles.transcribe_with_whisper", side_effect=_boom):
                 first = subtitles.generate_whisper_subtitles(media, settings)
                 second = subtitles.generate_whisper_subtitles(media, settings)
 
@@ -1158,7 +1158,7 @@ class SubtitleFailureCachingTests(unittest.TestCase):
             self.assertTrue(marker.exists())
 
     def test_ffmpeg_no_audio_stream_failure_is_cached(self):
-        import subtitles
+        import workers.subtitles as subtitles
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "video_only.mp4"
@@ -1174,7 +1174,7 @@ class SubtitleFailureCachingTests(unittest.TestCase):
                     "Transcription failed for video_only.mp4 (base): Failed to load audio: ffmpeg ... Output file does not contain any stream"
                 )
 
-            with patch("subtitles.transcribe_with_whisper", side_effect=_boom):
+            with patch("workers.subtitles.transcribe_with_whisper", side_effect=_boom):
                 first = subtitles.generate_whisper_subtitles(media, settings)
                 second = subtitles.generate_whisper_subtitles(media, settings)
 
@@ -1192,7 +1192,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
                 self.download_called = download
                 return {"channel": "Channel_Name", "uploader": "Uploader", "title": "Video Title"}
 
-        with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
+        with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForMetadata):
             source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
 
         self.assertEqual(source_name, "ChannelName")
@@ -1203,7 +1203,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
                 _ = url, download
                 return {"title": "A_Title_Only"}
 
-        with patch("youtube.YoutubeDL", FakeYoutubeDLForMetadata):
+        with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForMetadata):
             source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
 
         self.assertEqual(source_name, "ATitleOnly")
@@ -1226,7 +1226,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
                     ]
                 }
 
-        with patch("youtube.YoutubeDL", FakeYoutubeDLForSearch):
+        with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForSearch):
             results = youtube.search_youtube_videos("sample query", limit=5)
 
         self.assertEqual(len(results), 1)
@@ -1241,7 +1241,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
                 _ = url, download
                 raise RuntimeError("network fail")
 
-        with patch("youtube.YoutubeDL", BrokenYoutubeDL):
+        with patch("workers.youtube.YoutubeDL", BrokenYoutubeDL):
             results = youtube.search_youtube_videos("sample query")
 
         self.assertEqual(results, [])
@@ -1283,9 +1283,9 @@ class PodcastRetryTests(unittest.TestCase):
                 entries=[SimpleNamespace(title="Retry Episode", enclosures=[SimpleNamespace(href=mp3_url)])]
             )
 
-            with patch("podcasts.YoutubeDL", FlakyPodcastYoutubeDL), patch(
-                "podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("podcasts.time.sleep", return_value=None):
+            with patch("workers.podcasts.YoutubeDL", FlakyPodcastYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", return_value=fake_feed
+            ), patch("workers.podcasts.time.sleep", return_value=None):
                 downloaded_items = []
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -1347,7 +1347,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
             self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
@@ -1376,7 +1376,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 "type": "video",
             }
         ]
-        with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+        with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
             youtube.download_youtube_items(config, [])
         return FakeYoutubeDLForFilter.match_filter_result
 
@@ -1464,7 +1464,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
             self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
@@ -1485,8 +1485,8 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "youtube._apply_ffmpeg_audio_filter", return_value=True
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.youtube._apply_ffmpeg_audio_filter", return_value=True
             ) as mock_apply_filter:
                 youtube.download_youtube_items(config, [])
 
@@ -1545,7 +1545,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 ],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
             self.assertIsNone(FakeYoutubeDLForFilter.match_filter_result)
@@ -1596,8 +1596,8 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 ],
             }
 
-            with patch("podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "podcasts.feedparser.parse", side_effect=AssertionError("feed should not be fetched")
+            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
+                "workers.podcasts.feedparser.parse", side_effect=AssertionError("feed should not be fetched")
             ):
                 podcasts.download_podcasts(config, [])
 
@@ -1650,7 +1650,7 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
             }
 
-            with patch("youtube.YoutubeDL", FakeYoutubeDLForFilter):
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
             self.assertEqual(FakeYoutubeDLForFilter.match_filter_result, "Skipping YouTube Shorts entry from playlist.")

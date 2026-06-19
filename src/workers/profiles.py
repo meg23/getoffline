@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from database import ensure_config_seeded, get_stored_config, init_database, update_stored_defaults
+from workers.database import ensure_config_seeded, get_stored_config, init_database, update_stored_defaults
 
 
 @dataclass(frozen=True)

@@ -2,10 +2,10 @@ import argparse
 from pathlib import Path
 from typing import Dict, List
 
-from config import load_bootstrap_config, load_config
-from podcasts import download_podcasts
-from webapp import AppState, VIDEO_EXTENSIONS, import_local_media_file, run_webapp
-from youtube import download_youtube_items
+from workers.config import load_bootstrap_config, load_config
+from workers.podcasts import download_podcasts
+from workers.webapp import AppState, VIDEO_EXTENSIONS, import_local_media_file, run_webapp
+from workers.youtube import download_youtube_items
 
 
 def run_downloads() -> None:

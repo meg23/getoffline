@@ -11,8 +11,8 @@ from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 
-from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
-from database import (
+from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.database import (
     build_item_uid,
     ensure_config_seeded,
     get_stored_config,
@@ -23,10 +23,10 @@ from database import (
     upsert_download,
     has_episode_title_for_source,
 )
-from logger import get_logger
-from subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from summary_tasks import generate_missing_summaries
-from utils import ensure_dir, normalize_media_filename, sanitize, sanitize_channel_name
+from workers.logger import get_logger
+from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
+from workers.summary_tasks import generate_missing_summaries
+from workers.utils import ensure_dir, normalize_media_filename, sanitize, sanitize_channel_name
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
@@ -1107,13 +1107,6 @@ def _download_youtube_items_in_process(config, downloaded_items):
             log.error(f"Failed to download YouTube: {entry}: {e}")
 
 
-def _download_youtube_entry_in_subprocess(payload: Dict) -> Dict:
-    config = payload["config"]
-    downloaded_items: List[str] = []
-    _download_youtube_items_in_process(config, downloaded_items)
-    return {"downloaded_items": downloaded_items}
-
-
 def _parent_rss_mb() -> float:
     rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return float(rss_kb) / 1024.0
@@ -1130,9 +1123,9 @@ def download_youtube_items(config, downloaded_items):
         single_config = dict(base_config)
         single_config["youtube"] = [entry]
         payload = {"config": single_config}
-        worker_script = Path(__file__).with_name("youtube_subprocess.py")
+        worker_module = "workers.youtube_subprocess"
         proc = subprocess.run(
-            [sys.executable, str(worker_script)],
+            [sys.executable, "-m", worker_module],
             input=json.dumps(payload),
             stdout=subprocess.PIPE,
             stderr=None,
