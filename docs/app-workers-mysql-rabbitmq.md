@@ -69,35 +69,45 @@ The frontend now covers the core legacy `webapp.py` screens and actions in Djang
 
 It can queue:
 
-- `update_downloads`
-- `download_single`
+- `update_downloads` / `check_for_episodes` to discover new work
+- `download_single` / `download_episode` to download one item at a time
+- `generate_transcript` for parallel transcript generation
+- `summarize_missing` / `generate_summary` for parallel summary generation
 - `sync_media`
-- `summarize_missing`
 
 ## Running workers
 
-Downloads intentionally run as a single worker so the app does not download too
-quickly from YouTube:
+Episode discovery and downloads intentionally run as separate single-concurrency
+workers so the app checks sources and downloads from YouTube/media hosts one at
+a time:
 
 ```bash
-PYTHONPATH=src python -m workers downloads
+make run-worker-episode-checker
+make run-worker-downloader
 ```
 
-Other work can be split and run concurrently by starting multiple worker
-processes for the same queue:
+Transcript and summary work can be split and run concurrently by starting
+multiple worker processes for the same queue, or by setting `PREFETCH` for each
+process:
 
 ```bash
-PYTHONPATH=src python -m workers sync
-PYTHONPATH=src python -m workers sync
-PYTHONPATH=src python -m workers summaries
-PYTHONPATH=src python -m workers summaries
+PREFETCH=4 make run-worker-transcripts
+PREFETCH=4 make run-worker-summaries
+```
+
+Sync work remains isolated on its own queue:
+
+```bash
+make run-worker-sync
 ```
 
 ## Queue mapping
 
-- `getoffline.downloads`: `update_downloads`, `download_single`
+- `getoffline.episode_checks`: `update_downloads`, `check_for_episodes`
+- `getoffline.downloads`: `download_single`, `download_episode`
+- `getoffline.transcripts`: `generate_transcript`
+- `getoffline.summaries`: `summarize_missing`, `generate_summary`
 - `getoffline.sync_media`: `sync_media`
-- `getoffline.summarize_missing`: `summarize_missing`
 
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
 The job payload and status live in MySQL.

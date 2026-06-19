@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-downloads run-worker-sync run-worker-summaries
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-episode-checker run-worker-downloader run-worker-transcripts run-worker-sync run-worker-summaries
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -67,9 +67,17 @@ run-app-debug: venv
 	@echo "Running Django frontend app in debug mode..."
 	PYTHONPATH=$(SRC_DIR) GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
 
-run-worker-downloads: venv
-	@echo "Running single-concurrency downloads worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloads
+run-worker-episode-checker: venv
+	@echo "Running single-concurrency episode checker worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers episode-checker
+
+run-worker-downloader: venv
+	@echo "Running single-concurrency downloader worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader
+
+run-worker-transcripts: venv
+	@echo "Running parallel transcript worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transcripts --prefetch $${PREFETCH:-4}
 
 run-worker-sync: venv
 	@echo "Running sync worker..."
@@ -77,4 +85,4 @@ run-worker-sync: venv
 
 run-worker-summaries: venv
 	@echo "Running summaries worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers summaries
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers summaries --prefetch $${PREFETCH:-4}
