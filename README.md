@@ -66,7 +66,7 @@ YouTube live streams are skipped automatically for configured playlist and chann
 
 ## Split app/workers deployment
 
-For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, and run multiple sync or summary workers if you need concurrency. See `docs/app-workers-mysql-rabbitmq.md`.
+For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, and run multiple sync or summary workers if you need concurrency. See `docs/app-workers-mysql-rabbitmq.md`.
 
 ## Usage
 

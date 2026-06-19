@@ -11,6 +11,8 @@ worker process connect to the same MySQL database using Django's ORM.
 
 ## MySQL settings
 
+The split Django app uses `PyMySQL` as Django's MySQL driver shim, so it does not require the native `mysqlclient` package or local `pkg-config`/MariaDB client headers.
+
 Both the app and workers use `app.settings`, so they share these variables:
 
 ```bash
