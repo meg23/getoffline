@@ -9,7 +9,7 @@ from django.db.models import Sum
 from django.views.decorators.http import require_POST
 
 from models.jobs import create_job
-from models.models import AppConfigValue, Download, DownloadSettings, Job, SourceConfig
+from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig
 
 from .queue import publish_job
 
@@ -124,11 +124,79 @@ def subtitle(request: HttpRequest, download_id: int) -> FileResponse:
     return FileResponse(path.open("rb"), content_type="text/vtt" if path.suffix == ".vtt" else "text/plain")
 
 
+PROFILE_DEFAULTS = {
+    "output_root": "./downloads/profiles/default",
+    "processing_workers": "2",
+    "auto_update_minutes": "20",
+    "auto_delete_content_days": "0",
+    "manual_upload_delete_explicit_content": "0",
+    "audio_format": "mp3",
+    "audio_quality": "0",
+    "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
+    "max_downloads": "3",
+    "deno_path": "deno",
+    "summary_model": "qwen2.5:0.5b",
+    "ollama_path": "ollama",
+    "android_sync_target": "android",
+    "android_sync_enabled": "0",
+    "android_sync_max_items": "10",
+    "android_sync_directory": "./offline-sync",
+    "android_sync_destination": "/sdcard/Movies/GetOffline",
+    "android_sync_adb_path": "adb",
+    "android_sync_connection_mode": "usb",
+    "android_sync_wifi_address": "",
+    "android_sync_include_subtitles": "1",
+    "android_sync_include_unplayed": "1",
+    "android_sync_include_started": "1",
+    "android_sync_include_played": "0",
+    "android_sync_exclude_regex": "",
+    "profile_pin": "",
+}
+
+
+def _profile_settings(profile_id: str) -> dict[str, str]:
+    values = dict(PROFILE_DEFAULTS)
+    values["output_root"] = f"./downloads/profiles/{profile_id}"
+    values.update({row.key: row.value for row in AppConfigValue.objects.order_by("key")})
+    values.update({row.key: row.value for row in ProfileConfigValue.objects.filter(profile_id=profile_id)})
+    return values
+
+
+def _checked(settings: dict[str, str], key: str) -> bool:
+    return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def settings_page(request: HttpRequest) -> HttpResponse:
-    configs = AppConfigValue.objects.order_by("key")
-    sources = SourceConfig.objects.order_by("source_type", "position", "id")
-    download_settings = DownloadSettings.objects.filter(pk=1).first()
-    return render(request, "app/settings.html", {"configs": configs, "sources": sources, "download_settings": download_settings})
+    profile_id = _profile_id(request)
+    settings = _profile_settings(profile_id)
+    sources = SourceConfig.objects.filter(profile_id=profile_id).order_by("source_type", "position", "id")
+    download_settings = ProfileDownloadSettings.objects.filter(profile_id=profile_id).first()
+    if download_settings is None and profile_id == "default":
+        legacy = DownloadSettings.objects.filter(pk=1).first()
+        if legacy is not None:
+            download_settings = ProfileDownloadSettings(profile_id=profile_id, youtube_cookie_text=legacy.youtube_cookie_text)
+    profile_name = profile_id if profile_id != "default" else "max"
+    return render(
+        request,
+        "app/settings.html",
+        {
+            "settings": settings,
+            "sources": sources,
+            "youtube_sources": sources.filter(source_type=SourceConfig.SOURCE_YOUTUBE),
+            "podcast_sources": sources.filter(source_type=SourceConfig.SOURCE_PODCAST),
+            "download_settings": download_settings,
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "profile_initial": (profile_name[:1] or "M").upper(),
+            "manual_upload_filter_checked": _checked(settings, "manual_upload_delete_explicit_content"),
+            "android_sync_enabled_checked": _checked(settings, "android_sync_enabled"),
+            "android_sync_include_subtitles_checked": _checked(settings, "android_sync_include_subtitles"),
+            "android_sync_include_unplayed_checked": _checked(settings, "android_sync_include_unplayed"),
+            "android_sync_include_started_checked": _checked(settings, "android_sync_include_started"),
+            "android_sync_include_played_checked": _checked(settings, "android_sync_include_played"),
+            "pin_status": "PIN is set" if settings.get("profile_pin") else "No PIN set",
+        },
+    )
 
 
 def enqueue_job(request: HttpRequest) -> HttpResponse:
@@ -212,13 +280,43 @@ def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
 
 @require_POST
 def save_config(request: HttpRequest) -> HttpResponseRedirect:
+    profile_id = _profile_id(request)
     now = timezone.now()
+    checkbox_keys = {
+        "manual_upload_delete_explicit_content",
+        "android_sync_enabled",
+        "android_sync_include_subtitles",
+        "android_sync_include_unplayed",
+        "android_sync_include_started",
+        "android_sync_include_played",
+    }
+    posted_config_keys = {key.removeprefix("config__") for key in request.POST if key.startswith("config__")}
+    for checkbox_key in checkbox_keys:
+        if checkbox_key in posted_config_keys and f"config__{checkbox_key}" not in request.POST:
+            ProfileConfigValue.objects.update_or_create(
+                profile_id=profile_id,
+                key=checkbox_key,
+                defaults={"value": "0", "updated_at": now},
+            )
     for key, value in request.POST.items():
         if not key.startswith("config__"):
             continue
         config_key = key.removeprefix("config__")
-        AppConfigValue.objects.update_or_create(key=config_key, defaults={"value": value, "updated_at": now})
-    return HttpResponseRedirect(reverse("settings"))
+        ProfileConfigValue.objects.update_or_create(
+            profile_id=profile_id,
+            key=config_key,
+            defaults={"value": str(value), "updated_at": now},
+        )
+    if "youtube_cookie_text" in request.POST:
+        ProfileDownloadSettings.objects.update_or_create(
+            profile_id=profile_id,
+            defaults={
+                "youtube_cookie_text": request.POST.get("youtube_cookie_text") or "",
+                "cookie_updated_at": now,
+                "updated_at": now,
+            },
+        )
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
 
 
 @require_POST
@@ -226,8 +324,10 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
     source_type = str(request.POST.get("source_type") or "").strip().lower()
     if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
-    position = (SourceConfig.objects.filter(source_type=source_type).order_by("-position").values_list("position", flat=True).first() or -1) + 1
+    profile_id = _profile_id(request)
+    position = (SourceConfig.objects.filter(profile_id=profile_id, source_type=source_type).order_by("-position").values_list("position", flat=True).first() or -1) + 1
     SourceConfig.objects.create(
+        profile_id=profile_id,
         source_type=source_type,
         position=position,
         name=str(request.POST.get("name") or "").strip(),
@@ -237,7 +337,7 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
-    return HttpResponseRedirect(reverse("settings"))
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
 
 
 @require_POST
@@ -246,13 +346,15 @@ def toggle_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     source.enabled = not source.enabled
     source.updated_at = timezone.now()
     source.save(update_fields=["enabled", "updated_at"])
-    return HttpResponseRedirect(reverse("settings"))
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={source.profile_id}")
 
 
 @require_POST
 def delete_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    get_object_or_404(SourceConfig, pk=source_id).delete()
-    return HttpResponseRedirect(reverse("settings"))
+    source = get_object_or_404(SourceConfig, pk=source_id)
+    profile_id = source.profile_id
+    source.delete()
+    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
 
 
 @require_POST

@@ -11,6 +11,28 @@ class AppConfigValue(models.Model):
         db_table = "app_config"
 
 
+class ProfileConfigValue(models.Model):
+    profile_id = models.CharField(max_length=191, default="default", db_index=True)
+    key = models.CharField(max_length=191)
+    value = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "profile_config"
+        constraints = [models.UniqueConstraint(fields=["profile_id", "key"], name="uniq_profile_config_key")]
+        indexes = [models.Index(fields=["profile_id", "key"])]
+
+
+class ProfileDownloadSettings(models.Model):
+    profile_id = models.CharField(max_length=191, unique=True, default="default", db_index=True)
+    youtube_cookie_text = models.TextField(blank=True, null=True)
+    cookie_updated_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "profile_download_settings"
+
+
 class DownloadSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1)
     youtube_cookie_text = models.TextField(blank=True, null=True)
@@ -25,6 +47,7 @@ class SourceConfig(models.Model):
     SOURCE_YOUTUBE = "youtube"
     SOURCE_PODCAST = "podcast"
 
+    profile_id = models.CharField(max_length=191, default="default", db_index=True)
     source_type = models.CharField(max_length=32, db_index=True)
     position = models.IntegerField(default=0)
     name = models.CharField(max_length=255)
@@ -40,7 +63,7 @@ class SourceConfig(models.Model):
     class Meta:
         db_table = "source_configs"
         ordering = ["source_type", "position", "id"]
-        indexes = [models.Index(fields=["source_type", "position"])]
+        indexes = [models.Index(fields=["profile_id", "source_type", "position"])]
 
     def __str__(self) -> str:
         return f"{self.source_type}: {self.name}"

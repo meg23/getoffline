@@ -1,30 +1,129 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Settings</title></head>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GetOffline Settings</title>
+    <link rel="stylesheet" href="{% static 'app/settings.css' %}" />
+    <script src="{% static 'app/settings.js' %}" defer></script>
+  </head>
   <body>
-    <p><a href="{% url 'library' %}">Back to library</a></p>
-    <h1>Settings</h1>
-    <form method="post" action="{% url 'save_config' %}">
-      {% csrf_token %}
-      <table>{% for config in configs %}<tr><td>{{ config.key }}</td><td><input name="config__{{ config.key }}" value="{{ config.value }}"></td></tr>{% empty %}<tr><td>No config rows.</td></tr>{% endfor %}</table>
-      <button>Save config</button>
-    </form>
-    <h2>YouTube cookies</h2>
-    <textarea readonly rows="5" cols="80">{{ download_settings.youtube_cookie_text|default:"" }}</textarea>
-    <h2>Sources</h2>
-    <table>
-      {% for source in sources %}
-        <tr><td>{{ source.source_type }}</td><td>{{ source.name }}</td><td>{{ source.url }}</td><td>{{ source.enabled }}</td><td>
-          <form method="post" action="{% url 'toggle_source' source.id %}" style="display:inline">{% csrf_token %}<button>Toggle</button></form>
-          <form method="post" action="{% url 'delete_source' source.id %}" style="display:inline">{% csrf_token %}<button>Delete</button></form>
-        </td></tr>
-      {% empty %}<tr><td>No sources.</td></tr>{% endfor %}
-    </table>
-    <h3>Add source</h3>
-    <form method="post" action="{% url 'add_source' %}">
-      {% csrf_token %}
-      <select name="source_type"><option value="youtube">YouTube</option><option value="podcast">Podcast</option></select>
-      <input name="name" placeholder="Name"><input name="url" placeholder="URL"><button>Add</button>
-    </form>
+    <main class="settings-shell">
+      <header class="settings-header">
+        <h1>Settings</h1>
+        <div class="profile-controls">
+          <a class="back-link" href="{% url 'library' %}?profile_id={{ profile_id }}">Library</a>
+          <form class="profile-switch-form" method="get" action="{% url 'settings' %}">
+            <span class="profile-avatar">{{ profile_initial }}</span>
+            <span class="profile-name">{{ profile_name }}</span>
+            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+            <span class="profile-caret"></span>
+          </form>
+          <span class="profile-icon-button">🔒</span>
+          <span class="profile-icon-button">+</span>
+        </div>
+      </header>
+
+      <section class="settings-section">
+        <h2>General</h2>
+        <form method="post" action="{% url 'save_config' %}">
+          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          <label for="output_root">Output root</label>
+          <input id="output_root" name="config__output_root" value="{{ settings.output_root }}" required />
+          <div class="grid two">
+            <div><label for="processing_workers">Processing workers</label><input id="processing_workers" name="config__processing_workers" value="{{ settings.processing_workers }}" required /></div>
+            <div><label for="auto_update_minutes">Auto update interval (minutes)</label><input id="auto_update_minutes" name="config__auto_update_minutes" value="{{ settings.auto_update_minutes }}" required /></div>
+            <div><label for="auto_delete_content_days">Automatically delete content after (days)</label><input id="auto_delete_content_days" type="number" min="0" step="1" name="config__auto_delete_content_days" value="{{ settings.auto_delete_content_days }}" required /></div>
+          </div>
+          <p class="field-help">Use 0 to disable. Manual uploads are always ignored, and favorites are never automatically deleted. Already absent files are marked missing; expired files are removed while their database records remain available.</p>
+          <input type="hidden" name="config__manual_upload_delete_explicit_content" value="0" />
+          <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_delete_explicit_content" value="1" {% if manual_upload_filter_checked %}checked{% endif %} /> Delete drag-and-drop uploads containing profanity or sexual content</label>
+          <p class="field-help">Reviews the generated audio transcript before retaining media uploaded through the browser.</p>
+          <div class="actions"><button class="primary" type="submit">Save general settings</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section">
+        <h2>Profile lock</h2>
+        <p class="section-help">Set a 4–12 digit PIN for this profile. After unlocking, access expires after one hour. Leave blank and save to remove the PIN.</p>
+        <p><strong>{{ pin_status }}</strong></p>
+        <form method="post" action="{% url 'save_config' %}">
+          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          <label for="profile_pin">Profile PIN</label>
+          <input id="profile_pin" name="config__profile_pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="Leave blank to remove PIN" />
+          <div class="actions"><button class="primary" type="submit">Save profile PIN</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section blue-section">
+        <h2>yt-dlp configuration</h2>
+        <p class="section-help">Configure yt-dlp download behavior and authentication used for YouTube and media extraction.</p>
+        <form method="post" action="{% url 'save_config' %}">
+          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          <div class="grid two">
+            <div><label>Audio format</label><input name="config__audio_format" value="{{ settings.audio_format }}" required /></div>
+            <div><label>Audio quality</label><input name="config__audio_quality" value="{{ settings.audio_quality }}" required /></div>
+            <div><label>FFmpeg audio filter</label><input name="config__ffmpeg_audio_filter" value="{{ settings.ffmpeg_audio_filter }}" /></div>
+            <div><label>Default source max downloads</label><input name="config__max_downloads" value="{{ settings.max_downloads }}" required /></div>
+            <div><label>Deno executable</label><input name="config__deno_path" value="{{ settings.deno_path }}" required /></div>
+          </div>
+          <label for="youtube_cookie_text">YouTube cookies.txt content</label>
+          <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{{ download_settings.youtube_cookie_text|default:'' }}</textarea>
+          <div class="actions"><button class="primary" type="submit">Save yt-dlp configuration</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section violet-section">
+        <h2>Ollama configuration</h2>
+        <form method="post" action="{% url 'save_config' %}">
+          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          <div class="grid two">
+            <div><label>Ollama summary model</label><input name="config__summary_model" value="{{ settings.summary_model }}" required /></div>
+            <div><label>Ollama executable</label><input name="config__ollama_path" value="{{ settings.ollama_path }}" required /></div>
+          </div>
+          <div class="actions"><button class="primary" type="submit">Save Ollama configuration</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section blue-section">
+        <h2>Directory sync</h2>
+        <p class="section-help">Sync selected media to local disk or an Android device. Android connection settings are hidden unless Android is selected.</p>
+        <form method="post" action="{% url 'save_config' %}">
+          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          <div class="grid two">
+            <div><label>Sync destination</label><select id="android_sync_target" name="config__android_sync_target"><option value="directory" {% if settings.android_sync_target == 'directory' %}selected{% endif %}>Local disk</option><option value="android" {% if settings.android_sync_target != 'directory' %}selected{% endif %}>Android device</option></select></div>
+            <div><input type="hidden" name="config__android_sync_enabled" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_enabled" value="1" {% if android_sync_enabled_checked %}checked{% endif %} /> Auto-sync after downloads</label></div>
+            <div><label>Max items per sync</label><input type="number" min="1" name="config__android_sync_max_items" value="{{ settings.android_sync_max_items }}" required /></div>
+            <div><label>Exclude media matching regex</label><input name="config__android_sync_exclude_regex" value="{{ settings.android_sync_exclude_regex }}" placeholder="trailer|sample" /></div>
+          </div>
+          <div class="checkbox-grid">
+            <input type="hidden" name="config__android_sync_include_subtitles" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_subtitles" value="1" {% if android_sync_include_subtitles_checked %}checked{% endif %} /> Include subtitles</label>
+            <input type="hidden" name="config__android_sync_include_unplayed" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_unplayed" value="1" {% if android_sync_include_unplayed_checked %}checked{% endif %} /> Sync unplayed media</label>
+            <input type="hidden" name="config__android_sync_include_started" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_started" value="1" {% if android_sync_include_started_checked %}checked{% endif %} /> Sync started media</label>
+            <input type="hidden" name="config__android_sync_include_played" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_played" value="1" {% if android_sync_include_played_checked %}checked{% endif %} /> Sync played media</label>
+          </div>
+          <div id="directory-sync-fields"><label>Directory path</label><input name="config__android_sync_directory" value="{{ settings.android_sync_directory }}" /></div>
+          <div id="android-sync-fields" class="grid two"><div><label>Android folder</label><input name="config__android_sync_destination" value="{{ settings.android_sync_destination }}" /></div><div><label>ADB executable</label><input name="config__android_sync_adb_path" value="{{ settings.android_sync_adb_path }}" /></div><div><label>ADB connection</label><select name="config__android_sync_connection_mode"><option value="usb" {% if settings.android_sync_connection_mode != 'wifi' %}selected{% endif %}>USB / already connected device</option><option value="wifi" {% if settings.android_sync_connection_mode == 'wifi' %}selected{% endif %}>Wi-Fi</option></select></div><div><label>Wi-Fi device address</label><input name="config__android_sync_wifi_address" value="{{ settings.android_sync_wifi_address }}" placeholder="192.168.1.50:5555" /></div></div>
+          <div class="actions"><button class="primary" type="submit">Save and sync</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section">
+        <h2>YouTube sources</h2>
+        <p class="section-help">These sources belong to profile <strong>{{ profile_name }}</strong>.</p>
+        <div class="source-list">{% for source in youtube_sources %}<article class="source-card"><h3>{{ source.name|default:'Unnamed YouTube source' }}</h3><p>{{ source.url }}</p><p class="row-status">{% if source.enabled %}enabled{% else %}disabled{% endif %}</p><div class="row-actions"><form method="post" action="{% url 'toggle_source' source.id %}">{% csrf_token %}<button>Toggle</button></form><form method="post" action="{% url 'delete_source' source.id %}">{% csrf_token %}<button class="danger">Delete</button></form></div></article>{% empty %}<p>No YouTube sources configured.</p>{% endfor %}</div>
+        <h3>Add YouTube source</h3>
+        <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" /><input type="hidden" name="source_type" value="youtube" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Download type</label><select name="media_type"><option value="audio">audio</option><option value="video">video</option></select></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div class="actions full"><button class="primary">Add YouTube source</button></div></form>
+      </section>
+
+      <section class="settings-section">
+        <h2>Podcast sources</h2>
+        <p class="section-help">These sources belong to profile <strong>{{ profile_name }}</strong>.</p>
+        <div class="source-list">{% for source in podcast_sources %}<article class="source-card"><h3>{{ source.name|default:'Unnamed podcast source' }}</h3><p>{{ source.url }}</p><p class="row-status">{% if source.enabled %}enabled{% else %}disabled{% endif %}</p><div class="row-actions"><form method="post" action="{% url 'toggle_source' source.id %}">{% csrf_token %}<button>Toggle</button></form><form method="post" action="{% url 'delete_source' source.id %}">{% csrf_token %}<button class="danger">Delete</button></form></div></article>{% empty %}<p>No podcast sources configured.</p>{% endfor %}</div>
+        <h3>Add podcast source</h3>
+        <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" /><input type="hidden" name="source_type" value="podcast" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div class="actions full"><button class="primary">Add podcast source</button></div></form>
+      </section>
+    </main>
   </body>
 </html>
