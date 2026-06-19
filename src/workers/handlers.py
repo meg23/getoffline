@@ -1,5 +1,6 @@
 import hashlib
 import os
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
@@ -97,6 +98,109 @@ def _profile_setting(profile_id: str, key: str, default: str) -> str:
 def _download_output_root(profile_id: str) -> Path:
     root = _profile_setting(profile_id, "output_root", f"./downloads/profiles/{profile_id}")
     return Path(root).expanduser().resolve()
+
+
+def _preferred_media_kind(download: Download, payload: dict) -> str:
+    requested = str(payload.get("media_type") or "").strip().lower()
+    if requested in {"audio", "video"}:
+        return requested
+    source_media_type = (
+        SourceConfig.objects.filter(
+            profile_id=download.profile_id,
+            source_type=download.source_type,
+            name=download.source_name,
+        )
+        .values_list("media_type", flat=True)
+        .first()
+    )
+    if str(source_media_type or "").strip().lower() in {"audio", "video"}:
+        return str(source_media_type).strip().lower()
+    if download.source_type == SourceConfig.SOURCE_PODCAST:
+        return "audio"
+    return "video" if (download.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+
+
+def _target_path(source_path: Path, target_ext: str) -> Path:
+    clean_ext = target_ext.lower().lstrip(".") or source_path.suffix.lstrip(".")
+    candidate = source_path.with_name(f"{source_path.stem}.converted.{clean_ext}")
+    counter = 1
+    while candidate.exists() and candidate != source_path:
+        candidate = source_path.with_name(f"{source_path.stem}.converted-{counter}.{clean_ext}")
+        counter += 1
+    return candidate
+
+
+def _ffmpeg_audio_args(profile_id: str, target_ext: str) -> list[str]:
+    quality = _profile_setting(profile_id, "audio_quality", "0").strip() or "0"
+    audio_filter = _profile_setting(profile_id, "ffmpeg_audio_filter", "").strip()
+    args = ["-vn"]
+    if target_ext == "mp3":
+        args.extend(["-codec:a", "libmp3lame", "-q:a", quality])
+    elif target_ext == "opus":
+        args.extend(["-codec:a", "libopus", "-b:a", "96k"])
+    else:
+        args.extend(["-codec:a", "aac", "-b:a", "192k"])
+    if audio_filter:
+        args.extend(["-af", audio_filter])
+    return args
+
+
+def _ffmpeg_video_args(profile_id: str, target_ext: str) -> list[str]:
+    codec = _profile_setting(profile_id, "video_codec", "hevc").strip().lower()
+    args = ["-map", "0:v:0?", "-map", "0:a:0?", "-map", "0:s?", "-c:s", "mov_text" if target_ext == "mp4" else "copy"]
+    if codec == "copy":
+        args.extend(["-c:v", "copy"])
+    elif codec in {"h264", "avc"}:
+        args.extend(["-c:v", "libx264", "-crf", "23", "-preset", "medium"])
+    else:
+        args.extend(["-c:v", "libx265", "-tag:v", "hvc1", "-crf", "28", "-preset", "medium"])
+    args.extend(["-c:a", "aac", "-b:a", "192k"])
+    return args
+
+
+def transcode_media(job: Job) -> None:
+    """FFmpeg worker: convert a downloaded file, update its row, then remove the original."""
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
+    if not download_id:
+        log.warning("FFmpeg worker skipped job with no download_id job_id=%s", job.id)
+        return
+    download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
+    if download is None:
+        log.warning("FFmpeg worker skipped missing download job_id=%s download_id=%s", job.id, download_id)
+        return
+    source_path = Path(str(download.file_path or "")).expanduser().resolve()
+    if not source_path.exists():
+        raise FileNotFoundError(f"Downloaded file is missing: {source_path}")
+    media_kind = _preferred_media_kind(download, payload)
+    target_ext = _profile_setting(job.profile_id, "audio_format" if media_kind == "audio" else "video_format", "mp3" if media_kind == "audio" else "mp4").strip().lower()
+    target_path = _target_path(source_path, target_ext)
+    ffmpeg_path = _profile_setting(job.profile_id, "ffmpeg_path", "ffmpeg")
+    codec_args = _ffmpeg_audio_args(job.profile_id, target_ext) if media_kind == "audio" else _ffmpeg_video_args(job.profile_id, target_ext)
+    command = [ffmpeg_path, "-y", "-i", str(source_path), *codec_args, str(target_path)]
+    log.info("FFmpeg conversion starting job_id=%s download_id=%s media_kind=%s command=%s", job.id, download.id, media_kind, command)
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    old_path = source_path
+    output_root = _download_output_root(job.profile_id)
+    download.file_path = str(target_path)
+    download.file_path_relative = str(target_path.relative_to(output_root)) if target_path.is_relative_to(output_root) else None
+    download.file_ext = target_path.suffix.lstrip(".")
+    download.file_size_bytes = target_path.stat().st_size
+    download.download_status = "downloaded"
+    download.completed_at = timezone.now()
+    download.last_seen_at = timezone.now()
+    download.save(update_fields=["file_path", "file_path_relative", "file_ext", "file_size_bytes", "download_status", "completed_at", "last_seen_at"])
+    if old_path != target_path:
+        old_path.unlink(missing_ok=True)
+    log.info("FFmpeg conversion finished job_id=%s download_id=%s output=%s original_deleted=%s", job.id, download.id, target_path, old_path != target_path)
+    child = create_job(
+        profile_id=job.profile_id,
+        job_type="generate_transcript",
+        payload={"download_id": download.id},
+        idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
+    )
+    _publish_created_job(child)
+    log.info("FFmpeg worker queued transcript job parent_job_id=%s download_id=%s child_job_id=%s", job.id, download.id, child.id)
 
 
 def _find_downloaded_file(info: dict, ydl) -> Path | None:
@@ -544,6 +648,7 @@ def check_for_episodes(job: Job) -> None:
                         "source_type": source.source_type,
                         "source_name": source.name,
                         "source_url": source.url,
+                        "media_type": source.media_type or ("audio" if source.source_type == SourceConfig.SOURCE_PODCAST else "video"),
                         "source_max_downloads": limit,
                         "item_uid": item_uid,
                         "item_url": item_url,
@@ -599,12 +704,12 @@ def download_episode(job: Job) -> None:
         download_id = downloaded.id
     child = create_job(
         profile_id=job.profile_id,
-        job_type="generate_transcript",
-        payload={"download_id": download_id},
-        idempotency_key=f"generate_transcript:{job.profile_id}:{download_id}",
+        job_type="transcode_media",
+        payload={"download_id": download_id, "media_type": payload.get("media_type")},
+        idempotency_key=f"transcode_media:{job.profile_id}:{download_id}",
     )
     _publish_created_job(child)
-    log.info("Download worker queued transcript job parent_job_id=%s download_id=%s child_job_id=%s", job.id, download_id, child.id)
+    log.info("Download worker queued FFmpeg job parent_job_id=%s download_id=%s child_job_id=%s", job.id, download_id, child.id)
 
 
 def download_single(job: Job) -> None:
@@ -665,6 +770,7 @@ HANDLERS = {
     "update_downloads": update_downloads,
     "download_episode": download_episode,
     "download_single": download_single,
+    "transcode_media": transcode_media,
     "generate_transcript": generate_transcript,
     "generate_summary": generate_summary,
     "summarize_missing": summarize_missing,

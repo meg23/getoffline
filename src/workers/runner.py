@@ -19,6 +19,7 @@ from app.routing import (  # noqa: E402
     SUMMARY_QUEUE,
     SYNC_QUEUE,
     TRANSCRIPT_QUEUE,
+    FFMPEG_QUEUE,
 )
 from models.jobs import claim_job, finish_job  # noqa: E402
 from models.models import Job  # noqa: E402
@@ -31,6 +32,7 @@ _STOP = False
 QUEUE_BY_WORKER = {
     "updates": SERIAL_EPISODE_CHECK_QUEUE,
     "downloader": SERIAL_DOWNLOAD_QUEUE,
+    "ffmpeg": FFMPEG_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
     "summaries": SUMMARY_QUEUE,
     "sync": SYNC_QUEUE,
