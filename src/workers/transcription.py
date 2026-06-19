@@ -15,24 +15,44 @@ class TranscriptionError(RuntimeError):
     """Raised when Whisper transcription cannot be completed for a media file."""
 
 
-def _normalize_faster_whisper_result(segments_iterable):
+def _normalize_faster_whisper_result(segments_iterable, *, log_prefix: str = "transcription"):
     segments = []
     text_parts = []
-    for segment in segments_iterable:
+    last_end = 0.0
+    for index, segment in enumerate(segments_iterable, start=1):
         segment_text = (segment.text or "").strip()
+        segment_start = float(segment.start)
+        segment_end = float(segment.end)
+        last_end = max(last_end, segment_end)
         if segment_text:
             text_parts.append(segment_text)
         segments.append(
             {
-                "start": float(segment.start),
-                "end": float(segment.end),
+                "start": segment_start,
+                "end": segment_end,
                 "text": segment_text,
             }
         )
+        if index == 1 or index % 10 == 0:
+            log.info(
+                "Whisper transcription progress prefix=%s segments=%s latest_start=%.2fs latest_end=%.2fs text_chars=%s",
+                log_prefix,
+                index,
+                segment_start,
+                segment_end,
+                sum(len(part) for part in text_parts),
+            )
+    log.info(
+        "Whisper transcription complete prefix=%s segments=%s duration_seen=%.2fs text_chars=%s",
+        log_prefix,
+        len(segments),
+        last_end,
+        sum(len(part) for part in text_parts),
+    )
     return {"text": " ".join(text_parts).strip(), "segments": segments}
 
 
-def _transcribe_in_process(input_file: Path, model_name: str, language: str = None):
+def _transcribe_in_process(input_file: Path, model_name: str, language: str = None, log_prefix: str = "transcription"):
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -53,7 +73,7 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
         if "tuple index out of range" in str(exc):
             raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
         raise
-    return _normalize_faster_whisper_result(segments)
+    return _normalize_faster_whisper_result(segments, log_prefix=log_prefix)
 
 
 def transcribe_with_whisper(
@@ -70,7 +90,7 @@ def transcribe_with_whisper(
     try:
         if mode != "in_process":
             log.info("Ignoring deprecated transcription mode=%s; using native in-process transcription", mode)
-        result = _transcribe_in_process(input_file, model_name, language=language)
+        result = _transcribe_in_process(input_file, model_name, language=language, log_prefix=log_prefix)
     except Exception as exc:
         raise TranscriptionError(
             f"Transcription failed for {input_file.name} ({model_name}): {exc}"

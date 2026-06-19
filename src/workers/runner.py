@@ -22,9 +22,10 @@ from app.routing import (  # noqa: E402
     TRANSCRIPT_QUEUE,
     FFMPEG_QUEUE,
 )
-from models.jobs import claim_job, finish_job  # noqa: E402
-from models.models import Job  # noqa: E402
+from models.jobs import claim_job, create_job, finish_job  # noqa: E402
+from models.models import Download, Job, SourceConfig  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
+from app.queue import publish_job  # noqa: E402
 
 log = get_logger("workers.runner")
 
@@ -125,6 +126,72 @@ def requeue_existing_jobs(channel, worker_type: str) -> int:
     return len(rows)
 
 
+
+def _source_subtitle_settings(download: Download) -> tuple[bool, float | None]:
+    source = SourceConfig.objects.filter(
+        profile_id=download.profile_id,
+        source_type=download.source_type,
+        name=download.source_name,
+    ).only("subtitles", "subtitle_offset_seconds").first()
+    if source is None:
+        return True, None
+    return bool(source.subtitles), source.subtitle_offset_seconds
+
+
+def enqueue_missing_transcript_jobs(channel, *, limit: int = 500) -> int:
+    rows = list(
+        Download.objects.filter(download_status="downloaded")
+        .exclude(file_path__isnull=True)
+        .exclude(file_path="")
+        .filter(subtitle_path__isnull=True)
+        .order_by("-last_seen_at", "id")[:limit]
+    )
+    blank_rows = list(
+        Download.objects.filter(download_status="downloaded", subtitle_path="")
+        .exclude(file_path__isnull=True)
+        .exclude(file_path="")
+        .order_by("-last_seen_at", "id")[: max(0, limit - len(rows))]
+    )
+    rows.extend(blank_rows)
+    enqueued = 0
+    skipped_disabled = 0
+    for download in rows:
+        subtitles_enabled, subtitle_offset = _source_subtitle_settings(download)
+        if not subtitles_enabled:
+            skipped_disabled += 1
+            log.info(
+                "Startup missing transcript skipped because subtitles disabled download_id=%s profile_id=%s source_type=%s source_name=%s title=%s",
+                download.id,
+                download.profile_id,
+                download.source_type,
+                download.source_name,
+                download.title,
+            )
+            continue
+        job = create_job(
+            profile_id=download.profile_id,
+            job_type="generate_transcript",
+            payload={
+                "download_id": download.id,
+                "subtitles": True,
+                "subtitle_offset_seconds": subtitle_offset,
+                "startup_missing_subtitle": True,
+            },
+            idempotency_key=f"generate_transcript:{download.profile_id}:{download.id}",
+        )
+        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+        enqueued += 1
+        log.info(
+            "Startup missing transcript enqueued download_id=%s profile_id=%s job_id=%s title=%s file_path=%s",
+            download.id,
+            download.profile_id,
+            job.id,
+            download.title,
+            download.file_path,
+        )
+    log.info("Startup missing transcript scan finished candidates=%s enqueued=%s skipped_disabled=%s", len(rows), enqueued, skipped_disabled)
+    return enqueued
+
 def requeue_existing_jobs_enabled() -> bool:
     return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -151,6 +218,8 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
                 log.info("Worker requeue existing DB jobs found no queued rows worker_type=%s queue=%s", worker_type, queue)
         else:
             log.info("Worker skipped existing DB job requeue worker_type=%s queue=%s enable_with=GETOFFLINE_REQUEUE_EXISTING_JOBS=1", worker_type, queue)
+        if worker_type == "transcripts":
+            enqueue_missing_transcript_jobs(channel)
         log.info("Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s", worker_type, queue, settings.RABBITMQ_EXCHANGE, safe_prefetch)
         for method_frame, _properties, body in channel.consume(queue, inactivity_timeout=1):
             if _STOP:
