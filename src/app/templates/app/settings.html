@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Settings</title></head>
+  <body>
+    <p><a href="{% url 'library' %}">Back to library</a></p>
+    <h1>Settings</h1>
+    <form method="post" action="{% url 'save_config' %}">
+      {% csrf_token %}
+      <table>{% for config in configs %}<tr><td>{{ config.key }}</td><td><input name="config__{{ config.key }}" value="{{ config.value }}"></td></tr>{% empty %}<tr><td>No config rows.</td></tr>{% endfor %}</table>
+      <button>Save config</button>
+    </form>
+    <h2>YouTube cookies</h2>
+    <textarea readonly rows="5" cols="80">{{ download_settings.youtube_cookie_text|default:"" }}</textarea>
+    <h2>Sources</h2>
+    <table>
+      {% for source in sources %}
+        <tr><td>{{ source.source_type }}</td><td>{{ source.name }}</td><td>{{ source.url }}</td><td>{{ source.enabled }}</td><td>
+          <form method="post" action="{% url 'toggle_source' source.id %}" style="display:inline">{% csrf_token %}<button>Toggle</button></form>
+          <form method="post" action="{% url 'delete_source' source.id %}" style="display:inline">{% csrf_token %}<button>Delete</button></form>
+        </td></tr>
+      {% empty %}<tr><td>No sources.</td></tr>{% endfor %}
+    </table>
+    <h3>Add source</h3>
+    <form method="post" action="{% url 'add_source' %}">
+      {% csrf_token %}
+      <select name="source_type"><option value="youtube">YouTube</option><option value="podcast">Podcast</option></select>
+      <input name="name" placeholder="Name"><input name="url" placeholder="URL"><button>Add</button>
+    </form>
+  </body>
+</html>

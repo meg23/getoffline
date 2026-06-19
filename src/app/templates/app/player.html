@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>{{ item.title|default:"Player" }}</title></head>
+  <body>
+    <p><a href="{% url 'library' %}">Back to library</a></p>
+    <h1>{{ item.title|default:"Untitled" }}</h1>
+    <video controls autoplay style="max-width:100%;height:auto" src="{% url 'media' item.id %}">
+      {% if item.subtitle_path %}<track kind="subtitles" src="{% url 'subtitle' item.id %}" default>{% endif %}
+    </video>
+    <form id="position-form" method="post" action="{% url 'save_position' item.id %}">{% csrf_token %}<input type="hidden" name="position_seconds" id="position-seconds"></form>
+    <script>
+      const media = document.querySelector('video');
+      const form = document.getElementById('position-form');
+      const input = document.getElementById('position-seconds');
+      if (media) media.currentTime = {{ item.last_position_seconds|default:0 }};
+      setInterval(() => { if (!media || media.paused) return; input.value = media.currentTime; fetch(form.action, {method:'POST', body:new FormData(form)}); }, 30000);
+    </script>
+  </body>
+</html>

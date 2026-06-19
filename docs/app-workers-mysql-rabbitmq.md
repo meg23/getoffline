@@ -49,7 +49,15 @@ make migrate-db
 PYTHONPATH=src python -m app
 ```
 
-The frontend lists recent downloads and jobs and can queue:
+The frontend now covers the core legacy `webapp.py` screens and actions in Django:
+
+- library listing with played/favorite filters
+- player page with media/subtitle endpoints and playback position saves
+- settings/config/source management
+- job history
+- download actions for played/unplayed, favorite/unfavorite, and delete-file
+
+It can queue:
 
 - `update_downloads`
 - `download_single`
