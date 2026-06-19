@@ -1,4 +1,3 @@
-import gc
 import json
 import re
 import subprocess
@@ -161,7 +160,7 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
         llm_summary = _ollama_summary(joined_text, model_name=model_name, timeout_seconds=timeout_seconds)
         return {"summary_text": llm_summary, "model_name": model_name, "updated_at": _utcnow_iso()}
     payload = {"text": joined_text, "model_name": model_name, "timeout_seconds": int(timeout_seconds)}
-    cmd = [sys.executable, "-m", "summarization", "--worker", json.dumps(payload)]
+    cmd = [sys.executable, "-m", "workers.summarization_worker", json.dumps(payload)]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
@@ -172,27 +171,3 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
     if used_model == "extractive-local":
         log.warning("Summary subprocess used extractive fallback requested_model=%s transcript_chars=%s", model_name, len(joined_text))
     return result
-
-
-def _worker_once(text: str, model_name: str = DEFAULT_OLLAMA_MODEL, timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> Dict[str, str]:
-    try:
-        summary = _ollama_summary(text, model_name=model_name, timeout_seconds=timeout_seconds)
-        return {"summary_text": summary, "model_name": model_name, "updated_at": _utcnow_iso()}
-    finally:
-        gc.collect()
-
-
-
-if __name__ == "__main__":
-    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
-        try:
-            args = json.loads(sys.argv[2])
-            result = _worker_once(
-                text=str(args.get("text") or ""),
-                model_name=str(args.get("model_name") or DEFAULT_OLLAMA_MODEL),
-                timeout_seconds=int(args.get("timeout_seconds") or DEFAULT_OLLAMA_TIMEOUT_SECONDS),
-            )
-            sys.stdout.write(json.dumps(result))
-        except Exception as exc:
-            sys.stderr.write(str(exc))
-            sys.exit(1)
