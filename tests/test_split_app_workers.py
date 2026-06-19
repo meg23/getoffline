@@ -24,7 +24,7 @@ from app.routing import queue_name  # noqa: E402
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
     from models.models import Job, SourceConfig  # noqa: E402
-    from workers.handlers import check_for_episodes  # noqa: E402
+    from workers.handlers import check_for_episodes, _youtube_candidates  # noqa: E402
 
 
 @override_settings(
@@ -80,6 +80,33 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(jobs.count(), 1)
         self.assertEqual(jobs.first().payload["item_uid"], "video-1")
         publish.assert_called_once()
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_youtube_candidates_drill_into_channel_videos_tab(self):
+        source = SourceConfig(
+            id=4,
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            name="gamer",
+            url="https://www.youtube.com/@gameranxTV",
+            enabled=True,
+            max_downloads=1,
+        )
+        tab_entry = {
+            "id": "UCNvzD7Z-g64bPXxGzaQaa4g",
+            "title": "gameranx - Videos",
+            "url": "https://www.youtube.com/@gameranxTV/videos",
+        }
+        video_entry = {
+            "id": "abcdefghijk",
+            "title": "Actual newest upload",
+            "url": "abcdefghijk",
+        }
+        with patch("workers.handlers._youtube_entries_from_url", side_effect=[[tab_entry], [video_entry]]):
+            candidates = list(_youtube_candidates(source))
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["item_uid"], "abcdefghijk")
+        self.assertEqual(candidates[0]["media_url"], "https://www.youtube.com/watch?v=abcdefghijk")
 
 
 class QueueRoutingTests(unittest.TestCase):

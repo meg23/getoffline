@@ -357,41 +357,89 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
         }
 
 
-def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
-    log.info("Checking YouTube source source_id=%s source_name=%s url=%s", source.id, source.name, source.url)
-    limit = _source_limit(source)
+def _youtube_entries_from_url(url: str, limit: int, *, source: SourceConfig, reason: str) -> list[dict]:
     ydl_opts = _yt_dlp_base_options(
         extract_flat=True,
         skip_download=True,
         playlistend=limit,
         playlist_items=f"1-{limit}",
     )
-    log.info("yt-dlp extract starting source_id=%s source_name=%s url=%s options=%s", source.id, source.name, source.url, {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}})
+    log.info(
+        "yt-dlp extract starting source_id=%s source_name=%s reason=%s url=%s options=%s",
+        source.id,
+        source.name,
+        reason,
+        url,
+        {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
+    )
     from yt_dlp import YoutubeDL
 
     with YoutubeDL(ydl_opts) as ydl:
-        payload = ydl.extract_info(source.url, download=False) or {}
+        payload = ydl.extract_info(url, download=False) or {}
     if isinstance(payload, dict):
-        _log_youtube_response("yt-dlp extract response", payload)
+        _log_youtube_response(f"yt-dlp extract response ({reason})", payload)
     entries = payload.get("entries") if isinstance(payload, dict) else None
     if not entries:
         entries = [payload]
-    entries = list(entries or [])[:limit]
-    log.info("YouTube source parsed source_id=%s source_name=%s entries=%s", source.id, source.name, len(entries))
+    return [entry for entry in list(entries or []) if isinstance(entry, dict)]
+
+
+def _youtube_candidate_from_entry(source: SourceConfig, entry: dict) -> dict | None:
+    item_id = str(entry.get("id") or "").strip()
+    item_url = _youtube_video_url(entry)
+    if not _is_youtube_video_url(item_url):
+        log.info(
+            "Skipping non-video YouTube entry source_id=%s source_name=%s entry_id=%s title=%s url=%s",
+            source.id,
+            source.name,
+            item_id,
+            entry.get("title"),
+            item_url,
+        )
+        return None
+    title = str(entry.get("title") or item_url or "Untitled YouTube episode").strip()
+    item_uid = item_id if len(item_id) == 11 else item_url or _fallback_uid(source.url, title)
+    return {
+        "item_uid": item_uid[:255],
+        "item_url": item_url,
+        "media_url": item_url,
+        "title": title,
+        "published": str(entry.get("upload_date") or entry.get("timestamp") or ""),
+    }
+
+
+def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
+    log.info("Checking YouTube source source_id=%s source_name=%s url=%s", source.id, source.name, source.url)
+    limit = _source_limit(source)
+    entries = _youtube_entries_from_url(source.url, limit, source=source, reason="source")
+    log.info("YouTube source parsed source_id=%s source_name=%s entries=%s limit=%s", source.id, source.name, len(entries), limit)
+    yielded = 0
     for entry in entries:
-        if not isinstance(entry, dict):
+        if yielded >= limit:
+            break
+        candidate = _youtube_candidate_from_entry(source, entry)
+        if candidate is not None:
+            yielded += 1
+            yield candidate
             continue
-        item_id = str(entry.get("id") or "").strip()
-        item_url = _youtube_video_url(entry)
-        title = str(entry.get("title") or item_url or "Untitled YouTube episode").strip()
-        item_uid = item_id or item_url or _fallback_uid(source.url, title)
-        yield {
-            "item_uid": item_uid[:255],
-            "item_url": item_url,
-            "media_url": item_url,
-            "title": title,
-            "published": str(entry.get("upload_date") or entry.get("timestamp") or ""),
-        }
+        nested_url = _youtube_video_url(entry)
+        if nested_url and nested_url != source.url:
+            remaining = limit - yielded
+            log.info(
+                "Drilling into YouTube non-video entry source_id=%s source_name=%s nested_url=%s remaining=%s",
+                source.id,
+                source.name,
+                nested_url,
+                remaining,
+            )
+            for nested_entry in _youtube_entries_from_url(nested_url, remaining, source=source, reason="nested-entry"):
+                if yielded >= limit:
+                    break
+                nested_candidate = _youtube_candidate_from_entry(source, nested_entry)
+                if nested_candidate is None:
+                    continue
+                yielded += 1
+                yield nested_candidate
 
 
 def _candidates_for_source(source: SourceConfig) -> Iterable[dict]:
