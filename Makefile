@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv run-app run-worker-downloads run-worker-sync run-worker-summaries
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-worker-downloads run-worker-sync run-worker-summaries
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -53,6 +53,10 @@ clean:
 	rm -rf $(BUILD_DIR) $(VENV_DIR)
 	find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
+migrate-db: venv
+	@echo "Migrating split Django/MySQL database..."
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django migrate --run-syncdb
 
 run-app: venv
 	@echo "Running Django frontend app..."

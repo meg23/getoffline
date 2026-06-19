@@ -40,7 +40,7 @@ The shared models live in `src/models/models.py` and define:
 Create tables with Django's normal migration/sync workflow for this split app:
 
 ```bash
-PYTHONPATH=src DJANGO_SETTINGS_MODULE=app.settings python -m django migrate --run-syncdb
+make migrate-db
 ```
 
 ## Running the app
