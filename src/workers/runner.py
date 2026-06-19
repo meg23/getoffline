@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import signal
+import time
 from typing import Dict
 
 import django
@@ -32,6 +33,8 @@ _STOP = False
 QUEUE_BY_WORKER = {
     "updates": SERIAL_EPISODE_CHECK_QUEUE,
     "downloader": SERIAL_DOWNLOAD_QUEUE,
+    "downloader-youtube": SERIAL_DOWNLOAD_QUEUE,
+    "downloader-podcast": SERIAL_DOWNLOAD_QUEUE,
     "ffmpeg": FFMPEG_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
     "summaries": SUMMARY_QUEUE,
@@ -41,19 +44,33 @@ QUEUE_BY_WORKER = {
 JOB_TYPES_BY_WORKER = {
     "updates": {"check_for_episodes", "update_downloads"},
     "downloader": {"download_episode", "download_single"},
+    "downloader-youtube": {"download_episode", "download_single"},
+    "downloader-podcast": {"download_episode", "download_single"},
     "ffmpeg": {"transcode_media"},
     "transcripts": {"generate_transcript"},
     "summaries": {"generate_summary", "summarize_missing"},
     "sync": {"sync_media"},
 }
 
-SERIAL_WORKERS = {"updates", "downloader"}
+SERIAL_WORKERS = {"updates", "downloader", "downloader-youtube"}
 
 
 def _handle_signal(signum, _frame) -> None:
     global _STOP
     log.info("Shutdown signal received signal=%s", signum)
     _STOP = True
+
+
+def _worker_accepts_job(worker_type: str, job_id: int) -> bool:
+    if worker_type not in {"downloader-youtube", "downloader-podcast"}:
+        return True
+    job = Job.objects.filter(pk=job_id).only("payload", "job_type").first()
+    if job is None:
+        return True
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    source_type = str(payload.get("source_type") or ("podcast" if payload.get("media_type") == "audio" else "youtube")).strip().lower()
+    allowed = "youtube" if worker_type == "downloader-youtube" else "podcast"
+    return source_type == allowed
 
 
 def process_message(message: Dict) -> None:
@@ -140,6 +157,12 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None) -> None:
             if method_frame is None:
                 continue
             message = json.loads(body.decode("utf-8"))
+            job_id = int(message.get("job_id", 0))
+            if not _worker_accepts_job(worker_type, job_id):
+                channel.basic_nack(method_frame.delivery_tag, requeue=True)
+                log.info("Message requeued for matching downloader worker worker_type=%s queue=%s job_id=%s", worker_type, queue, job_id)
+                time.sleep(0.25)
+                continue
             try:
                 process_message(message)
             except Exception:
