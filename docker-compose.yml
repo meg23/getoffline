@@ -54,6 +54,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   nginx:
     image: nginx:1.27-alpine
@@ -68,7 +70,7 @@ services:
 
   migrate:
     build: .
-    profiles: ["tools"]
+    restart: "no"
     environment: *getoffline-env
     command: sh -c "python -m django migrate --run-syncdb && python -m django sync_model_schema"
     depends_on:
@@ -87,6 +89,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker-downloader:
     build: .
@@ -100,6 +104,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker-transcripts:
     build: .
@@ -113,6 +119,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker-summaries:
     build: .
@@ -124,6 +132,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker-sync:
     build: .
@@ -135,6 +145,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   mysql-data:

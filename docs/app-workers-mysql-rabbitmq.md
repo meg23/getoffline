@@ -122,7 +122,7 @@ The repository includes `docker-compose.yml` for running the frontend, nginx, Ra
 - `worker-episode-checker` discovers new episodes and publishes download jobs.
 - `worker-downloader` consumes download jobs one at a time.
 - `worker-transcripts`, `worker-summaries`, and `worker-sync` run the parallel/background processing queues.
-- `migrate` is a tools-profile service for applying Django schema updates to the configured MySQL database.
+- `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
 
 Example startup:
 
@@ -134,11 +134,10 @@ export GETOFFLINE_DB_PASSWORD='replace-me'
 export GETOFFLINE_DB_ROOT_PASSWORD='replace-root-password'
 export GETOFFLINE_DOWNLOADS_DIR='/srv/getoffline/downloads'
 
-docker compose --profile tools run --rm migrate
 docker compose up --build -d
 ```
 
-The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
+On startup, `frontend` and every worker wait for the one-shot `migrate` service to finish successfully, so tables such as `downloads` are created before the web UI serves requests. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
 
 ```bash
 docker compose up -d --scale worker-transcripts=4 --scale worker-summaries=4
