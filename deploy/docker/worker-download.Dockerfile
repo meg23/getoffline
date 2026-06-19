@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     DJANGO_SETTINGS_MODULE=app.settings \
-    DENO_INSTALL=/usr/local
+    DENO_INSTALL=/usr/local \
+    PATH=/usr/local/bin:$PATH
 
 RUN apk add --no-cache ca-certificates ffmpeg \
     && apk add --no-cache --virtual .deno-fetch curl unzip \
