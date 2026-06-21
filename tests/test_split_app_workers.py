@@ -22,7 +22,8 @@ except ModuleNotFoundError:  # pragma: no cover - dependency may be absent outsi
 if django is not None:
     django.setup()
 
-from app.routing import queue_name  # noqa: E402
+from app.queue import job_priority  # noqa: E402
+from app.routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, queue_arguments, queue_name  # noqa: E402
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
@@ -39,6 +40,8 @@ if django is not None:
     }
 )
 class SharedDjangoModelTests(TestCase):
+
+
     @unittest.skipIf(django is None, "Django is not installed")
     def test_create_claim_and_finish_job(self):
         job = create_job(
@@ -155,6 +158,20 @@ class SharedDjangoModelTests(TestCase):
 
 
 class QueueRoutingTests(unittest.TestCase):
+
+    def test_priority_rules_match_user_initiated_and_fresh_work(self):
+        self.assertEqual(job_priority({"job_type": "download_single", "payload": {"manual_enqueue": True}}), 10)
+        self.assertEqual(job_priority({"job_type": "download_episode", "payload": {"redownload": True}}), 9)
+        self.assertEqual(job_priority({"job_type": "download_episode", "payload": {}}), 5)
+        self.assertEqual(job_priority({"job_type": "generate_transcript", "payload": {"download_id": 1, "source_type": "podcast"}}), 8)
+        self.assertEqual(job_priority({"job_type": "generate_transcript", "payload": {"download_id": 1, "source_type": "youtube"}}), 7)
+        self.assertEqual(job_priority({"job_type": "generate_transcript", "payload": {"download_id": 1, "startup_missing_subtitle": True}}), 2)
+
+    def test_priority_queues_are_declared_with_max_priority(self):
+        self.assertEqual(queue_arguments(SERIAL_DOWNLOAD_QUEUE), {"x-max-priority": 10})
+        self.assertEqual(queue_arguments(TRANSCRIPT_QUEUE), {"x-max-priority": 10})
+        self.assertEqual(queue_arguments(FFMPEG_QUEUE), {"x-max-priority": 10})
+
     def test_download_jobs_share_single_download_queue(self):
         self.assertEqual(queue_name("update_downloads"), "getoffline.jobs.updates")
         self.assertEqual(queue_name("check_for_episodes"), "getoffline.jobs.updates")

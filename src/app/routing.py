@@ -4,6 +4,14 @@ TRANSCRIPT_QUEUE = "getoffline.transcripts"
 SUMMARY_QUEUE = "getoffline.summaries"
 SYNC_QUEUE = "getoffline.sync_media"
 FFMPEG_QUEUE = "getoffline.ffmpeg"
+MAX_QUEUE_PRIORITY = 10
+
+
+def queue_arguments(queue: str) -> dict:
+    """RabbitMQ queue declaration options shared by publishers and consumers."""
+    if queue in {SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, FFMPEG_QUEUE}:
+        return {"x-max-priority": MAX_QUEUE_PRIORITY}
+    return {}
 
 
 def queue_name(job_type: str) -> str:
