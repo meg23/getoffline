@@ -1,6 +1,7 @@
 import hashlib
 import os
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -1023,6 +1024,62 @@ def summarize_missing(job: Job) -> None:
     log.info("Summarize-missing fanout finished job_id=%s profile_id=%s enqueued_summary_jobs=%s", job.id, job.profile_id, enqueued)
 
 
+def retention_cleanup(job: Job) -> None:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    configured_days = ProfileConfigValue.objects.filter(profile_id=job.profile_id, key="auto_delete_content_days").values_list("value", flat=True).first()
+    try:
+        retention_days = int(payload.get("retention_days") or configured_days or 0)
+    except (TypeError, ValueError):
+        retention_days = 0
+    if retention_days <= 0:
+        log.info("Retention cleanup skipped because retention is disabled job_id=%s profile_id=%s", job.id, job.profile_id)
+        return
+    cutoff = timezone.now() - timedelta(days=retention_days)
+    rows = list(
+        Download.objects.filter(profile_id=job.profile_id, download_status="downloaded")
+        .exclude(source_type="manual")
+        .order_by("completed_at", "first_seen_at", "id")
+    )
+    deleted = 0
+    marked_missing = 0
+    skipped_favorites = 0
+    now = timezone.now()
+    for download in rows:
+        media_path = Path(str(download.file_path or "")).expanduser() if download.file_path else None
+        if not media_path or not media_path.is_file():
+            download.download_status = "missing"
+            download.last_seen_at = now
+            download.save(update_fields=["download_status", "last_seen_at"])
+            marked_missing += 1
+            continue
+        if download.favorite:
+            skipped_favorites += 1
+            continue
+        content_date = download.completed_at or download.first_seen_at
+        if content_date and content_date > cutoff:
+            continue
+        try:
+            media_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("Retention cleanup could not delete file job_id=%s download_id=%s path=%s error=%s", job.id, download.id, media_path, exc)
+            continue
+        download.download_status = "retention_deleted"
+        download.last_seen_at = now
+        download.save(update_fields=["download_status", "last_seen_at"])
+        deleted += 1
+    log.info(
+        "Retention cleanup finished job_id=%s profile_id=%s retention_days=%s deleted=%s marked_missing=%s skipped_favorites=%s",
+        job.id,
+        job.profile_id,
+        retention_days,
+        deleted,
+        marked_missing,
+        skipped_favorites,
+    )
+
+
 def sync_media(job: Job) -> None:
     log.info("Sync worker placeholder started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
     log.info("Sync worker placeholder finished job_id=%s", job.id)
@@ -1039,4 +1096,5 @@ HANDLERS = {
     "generate_summary": generate_summary,
     "summarize_missing": summarize_missing,
     "sync_media": sync_media,
+    "retention_cleanup": retention_cleanup,
 }

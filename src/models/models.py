@@ -136,6 +136,29 @@ class TranscriptSegment(models.Model):
         indexes = [models.Index(fields=["download", "start_seconds"])]
 
 
+class ScheduledJob(models.Model):
+    profile_id = models.CharField(max_length=191, default="default", db_index=True)
+    job_type = models.CharField(max_length=64, db_index=True)
+    enabled = models.BooleanField(default=True, db_index=True)
+    interval_seconds = models.PositiveIntegerField(default=3600)
+    payload = models.JSONField(default=dict, blank=True)
+    idempotency_key_template = models.CharField(max_length=255, blank=True, default="")
+    next_run_at = models.DateTimeField(default=timezone.now, db_index=True)
+    last_run_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "scheduled_jobs"
+        indexes = [
+            models.Index(fields=["enabled", "next_run_at"]),
+            models.Index(fields=["profile_id", "job_type"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.job_type} every {self.interval_seconds}s ({'enabled' if self.enabled else 'disabled'})"
+
+
 class Job(models.Model):
     STATUS_QUEUED = "queued"
     STATUS_RUNNING = "running"
