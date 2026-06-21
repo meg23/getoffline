@@ -2,6 +2,7 @@ FROM python:3.12-alpine AS wheels
 
 ARG FASTER_WHISPER_VERSION=1.1.1
 ARG CTRANSLATE2_VERSION=4.6.0
+ARG ONNXRUNTIME_VERSION=1.20.1
 ARG TARGETPLATFORM
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -17,7 +18,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
        esac \
     && python -m pip download --no-cache-dir --no-deps --only-binary=:all: --dest /wheels \
         --platform ${CTRANSLATE2_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
-        ctranslate2==${CTRANSLATE2_VERSION}
+        ctranslate2==${CTRANSLATE2_VERSION} \
+    && python -m pip download --no-cache-dir --no-deps --only-binary=:all: --dest /wheels \
+        --platform ${CTRANSLATE2_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
+        onnxruntime==${ONNXRUNTIME_VERSION}
 
 FROM python:3.12-alpine AS model-cache
 
@@ -39,11 +43,12 @@ import site
 import zipfile
 from pathlib import Path
 site_packages = Path(site.getsitepackages()[0])
-wheels = sorted(Path('/wheels').glob('ctranslate2-*.whl'))
-if not wheels:
-    raise SystemExit('missing ctranslate2 wheel')
-with zipfile.ZipFile(wheels[0]) as wheel:
-    wheel.extractall(site_packages)
+for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
+    wheels = sorted(Path('/wheels').glob(pattern))
+    if not wheels:
+        raise SystemExit(f'missing wheel: {pattern}')
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        wheel.extractall(site_packages)
 PY
 RUN /opt/venv/bin/python - <<'PY'
 import os
@@ -76,11 +81,12 @@ import site
 import zipfile
 from pathlib import Path
 site_packages = Path(site.getsitepackages()[0])
-wheels = sorted(Path('/wheels').glob('ctranslate2-*.whl'))
-if not wheels:
-    raise SystemExit('missing ctranslate2 wheel')
-with zipfile.ZipFile(wheels[0]) as wheel:
-    wheel.extractall(site_packages)
+for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
+    wheels = sorted(Path('/wheels').glob(pattern))
+    if not wheels:
+        raise SystemExit(f'missing wheel: {pattern}')
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        wheel.extractall(site_packages)
 PY
 RUN rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY --from=model-cache /app/model-cache /app/model-cache
