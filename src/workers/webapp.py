@@ -4376,7 +4376,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     <h2>{title}</h2>
     <p class="meta">{source}</p>
     <{media_kind} id="player" class="player" controls preload="metadata">
-      <source src="/media?id={row.row_id}" />
+      <source src="/media?id={row.row_id}#t={resume_value:.3f}" />
       {subtitles_html}
       Your browser does not support this media type.
     </{media_kind}>

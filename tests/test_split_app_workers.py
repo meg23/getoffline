@@ -219,6 +219,7 @@ class SharedDjangoModelTests(TestCase):
                 file_ext="mp4",
                 download_status="downloaded",
                 subtitle_path=str(subtitle),
+                last_position_seconds=42.5,
             )
 
             with patch("app.views.publish_job"):
@@ -227,6 +228,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
         self.assertNotIn('id="subtitle-track"', body)
+        self.assertIn(f'/media/{download.id}/#t=42.500', body)
         self.assertIn("const periodicProgressSeconds = 5;", body)
         self.assertIn("media?.addEventListener('timeupdate'", body)
         self.assertIn("media?.addEventListener('pause'", body)

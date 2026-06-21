@@ -2014,6 +2014,7 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             body = _render_player(row, media, 42.5, has_subtitles=False)
             self.assertIn("/progress", body)
             self.assertIn("startSeconds = 42.500000", body)
+            self.assertIn('/media?id=11#t=42.500', body)
             self.assertIn("shouldAutoPlay", body)
             self.assertIn("get('autoplay') === '1'", body)
             self.assertIn("navigator.sendBeacon('/progress'", body)
