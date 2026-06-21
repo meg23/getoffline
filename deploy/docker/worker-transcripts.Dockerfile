@@ -49,9 +49,14 @@ for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
         raise SystemExit(f'missing wheel: {pattern}')
     with zipfile.ZipFile(wheels[0]) as wheel:
         wheel.extractall(site_packages)
-# Alpine uses unpacked native wheels; avoid import-time evaluation of this optional type alias.
+# Alpine uses unpacked native wheels; avoid import-time evaluation of native type aliases.
 transcribe_py = site_packages / 'faster_whisper' / 'transcribe.py'
-transcribe_py.write_text(transcribe_py.read_text().replace('ctranslate2.StorageView', 'object'))
+transcribe_text = transcribe_py.read_text()
+if 'from __future__ import annotations' not in transcribe_text.splitlines()[:3]:
+    transcribe_text = 'from __future__ import annotations\n' + transcribe_text
+transcribe_text = transcribe_text.replace('ctranslate2.StorageView', 'object')
+transcribe_text = transcribe_text.replace('ctranslate2.models.WhisperGenerationResult', 'object')
+transcribe_py.write_text(transcribe_text)
 PY
 RUN /opt/venv/bin/python - <<'PY'
 import os
@@ -90,9 +95,14 @@ for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
         raise SystemExit(f'missing wheel: {pattern}')
     with zipfile.ZipFile(wheels[0]) as wheel:
         wheel.extractall(site_packages)
-# Alpine uses unpacked native wheels; avoid import-time evaluation of this optional type alias.
+# Alpine uses unpacked native wheels; avoid import-time evaluation of native type aliases.
 transcribe_py = site_packages / 'faster_whisper' / 'transcribe.py'
-transcribe_py.write_text(transcribe_py.read_text().replace('ctranslate2.StorageView', 'object'))
+transcribe_text = transcribe_py.read_text()
+if 'from __future__ import annotations' not in transcribe_text.splitlines()[:3]:
+    transcribe_text = 'from __future__ import annotations\n' + transcribe_text
+transcribe_text = transcribe_text.replace('ctranslate2.StorageView', 'object')
+transcribe_text = transcribe_text.replace('ctranslate2.models.WhisperGenerationResult', 'object')
+transcribe_py.write_text(transcribe_text)
 PY
 RUN rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY --from=model-cache /app/model-cache /app/model-cache
