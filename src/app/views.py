@@ -1,5 +1,6 @@
 import mimetypes
 from pathlib import Path
+from urllib.parse import urlencode
 
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -341,7 +342,8 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     job = create_job(profile_id=profile_id, job_type=job_type, payload=payload, idempotency_key=idempotency_key)
     publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
     if request.headers.get("x-requested-with") == "XMLHttpRequest" or request.headers.get("accept") == "application/json":
-        return JsonResponse({"ok": True, "job_id": job.id, "status": job.status, "status_url": reverse("job_status", args=[job.id])})
+        status_url = f"{reverse('job_status', args=[job.id])}?{urlencode({'profile_id': profile_id})}"
+        return JsonResponse({"ok": True, "job_id": job.id, "status": job.status, "status_url": status_url})
     next_url = str(request.POST.get("next") or "")
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return HttpResponseRedirect(next_url)

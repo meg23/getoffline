@@ -180,6 +180,8 @@
     form?.querySelector("[name=csrfmiddlewaretoken]")?.value ||
     decodeURIComponent(readCookie("csrftoken") || "");
   const doneStatuses = new Set(["succeeded", "failed"]);
+  const maxPollFailures = 3;
+  let pollFailures = 0;
   let pollTimer = 0;
 
   function setLoading(loading) {
@@ -199,6 +201,7 @@
       headers: { Accept: "application/json" },
     });
     if (!response.ok) throw new Error("Unable to check sync status.");
+    pollFailures = 0;
     const payload = await response.json();
     if (payload.finished || doneStatuses.has(String(payload.status || ""))) {
       setLoading(false);
@@ -209,13 +212,23 @@
       }
       return;
     }
-    pollTimer = window.setTimeout(() => pollUntilDone(statusUrl).catch(fail), 1500);
+    pollTimer = window.setTimeout(() => pollUntilDone(statusUrl).catch(() => retryPoll(statusUrl)), 1500);
   }
 
-  function fail() {
+  function retryPoll(statusUrl) {
+    pollFailures += 1;
+    if (pollFailures < maxPollFailures) {
+      pollTimer = window.setTimeout(() => pollUntilDone(statusUrl).catch(() => retryPoll(statusUrl)), 1500);
+      return;
+    }
+    setLoading(false);
+    window.location.reload();
+  }
+
+  function fail(message) {
     window.clearTimeout(pollTimer);
     setLoading(false);
-    window.alert("Unable to finish checking for updates. Please try again.");
+    window.alert(message || "Unable to start checking for updates. Please try again.");
   }
 
   form?.addEventListener("submit", async (event) => {
@@ -236,6 +249,7 @@
       if (!response.ok) throw new Error("Unable to start sync.");
       const payload = await response.json();
       if (!payload.status_url) throw new Error("Missing sync status URL.");
+      pollFailures = 0;
       await pollUntilDone(payload.status_url);
     } catch (_) {
       fail();
