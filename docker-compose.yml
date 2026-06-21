@@ -131,7 +131,7 @@ services:
   worker-ffmpeg:
     build:
       context: .
-      dockerfile: deploy/docker/worker-download.Dockerfile
+      dockerfile: deploy/docker/worker-ffmpeg.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: sh -c "python -m workers ffmpeg --prefetch $${PREFETCH:-1}"
@@ -158,7 +158,6 @@ services:
       replicas: 1
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-      - huggingface-cache:/app/model-cache
     depends_on:
       mysql:
         condition: service_healthy
@@ -232,4 +231,3 @@ services:
 volumes:
   mysql-data:
   rabbitmq-data:
-  huggingface-cache:

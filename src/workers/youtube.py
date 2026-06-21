@@ -146,8 +146,8 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
     return True
 
 
-def _resolve_deno_binary(deno_path: Optional[str] = None) -> Optional[str]:
-    candidate = str(deno_path or "deno").strip() or "deno"
+def _resolve_quickjs_binary(js_runtime_path: Optional[str] = None) -> Optional[str]:
+    candidate = str(js_runtime_path or "qjs").strip() or "qjs"
     if os.sep in candidate or (os.altsep and os.altsep in candidate):
         path = Path(candidate).expanduser()
         if path.is_file() and os.access(path, os.X_OK):
@@ -156,22 +156,23 @@ def _resolve_deno_binary(deno_path: Optional[str] = None) -> Optional[str]:
     return shutil.which(candidate)
 
 
-def _prepend_deno_to_path(deno_binary: str) -> None:
-    deno_dir = str(Path(deno_binary).parent)
+def _prepend_runtime_to_path(runtime_binary: str) -> None:
+    runtime_dir = str(Path(runtime_binary).parent)
     path_parts = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
-    if deno_dir not in path_parts:
-        os.environ["PATH"] = os.pathsep.join([deno_dir, *path_parts])
+    if runtime_dir not in path_parts:
+        os.environ["PATH"] = os.pathsep.join([runtime_dir, *path_parts])
 
 
-def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str, deno_path: Optional[str] = None):
-    """Enable yt-dlp's YouTube EJS remote component when deno is available."""
-    deno_binary = _resolve_deno_binary(deno_path)
-    if not deno_binary:
-        configured = str(deno_path or "deno").strip() or "deno"
-        log.warning("deno executable %r was not found; skipping yt-dlp EJS remote component for %s. If challenge solving fails, set the Deno executable in Settings or upgrade with: pip install -U 'yt-dlp[default]'", configured, context_label)
+def _enable_youtube_quickjs_remote_component(ydl_opts: Dict, context_label: str, js_runtime_path: Optional[str] = None):
+    """Configure yt-dlp's YouTube EJS remote component to use QuickJS when available."""
+    quickjs_binary = _resolve_quickjs_binary(js_runtime_path)
+    if not quickjs_binary:
+        configured = str(js_runtime_path or "qjs").strip() or "qjs"
+        log.warning("QuickJS executable %r was not found; skipping yt-dlp EJS remote component for %s. If challenge solving fails, install the quickjs package or set the JavaScript runtime path in Settings.", configured, context_label)
         return
 
-    _prepend_deno_to_path(deno_binary)
+    _prepend_runtime_to_path(quickjs_binary)
+    ydl_opts["js_runtimes"] = {"quickjs": {"path": quickjs_binary}}
 
     existing_value = ydl_opts.get("remote_components")
     if isinstance(existing_value, list):
@@ -181,14 +182,11 @@ def _enable_youtube_ejs_remote_component(ydl_opts: Dict, context_label: str, den
     else:
         components = []
 
-    if _YTDLP_REMOTE_COMPONENT in components:
-        return
+    if _YTDLP_REMOTE_COMPONENT not in components:
+        components.append(_YTDLP_REMOTE_COMPONENT)
 
-    components.append(_YTDLP_REMOTE_COMPONENT)
     ydl_opts["remote_components"] = components
-    log.info("Enabled yt-dlp remote component %s for %s (runtime: %s)", _YTDLP_REMOTE_COMPONENT, context_label, deno_binary)
-
-
+    log.info("Enabled yt-dlp remote component %s for %s (quickjs runtime: %s)", _YTDLP_REMOTE_COMPONENT, context_label, quickjs_binary)
 
 
 
@@ -272,7 +270,7 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
     }
     if cookie_file:
         ydl_opts["cookiefile"] = cookie_file
-    _enable_youtube_ejs_remote_component(ydl_opts, "source-name resolution")
+    _enable_youtube_quickjs_remote_component(ydl_opts, "source-name resolution")
     _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     with _get_youtubedl()(ydl_opts) as ydl:
@@ -312,7 +310,7 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
         "extract_flat": "discard_in_playlist",
         "logger": _YoutubeDlQuietLogger(),
     }
-    _enable_youtube_ejs_remote_component(ydl_opts, "search")
+    _enable_youtube_quickjs_remote_component(ydl_opts, "search")
     _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     try:
@@ -846,7 +844,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
-            _enable_youtube_ejs_remote_component(ydl_opts, f"download source {name}", defaults.get("deno_path"))
+            _enable_youtube_quickjs_remote_component(ydl_opts, f"download source {name}", defaults.get("js_runtime_path", "qjs"))
             _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
             ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
