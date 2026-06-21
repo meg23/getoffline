@@ -3226,6 +3226,99 @@ def _render_index(
         <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:16px;"></progress>
       </div>
     </div>
+    <script>
+      (() => {{
+        const dragDropHint = document.getElementById('drag-drop-upload-hint');
+        const uploadProgressWrap = document.getElementById('upload-progress-wrap');
+        const uploadProgressBar = document.getElementById('upload-progress-bar');
+        const uploadProgressLabel = document.getElementById('upload-progress-label');
+        let dragCounter = 0;
+
+        const dataTransferHasFiles = (dataTransfer) => {{
+          if (!dataTransfer) return false;
+          if (dataTransfer.files && dataTransfer.files.length > 0) return true;
+          if (dataTransfer.items && Array.from(dataTransfer.items).some((item) => item.kind === 'file')) return true;
+          const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+          return types.some((type) => String(type).toLowerCase() === 'files');
+        }};
+
+        const setDragOverlay = (isVisible) => {{
+          if (!dragDropHint) return;
+          dragDropHint.style.display = isVisible ? 'flex' : 'none';
+        }};
+
+        const uploadFile = (file, index, total) => new Promise((resolve, reject) => {{
+          const xhr = new XMLHttpRequest();
+          const formData = new FormData();
+          const prefix = total > 1 ? `(${{index + 1}}/${{total}}) ` : '';
+          formData.append('media_file', file, file.name || 'upload.bin');
+          xhr.open('POST', '/import-media', true);
+          if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
+          if (uploadProgressBar) uploadProgressBar.value = 0;
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name || 'upload.bin'}}… 0%`;
+          xhr.upload.onprogress = (progressEvent) => {{
+            if (!progressEvent.lengthComputable) return;
+            const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
+            if (uploadProgressBar) uploadProgressBar.value = pct;
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name || 'upload.bin'}}… ${{pct}}%`;
+          }};
+          xhr.onload = () => {{
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`HTTP ${{xhr.status}}`));
+          }};
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(formData);
+        }});
+
+        const handleDropUpload = async (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          dragCounter = 0;
+          setDragOverlay(false);
+          const files = Array.from(event.dataTransfer.files || []);
+          if (!files.length) return;
+          let completedUploads = 0;
+          try {{
+            for (let index = 0; index < files.length; index += 1) {{
+              await uploadFile(files[index], index, files.length);
+              completedUploads += 1;
+              if (uploadProgressBar) uploadProgressBar.value = 100;
+              if (uploadProgressLabel) uploadProgressLabel.textContent = `Processing complete: ${{files[index].name || 'upload.bin'}}`;
+            }}
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Created transcripts and summaries for ${{completedUploads}} upload${{completedUploads === 1 ? '' : 's'}}.`;
+            window.location.reload();
+          }} catch (err) {{
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed after ${{completedUploads}} completed upload${{completedUploads === 1 ? '' : 's'}}.`;
+            window.alert(`Failed to import file: ${{err}}`);
+          }} finally {{
+            window.setTimeout(() => {{
+              if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
+            }}, 1200);
+          }}
+        }};
+
+        document.addEventListener('dragenter', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          dragCounter += 1;
+          setDragOverlay(true);
+        }}, true);
+        document.addEventListener('dragover', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setDragOverlay(true);
+        }}, true);
+        document.addEventListener('dragleave', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          dragCounter = Math.max(0, dragCounter - 1);
+          if (dragCounter === 0) setDragOverlay(false);
+        }}, true);
+        document.addEventListener('drop', handleDropUpload, true);
+      }})();
+    </script>
 
     <table id="downloads-table">
       <colgroup>
@@ -3328,82 +3421,6 @@ def _render_index(
           muted: !!media.muted,
         }}));
       }};
-
-      const dragDropHint = document.getElementById('drag-drop-upload-hint');
-      const uploadProgressWrap = document.getElementById('upload-progress-wrap');
-      const uploadProgressBar = document.getElementById('upload-progress-bar');
-      const uploadProgressLabel = document.getElementById('upload-progress-label');
-      let dragCounter = 0;
-      const setDragOverlay = (isVisible) => {{
-        if (!dragDropHint) return;
-        dragDropHint.style.display = isVisible ? 'flex' : 'none';
-      }};
-      const containsFiles = (event) => {{
-        const types = event?.dataTransfer?.types;
-        return !!(types && Array.from(types).includes('Files'));
-      }};
-      window.addEventListener('dragenter', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter += 1;
-        setDragOverlay(true);
-      }});
-      window.addEventListener('dragover', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-      }});
-      window.addEventListener('dragleave', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter = Math.max(0, dragCounter - 1);
-        if (dragCounter === 0) setDragOverlay(false);
-      }});
-      window.addEventListener('drop', async (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter = 0;
-        setDragOverlay(false);
-        const files = Array.from(event.dataTransfer.files || []);
-        if (!files.length) return;
-        let completedUploads = 0;
-        try {{
-          for (const file of files) {{
-            const resp = await new Promise((resolve, reject) => {{
-              const xhr = new XMLHttpRequest();
-              const formData = new FormData();
-              formData.append('media_file', file, file.name || 'upload.bin');
-              xhr.open('POST', '/import-media', true);
-              if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
-              if (uploadProgressBar) uploadProgressBar.value = 0;
-              const prefix = files.length > 1 ? `(${{completedUploads + 1}}/${{files.length}}) ` : '';
-              if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name}}… 0%`;
-
-              xhr.upload.onprogress = (progressEvent) => {{
-                if (!progressEvent.lengthComputable) return;
-                const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
-                if (uploadProgressBar) uploadProgressBar.value = pct;
-                if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name}}… ${{pct}}%`;
-              }};
-              xhr.onload = () => resolve({{ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status }});
-              xhr.onerror = () => reject(new Error('Network error'));
-              xhr.send(formData);
-            }});
-            if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
-            completedUploads += 1;
-            if (uploadProgressBar) uploadProgressBar.value = 100;
-            if (uploadProgressLabel) uploadProgressLabel.textContent = `Processing complete: ${{file.name}}`;
-          }}
-          if (uploadProgressLabel) uploadProgressLabel.textContent = `Created transcripts and summaries for ${{completedUploads}} upload${{completedUploads === 1 ? '' : 's'}}.`;
-          window.location.reload();
-        }} catch (err) {{
-          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed after ${{completedUploads}} completed upload${{completedUploads === 1 ? '' : 's'}}.`;
-          window.alert(`Failed to import file: ${{err}}`);
-        }} finally {{
-          window.setTimeout(() => {{
-            if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
-          }}, 1200);
-        }}
-      }});
 
       const clearSyncReloadTimer = () => {{
         if (syncReloadTimer) {{
