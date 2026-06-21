@@ -229,13 +229,6 @@
   function submitNormally() {
     window.clearTimeout(pollTimer);
     setLoading(false);
-    if (button?.name && button?.value && !form.querySelector(`[name="${button.name}"]`)) {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = button.name;
-      input.value = button.value;
-      form.appendChild(input);
-    }
     HTMLFormElement.prototype.submit.call(form);
   }
 
@@ -254,7 +247,7 @@
           "X-Requested-With": "XMLHttpRequest",
         },
       });
-      if (!response.ok) throw new Error("Unable to start sync.");
+      if (!response.ok) throw new Error("Sync request failed.");
       const payload = await response.json();
       if (!payload.status_url) throw new Error("Missing sync status URL.");
       pollUntilDone(payload.status_url).catch(() => schedulePoll(payload.status_url));
