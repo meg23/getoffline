@@ -27,7 +27,7 @@ from app.routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, q
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import Download, Job, MediaSummary, SourceConfig  # noqa: E402
+    from models.models import Download, Job, MediaSummary, SourceConfig, ProfileConfigValue  # noqa: E402
     from app.views import _queue_counts, _queue_missing_summary_batch  # noqa: E402
     from workers.handlers import check_for_episodes, transcode_media, _youtube_candidates  # noqa: E402
 
@@ -139,6 +139,65 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(counts["Downloads"]["queued"], 1)
         self.assertEqual(counts["Downloads"]["running"], 0)
         self.assertEqual(counts["Summaries"]["total"], 0)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_library_marks_sibling_podcast_subtitles_when_database_path_missing(self):
+        client = Client()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ProfileConfigValue.objects.create(profile_id="default", key="output_root", value=str(root))
+            media = root / "episode.mp3"
+            media.write_text("audio", encoding="utf-8")
+            media.with_suffix(".srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_PODCAST,
+                source_name="Podcast",
+                item_uid="episode-1",
+                title="Podcast Episode",
+                file_path=str(media),
+                file_ext="mp3",
+                download_status="downloaded",
+                subtitle_path="",
+            )
+
+            with patch("app.views.publish_job"):
+                response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn('data-has-subtitles="1"', body)
+        self.assertIn(f'/subtitle/{download.id}/', body)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_subtitle_endpoint_converts_srt_to_vtt_for_browser_tracks(self):
+        client = Client()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ProfileConfigValue.objects.create(profile_id="default", key="output_root", value=str(root))
+            media = root / "video.mp4"
+            subtitle = root / "video.srt"
+            media.write_text("video", encoding="utf-8")
+            subtitle.write_text("1\n00:00:00,000 --> 00:00:01,250\ncaption text\n", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                item_uid="video-1",
+                title="Video",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status="downloaded",
+                subtitle_path=str(subtitle),
+            )
+
+            response = client.get(f"/subtitle/{download.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/vtt; charset=utf-8")
+        body = response.content.decode("utf-8")
+        self.assertTrue(body.startswith("WEBVTT"))
+        self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_enqueue_job_redirects_to_next_when_present(self):
