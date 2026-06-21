@@ -12,15 +12,15 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt \
     && python -m pip download --no-cache-dir --no-deps --dest /wheels faster-whisper==${FASTER_WHISPER_VERSION} \
     && case "${TARGETPLATFORM:-linux/amd64}" in \
-        linux/amd64) CTRANSLATE2_PLATFORM=manylinux2014_x86_64 ;; \
-        linux/arm64) CTRANSLATE2_PLATFORM=manylinux2014_aarch64 ;; \
-        *) echo "Unsupported Alpine transcript platform for prebuilt ctranslate2: ${TARGETPLATFORM}" >&2; exit 1 ;; \
+        linux/amd64) CTRANSLATE2_PLATFORM=manylinux2014_x86_64; ONNXRUNTIME_PLATFORM=manylinux_2_27_x86_64 ;; \
+        linux/arm64) CTRANSLATE2_PLATFORM=manylinux2014_aarch64; ONNXRUNTIME_PLATFORM=manylinux_2_27_aarch64 ;; \
+        *) echo "Unsupported Alpine transcript platform for prebuilt native wheels: ${TARGETPLATFORM}" >&2; exit 1 ;; \
        esac \
     && python -m pip download --no-cache-dir --no-deps --only-binary=:all: --dest /wheels \
         --platform ${CTRANSLATE2_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
         ctranslate2==${CTRANSLATE2_VERSION} \
     && python -m pip download --no-cache-dir --no-deps --only-binary=:all: --dest /wheels \
-        --platform ${CTRANSLATE2_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
+        --platform ${ONNXRUNTIME_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
         onnxruntime==${ONNXRUNTIME_VERSION}
 
 FROM python:3.12-alpine AS model-cache
