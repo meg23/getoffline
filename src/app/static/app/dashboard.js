@@ -544,7 +544,23 @@
     if (!media) return;
     if (miniTitle) miniTitle.textContent = state.title || "Now playing";
     if (miniSource) miniSource.textContent = state.source || "";
-    media.src = state.src;
+    const resumeAtLoad = Math.max(0, Number(state.currentTime || 0));
+    media.src = resumeAtLoad > 0 ? `${state.src}#t=${resumeAtLoad.toFixed(3)}` : state.src;
+    let miniResumeApplied = !(resumeAtLoad > 0);
+    const applyMiniResume = () => {
+      if (miniResumeApplied) return true;
+      const target = Number.isFinite(media.duration) && media.duration > 1
+        ? Math.min(resumeAtLoad, Math.max(media.duration - 1, 0))
+        : resumeAtLoad;
+      try {
+        if (Math.abs(Number(media.currentTime || 0) - target) > 0.75) media.currentTime = target;
+        miniResumeApplied = Math.abs(Number(media.currentTime || 0) - target) <= 0.75;
+        console.debug('[getoffline] mini resume seek', { rowId: state.rowId, target, currentTime: media.currentTime, applied: miniResumeApplied });
+      } catch (err) {
+        console.debug('[getoffline] mini resume seek failed', { rowId: state.rowId, target, err });
+      }
+      return miniResumeApplied;
+    };
     if (state.kind !== "video" && state.hasSubtitles && state.subtitleUrl) {
       const track = document.createElement("track");
       track.kind = "subtitles";
@@ -563,30 +579,25 @@
       "loadedmetadata",
       () => {
         applyMediaSettings(media);
-        const resume = Math.max(0, Number(state.currentTime || 0));
-        if (resume) {
-          const target =
-            Number.isFinite(media.duration) && media.duration > 1
-              ? Math.min(resume, Math.max(media.duration - 1, 0))
-              : resume;
-          try {
-            media.currentTime = target;
-          } catch (_) {}
-        }
-        if (!state.paused) media.play().catch(() => {});
+        applyMiniResume();
+        if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay after metadata failed", { rowId: state.rowId, err }));
       },
       { once: true },
     );
     media.addEventListener("loadeddata", () => scheduleTranscriptInit(media), {
       once: true,
     });
+    media.addEventListener("canplay", applyMiniResume, { once: true });
+    media.addEventListener("playing", applyMiniResume);
     media.ontimeupdate = () => {
+      if (!miniResumeApplied && !applyMiniResume()) return;
       state.currentTime = media.currentTime || 0;
       state.paused = media.paused;
       localStorage.setItem(stateKey, JSON.stringify(state));
       if (!media.paused) postProgress(state, media, false, "mini-timeupdate");
     };
     media.onpause = () => {
+      if (!miniResumeApplied && !applyMiniResume()) return;
       state.currentTime = media.currentTime || 0;
       state.paused = true;
       localStorage.setItem(stateKey, JSON.stringify(state));
@@ -607,7 +618,7 @@
     };
     media.autoplay = !state.paused;
     media.load();
-    if (!state.paused) media.play().catch(() => {});
+    if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay failed", { rowId: state.rowId, err }));
     miniPlayer.classList.add("is-visible");
     setExpanded(false);
   }

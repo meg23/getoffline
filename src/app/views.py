@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import uuid
 import re
@@ -21,6 +22,7 @@ from .routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_Q
 
 ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "sync_media", "summarize_missing"}
 DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
+log = logging.getLogger(__name__)
 
 
 def _human_size(size: int | None) -> str:
@@ -231,6 +233,15 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
         requested_seek = 0.0
     seek = max(float(item.last_position_seconds or 0.0), requested_seek)
     media_kind = "video" if (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")).lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+    log.info(
+        "player render download_id=%s media_kind=%s saved_position=%.3f requested_seek=%.3f rendered_seek=%.3f played=%s",
+        item.id,
+        media_kind,
+        float(item.last_position_seconds or 0.0),
+        requested_seek,
+        seek,
+        item.played,
+    )
     return render(request, "app/player.html", {"item": item, "seek_seconds": seek, "media_kind": media_kind})
 
 
@@ -499,7 +510,10 @@ def unfavorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
 @require_POST
 def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
-    position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
+    try:
+        position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
+    except (TypeError, ValueError):
+        return HttpResponse(status=400)
     reason = str(request.POST.get("reason") or "").strip().lower()
     completed = reason in {"ended", "mini-ended"}
     delta = max(0.0, position - float(item.last_position_seconds or 0.0))
@@ -508,6 +522,15 @@ def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     item.last_position_updated_at = timezone.now()
     item.last_seen_at = timezone.now()
     update_fields = ["last_position_seconds", "total_listened_seconds", "last_position_updated_at", "last_seen_at"]
+    log.info(
+        "player save_position download_id=%s position=%.3f reason=%s completed=%s previous=%.3f delta=%.3f",
+        item.id,
+        position,
+        reason or "unknown",
+        completed,
+        float(item.last_position_seconds or 0.0),
+        delta,
+    )
     if completed:
         item.played = True
         item.played_at = timezone.now()

@@ -3897,9 +3897,26 @@ def _render_index(
         const active = state.kind === 'video' ? miniVideo : miniAudio;
         active.style.display = 'block';
         applyStoredMediaSettings(active);
+        const resumeAtLoad = Math.max(0, Number(state.currentTime || 0));
         const source = document.createElement('source');
-        source.src = state.src;
+        source.src = resumeAtLoad > 0 ? state.src + '#t=' + resumeAtLoad.toFixed(3) : state.src;
         active.appendChild(source);
+
+        let miniResumeApplied = !(resumeAtLoad > 0);
+        function applyMiniResume() {{
+          if (miniResumeApplied) return true;
+          const target = Number.isFinite(active.duration) && active.duration > 1
+            ? Math.min(resumeAtLoad, Math.max(active.duration - 1, 0))
+            : resumeAtLoad;
+          try {{
+            if (Math.abs(Number(active.currentTime || 0) - target) > 0.75) active.currentTime = target;
+            miniResumeApplied = Math.abs(Number(active.currentTime || 0) - target) <= 0.75;
+            console.debug('[getoffline] mini resume seek', {{ rowId: state.rowId, target, currentTime: active.currentTime, applied: miniResumeApplied }});
+          }} catch (err) {{
+            console.debug('[getoffline] mini resume seek failed', {{ rowId: state.rowId, target, err }});
+          }}
+          return miniResumeApplied;
+        }}
 
         let subtitleTrackEl = null;
         if (state.kind === 'audio' && state.hasSubtitles) {{
@@ -3913,15 +3930,20 @@ def _render_index(
         }}
 
         active.addEventListener('loadedmetadata', () => {{
-          active.currentTime = Math.max(0, Number(state.currentTime || 0));
+          applyMiniResume();
           if (!state.paused) active.play().catch(() => {{}});
         }}, {{ once: true }});
+        active.addEventListener('canplay', applyMiniResume, {{ once: true }});
+        active.addEventListener('playing', applyMiniResume);
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
+        active.autoplay = !state.paused;
         active.load();
+        if (!state.paused) active.play().catch((err) => console.debug('[getoffline] mini autoplay failed', {{ rowId: state.rowId, err }}));
 
         detachMiniHandlers(active);
 
         const persist = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
             ...state,
             currentTime: active.currentTime || 0,
@@ -3929,10 +3951,12 @@ def _render_index(
           }}));
         }};
         const timeupdateHandler = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           persist();
           if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
         }};
         const pauseHandler = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           persist();
           postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
         }};
@@ -4376,7 +4400,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     <h2>{title}</h2>
     <p class="meta">{source}</p>
     <{media_kind} id="player" class="player" controls preload="metadata">
-      <source src="/media?id={row.row_id}" />
+      <source src="/media?id={row.row_id}#t={resume_value:.3f}" />
       {subtitles_html}
       Your browser does not support this media type.
     </{media_kind}>
@@ -4555,17 +4579,21 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function applyInitialSeek() {{
-        if (hasAppliedInitialSeek) return;
+        if (hasAppliedInitialSeek) return true;
         const initialSeconds = getMiniPlayerResumeSeconds() ?? startSeconds;
-        if (initialSeconds <= 0) return;
+        if (initialSeconds <= 0) {{
+          hasAppliedInitialSeek = true;
+          return true;
+        }}
         const target = Number.isFinite(player.duration) && player.duration > 1
           ? Math.min(initialSeconds, Math.max(player.duration - 1, 0))
           : initialSeconds;
         try {{
-          player.currentTime = target;
-          hasAppliedInitialSeek = true;
+          if (Math.abs(Number(player.currentTime || 0) - target) > 0.75) player.currentTime = target;
+          hasAppliedInitialSeek = Math.abs(Number(player.currentTime || 0) - target) <= 0.75;
           updateLabel(target);
         }} catch (_) {{}}
+        return hasAppliedInitialSeek;
       }}
 
       function syncTranscriptFromTrack() {{
@@ -4644,10 +4672,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       scheduleTranscriptInit();
 
       player.addEventListener('timeupdate', () => {{
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return;
         persistMiniPlayerState();
         if (!player.paused) postProgress(player.currentTime, false);
       }});
       player.addEventListener('pause', () => {{
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return;
         persistMiniPlayerState();
         postProgress(player.currentTime, true, 'pause');
       }});
