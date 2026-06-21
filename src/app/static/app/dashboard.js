@@ -180,8 +180,6 @@
     form?.querySelector("[name=csrfmiddlewaretoken]")?.value ||
     decodeURIComponent(readCookie("csrftoken") || "");
   const doneStatuses = new Set(["succeeded", "failed"]);
-  const maxPollFailures = 3;
-  let pollFailures = 0;
   let pollTimer = 0;
 
   function setLoading(loading) {
@@ -201,7 +199,6 @@
       headers: { Accept: "application/json" },
     });
     if (!response.ok) throw new Error("Unable to check sync status.");
-    pollFailures = 0;
     const payload = await response.json();
     if (payload.finished || doneStatuses.has(String(payload.status || ""))) {
       setLoading(false);
@@ -212,23 +209,34 @@
       }
       return;
     }
-    pollTimer = window.setTimeout(() => pollUntilDone(statusUrl).catch(() => retryPoll(statusUrl)), 1500);
+    schedulePoll(statusUrl);
   }
 
-  function retryPoll(statusUrl) {
-    pollFailures += 1;
-    if (pollFailures < maxPollFailures) {
-      pollTimer = window.setTimeout(() => pollUntilDone(statusUrl).catch(() => retryPoll(statusUrl)), 1500);
-      return;
+  function schedulePoll(statusUrl) {
+    pollTimer = window.setTimeout(() => {
+      pollUntilDone(statusUrl).catch(() => schedulePoll(statusUrl));
+    }, 1500);
+  }
+
+  function syncFormData() {
+    const body = new FormData(form);
+    if (button?.name && button?.value && !body.has(button.name)) {
+      body.append(button.name, button.value);
     }
-    setLoading(false);
-    window.location.reload();
+    return body;
   }
 
-  function fail(message) {
+  function submitNormally() {
     window.clearTimeout(pollTimer);
     setLoading(false);
-    window.alert(message || "Unable to start checking for updates. Please try again.");
+    if (button?.name && button?.value && !form.querySelector(`[name="${button.name}"]`)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = button.name;
+      input.value = button.value;
+      form.appendChild(input);
+    }
+    HTMLFormElement.prototype.submit.call(form);
   }
 
   form?.addEventListener("submit", async (event) => {
@@ -238,7 +246,7 @@
     try {
       const response = await fetch(form.action, {
         method: "POST",
-        body: new FormData(form),
+        body: syncFormData(),
         credentials: "same-origin",
         headers: {
           Accept: "application/json",
@@ -249,10 +257,9 @@
       if (!response.ok) throw new Error("Unable to start sync.");
       const payload = await response.json();
       if (!payload.status_url) throw new Error("Missing sync status URL.");
-      pollFailures = 0;
-      await pollUntilDone(payload.status_url);
+      pollUntilDone(payload.status_url).catch(() => schedulePoll(payload.status_url));
     } catch (_) {
-      fail();
+      submitNormally();
     }
   });
 })();
