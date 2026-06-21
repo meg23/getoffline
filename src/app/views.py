@@ -5,7 +5,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.views.decorators.http import require_POST
 
 from models.jobs import create_job
@@ -86,8 +86,45 @@ def _safe_path(raw_path: str | None) -> Path:
     return path
 
 
+def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
+    """Queue one batch summary fanout job when downloaded subtitle-backed rows lack summaries."""
+    has_missing_summary = (
+        Download.objects.filter(profile_id=profile_id, download_status="downloaded")
+        .exclude(Q(subtitle_path__isnull=True) | Q(subtitle_path=""))
+        .filter(summary__isnull=True)
+        .exists()
+    )
+    if not has_missing_summary:
+        return False
+
+    idempotency_key = f"summarize_missing:{profile_id}:auto"
+    active_job = Job.objects.filter(
+        idempotency_key=idempotency_key,
+        status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+    ).first()
+    if active_job is not None:
+        return False
+
+    job = create_job(
+        profile_id=profile_id,
+        job_type="summarize_missing",
+        payload={"source": "django_app", "auto_enqueue": True, "reason": reason},
+        idempotency_key=idempotency_key,
+    )
+    try:
+        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    except Exception:
+        job.status = Job.STATUS_FAILED
+        job.error_message = "Failed to publish automatic summarize_missing job"
+        job.finished_at = timezone.now()
+        job.updated_at = job.finished_at
+        job.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
+        return False
+    return True
+
 def library(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
+    _queue_missing_summary_batch(profile_id, reason="library_missing_summary")
     downloads_qs = Download.objects.select_related("summary").filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
     downloads = [_decorate_download(item) for item in downloads_qs.order_by("-last_seen_at", "-id")[:500]]
     played_count = sum(1 for item in downloads if item.played)
@@ -124,6 +161,8 @@ def jobs(request: HttpRequest) -> HttpResponse:
 
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
+    if not hasattr(item, "summary") and item.download_status == "downloaded" and item.subtitle_path:
+        _queue_missing_summary_batch(item.profile_id, reason="player_missing_summary")
     try:
         requested_seek = float(request.GET.get("t") or 0.0)
     except (TypeError, ValueError):

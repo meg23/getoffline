@@ -27,7 +27,8 @@ from app.routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, q
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import Download, Job, SourceConfig  # noqa: E402
+    from models.models import Download, Job, MediaSummary, SourceConfig  # noqa: E402
+    from app.views import _queue_missing_summary_batch  # noqa: E402
     from workers.handlers import check_for_episodes, transcode_media, _youtube_candidates  # noqa: E402
 
 
@@ -63,6 +64,64 @@ class SharedDjangoModelTests(TestCase):
         first = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         second = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         self.assertEqual(first.id, second.id)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_missing_summary_batch_is_queued_once_for_downloaded_subtitle_rows(self):
+        Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="missing-summary",
+            title="Missing Summary",
+            file_path="/tmp/media.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="/tmp/media.srt",
+        )
+
+        with patch("app.views.publish_job") as publish:
+            queued = _queue_missing_summary_batch("default", reason="test_missing_summary")
+            queued_again = _queue_missing_summary_batch("default", reason="test_missing_summary")
+
+        self.assertTrue(queued)
+        self.assertFalse(queued_again)
+        job = Job.objects.get(job_type="summarize_missing", idempotency_key="summarize_missing:default:auto")
+        self.assertEqual(job.payload["reason"], "test_missing_summary")
+        self.assertTrue(job.payload["auto_enqueue"])
+        publish.assert_called_once_with({"job_id": job.id, "job_type": "summarize_missing", "profile_id": "default", "attempt": 1})
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_missing_summary_batch_skips_rows_without_subtitles_or_with_summary(self):
+        Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="no-subtitles",
+            title="No Subtitles",
+            file_path="/tmp/no-subtitles.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="",
+        )
+        with_summary = Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="with-summary",
+            title="With Summary",
+            file_path="/tmp/with-summary.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="/tmp/with-summary.srt",
+        )
+        MediaSummary.objects.create(download=with_summary, summary_text="Already summarized", model_name="test")
+
+        with patch("app.views.publish_job") as publish:
+            queued = _queue_missing_summary_batch("default", reason="test_no_candidates")
+
+        self.assertFalse(queued)
+        self.assertFalse(Job.objects.filter(job_type="summarize_missing").exists())
+        publish.assert_not_called()
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_honors_source_max_downloads(self):
