@@ -132,10 +132,10 @@ make run-worker-sync
 
 - `getoffline.jobs.updates`: `update_downloads`, `check_for_episodes`
 - `getoffline.jobs.downloads`: `download_single`, `download_episode`
-- `getoffline.ffmpeg`: `transcode_media`
-- `getoffline.transcripts`: `generate_transcript`
-- `getoffline.summaries`: `summarize_missing`, `generate_summary`
-- `getoffline.sync_media`: `sync_media`
+- `getoffline.jobs.ffmpeg`: `transcode_media`
+- `getoffline.jobs.transcripts`: `generate_transcript`
+- `getoffline.jobs.summaries`: `summarize_missing`, `generate_summary`
+- `getoffline.jobs.sync_media`: `sync_media`
 
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
 The job payload and status live in MySQL.

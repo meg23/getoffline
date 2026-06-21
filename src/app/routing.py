@@ -1,9 +1,9 @@
 SERIAL_EPISODE_CHECK_QUEUE = "getoffline.jobs.updates"
 SERIAL_DOWNLOAD_QUEUE = "getoffline.jobs.downloads"
-TRANSCRIPT_QUEUE = "getoffline.transcripts"
-SUMMARY_QUEUE = "getoffline.summaries"
-SYNC_QUEUE = "getoffline.sync_media"
-FFMPEG_QUEUE = "getoffline.ffmpeg"
+TRANSCRIPT_QUEUE = "getoffline.jobs.transcripts"
+SUMMARY_QUEUE = "getoffline.jobs.summaries"
+SYNC_QUEUE = "getoffline.jobs.sync_media"
+FFMPEG_QUEUE = "getoffline.jobs.ffmpeg"
 MAX_QUEUE_PRIORITY = 10
 
 
@@ -25,4 +25,4 @@ def queue_name(job_type: str) -> str:
         return TRANSCRIPT_QUEUE
     if job_type in {"generate_summary", "summarize_missing"}:
         return SUMMARY_QUEUE
-    return f"getoffline.{job_type}"
+    return f"getoffline.jobs.{job_type}"

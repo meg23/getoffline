@@ -400,13 +400,13 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(queue_name("check_for_episodes"), "getoffline.jobs.updates")
         self.assertEqual(queue_name("download_single"), "getoffline.jobs.downloads")
         self.assertEqual(queue_name("download_episode"), "getoffline.jobs.downloads")
-        self.assertEqual(queue_name("transcode_media"), "getoffline.ffmpeg")
+        self.assertEqual(queue_name("transcode_media"), "getoffline.jobs.ffmpeg")
 
     def test_non_download_jobs_get_separate_queues(self):
-        self.assertEqual(queue_name("sync_media"), "getoffline.sync_media")
-        self.assertEqual(queue_name("generate_transcript"), "getoffline.transcripts")
-        self.assertEqual(queue_name("summarize_missing"), "getoffline.summaries")
-        self.assertEqual(queue_name("generate_summary"), "getoffline.summaries")
+        self.assertEqual(queue_name("sync_media"), "getoffline.jobs.sync_media")
+        self.assertEqual(queue_name("generate_transcript"), "getoffline.jobs.transcripts")
+        self.assertEqual(queue_name("summarize_missing"), "getoffline.jobs.summaries")
+        self.assertEqual(queue_name("generate_summary"), "getoffline.jobs.summaries")
 
 
 if __name__ == "__main__":
