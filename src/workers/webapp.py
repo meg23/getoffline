@@ -639,6 +639,83 @@ def _filter_imported_media(
     return explicit_match.category
 
 
+def _download_id_for_item_uid(db_path: Path, item_uid: str) -> Optional[int]:
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM downloads
+            WHERE source_type = 'manual'
+              AND source_name = 'Manual Uploads'
+              AND item_uid = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (item_uid,),
+        ).fetchone()
+    return int(row[0]) if row else None
+
+
+def _index_and_summarize_imported_media(state: AppState, item_uid: str, subtitle_path: Path, defaults: Dict) -> None:
+    download_id = _download_id_for_item_uid(state.database_path, item_uid)
+    if download_id is None:
+        log.warning("Post-import transcript indexing skipped item_uid=%s reason=download-row-missing", item_uid)
+        return
+
+    segments = _subtitle_segments_from_path(subtitle_path)
+    if not segments:
+        log.warning("Post-import transcript indexing skipped item_uid=%s reason=no-segments", item_uid)
+        return
+
+    with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO transcript_segments (download_id, subtitle_path, start_seconds, end_seconds, text)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [(download_id, str(subtitle_path), start, end, text) for start, end, text in segments],
+        )
+        conn.commit()
+
+    try:
+        result = summarize_segments(
+            [text for _, _, text in segments],
+            model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
+            mode="in_process",
+            timeout_seconds=max(1, int(defaults.get("summary_timeout_seconds") or 90)),
+        )
+    except Exception as exc:
+        log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
+        return
+
+    summary_text = str(result.get("summary_text") or "").strip()
+    if not summary_text:
+        log.warning("Post-import summary generation returned empty output item_uid=%s", item_uid)
+        return
+
+    with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        conn.execute(
+            """
+            INSERT INTO media_summaries (download_id, summary_text, model_name, source_segment_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(download_id) DO UPDATE SET
+              summary_text = excluded.summary_text,
+              model_name = excluded.model_name,
+              source_segment_count = excluded.source_segment_count,
+              updated_at = excluded.updated_at
+            """,
+            (
+                download_id,
+                summary_text,
+                str(result.get("model_name") or "unknown"),
+                len(segments),
+                str(result.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            ),
+        )
+        conn.commit()
+    log.info("Post-import transcript indexed and summary generated item_uid=%s download_id=%s segments=%s", item_uid, download_id, len(segments))
+
+
 def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Path) -> None:
     defaults = (state.config or {}).get("defaults") or {}
     item_uid = str(metadata["item_uid"])
@@ -688,15 +765,7 @@ def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Pat
         metadata["download_status"],
     )
     if subtitle_path:
-        try:
-            generate_missing_summaries(
-                str(state.database_path),
-                limit=1,
-                model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
-                timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90),
-            )
-        except Exception as exc:
-            log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
+        _index_and_summarize_imported_media(state, item_uid, Path(subtitle_path), defaults)
 
 
 def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> Tuple[str, bytes]:
@@ -3157,6 +3226,99 @@ def _render_index(
         <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:16px;"></progress>
       </div>
     </div>
+    <script>
+      (() => {{
+        const dragDropHint = document.getElementById('drag-drop-upload-hint');
+        const uploadProgressWrap = document.getElementById('upload-progress-wrap');
+        const uploadProgressBar = document.getElementById('upload-progress-bar');
+        const uploadProgressLabel = document.getElementById('upload-progress-label');
+        let dragCounter = 0;
+
+        const dataTransferHasFiles = (dataTransfer) => {{
+          if (!dataTransfer) return false;
+          if (dataTransfer.files && dataTransfer.files.length > 0) return true;
+          if (dataTransfer.items && Array.from(dataTransfer.items).some((item) => item.kind === 'file')) return true;
+          const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+          return types.some((type) => String(type).toLowerCase() === 'files');
+        }};
+
+        const setDragOverlay = (isVisible) => {{
+          if (!dragDropHint) return;
+          dragDropHint.style.display = isVisible ? 'flex' : 'none';
+        }};
+
+        const uploadFile = (file, index, total) => new Promise((resolve, reject) => {{
+          const xhr = new XMLHttpRequest();
+          const formData = new FormData();
+          const prefix = total > 1 ? `(${{index + 1}}/${{total}}) ` : '';
+          formData.append('media_file', file, file.name || 'upload.bin');
+          xhr.open('POST', '/import-media', true);
+          if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
+          if (uploadProgressBar) uploadProgressBar.value = 0;
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name || 'upload.bin'}}… 0%`;
+          xhr.upload.onprogress = (progressEvent) => {{
+            if (!progressEvent.lengthComputable) return;
+            const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
+            if (uploadProgressBar) uploadProgressBar.value = pct;
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name || 'upload.bin'}}… ${{pct}}%`;
+          }};
+          xhr.onload = () => {{
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`HTTP ${{xhr.status}}`));
+          }};
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(formData);
+        }});
+
+        const handleDropUpload = async (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          dragCounter = 0;
+          setDragOverlay(false);
+          const files = Array.from(event.dataTransfer.files || []);
+          if (!files.length) return;
+          let completedUploads = 0;
+          try {{
+            for (let index = 0; index < files.length; index += 1) {{
+              await uploadFile(files[index], index, files.length);
+              completedUploads += 1;
+              if (uploadProgressBar) uploadProgressBar.value = 100;
+              if (uploadProgressLabel) uploadProgressLabel.textContent = `Processing complete: ${{files[index].name || 'upload.bin'}}`;
+            }}
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Created transcripts and summaries for ${{completedUploads}} upload${{completedUploads === 1 ? '' : 's'}}.`;
+            window.location.reload();
+          }} catch (err) {{
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed after ${{completedUploads}} completed upload${{completedUploads === 1 ? '' : 's'}}.`;
+            window.alert(`Failed to import file: ${{err}}`);
+          }} finally {{
+            window.setTimeout(() => {{
+              if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
+            }}, 1200);
+          }}
+        }};
+
+        document.addEventListener('dragenter', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          dragCounter += 1;
+          setDragOverlay(true);
+        }}, true);
+        document.addEventListener('dragover', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setDragOverlay(true);
+        }}, true);
+        document.addEventListener('dragleave', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          dragCounter = Math.max(0, dragCounter - 1);
+          if (dragCounter === 0) setDragOverlay(false);
+        }}, true);
+        document.addEventListener('drop', handleDropUpload, true);
+      }})();
+    </script>
 
     <table id="downloads-table">
       <colgroup>
@@ -3259,77 +3421,6 @@ def _render_index(
           muted: !!media.muted,
         }}));
       }};
-
-      const dragDropHint = document.getElementById('drag-drop-upload-hint');
-      const uploadProgressWrap = document.getElementById('upload-progress-wrap');
-      const uploadProgressBar = document.getElementById('upload-progress-bar');
-      const uploadProgressLabel = document.getElementById('upload-progress-label');
-      let dragCounter = 0;
-      const setDragOverlay = (isVisible) => {{
-        if (!dragDropHint) return;
-        dragDropHint.style.display = isVisible ? 'flex' : 'none';
-      }};
-      const containsFiles = (event) => {{
-        const types = event?.dataTransfer?.types;
-        return !!(types && Array.from(types).includes('Files'));
-      }};
-      window.addEventListener('dragenter', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter += 1;
-        setDragOverlay(true);
-      }});
-      window.addEventListener('dragover', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-      }});
-      window.addEventListener('dragleave', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter = Math.max(0, dragCounter - 1);
-        if (dragCounter === 0) setDragOverlay(false);
-      }});
-      window.addEventListener('drop', async (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter = 0;
-        setDragOverlay(false);
-        const files = Array.from(event.dataTransfer.files || []);
-        if (!files.length) return;
-        const file = files[0];
-        try {{
-          const resp = await new Promise((resolve, reject) => {{
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/import-media', true);
-            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-            xhr.setRequestHeader('X-Upload-Filename', encodeURIComponent(file.name || 'upload.bin'));
-            if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
-            if (uploadProgressBar) uploadProgressBar.value = 0;
-            if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… 0%`;
-
-            xhr.upload.onprogress = (progressEvent) => {{
-              if (!progressEvent.lengthComputable) return;
-              const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
-              if (uploadProgressBar) uploadProgressBar.value = pct;
-              if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… ${{pct}}%`;
-            }};
-            xhr.onload = () => resolve({{ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status }});
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send(file);
-          }});
-          if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
-          if (uploadProgressBar) uploadProgressBar.value = 100;
-          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload complete: ${{file.name}}`;
-          window.location.reload();
-        }} catch (err) {{
-          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed: ${{file.name}}`;
-          window.alert(`Failed to import file: ${{err}}`);
-        }} finally {{
-          window.setTimeout(() => {{
-            if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
-          }}, 1200);
-        }}
-      }});
 
       const clearSyncReloadTimer = () => {{
         if (syncReloadTimer) {{
