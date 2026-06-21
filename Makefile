@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader run-worker-ffmpeg run-worker-transcripts run-worker-sync run-worker-summaries
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader run-worker-ffmpeg run-worker-transcripts run-worker-sync run-worker-summaries run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -90,3 +90,11 @@ run-worker-sync: venv
 run-worker-summaries: venv
 	@echo "Running summaries worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers summaries --prefetch $${PREFETCH:-4}
+
+run-worker-cleanup: venv
+	@echo "Running cleanup worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers cleanup
+
+run-scheduler: venv
+	@echo "Running scheduler..."
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django run_scheduler --loop --install-defaults

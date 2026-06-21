@@ -23,13 +23,14 @@ if django is not None:
     django.setup()
 
 from app.queue import job_priority  # noqa: E402
-from app.routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, queue_arguments, queue_name  # noqa: E402
+from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, queue_arguments, queue_name  # noqa: E402
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import Download, Job, MediaSummary, SourceConfig, ProfileConfigValue  # noqa: E402
+    from models.models import Download, Job, MediaSummary, ScheduledJob, SourceConfig, ProfileConfigValue  # noqa: E402
     from app.views import _queue_counts, _queue_missing_summary_batch  # noqa: E402
-    from workers.handlers import check_for_episodes, transcode_media, _youtube_candidates  # noqa: E402
+    from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
+    from workers.handlers import check_for_episodes, retention_cleanup, transcode_media, _youtube_candidates  # noqa: E402
 
 
 @override_settings(
@@ -64,6 +65,76 @@ class SharedDjangoModelTests(TestCase):
         first = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         second = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         self.assertEqual(first.id, second.id)
+
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_scheduler_enqueues_due_database_configured_job(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        due_at = timezone.now() - timedelta(minutes=1)
+        schedule = ScheduledJob.objects.create(
+            profile_id="default",
+            job_type="sync_media",
+            interval_seconds=3600,
+            payload={"source": "test-scheduler"},
+            idempotency_key_template="scheduled:${job_type}:${profile_id}:${due_hour}",
+            next_run_at=due_at,
+        )
+
+        with patch("models.scheduler.publish_job") as publish:
+            job_ids = enqueue_due_scheduled_jobs(now=timezone.now())
+
+        self.assertEqual(len(job_ids), 1)
+        job = Job.objects.get(id=job_ids[0])
+        self.assertEqual(job.job_type, "sync_media")
+        self.assertEqual(job.payload["source"], "test-scheduler")
+        self.assertEqual(job.payload["scheduled_job_id"], schedule.id)
+        schedule.refresh_from_db()
+        self.assertGreater(schedule.next_run_at, due_at)
+        publish.assert_called_once_with({"job_id": job.id, "job_type": "sync_media", "profile_id": "default", "attempt": 1})
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_retention_cleanup_deletes_expired_non_favorite_content(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            expired = Path(tmpdir) / "expired.mp4"
+            favorite = Path(tmpdir) / "favorite.mp4"
+            expired.write_text("old", encoding="utf-8")
+            favorite.write_text("fav", encoding="utf-8")
+            old_time = timezone.now() - timedelta(days=10)
+            ProfileConfigValue.objects.create(profile_id="default", key="auto_delete_content_days", value="7")
+            expired_download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                title="Expired",
+                file_path=str(expired),
+                download_status="downloaded",
+                completed_at=old_time,
+            )
+            favorite_download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                title="Favorite",
+                file_path=str(favorite),
+                download_status="downloaded",
+                completed_at=old_time,
+                favorite=True,
+            )
+            job = Job.objects.create(profile_id="default", job_type="retention_cleanup", payload={})
+
+            retention_cleanup(job)
+
+            expired_download.refresh_from_db()
+            favorite_download.refresh_from_db()
+            self.assertFalse(expired.exists())
+            self.assertTrue(favorite.exists())
+            self.assertEqual(expired_download.download_status, "retention_deleted")
+            self.assertEqual(favorite_download.download_status, "downloaded")
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_missing_summary_batch_is_queued_once_for_downloaded_subtitle_rows(self):
@@ -139,6 +210,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(counts["Downloads"]["queued"], 1)
         self.assertEqual(counts["Downloads"]["running"], 0)
         self.assertEqual(counts["Summaries"]["total"], 0)
+        self.assertEqual(queue_name("retention_cleanup"), CLEANUP_QUEUE)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_library_marks_sibling_podcast_subtitles_when_database_path_missing(self):

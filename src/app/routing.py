@@ -4,6 +4,7 @@ TRANSCRIPT_QUEUE = "getoffline.jobs.transcripts"
 SUMMARY_QUEUE = "getoffline.jobs.summaries"
 SYNC_QUEUE = "getoffline.jobs.sync_media"
 FFMPEG_QUEUE = "getoffline.jobs.ffmpeg"
+CLEANUP_QUEUE = "getoffline.jobs.cleanup"
 MAX_QUEUE_PRIORITY = 10
 
 
@@ -25,4 +26,6 @@ def queue_name(job_type: str) -> str:
         return TRANSCRIPT_QUEUE
     if job_type in {"generate_summary", "summarize_missing"}:
         return SUMMARY_QUEUE
+    if job_type == "retention_cleanup":
+        return CLEANUP_QUEUE
     return f"getoffline.jobs.{job_type}"

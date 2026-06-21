@@ -21,6 +21,7 @@ from app.routing import (  # noqa: E402
     SYNC_QUEUE,
     TRANSCRIPT_QUEUE,
     FFMPEG_QUEUE,
+    CLEANUP_QUEUE,
     queue_arguments,
 )
 from models.jobs import claim_job, create_job, finish_job  # noqa: E402
@@ -41,6 +42,7 @@ QUEUE_BY_WORKER = {
     "transcripts": TRANSCRIPT_QUEUE,
     "summaries": SUMMARY_QUEUE,
     "sync": SYNC_QUEUE,
+    "cleanup": CLEANUP_QUEUE,
 }
 
 JOB_TYPES_BY_WORKER = {
@@ -52,6 +54,7 @@ JOB_TYPES_BY_WORKER = {
     "transcripts": {"generate_transcript"},
     "summaries": {"generate_summary", "summarize_missing"},
     "sync": {"sync_media"},
+    "cleanup": {"retention_cleanup"},
 }
 
 SERIAL_WORKERS = {"updates", "downloader", "downloader-youtube"}

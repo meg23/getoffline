@@ -5,6 +5,7 @@ This split deployment uses three simple Python packages:
 - `src/app`: the Django frontend. It renders pages, reads from MySQL, and queues jobs.
 - `src/models`: shared Django ORM models and tiny job helpers used by both app and workers.
 - `src/workers`: queue-specific Python workers that consume RabbitMQ messages and update MySQL.
+- `ScheduledJob` rows in MySQL define recurring work; the scheduler process enqueues due jobs.
 
 The browser never connects to MySQL or RabbitMQ directly. The Django app and each
 worker process connect to the same MySQL database using Django's ORM.
@@ -36,6 +37,7 @@ The shared models live in `src/models/models.py` and define:
 
 - `Download`: the frontend library rows workers update.
 - `Job`: the durable job state (`queued`, `running`, `succeeded`, `failed`).
+- `ScheduledJob`: database-configured recurring jobs with frequency, payload, next run, and idempotency template.
 
 Create tables with Django's normal migration/sync workflow for this split app:
 
@@ -74,6 +76,7 @@ It can queue:
 - `generate_transcript` for parallel transcript generation
 - `summarize_missing` / `generate_summary` for parallel summary generation
 - `sync_media`
+- `retention_cleanup` for automatic old-content deletion
 
 ## Running workers
 
@@ -122,6 +125,14 @@ recover queued database rows, restart the relevant worker once with
 large backlog of older queued conversions does not run ahead of newly downloaded
 media.
 
+Recurring work is created by the scheduler from `scheduled_jobs` rows. Start it with:
+
+```bash
+make run-scheduler
+```
+
+Use `python -m django run_scheduler --install-defaults` to insert the default update, summary, sync, and retention schedules. Edit the `scheduled_jobs` table to change `enabled`, `interval_seconds`, `payload`, or `next_run_at`.
+
 Sync work remains isolated on its own queue:
 
 ```bash
@@ -136,6 +147,7 @@ make run-worker-sync
 - `getoffline.jobs.transcripts`: `generate_transcript`
 - `getoffline.jobs.summaries`: `summarize_missing`, `generate_summary`
 - `getoffline.jobs.sync_media`: `sync_media`
+- `getoffline.jobs.cleanup`: `retention_cleanup`
 
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
 The job payload and status live in MySQL.
@@ -156,7 +168,8 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 - `worker-ffmpeg` consumes conversion jobs and defaults to three Compose
   replicas so up to three conversions can run in parallel. Each replica uses a
   prefetch of one by default so one long encode does not reserve extra jobs.
-- `worker-transcripts`, `worker-summaries`, and `worker-sync` run the parallel/background processing queues.
+- `worker-transcripts`, `worker-summaries`, `worker-sync`, and `worker-cleanup` run the parallel/background processing queues.
+- `scheduler` polls the database for due `scheduled_jobs` rows and publishes durable RabbitMQ jobs.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
 
 Example startup:
