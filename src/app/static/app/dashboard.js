@@ -550,10 +550,11 @@
       track.kind = "subtitles";
       track.srclang = "en";
       track.label = "English";
-      track.default = true;
+      track.default = state.kind !== "video";
       track.src = state.subtitleUrl;
       track.addEventListener("load", () => scheduleTranscriptInit(media));
       media.appendChild(track);
+      if (state.kind === "video" && track.track) track.track.mode = "hidden";
     }
     media.style.display = "block";
     media.classList.add("is-active");
@@ -604,7 +605,9 @@
       } catch (_) {}
       closeMini({ skipProgress: true });
     };
+    media.autoplay = !state.paused;
     media.load();
+    if (!state.paused) media.play().catch(() => {});
     miniPlayer.classList.add("is-visible");
     setExpanded(false);
   }
