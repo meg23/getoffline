@@ -49,6 +49,9 @@ for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
         raise SystemExit(f'missing wheel: {pattern}')
     with zipfile.ZipFile(wheels[0]) as wheel:
         wheel.extractall(site_packages)
+# Alpine uses unpacked native wheels; avoid import-time evaluation of this optional type alias.
+transcribe_py = site_packages / 'faster_whisper' / 'transcribe.py'
+transcribe_py.write_text(transcribe_py.read_text().replace('ctranslate2.StorageView', 'object'))
 PY
 RUN /opt/venv/bin/python - <<'PY'
 import os
@@ -87,6 +90,9 @@ for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
         raise SystemExit(f'missing wheel: {pattern}')
     with zipfile.ZipFile(wheels[0]) as wheel:
         wheel.extractall(site_packages)
+# Alpine uses unpacked native wheels; avoid import-time evaluation of this optional type alias.
+transcribe_py = site_packages / 'faster_whisper' / 'transcribe.py'
+transcribe_py.write_text(transcribe_py.read_text().replace('ctranslate2.StorageView', 'object'))
 PY
 RUN rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY --from=model-cache /app/model-cache /app/model-cache
