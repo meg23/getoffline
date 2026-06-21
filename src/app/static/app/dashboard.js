@@ -550,7 +550,7 @@
       track.kind = "subtitles";
       track.srclang = "en";
       track.label = "English";
-      track.default = true;
+      track.default = state.kind !== "video";
       track.src = state.subtitleUrl;
       track.addEventListener("load", () => scheduleTranscriptInit(media));
       media.appendChild(track);

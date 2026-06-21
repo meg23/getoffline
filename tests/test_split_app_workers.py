@@ -200,6 +200,37 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_video_player_includes_subtitle_track_without_default(self):
+        client = Client()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ProfileConfigValue.objects.create(profile_id="default", key="output_root", value=str(root))
+            media = root / "video.mp4"
+            subtitle = root / "video.srt"
+            media.write_text("video", encoding="utf-8")
+            subtitle.write_text("1\n00:00:00,000 --> 00:00:01,250\ncaption text\n", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                item_uid="video-player-1",
+                title="Video Player",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status="downloaded",
+                subtitle_path=str(subtitle),
+            )
+
+            with patch("app.views.publish_job"):
+                response = client.get(f"/player/{download.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn('id="subtitle-track"', body)
+        track_markup = body.split('id="subtitle-track"', 1)[1].split('>', 1)[0]
+        self.assertNotIn("default", track_markup)
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
