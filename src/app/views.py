@@ -301,7 +301,7 @@ PROFILE_DEFAULTS = {
     "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
     "ytdlp_video_max_height": "720",
     "max_downloads": "3",
-    "deno_path": "deno",
+    "js_runtime_path": "qjs",
     "summary_model": "qwen2.5:0.5b",
     "ollama_path": "ollama",
     "android_sync_target": "android",

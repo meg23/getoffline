@@ -11,7 +11,7 @@ from workers.logger import get_logger
 from models.jobs import create_job
 from models.models import Download, Job, MediaSummary, ProfileConfigValue, SourceConfig, TranscriptSegment
 from workers.utils import sanitize_channel_name
-from workers.youtube import _apply_ytdlp_player_js_variant_workaround, _enable_youtube_ejs_remote_component
+from workers.youtube import _apply_ytdlp_player_js_variant_workaround, _enable_youtube_quickjs_remote_component
 from workers.subtitles import create_subtitles
 from workers.summary_tasks import _load_segments_from_subtitle
 from workers.summarization import summarize_segments
@@ -387,7 +387,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     if source_type == SourceConfig.SOURCE_YOUTUBE and requested_media_type != "audio" and max_height.isdigit():
         ydl_opts["format"] = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/best[height<={max_height}]/best"
     if source_type == SourceConfig.SOURCE_YOUTUBE:
-        _enable_youtube_ejs_remote_component(ydl_opts, f"download job {job.id}", _profile_setting(job.profile_id, "deno_path", "deno"))
+        _enable_youtube_quickjs_remote_component(ydl_opts, f"download job {job.id}", _profile_setting(job.profile_id, "js_runtime_path", "qjs"))
         _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     log.info(
@@ -616,7 +616,7 @@ def _youtube_entries_from_url(url: str, limit: int, *, source: SourceConfig, rea
         playlistend=limit,
         playlist_items=f"1-{limit}",
     )
-    _enable_youtube_ejs_remote_component(ydl_opts, f"update source {source.name}", _profile_setting(source.profile_id, "deno_path", "deno"))
+    _enable_youtube_quickjs_remote_component(ydl_opts, f"update source {source.name}", _profile_setting(source.profile_id, "js_runtime_path", "qjs"))
     _apply_ytdlp_player_js_variant_workaround(ydl_opts)
     log.info(
         "yt-dlp extract starting source_id=%s source_name=%s reason=%s url=%s options=%s",

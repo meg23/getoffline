@@ -4828,7 +4828,7 @@ def _render_settings(
     auto_delete_content_days = html.escape(str(defaults.get("auto_delete_content_days") or "0"))
     summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
     ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
-    deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
+    js_runtime_path = html.escape(str(defaults.get("js_runtime_path") or "qjs"))
     def default_checked(key: str, fallback: bool = False) -> str:
         value = defaults.get(key, fallback)
         if isinstance(value, bool):
@@ -4860,7 +4860,7 @@ def _render_settings(
     android_sync_include_played_checked = default_checked("android_sync_include_played", False)
     android_sync_exclude_regex = html.escape(str(defaults.get("android_sync_exclude_regex") or ""))
     resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
-    resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
+    resolved_js_runtime_path = html.escape(str(shutil.which(str(defaults.get("js_runtime_path") or "qjs")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
     manual_upload_filter_checked = default_checked("manual_upload_delete_explicit_content")
@@ -5252,11 +5252,11 @@ def _render_settings(
             <input id="max_downloads" name="max_downloads" value="{max_downloads}" required />
           </div>
           <div>
-            <label for="deno_path">Deno executable</label>
-            <input id="deno_path" name="deno_path" value="{deno_path}" required />
+            <label for="js_runtime_path">JavaScript runtime executable</label>
+            <input id="js_runtime_path" name="js_runtime_path" value="{js_runtime_path}" required />
           </div>
         </div>
-        <p><strong>Resolved path:</strong> Deno <code>{resolved_deno_path}</code></p>
+        <p><strong>Resolved path:</strong> JavaScript runtime <code>{resolved_js_runtime_path}</code></p>
         <label for="youtube_cookie_text">YouTube cookies.txt content</label>
         <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
         <div class="actions">
@@ -6301,7 +6301,7 @@ def make_handler(state: AppState):
                         "ffmpeg_audio_filter": (form.get("ffmpeg_audio_filter") or [""])[0],
                         "max_downloads": (form.get("max_downloads") or [""])[0],
                         "playlist_end": (form.get("max_downloads") or [""])[0],
-                        "deno_path": (form.get("deno_path") or [""])[0],
+                        "js_runtime_path": (form.get("js_runtime_path") or [""])[0],
                     }
                     sanitized_updates = {
                         k: str(v).strip()

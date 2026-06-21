@@ -125,7 +125,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "playlist_end": "9",
                     "summary_model": "qwen2.5:0.5b",
                     "ollama_path": "/opt/bin/ollama",
-                    "deno_path": "/opt/bin/deno",
+                    "js_runtime_path": "/usr/bin/qjs",
                     "android_sync_target": "directory",
                     "android_sync_directory": "/mnt/offline",
                     "manual_upload_delete_explicit_content": "1",
@@ -139,7 +139,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(config["defaults"]["playlist_end"], 9)
             self.assertEqual(config["defaults"]["summary_model"], "qwen2.5:0.5b")
             self.assertEqual(config["defaults"]["ollama_path"], "/opt/bin/ollama")
-            self.assertEqual(config["defaults"]["deno_path"], "/opt/bin/deno")
+            self.assertEqual(config["defaults"]["js_runtime_path"], "/usr/bin/qjs")
             self.assertEqual(config["defaults"]["android_sync_target"], "directory")
             self.assertEqual(config["defaults"]["android_sync_directory"], "/mnt/offline")
             self.assertTrue(config["defaults"]["manual_upload_delete_explicit_content"])

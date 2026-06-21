@@ -7,25 +7,16 @@ COPY deploy/requirements/worker-download.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt
 
-FROM python:3.12-alpine AS deno
-
-ENV DENO_INSTALL=/usr/local
-RUN apk add --no-cache ca-certificates curl unzip \
-    && curl -fsSL https://deno.land/install.sh | sh \
-    && rm -rf /root/.cache /tmp/*
-
 FROM python:3.12-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     DJANGO_SETTINGS_MODULE=app.settings \
-    DENO_INSTALL=/usr/local \
     PATH=/opt/venv/bin:/usr/local/bin:$PATH
 
-RUN apk add --no-cache ca-certificates ffmpeg \
+RUN apk add --no-cache ca-certificates ffmpeg quickjs \
     && python -m venv /opt/venv
-COPY --from=deno /usr/local/bin/deno /usr/local/bin/deno
 WORKDIR /app
 COPY --from=wheels /wheels /wheels
 COPY deploy/requirements/worker-download.txt /tmp/requirements.txt

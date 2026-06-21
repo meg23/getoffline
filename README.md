@@ -26,12 +26,12 @@ Install the following system tools first:
 
 - `make`
 - `ffmpeg` (includes `ffprobe`)
-- `deno` (used by yt-dlp's YouTube challenge solver runtime)
+- `quickjs` / `qjs` (used by yt-dlp's YouTube challenge solver runtime)
 - Python 3.8+
 
 Python dependencies are installed automatically by the Makefile.
 
-If `deno` is available on `PATH`, GetOffline enables yt-dlp's recommended YouTube remote component (`ejs:github`) for challenge solving.
+If `qjs` (QuickJS) is available on `PATH`, GetOffline configures yt-dlp to use the `quickjs` JavaScript runtime and enables the YouTube remote component (`ejs:github`) for challenge solving.
 
 GetOffline applies the yt-dlp `youtube:player_js_variant=main` workaround for known challenge-solver instability (see yt-dlp issue #16256).
 
@@ -41,7 +41,7 @@ When upgrading yt-dlp from PyPI/pip, install with the default extra so EJS suppo
 pip install -U "yt-dlp[default]"
 ```
 
-GetOffline sets `--remote-components ejs:github` automatically when `deno` is available, matching yt-dlp guidance for non-GitHub-release installs.
+GetOffline sets `js_runtimes={"quickjs": {"path": "qjs"}}` and `--remote-components ejs:github` automatically when QuickJS is available, matching yt-dlp's external JavaScript runtime support while keeping the download image small.
 
 
 ## Configuration

@@ -449,7 +449,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertEqual(RecordingExecutor.instances[0].max_workers, 1)
 
 
-    def test_youtube_download_enables_ejs_remote_component_when_deno_available(self):
+    def test_youtube_download_enables_ejs_remote_component_when_quickjs_available(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
                 "defaults": {
@@ -464,19 +464,20 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
             }
 
-            with patch("workers.youtube.shutil.which", return_value="/usr/bin/deno"), patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
+            with patch("workers.youtube.shutil.which", return_value="/usr/bin/qjs"), patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
             self.assertEqual(opts.get("remote_components"), ["ejs:github"])
+            self.assertEqual(opts.get("js_runtimes"), {"quickjs": {"path": "/usr/bin/qjs"}})
 
-    def test_youtube_download_uses_configured_deno_path_for_ejs_remote_component(self):
+    def test_youtube_download_uses_configured_quickjs_path_for_ejs_remote_component(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            deno_dir = Path(tmpdir) / "deno-bin"
-            deno_dir.mkdir()
-            deno_path = deno_dir / "deno"
-            deno_path.write_text("#!/bin/sh\n", encoding="utf-8")
-            deno_path.chmod(0o755)
+            quickjs_dir = Path(tmpdir) / "quickjs-bin"
+            quickjs_dir.mkdir()
+            quickjs_path = quickjs_dir / "qjs"
+            quickjs_path.write_text("#!/bin/sh\n", encoding="utf-8")
+            quickjs_path.chmod(0o755)
             config = {
                 "defaults": {
                     "cookie_path": os.path.join(tmpdir, "cookies.txt"),
@@ -486,14 +487,14 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                    "deno_path": str(deno_path),
+                    "js_runtime_path": str(quickjs_path),
                 },
                 "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
             }
 
             original_path = os.environ.get("PATH", "")
             try:
-                os.environ["PATH"] = os.pathsep.join(part for part in original_path.split(os.pathsep) if part != str(deno_dir))
+                os.environ["PATH"] = os.pathsep.join(part for part in original_path.split(os.pathsep) if part != str(quickjs_dir))
                 with patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
                     youtube.download_youtube_items(config, [])
                 path_after_download = os.environ["PATH"]
@@ -502,7 +503,8 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
 
             opts = FakeYoutubeDL.instances[0].opts
             self.assertEqual(opts.get("remote_components"), ["ejs:github"])
-            self.assertEqual(path_after_download.split(os.pathsep)[0], str(deno_dir.resolve()))
+            self.assertEqual(opts.get("js_runtimes"), {"quickjs": {"path": str(quickjs_path.resolve())}})
+            self.assertEqual(path_after_download.split(os.pathsep)[0], str(quickjs_dir.resolve()))
 
     def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
         class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):
