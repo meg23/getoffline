@@ -1,8 +1,9 @@
 import mimetypes
+import uuid
 from pathlib import Path
 from urllib.parse import urlencode
 
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
@@ -334,15 +335,27 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Unsupported job_type")
 
     payload = {"source": "django_app"}
+    completion_token = ""
+    if job_type == "update_downloads":
+        completion_token = uuid.uuid4().hex
+        payload["completion_token"] = completion_token
     if job_type == "download_single":
         payload["manual_enqueue"] = True
     if request.POST.get("url"):
         payload["url"] = str(request.POST["url"]).strip()
-    idempotency_key = request.POST.get("idempotency_key") or f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
+    default_idempotency = f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
+    if job_type == "update_downloads":
+        default_idempotency = f"{job_type}:{profile_id}:{completion_token}"
+    idempotency_key = request.POST.get("idempotency_key") or default_idempotency
     job = create_job(profile_id=profile_id, job_type=job_type, payload=payload, idempotency_key=idempotency_key)
     publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
-    if request.headers.get("x-requested-with") == "XMLHttpRequest" or request.headers.get("accept") == "application/json":
-        status_url = f"{reverse('job_status', args=[job.id])}?{urlencode({'profile_id': profile_id})}"
+    wants_json = (
+        request.headers.get("x-requested-with") == "XMLHttpRequest"
+        or request.headers.get("accept") == "application/json"
+    )
+    if wants_json:
+        status_query = urlencode({"profile_id": profile_id, "token": completion_token})
+        status_url = f"{reverse('worker_message_status')}?{status_query}"
         return JsonResponse({"ok": True, "job_id": job.id, "status": job.status, "status_url": status_url})
     next_url = str(request.POST.get("next") or "")
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
@@ -350,19 +363,33 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     return HttpResponseRedirect(reverse("jobs") + f"?profile_id={profile_id}")
 
 
-def job_status(request: HttpRequest, job_id: int) -> JsonResponse:
+def worker_message_status(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
-    job = get_object_or_404(Job, pk=job_id)
-    if job.profile_id != profile_id:
-        return HttpResponseForbidden("Job is not available for this profile")
-    finished = job.status in {Job.STATUS_SUCCEEDED, Job.STATUS_FAILED}
+    token = str(request.GET.get("token") or "").strip()
+    if not token:
+        return JsonResponse(
+            {"finished": False, "ok": False, "error_message": "Missing completion token"},
+            status=400,
+        )
+    message = (
+        Job.objects.filter(
+            profile_id=profile_id,
+            job_type="worker_message",
+            payload__event_type="update_downloads_finished",
+            payload__completion_token=token,
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if message is None:
+        return JsonResponse({"finished": False, "ok": True, "status": "pending"})
+    payload = message.payload if isinstance(message.payload, dict) else {}
+    source_status = str(payload.get("source_status") or "")
     return JsonResponse({
-        "id": job.id,
-        "job_type": job.job_type,
-        "status": job.status,
-        "finished": finished,
-        "ok": job.status != Job.STATUS_FAILED,
-        "error_message": job.error_message or "",
+        "finished": True,
+        "ok": source_status != Job.STATUS_FAILED,
+        "status": source_status,
+        "error_message": str(payload.get("error_message") or ""),
     })
 
 
