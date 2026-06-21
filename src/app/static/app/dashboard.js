@@ -545,7 +545,7 @@
     if (miniTitle) miniTitle.textContent = state.title || "Now playing";
     if (miniSource) miniSource.textContent = state.source || "";
     media.src = state.src;
-    if (state.hasSubtitles && state.subtitleUrl) {
+    if (state.kind !== "video" && state.hasSubtitles && state.subtitleUrl) {
       const track = document.createElement("track");
       track.kind = "subtitles";
       track.srclang = "en";

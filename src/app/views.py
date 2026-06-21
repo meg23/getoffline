@@ -1,5 +1,6 @@
 import mimetypes
 import uuid
+import re
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -56,6 +57,11 @@ def _decorate_download(item: Download) -> Download:
     if item.download_status in {"missing", "retention_deleted"}:
         item.status_label = "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
         item.status_class = "status-missing"
+    try:
+        item.resolved_subtitle_path = _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
+    except Http404:
+        item.resolved_subtitle_path = None
+    item.has_subtitles = item.resolved_subtitle_path is not None
     return item
 
 
@@ -88,6 +94,56 @@ def _safe_path(raw_path: str | None) -> Path:
     if not path.exists() or not path.is_file():
         raise Http404("File unavailable")
     return path
+
+
+def _profile_output_root(profile_id: str) -> Path:
+    value = (
+        ProfileConfigValue.objects.filter(profile_id=profile_id, key="output_root")
+        .values_list("value", flat=True)
+        .first()
+        or AppConfigValue.objects.filter(key="output_root").values_list("value", flat=True).first()
+        or PROFILE_DEFAULTS["output_root"]
+    )
+    return Path(str(value)).expanduser().resolve()
+
+
+def _srt_to_vtt(content: str) -> str:
+    lines = content.replace("\ufeff", "").splitlines()
+    timestamp_re = re.compile(
+        r"^(\d{2}:\d{2}:\d{2}),(\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}),(\d{3})(.*)$"
+    )
+    out_lines = ["WEBVTT", ""]
+    for line in lines:
+        match = timestamp_re.match(line)
+        if match:
+            start_time, start_ms, end_time, end_ms, tail = match.groups()
+            out_lines.append(f"{start_time}.{start_ms} --> {end_time}.{end_ms}{tail}")
+        elif line.strip().isdigit():
+            continue
+        else:
+            out_lines.append(line)
+    return "\n".join(out_lines).strip() + "\n"
+
+
+def _resolve_subtitle_path(item: Download) -> Path | None:
+    media_path = _safe_path(item.file_path)
+    candidates: list[Path] = []
+    if item.subtitle_path:
+        candidates.append(Path(str(item.subtitle_path)))
+    if item.subtitle_path_relative:
+        candidates.append(_profile_output_root(item.profile_id) / str(item.subtitle_path_relative))
+    candidates.extend([media_path.with_suffix(".srt"), media_path.with_suffix(".vtt")])
+
+    root = _profile_output_root(item.profile_id)
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        if resolved.is_file() and resolved.suffix.lower() in {".srt", ".vtt"}:
+            return resolved
+    return None
 
 
 def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
@@ -165,7 +221,9 @@ def jobs(request: HttpRequest) -> HttpResponse:
 
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
-    if not hasattr(item, "summary") and item.download_status == "downloaded" and item.subtitle_path:
+    item.resolved_subtitle_path = _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
+    item.has_subtitles = item.resolved_subtitle_path is not None
+    if not hasattr(item, "summary") and item.download_status == "downloaded" and item.has_subtitles:
         _queue_missing_summary_batch(item.profile_id, reason="player_missing_summary")
     try:
         requested_seek = float(request.GET.get("t") or 0.0)
@@ -205,10 +263,17 @@ def media(request: HttpRequest, download_id: int) -> HttpResponse:
     return response
 
 
-def subtitle(request: HttpRequest, download_id: int) -> FileResponse:
+def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
-    path = _safe_path(item.subtitle_path)
-    return FileResponse(path.open("rb"), content_type="text/vtt" if path.suffix == ".vtt" else "text/plain")
+    path = _resolve_subtitle_path(item)
+    if path is None:
+        raise Http404("Subtitle unavailable")
+    subtitle_text = path.read_text(encoding="utf-8", errors="replace")
+    if path.suffix.lower() == ".srt":
+        subtitle_text = _srt_to_vtt(subtitle_text)
+    elif not subtitle_text.lstrip().startswith("WEBVTT"):
+        subtitle_text = "WEBVTT\n\n" + subtitle_text
+    return HttpResponse(subtitle_text, content_type="text/vtt; charset=utf-8")
 
 
 PROFILE_DEFAULTS = {
