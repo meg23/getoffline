@@ -299,7 +299,7 @@ def transcode_media(job: Job) -> None:
     child = create_job(
         profile_id=job.profile_id,
         job_type="generate_transcript",
-        payload={"download_id": download.id, "original_file_path": str(old_path) if old_path != target_path else "", "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds")},
+        payload={"download_id": download.id, "original_file_path": str(old_path) if old_path != target_path else "", "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"), "source_type": download.source_type, "media_type": media_kind, "recent_download": True},
         idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
     )
     _publish_created_job(child)
@@ -350,8 +350,16 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     if not download_url:
         log.warning("Download worker skipped job with no URL job_id=%s payload=%s", job.id, payload)
         return None
-    source_name = str(payload.get("source_name") or payload.get("source_type") or "GetOffline").strip()
     source_type = str(payload.get("source_type") or "youtube").strip()
+    source_name = str(payload.get("source_name") or "").strip()
+    if not source_name and source_type == SourceConfig.SOURCE_YOUTUBE:
+        try:
+            from workers.youtube import resolve_youtube_source_name
+
+            source_name = resolve_youtube_source_name(download_url)
+        except Exception as exc:
+            log.warning("Could not resolve YouTube channel name for direct download job_id=%s url=%s: %s", job.id, download_url, exc)
+    source_name = source_name or str(payload.get("source_type") or "GetOffline").strip()
     if source_type == SourceConfig.SOURCE_YOUTUBE and not _is_youtube_video_url(download_url):
         fallback_uid = str(payload.get("item_uid") or "").strip()
         if len(fallback_uid) == 11:
@@ -448,6 +456,8 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             "media_type": media_kind,
             "subtitles": payload.get("subtitles", True),
             "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
+            "source_type": source_type,
+            "recent_download": True,
             "download_lookup": download_lookup,
             "download_defaults": {key: value for key, value in download_defaults.items() if key not in {"last_seen_at", "completed_at"}},
             "item_uid": item_uid,
@@ -854,7 +864,7 @@ def download_episode(job: Job) -> None:
     target_ext = "mp3" if media_kind == "audio" else (download.file_ext or "")
     requires_ffmpeg = media_kind == "audio" and (download.file_ext or "").lower() != "mp3"
     next_job_type = "transcode_media" if requires_ffmpeg else "generate_transcript"
-    next_payload = {"download_id": download_id, "media_type": media_kind, "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds")} if requires_ffmpeg else {"download_id": download_id, "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds")}
+    next_payload = {"download_id": download_id, "media_type": media_kind, "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"), "source_type": download.source_type, "recent_download": True} if requires_ffmpeg else {"download_id": download_id, "subtitles": payload.get("subtitles", True), "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"), "source_type": download.source_type, "media_type": media_kind, "recent_download": True}
     log.info(
         "Download worker selected next stage parent_job_id=%s download_id=%s file_ext=%s media_kind=%s target_ext=%s next_job_type=%s",
         job.id,

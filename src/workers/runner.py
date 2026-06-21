@@ -21,11 +21,12 @@ from app.routing import (  # noqa: E402
     SYNC_QUEUE,
     TRANSCRIPT_QUEUE,
     FFMPEG_QUEUE,
+    queue_arguments,
 )
 from models.jobs import claim_job, create_job, finish_job  # noqa: E402
 from models.models import Download, Job, SourceConfig  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
-from app.queue import publish_job  # noqa: E402
+from app.queue import job_priority, publish_job  # noqa: E402
 
 log = get_logger("workers.runner")
 
@@ -116,11 +117,12 @@ def requeue_existing_jobs(channel, worker_type: str) -> int:
     queue = QUEUE_BY_WORKER[worker_type]
     rows = list(Job.objects.filter(status=Job.STATUS_QUEUED, job_type__in=job_types).order_by("created_at", "id")[:500])
     for job in rows:
+        message = {"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1, "payload": job.payload}
         channel.basic_publish(
             exchange=settings.RABBITMQ_EXCHANGE,
             routing_key=queue,
-            body=json.dumps({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1}, sort_keys=True).encode("utf-8"),
-            properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+            body=json.dumps({k: v for k, v in message.items() if k != "payload"}, sort_keys=True).encode("utf-8"),
+            properties=pika.BasicProperties(content_type="application/json", delivery_mode=2, priority=job_priority(message)),
             mandatory=True,
         )
     return len(rows)
@@ -207,7 +209,7 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
     try:
         channel = connection.channel()
         channel.exchange_declare(exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True)
-        channel.queue_declare(queue=queue, durable=True)
+        channel.queue_declare(queue=queue, durable=True, arguments=queue_arguments(queue) or None)
         channel.queue_bind(queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue)
         channel.basic_qos(prefetch_count=safe_prefetch)
         if requeue_existing_jobs_enabled():
