@@ -146,20 +146,31 @@
       <section class="settings-section queue-section">
         <h2>Queue counts</h2>
         <p class="section-help">Current queued and running jobs for profile <strong>{{ profile_name }}</strong>, grouped by worker queue.</p>
-        <div class="queue-count-grid">
-          {% for queue in queue_counts %}
-            <article class="queue-count-card">
-              <h3>{{ queue.label }}</h3>
-              <p class="queue-name">{{ queue.queue }}</p>
-              <div class="queue-count-values">
-                <span><strong>{{ queue.queued }}</strong> queued</span>
-                <span><strong>{{ queue.running }}</strong> running</span>
-                <span><strong>{{ queue.total }}</strong> total</span>
-              </div>
-            </article>
-          {% empty %}
-            <p>No queues found.</p>
-          {% endfor %}
+        <div class="queue-count-table-wrap">
+          <table class="queue-count-table">
+            <thead>
+              <tr>
+                <th scope="col">Queue</th>
+                <th scope="col">Worker route</th>
+                <th scope="col">Queued</th>
+                <th scope="col">Running</th>
+                <th scope="col">Total active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for queue in queue_counts %}
+                <tr>
+                  <th scope="row">{{ queue.label }}</th>
+                  <td class="queue-name">{{ queue.queue }}</td>
+                  <td>{{ queue.queued }}</td>
+                  <td>{{ queue.running }}</td>
+                  <td><strong>{{ queue.total }}</strong></td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="5" class="empty-queue-row">No queues found.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
       </section>
     </main>
