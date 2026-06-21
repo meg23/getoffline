@@ -142,12 +142,12 @@ The job payload and status live in MySQL.
 
 ## Docker Compose with persistent MySQL
 
-The repository includes `docker-compose.yml` for running the frontend, nginx, RabbitMQ, workers, and a persistent MySQL database. It builds separate Alpine images so the frontend/migration image installs only Django/PyMySQL/pika, while the worker image carries the heavier media-processing dependencies only where they are needed:
+The repository includes `docker-compose.yml` for running the frontend with bundled nginx, RabbitMQ, workers, and a persistent MySQL database. It builds separate Alpine images so the frontend/migration image installs only web/database/queue dependencies plus nginx, while the worker image carries the heavier media-processing dependencies only where they are needed:
 
-- `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, a small Alpine image with only web/database/queue dependencies.
+- `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, an Alpine image with Django, Gunicorn, and nginx for web/database/queue dependencies.
 - updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
 - transcript, summary, and sync workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies until heavier processing packages are actually needed.
-- `nginx` publishes the frontend on host port `8080` and proxies requests to the Django `frontend` service.
+- `frontend` publishes host port `8080`, serves static files with bundled nginx, and proxies dynamic requests to the Django app running under Gunicorn WSGI in the same container.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
 - `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.
 - `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
