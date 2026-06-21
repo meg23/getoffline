@@ -1,7 +1,7 @@
 import mimetypes
 from pathlib import Path
 
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
@@ -340,10 +340,28 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     idempotency_key = request.POST.get("idempotency_key") or f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
     job = create_job(profile_id=profile_id, job_type=job_type, payload=payload, idempotency_key=idempotency_key)
     publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    if request.headers.get("x-requested-with") == "XMLHttpRequest" or request.headers.get("accept") == "application/json":
+        return JsonResponse({"ok": True, "job_id": job.id, "status": job.status, "status_url": reverse("job_status", args=[job.id])})
     next_url = str(request.POST.get("next") or "")
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return HttpResponseRedirect(next_url)
     return HttpResponseRedirect(reverse("jobs") + f"?profile_id={profile_id}")
+
+
+def job_status(request: HttpRequest, job_id: int) -> JsonResponse:
+    profile_id = _profile_id(request)
+    job = get_object_or_404(Job, pk=job_id)
+    if job.profile_id != profile_id:
+        return HttpResponseForbidden("Job is not available for this profile")
+    finished = job.status in {Job.STATUS_SUCCEEDED, Job.STATUS_FAILED}
+    return JsonResponse({
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "finished": finished,
+        "ok": job.status != Job.STATUS_FAILED,
+        "error_message": job.error_message or "",
+    })
 
 
 @require_POST

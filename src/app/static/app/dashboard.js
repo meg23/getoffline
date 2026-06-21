@@ -162,6 +162,87 @@
   applyFilters();
 })();
 
+
+(() => {
+  function readCookie(name) {
+    return (
+      document.cookie
+        .split(";")
+        .map((v) => v.trim())
+        .find((v) => v.startsWith(`${name}=`))
+        ?.slice(name.length + 1) || ""
+    );
+  }
+
+  const form = document.getElementById("sync-form");
+  const button = document.getElementById("sync-button");
+  const csrf =
+    form?.querySelector("[name=csrfmiddlewaretoken]")?.value ||
+    decodeURIComponent(readCookie("csrftoken") || "");
+  const doneStatuses = new Set(["succeeded", "failed"]);
+  let pollTimer = 0;
+
+  function setLoading(loading) {
+    if (!button) return;
+    button.classList.toggle("is-spinning", loading);
+    button.disabled = loading;
+    button.setAttribute("aria-busy", loading ? "true" : "false");
+    button.textContent = loading
+      ? button.dataset.loadingLabel || "⟳"
+      : button.dataset.idleLabel || "⟳";
+  }
+
+  async function pollUntilDone(statusUrl) {
+    const response = await fetch(statusUrl, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("Unable to check sync status.");
+    const payload = await response.json();
+    if (payload.finished || doneStatuses.has(String(payload.status || ""))) {
+      setLoading(false);
+      if (payload.status === "failed") {
+        window.alert(payload.error_message || "Sync failed while looking for updates.");
+      } else {
+        window.location.reload();
+      }
+      return;
+    }
+    pollTimer = window.setTimeout(() => pollUntilDone(statusUrl).catch(fail), 1500);
+  }
+
+  function fail() {
+    window.clearTimeout(pollTimer);
+    setLoading(false);
+    window.alert("Unable to finish checking for updates. Please try again.");
+  }
+
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form || !button || button.disabled) return;
+    setLoading(true);
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "X-CSRFToken": csrf,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      if (!response.ok) throw new Error("Unable to start sync.");
+      const payload = await response.json();
+      if (!payload.status_url) throw new Error("Missing sync status URL.");
+      await pollUntilDone(payload.status_url);
+    } catch (_) {
+      fail();
+    }
+  });
+})();
+
 (() => {
   function readCookie(name) {
     return (

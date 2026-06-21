@@ -37,11 +37,11 @@
 
       <section class="panel toolbar-panel" aria-label="Dashboard controls">
         <div class="toolbar-actions">
-          <form method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
+          <form id="sync-form" method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
             {% csrf_token %}
             <input type="hidden" name="profile_id" value="{{ profile_id }}" />
             <input type="hidden" name="next" value="{% url 'library' %}?profile_id={{ profile_id }}" />
-            <button class="icon-button icon-button-primary" name="job_type" value="update_downloads" type="submit" title="Sync downloads" aria-label="Sync downloads">⟳</button>
+            <button id="sync-button" class="icon-button icon-button-primary" name="job_type" value="update_downloads" type="submit" title="Sync downloads" aria-label="Sync downloads" data-idle-label="⟳" data-loading-label="⟳">⟳</button>
           </form>
           <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link">+</button>
           <button id="transcript-search-open" class="icon-button" type="button" title="Search transcripts" aria-label="Search transcripts">⌕</button>
