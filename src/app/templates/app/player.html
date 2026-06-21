@@ -27,6 +27,7 @@
       const form = document.getElementById('position-form');
       const input = document.getElementById('position-seconds');
       const seek = {{ seek_seconds|default:0 }};
+      const shouldAutoPlay = true;
       let lastSentSeconds = -1;
       let pendingForcedSave = false;
       let hasAppliedInitialSeek = !(seek > 0);
@@ -81,7 +82,7 @@
       }
 
       media?.addEventListener('loadedmetadata', applyInitialSeek);
-      media?.addEventListener('canplay', applyInitialSeek);
+      media?.addEventListener('canplay', () => { applyInitialSeek(); if (shouldAutoPlay && media.paused) media.play().catch((err) => console.debug('[getoffline] player autoplay failed', { err })); });
       media?.addEventListener('playing', applyInitialSeek);
       media?.addEventListener('timeupdate', () => { if (!hasAppliedInitialSeek && !applyInitialSeek()) return; if (!media.paused) savePosition('timeupdate', false); });
       media?.addEventListener('pause', () => savePosition('pause', true));

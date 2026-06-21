@@ -580,7 +580,7 @@
       () => {
         applyMediaSettings(media);
         applyMiniResume();
-        if (!state.paused) media.play().catch(() => {});
+        if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay after metadata failed", { rowId: state.rowId, err }));
       },
       { once: true },
     );
@@ -618,7 +618,7 @@
     };
     media.autoplay = !state.paused;
     media.load();
-    if (!state.paused) media.play().catch(() => {});
+    if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay failed", { rowId: state.rowId, err }));
     miniPlayer.classList.add("is-visible");
     setExpanded(false);
   }

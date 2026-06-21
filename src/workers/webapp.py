@@ -3936,7 +3936,9 @@ def _render_index(
         active.addEventListener('canplay', applyMiniResume, {{ once: true }});
         active.addEventListener('playing', applyMiniResume);
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
+        active.autoplay = !state.paused;
         active.load();
+        if (!state.paused) active.play().catch((err) => console.debug('[getoffline] mini autoplay failed', {{ rowId: state.rowId, err }}));
 
         detachMiniHandlers(active);
 
