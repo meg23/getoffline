@@ -4,7 +4,7 @@ FROM python:3.12-alpine AS wheels
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY deploy/requirements/worker-download.txt /tmp/requirements.txt
+COPY deploy/requirements/worker-base.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt
 
@@ -14,12 +14,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     DJANGO_SETTINGS_MODULE=app.settings \
-    PATH=/opt/venv/bin:/usr/local/bin:$PATH
+    PATH=/opt/venv/bin:$PATH
 
-RUN apk add --no-cache ca-certificates quickjs \
+RUN apk add --no-cache ca-certificates ffmpeg \
     && python -m venv /opt/venv
 WORKDIR /app
-COPY deploy/requirements/worker-download.txt /tmp/requirements.txt
+COPY deploy/requirements/worker-base.txt /tmp/requirements.txt
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
     && rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share

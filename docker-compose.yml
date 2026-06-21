@@ -131,7 +131,7 @@ services:
   worker-ffmpeg:
     build:
       context: .
-      dockerfile: deploy/docker/worker-download.Dockerfile
+      dockerfile: deploy/docker/worker-ffmpeg.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
     command: sh -c "python -m workers ffmpeg --prefetch $${PREFETCH:-1}"

@@ -78,7 +78,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/app/model-cache/xdg \
     PATH=/opt/venv/bin:$PATH
 
-RUN apk add --no-cache ca-certificates ffmpeg libgomp libstdc++ gcompat \
+RUN apk add --no-cache ca-certificates libgomp libstdc++ gcompat \
     && python -m venv /opt/venv
 WORKDIR /app
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
