@@ -297,3 +297,36 @@ button {
     padding: 1rem;
   }
 }
+
+.queue-count-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1rem;
+}
+.queue-count-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+  background: #f8fbff;
+}
+.queue-count-card h3 {
+  margin: 0 0 0.25rem;
+}
+.queue-name {
+  margin: 0 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.queue-count-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+.queue-count-values span {
+  border-radius: 999px;
+  background: #eef3ff;
+  color: #243251;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.9rem;
+}

@@ -5,13 +5,15 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.views.decorators.http import require_POST
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from models.jobs import create_job
 from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig, TranscriptSegment
 
 from .queue import publish_job
+from .routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, SYNC_QUEUE, TRANSCRIPT_QUEUE, queue_name
 
 
 ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "sync_media", "summarize_missing"}
@@ -253,6 +255,40 @@ def _checked(settings: dict[str, str], key: str) -> bool:
     return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _queue_counts(profile_id: str) -> list[dict[str, object]]:
+    queue_labels = {
+        SERIAL_EPISODE_CHECK_QUEUE: "Updates",
+        SERIAL_DOWNLOAD_QUEUE: "Downloads",
+        FFMPEG_QUEUE: "FFmpeg",
+        TRANSCRIPT_QUEUE: "Transcripts",
+        SUMMARY_QUEUE: "Summaries",
+        SYNC_QUEUE: "Sync",
+    }
+    counts = {
+        queue: {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0}
+        for queue in queue_labels
+    }
+    rows = (
+        Job.objects.filter(profile_id=profile_id, status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING])
+        .values("job_type", "status")
+        .annotate(total=Count("id"))
+    )
+    for row in rows:
+        queue = queue_name(str(row["job_type"]))
+        counts.setdefault(queue, {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0})
+        counts[queue][str(row["status"])] = int(row["total"] or 0)
+        queue_labels.setdefault(queue, queue.removeprefix("getoffline."))
+    return [
+        {
+            "queue": queue,
+            "label": queue_labels[queue],
+            "queued": values[Job.STATUS_QUEUED],
+            "running": values[Job.STATUS_RUNNING],
+            "total": values[Job.STATUS_QUEUED] + values[Job.STATUS_RUNNING],
+        }
+        for queue, values in sorted(counts.items(), key=lambda item: queue_labels[item[0]].lower())
+    ]
+
 def settings_page(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
     settings = _profile_settings(profile_id)
@@ -283,6 +319,7 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "android_sync_include_started_checked": _checked(settings, "android_sync_include_started"),
             "android_sync_include_played_checked": _checked(settings, "android_sync_include_played"),
             "pin_status": "PIN is set" if settings.get("profile_pin") else "No PIN set",
+            "queue_counts": _queue_counts(profile_id),
         },
     )
 
@@ -303,6 +340,9 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     idempotency_key = request.POST.get("idempotency_key") or f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
     job = create_job(profile_id=profile_id, job_type=job_type, payload=payload, idempotency_key=idempotency_key)
     publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    next_url = str(request.POST.get("next") or "")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return HttpResponseRedirect(next_url)
     return HttpResponseRedirect(reverse("jobs") + f"?profile_id={profile_id}")
 
 
