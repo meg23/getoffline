@@ -40,6 +40,7 @@
           <form method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
             {% csrf_token %}
             <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+            <input type="hidden" name="next" value="{% url 'library' %}?profile_id={{ profile_id }}" />
             <button class="icon-button icon-button-primary" name="job_type" value="update_downloads" type="submit" title="Sync downloads" aria-label="Sync downloads">⟳</button>
           </form>
           <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link">+</button>

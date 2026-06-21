@@ -141,6 +141,38 @@
         <h3>Add podcast source</h3>
         <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" /><input type="hidden" name="source_type" value="podcast" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Add podcast source</button></div></form>
       </section>
+
+
+      <section class="settings-section queue-section">
+        <h2>Queue counts</h2>
+        <p class="section-help">Current queued and running jobs for profile <strong>{{ profile_name }}</strong>, grouped by worker queue.</p>
+        <div class="queue-count-table-wrap">
+          <table class="queue-count-table">
+            <thead>
+              <tr>
+                <th scope="col">Queue</th>
+                <th scope="col">Worker route</th>
+                <th scope="col">Queued</th>
+                <th scope="col">Running</th>
+                <th scope="col">Total active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for queue in queue_counts %}
+                <tr>
+                  <th scope="row">{{ queue.label }}</th>
+                  <td class="queue-name">{{ queue.queue }}</td>
+                  <td>{{ queue.queued }}</td>
+                  <td>{{ queue.running }}</td>
+                  <td><strong>{{ queue.total }}</strong></td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="5" class="empty-queue-row">No queues found.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   </body>
 </html>

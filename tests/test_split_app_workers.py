@@ -11,7 +11,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
 try:
     import django  # noqa: E402
-    from django.test import TestCase, override_settings  # noqa: E402
+    from django.test import Client, TestCase, override_settings  # noqa: E402
 except ModuleNotFoundError:  # pragma: no cover - dependency may be absent outside project venv
     django = None
     TestCase = unittest.TestCase
@@ -28,7 +28,7 @@ from app.routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, q
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
     from models.models import Download, Job, MediaSummary, SourceConfig  # noqa: E402
-    from app.views import _queue_missing_summary_batch  # noqa: E402
+    from app.views import _queue_counts, _queue_missing_summary_batch  # noqa: E402
     from workers.handlers import check_for_episodes, transcode_media, _youtube_candidates  # noqa: E402
 
 
@@ -122,6 +122,38 @@ class SharedDjangoModelTests(TestCase):
         self.assertFalse(queued)
         self.assertFalse(Job.objects.filter(job_type="summarize_missing").exists())
         publish.assert_not_called()
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_queue_counts_groups_active_jobs_by_worker_queue(self):
+        Job.objects.create(profile_id="default", job_type="update_downloads", status=Job.STATUS_QUEUED)
+        Job.objects.create(profile_id="default", job_type="check_for_episodes", status=Job.STATUS_RUNNING)
+        Job.objects.create(profile_id="default", job_type="download_episode", status=Job.STATUS_QUEUED)
+        Job.objects.create(profile_id="default", job_type="generate_summary", status=Job.STATUS_SUCCEEDED)
+        Job.objects.create(profile_id="other", job_type="download_episode", status=Job.STATUS_QUEUED)
+
+        counts = {row["label"]: row for row in _queue_counts("default")}
+
+        self.assertEqual(counts["Updates"]["queued"], 1)
+        self.assertEqual(counts["Updates"]["running"], 1)
+        self.assertEqual(counts["Updates"]["total"], 2)
+        self.assertEqual(counts["Downloads"]["queued"], 1)
+        self.assertEqual(counts["Downloads"]["running"], 0)
+        self.assertEqual(counts["Summaries"]["total"], 0)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_enqueue_job_redirects_to_next_when_present(self):
+        client = Client()
+
+        with patch("app.views.publish_job") as publish:
+            response = client.post(
+                "/jobs/enqueue/",
+                {"profile_id": "default", "job_type": "update_downloads", "next": "/?profile_id=default"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/?profile_id=default")
+        job = Job.objects.get(job_type="update_downloads")
+        publish.assert_called_once_with({"job_id": job.id, "job_type": "update_downloads", "profile_id": "default", "attempt": 1})
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_honors_source_max_downloads(self):
