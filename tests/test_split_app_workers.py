@@ -200,7 +200,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_video_player_includes_subtitle_track_without_default(self):
+    def test_video_player_omits_subtitle_track_by_default(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -226,9 +226,7 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
-        self.assertIn('id="subtitle-track"', body)
-        track_markup = body.split('id="subtitle-track"', 1)[1].split('>', 1)[0]
-        self.assertNotIn("default", track_markup)
+        self.assertNotIn('id="subtitle-track"', body)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_enqueue_job_redirects_to_next_when_present(self):
