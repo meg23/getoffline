@@ -4555,17 +4555,21 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function applyInitialSeek() {{
-        if (hasAppliedInitialSeek) return;
+        if (hasAppliedInitialSeek) return true;
         const initialSeconds = getMiniPlayerResumeSeconds() ?? startSeconds;
-        if (initialSeconds <= 0) return;
+        if (initialSeconds <= 0) {{
+          hasAppliedInitialSeek = true;
+          return true;
+        }}
         const target = Number.isFinite(player.duration) && player.duration > 1
           ? Math.min(initialSeconds, Math.max(player.duration - 1, 0))
           : initialSeconds;
         try {{
-          player.currentTime = target;
-          hasAppliedInitialSeek = true;
+          if (Math.abs(Number(player.currentTime || 0) - target) > 0.75) player.currentTime = target;
+          hasAppliedInitialSeek = Math.abs(Number(player.currentTime || 0) - target) <= 0.75;
           updateLabel(target);
         }} catch (_) {{}}
+        return hasAppliedInitialSeek;
       }}
 
       function syncTranscriptFromTrack() {{
@@ -4644,10 +4648,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       scheduleTranscriptInit();
 
       player.addEventListener('timeupdate', () => {{
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return;
         persistMiniPlayerState();
         if (!player.paused) postProgress(player.currentTime, false);
       }});
       player.addEventListener('pause', () => {{
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return;
         persistMiniPlayerState();
         postProgress(player.currentTime, true, 'pause');
       }});

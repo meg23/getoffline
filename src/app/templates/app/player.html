@@ -29,20 +29,33 @@
       const seek = {{ seek_seconds|default:0 }};
       let lastSentSeconds = -1;
       let pendingForcedSave = false;
-      let hasAppliedInitialSeek = false;
+      let hasAppliedInitialSeek = !(seek > 0);
       const periodicProgressSeconds = 5;
 
+      function initialSeekTarget() {
+        if (!media || !(seek > 0)) return 0;
+        return Number.isFinite(media.duration) && media.duration > 1
+          ? Math.min(seek, Math.max(media.duration - 1, 0))
+          : seek;
+      }
+
       function applyInitialSeek() {
-        if (!media || hasAppliedInitialSeek || !(seek > 0)) return;
-        if (Number.isFinite(media.duration) && seek >= media.duration) return;
-        try {
-          media.currentTime = seek;
+        if (!media || hasAppliedInitialSeek) return true;
+        const target = initialSeekTarget();
+        if (!(target > 0)) {
           hasAppliedInitialSeek = true;
+          return true;
+        }
+        try {
+          if (Math.abs(Number(media.currentTime || 0) - target) > 0.75) media.currentTime = target;
+          hasAppliedInitialSeek = Math.abs(Number(media.currentTime || 0) - target) <= 0.75;
         } catch (_) {}
+        return hasAppliedInitialSeek;
       }
 
       function savePosition(reason = 'timeupdate', forced = false) {
         if (!media || !form || !input) return Promise.resolve(null);
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return Promise.resolve(null);
         const seconds = reason === 'ended' ? 0 : Math.max(0, Number(media.currentTime || 0));
         if (!forced && Math.abs(seconds - lastSentSeconds) < periodicProgressSeconds) return Promise.resolve(null);
         lastSentSeconds = seconds;
@@ -55,6 +68,7 @@
 
       function savePositionBeacon(reason) {
         if (!media || !form || !input || !navigator.sendBeacon) return false;
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return false;
         const seconds = reason === 'ended' ? 0 : Math.max(0, Number(media.currentTime || 0));
         input.value = seconds.toFixed(3);
         const body = new FormData(form);
@@ -66,7 +80,7 @@
       media?.addEventListener('loadedmetadata', applyInitialSeek);
       media?.addEventListener('canplay', applyInitialSeek);
       media?.addEventListener('playing', applyInitialSeek);
-      media?.addEventListener('timeupdate', () => { if (!media.paused) savePosition('timeupdate', false); });
+      media?.addEventListener('timeupdate', () => { if (!hasAppliedInitialSeek && !applyInitialSeek()) return; if (!media.paused) savePosition('timeupdate', false); });
       media?.addEventListener('pause', () => savePosition('pause', true));
       media?.addEventListener('seeking', () => { pendingForcedSave = true; });
       media?.addEventListener('seeked', () => { if (pendingForcedSave) savePosition('seeked', true); pendingForcedSave = false; });
