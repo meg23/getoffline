@@ -350,8 +350,16 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     if not download_url:
         log.warning("Download worker skipped job with no URL job_id=%s payload=%s", job.id, payload)
         return None
-    source_name = str(payload.get("source_name") or payload.get("source_type") or "GetOffline").strip()
     source_type = str(payload.get("source_type") or "youtube").strip()
+    source_name = str(payload.get("source_name") or "").strip()
+    if not source_name and source_type == SourceConfig.SOURCE_YOUTUBE:
+        try:
+            from workers.youtube import resolve_youtube_source_name
+
+            source_name = resolve_youtube_source_name(download_url)
+        except Exception as exc:
+            log.warning("Could not resolve YouTube channel name for direct download job_id=%s url=%s: %s", job.id, download_url, exc)
+    source_name = source_name or str(payload.get("source_type") or "GetOffline").strip()
     if source_type == SourceConfig.SOURCE_YOUTUBE and not _is_youtube_video_url(download_url):
         fallback_uid = str(payload.get("item_uid") or "").strip()
         if len(fallback_uid) == 11:
