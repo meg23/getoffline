@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM python:3.12-alpine AS wheels
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -17,10 +18,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 RUN python -m venv /opt/venv
-COPY --from=wheels /wheels /wheels
 COPY deploy/requirements/worker-base.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
+RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
+    python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
+    && rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share
 
 COPY src ./src
 RUN python -m compileall -q /app/src

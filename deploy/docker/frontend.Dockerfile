@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM python:3.14-alpine AS wheels
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -17,10 +18,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 RUN python -m venv /opt/venv
-COPY --from=wheels /wheels /wheels
 COPY deploy/requirements/frontend.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
+RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
+    python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
+    && rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY src ./src
 RUN python -m django collectstatic --noinput
 
@@ -37,10 +38,10 @@ WORKDIR /app
 RUN apk add --no-cache nginx \
     && python -m venv /opt/venv \
     && mkdir -p /run/nginx /var/lib/nginx/tmp/client_body /app/staticfiles
-COPY --from=wheels /wheels /wheels
 COPY deploy/requirements/frontend.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
+RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
+    python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
+    && rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share
 
 COPY deploy/nginx/default.conf /etc/nginx/http.d/default.conf
 COPY deploy/docker/frontend-entrypoint.sh /usr/local/bin/frontend-entrypoint.sh

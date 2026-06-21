@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM python:3.12-alpine AS wheels
 
 ARG FASTER_WHISPER_VERSION=1.1.0
@@ -32,9 +33,9 @@ ENV WHISPER_MODEL=${WHISPER_MODEL} \
     HUGGINGFACE_HUB_CACHE=/app/model-cache/hub \
     XDG_CACHE_HOME=/app/model-cache/xdg
 
-COPY --from=wheels /wheels /wheels
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
-RUN apk add --no-cache libstdc++ gcompat \
+RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
+    apk add --no-cache libstdc++ gcompat \
     && python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-deps /wheels/faster_whisper-*.whl \
@@ -80,9 +81,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apk add --no-cache ca-certificates ffmpeg libgomp libstdc++ gcompat \
     && python -m venv /opt/venv
 WORKDIR /app
-COPY --from=wheels /wheels /wheels
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
+RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
+    python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
     && python -m pip install --no-cache-dir --no-deps /wheels/faster_whisper-*.whl \
     && python - <<'PY'
 import site
@@ -104,7 +105,7 @@ transcribe_text = transcribe_text.replace('ctranslate2.StorageView', 'object')
 transcribe_text = transcribe_text.replace('ctranslate2.models.WhisperGenerationResult', 'object')
 transcribe_py.write_text(transcribe_text)
 PY
-RUN rm -rf /wheels /tmp/requirements.txt /root/.cache /opt/venv/share
+RUN rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY --from=model-cache /app/model-cache /app/model-cache
 COPY src ./src
 RUN python -m compileall -q /app/src
