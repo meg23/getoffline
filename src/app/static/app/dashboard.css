@@ -235,6 +235,16 @@ table {
   background: #2f62f2;
   border-color: #2f62f2;
 }
+.icon-button.is-spinning {
+  cursor: progress;
+  opacity: 0.85;
+  animation: sync-spin 0.8s linear infinite;
+}
+@keyframes sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .library-filter-wrap {
   display: inline-flex;
   align-items: stretch;

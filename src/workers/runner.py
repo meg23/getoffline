@@ -75,6 +75,31 @@ def _worker_accepts_job(worker_type: str, job_id: int) -> bool:
     return source_type == allowed
 
 
+def _emit_update_finished_message(job: Job, *, status: str, error_message: str = "") -> None:
+    if job.job_type != "update_downloads":
+        return
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    completion_token = str(payload.get("completion_token") or "").strip()
+    if not completion_token:
+        return
+    idempotency_key = f"worker_message:update_downloads:{job.id}:{completion_token}"
+    if Job.objects.filter(idempotency_key=idempotency_key).exists():
+        return
+    Job.objects.create(
+        profile_id=job.profile_id,
+        job_type="worker_message",
+        status=Job.STATUS_SUCCEEDED,
+        payload={
+            "event_type": "update_downloads_finished",
+            "completion_token": completion_token,
+            "source_job_id": job.id,
+            "source_status": status,
+            "error_message": error_message,
+        },
+        idempotency_key=idempotency_key,
+    )
+
+
 def process_message(message: Dict) -> None:
     close_old_connections()
     job_id = int(message["job_id"])
@@ -95,9 +120,11 @@ def process_message(message: Dict) -> None:
         log.info("Job handler starting job_id=%s job_type=%s", job.id, job.job_type)
         handler(job)
         finish_job(job, status=Job.STATUS_SUCCEEDED)
+        _emit_update_finished_message(job, status=Job.STATUS_SUCCEEDED)
         log.info("Job succeeded job_id=%s job_type=%s", job.id, job.job_type)
     except Exception as exc:
         finish_job(job, status=Job.STATUS_FAILED, error_message=str(exc))
+        _emit_update_finished_message(job, status=Job.STATUS_FAILED, error_message=str(exc))
         log.exception("Job failed job_id=%s job_type=%s error=%s", job.id, job.job_type, exc)
         raise
     finally:
