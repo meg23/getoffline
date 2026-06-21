@@ -499,7 +499,10 @@ def unfavorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
 @require_POST
 def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id)
-    position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
+    try:
+        position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
+    except (TypeError, ValueError):
+        return HttpResponse(status=400)
     reason = str(request.POST.get("reason") or "").strip().lower()
     completed = reason in {"ended", "mini-ended"}
     delta = max(0.0, position - float(item.last_position_seconds or 0.0))

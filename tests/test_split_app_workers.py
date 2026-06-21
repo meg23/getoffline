@@ -227,6 +227,48 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
         self.assertNotIn('id="subtitle-track"', body)
+        self.assertIn("const periodicProgressSeconds = 5;", body)
+        self.assertIn("media?.addEventListener('timeupdate'", body)
+        self.assertIn("media?.addEventListener('pause'", body)
+        self.assertIn("media?.addEventListener('seeked'", body)
+        self.assertIn("media?.addEventListener('ended'", body)
+        self.assertIn("window.addEventListener('pagehide'", body)
+        self.assertIn("navigator.sendBeacon(form.action, body)", body)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_django_player_position_endpoint_persists_resume_and_completion(self):
+        client = Client()
+        download = Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="position-video-1",
+            title="Position Video",
+            file_path="/tmp/position-video.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            last_position_seconds=0.0,
+        )
+
+        response = client.post(
+            f"/downloads/{download.id}/position/",
+            {"position_seconds": "37.250", "reason": "timeupdate"},
+        )
+        download.refresh_from_db()
+
+        self.assertEqual(response.status_code, 204)
+        self.assertAlmostEqual(download.last_position_seconds, 37.25, places=2)
+        self.assertFalse(download.played)
+
+        response = client.post(
+            f"/downloads/{download.id}/position/",
+            {"position_seconds": "0", "reason": "ended"},
+        )
+        download.refresh_from_db()
+
+        self.assertEqual(response.status_code, 204)
+        self.assertAlmostEqual(download.last_position_seconds, 0.0, places=2)
+        self.assertTrue(download.played)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_enqueue_job_redirects_to_next_when_present(self):
