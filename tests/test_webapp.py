@@ -2062,6 +2062,9 @@ class WebAppRenderVisibilityTests(unittest.TestCase):
             self.assertIn("miniOpen.textContent = isExpanded ? 'Minimize' : 'Maximize';", body)
             self.assertIn("miniPlayer.classList.contains('is-maximized')", body)
             self.assertIn("link.dataset.resumeSeconds = safe.toFixed(3);", body)
+            self.assertIn("function applyMiniResume()", body)
+            self.assertIn("[getoffline] mini resume seek", body)
+            self.assertIn("state.src + '#t=' + resumeAtLoad.toFixed(3)", body)
 
     def test_player_page_includes_transcript_for_audio_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:

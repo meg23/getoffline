@@ -49,7 +49,8 @@
         try {
           if (Math.abs(Number(media.currentTime || 0) - target) > 0.75) media.currentTime = target;
           hasAppliedInitialSeek = Math.abs(Number(media.currentTime || 0) - target) <= 0.75;
-        } catch (_) {}
+          console.debug('[getoffline] player resume seek', { target, currentTime: media.currentTime, applied: hasAppliedInitialSeek });
+        } catch (err) { console.debug('[getoffline] player resume seek failed', { err }); }
         return hasAppliedInitialSeek;
       }
 
@@ -63,7 +64,9 @@
         const body = new FormData(form);
         body.set('reason', reason);
         body.set('forced', forced ? '1' : '0');
-        return fetch(form.action, { method: 'POST', body, keepalive: forced }).catch(() => null);
+        return fetch(form.action, { method: 'POST', body, keepalive: forced })
+          .then((response) => { console.debug('[getoffline] player save position', { reason, forced, seconds, status: response.status }); return response; })
+          .catch((err) => { console.debug('[getoffline] player save position failed', { reason, forced, seconds, err }); return null; });
       }
 
       function savePositionBeacon(reason) {

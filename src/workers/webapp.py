@@ -3897,9 +3897,26 @@ def _render_index(
         const active = state.kind === 'video' ? miniVideo : miniAudio;
         active.style.display = 'block';
         applyStoredMediaSettings(active);
+        const resumeAtLoad = Math.max(0, Number(state.currentTime || 0));
         const source = document.createElement('source');
-        source.src = state.src;
+        source.src = resumeAtLoad > 0 ? state.src + '#t=' + resumeAtLoad.toFixed(3) : state.src;
         active.appendChild(source);
+
+        let miniResumeApplied = !(resumeAtLoad > 0);
+        function applyMiniResume() {{
+          if (miniResumeApplied) return true;
+          const target = Number.isFinite(active.duration) && active.duration > 1
+            ? Math.min(resumeAtLoad, Math.max(active.duration - 1, 0))
+            : resumeAtLoad;
+          try {{
+            if (Math.abs(Number(active.currentTime || 0) - target) > 0.75) active.currentTime = target;
+            miniResumeApplied = Math.abs(Number(active.currentTime || 0) - target) <= 0.75;
+            console.debug('[getoffline] mini resume seek', {{ rowId: state.rowId, target, currentTime: active.currentTime, applied: miniResumeApplied }});
+          }} catch (err) {{
+            console.debug('[getoffline] mini resume seek failed', {{ rowId: state.rowId, target, err }});
+          }}
+          return miniResumeApplied;
+        }}
 
         let subtitleTrackEl = null;
         if (state.kind === 'audio' && state.hasSubtitles) {{
@@ -3913,15 +3930,18 @@ def _render_index(
         }}
 
         active.addEventListener('loadedmetadata', () => {{
-          active.currentTime = Math.max(0, Number(state.currentTime || 0));
+          applyMiniResume();
           if (!state.paused) active.play().catch(() => {{}});
         }}, {{ once: true }});
+        active.addEventListener('canplay', applyMiniResume, {{ once: true }});
+        active.addEventListener('playing', applyMiniResume);
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
         active.load();
 
         detachMiniHandlers(active);
 
         const persist = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
             ...state,
             currentTime: active.currentTime || 0,
@@ -3929,10 +3949,12 @@ def _render_index(
           }}));
         }};
         const timeupdateHandler = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           persist();
           if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
         }};
         const pauseHandler = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           persist();
           postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
         }};
