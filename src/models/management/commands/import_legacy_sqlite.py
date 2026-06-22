@@ -88,18 +88,28 @@ class Command(BaseCommand):
             action="store_true",
             help="Only import library metadata, transcripts, and summaries; skip settings/source tables.",
         )
+        parser.add_argument(
+            "--progress-interval",
+            type=int,
+            default=500,
+            help="Print progress after this many rows while importing large tables (default: 500).",
+        )
 
     def handle(self, *args, **options):
         sqlite_path = Path(options["sqlite_path"]).expanduser()
         profile_id = str(options["profile_id"]).strip() or "default"
+        self.progress_interval = max(1, int(options["progress_interval"]))
         if not sqlite_path.exists():
             raise CommandError(f"Legacy SQLite database not found: {sqlite_path}")
 
+        self._write_progress(f"Opening legacy SQLite database: {sqlite_path}")
         with sqlite3.connect(str(sqlite_path)) as legacy:
             legacy.row_factory = sqlite3.Row
             self._validate_tables(legacy)
+            self._write_progress(f"Importing into destination profile: {profile_id}")
             with transaction.atomic():
                 if options["replace_profile"]:
+                    self._write_progress(f"Clearing existing rows for destination profile: {profile_id}")
                     self._delete_profile(profile_id)
                 counts = self._import_all(legacy, profile_id, skip_config=options["skip_config"])
 
@@ -129,11 +139,21 @@ class Command(BaseCommand):
     def _import_all(self, legacy: sqlite3.Connection, profile_id: str, *, skip_config: bool) -> dict[str, int]:
         counts = {"downloads": 0, "transcript_segments": 0, "media_summaries": 0, "source_configs": 0}
         if not skip_config:
+            self._write_progress("Importing settings and sources...")
             counts["source_configs"] = self._import_config(legacy, profile_id)
+            self._write_progress(f"Imported {counts['source_configs']} sources/settings rows.")
+        else:
+            self._write_progress("Skipping settings and sources.")
+        self._write_progress("Importing downloads...")
         id_map = self._import_downloads(legacy, profile_id)
         counts["downloads"] = len(id_map)
+        self._write_progress(f"Imported {counts['downloads']} downloads.")
+        self._write_progress("Importing transcript segments...")
         counts["transcript_segments"] = self._import_transcript_segments(legacy, id_map)
+        self._write_progress(f"Imported {counts['transcript_segments']} transcript segments.")
+        self._write_progress("Importing media summaries...")
         counts["media_summaries"] = self._import_media_summaries(legacy, id_map)
+        self._write_progress(f"Imported {counts['media_summaries']} media summaries.")
         return counts
 
     def _import_config(self, legacy: sqlite3.Connection, profile_id: str) -> int:
@@ -189,10 +209,13 @@ class Command(BaseCommand):
 
     def _import_downloads(self, legacy: sqlite3.Connection, profile_id: str) -> dict[int, int]:
         id_map = {}
+        count = 0
         for row in legacy.execute("SELECT * FROM downloads ORDER BY id"):
             payload = self._download_payload(row, profile_id)
             download = self._upsert_download(payload)
             id_map[int(row["id"])] = int(download.id)
+            count += 1
+            self._write_row_progress("downloads", count)
         return id_map
 
     def _import_transcript_segments(self, legacy: sqlite3.Connection, id_map: dict[int, int]) -> int:
@@ -211,6 +234,7 @@ class Command(BaseCommand):
                 defaults={"end_seconds": row["end_seconds"]},
             )
             count += 1
+            self._write_row_progress("transcript segments", count)
         return count
 
     def _import_media_summaries(self, legacy: sqlite3.Connection, id_map: dict[int, int]) -> int:
@@ -231,6 +255,7 @@ class Command(BaseCommand):
                 },
             )
             count += 1
+            self._write_row_progress("media summaries", count)
         return count
 
     def _upsert_download(self, payload: dict[str, Any]) -> Download:
@@ -325,6 +350,15 @@ class Command(BaseCommand):
         for key in row.keys():
             columns.add(key)
         return columns
+
+    def _write_progress(self, message: str) -> None:
+        self.stdout.write(message)
+        self.stdout.flush()
+
+    def _write_row_progress(self, label: str, count: int) -> None:
+        if count % self.progress_interval != 0:
+            return
+        self._write_progress(f"Imported {count} {label}...")
 
     def _datetime(self, value: Any, fallback: Optional[Any]) -> Optional[Any]:
         if value in (None, ""):

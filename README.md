@@ -74,7 +74,7 @@ To migrate an older standalone SQLite library into the split Django/MySQL databa
 PYTHONPATH=src DJANGO_SETTINGS_MODULE=app.settings python -m django import_legacy_sqlite /path/to/downloads.sqlite3 --profile-id <username>
 ```
 
-Use `--replace-profile` to clear the destination user's existing imported library/settings before loading the SQLite data again. The importer copies downloads, source settings, playback flags, transcripts, and summaries; legacy youtube-dl format columns that are no longer represented by the Django models are ignored.
+Use `--replace-profile` to clear the destination user's existing imported library/settings before loading the SQLite data again. The importer prints progress as each major table starts and every 500 imported rows by default; pass `--progress-interval 50` (or another positive number) for more frequent updates. It copies downloads, source settings, playback flags, transcripts, and summaries; legacy youtube-dl format columns that are no longer represented by the Django models are ignored.
 
 
 ## Usage
