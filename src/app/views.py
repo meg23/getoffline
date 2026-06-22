@@ -17,7 +17,7 @@ from models.jobs import create_job
 from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig, TranscriptSegment
 
 from .queue import publish_job
-from .routing import FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, SERIAL_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, SYNC_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_name
+from .routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, SYNC_QUEUE, TRANSCRIPT_QUEUE, queue_name
 
 
 ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "sync_media", "summarize_missing"}
@@ -337,8 +337,6 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
     queue_labels = {
         SERIAL_EPISODE_CHECK_QUEUE: "Updates",
         SERIAL_DOWNLOAD_QUEUE: "Downloads",
-        YOUTUBE_DOWNLOAD_QUEUE: "YouTube downloads",
-        PODCAST_DOWNLOAD_QUEUE: "Podcast downloads",
         FFMPEG_QUEUE: "FFmpeg",
         TRANSCRIPT_QUEUE: "Transcripts",
         SUMMARY_QUEUE: "Summaries",

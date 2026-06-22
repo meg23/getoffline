@@ -1,7 +1,7 @@
 SERIAL_EPISODE_CHECK_QUEUE = "getoffline.jobs.updates"
 SERIAL_DOWNLOAD_QUEUE = "getoffline.jobs.downloads"
-YOUTUBE_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.youtube"
-PODCAST_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.podcast"
+YOUTUBE_DOWNLOAD_QUEUE = SERIAL_DOWNLOAD_QUEUE
+PODCAST_DOWNLOAD_QUEUE = SERIAL_DOWNLOAD_QUEUE
 TRANSCRIPT_QUEUE = "getoffline.jobs.transcripts"
 SUMMARY_QUEUE = "getoffline.jobs.summaries"
 SYNC_QUEUE = "getoffline.jobs.sync_media"
@@ -18,20 +18,6 @@ def queue_arguments(queue: str) -> dict:
 
 
 def _download_queue_name(payload: dict | None = None) -> str:
-    payload = payload if isinstance(payload, dict) else {}
-    source_type = str(payload.get("source_type") or "").strip().lower()
-    media_type = str(payload.get("media_type") or "").strip().lower()
-    if source_type == "podcast":
-        return PODCAST_DOWNLOAD_QUEUE
-    if source_type == "youtube":
-        return YOUTUBE_DOWNLOAD_QUEUE
-    if media_type == "audio":
-        return PODCAST_DOWNLOAD_QUEUE
-    # Manual URL downloads default to the YouTube-capable downloader. Keeping the
-    # legacy shared queue as the no-payload fallback preserves old tests and any
-    # generic downloader deployments that call queue_name(job_type) directly.
-    if payload:
-        return YOUTUBE_DOWNLOAD_QUEUE
     return SERIAL_DOWNLOAD_QUEUE
 
 

@@ -16,8 +16,6 @@ django.setup()
 
 from app.routing import (  # noqa: E402
     SERIAL_DOWNLOAD_QUEUE,
-    YOUTUBE_DOWNLOAD_QUEUE,
-    PODCAST_DOWNLOAD_QUEUE,
     SERIAL_EPISODE_CHECK_QUEUE,
     SUMMARY_QUEUE,
     SYNC_QUEUE,
@@ -39,8 +37,8 @@ _STOP = False
 QUEUE_BY_WORKER = {
     "updates": SERIAL_EPISODE_CHECK_QUEUE,
     "downloader": SERIAL_DOWNLOAD_QUEUE,
-    "downloader-youtube": YOUTUBE_DOWNLOAD_QUEUE,
-    "downloader-podcast": PODCAST_DOWNLOAD_QUEUE,
+    "downloader-youtube": SERIAL_DOWNLOAD_QUEUE,
+    "downloader-podcast": SERIAL_DOWNLOAD_QUEUE,
     "ffmpeg": FFMPEG_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
     "summaries": SUMMARY_QUEUE,
@@ -60,7 +58,7 @@ JOB_TYPES_BY_WORKER = {
     "cleanup": {"retention_cleanup"},
 }
 
-SERIAL_WORKERS = {"updates", "downloader", "downloader-youtube"}
+SERIAL_WORKERS = {"updates", "downloader", "downloader-youtube", "downloader-podcast"}
 
 
 def _handle_signal(signum, _frame) -> None:
@@ -70,15 +68,7 @@ def _handle_signal(signum, _frame) -> None:
 
 
 def _worker_accepts_job(worker_type: str, job_id: int) -> bool:
-    if worker_type not in {"downloader-youtube", "downloader-podcast"}:
-        return True
-    job = Job.objects.filter(pk=job_id).only("payload", "job_type").first()
-    if job is None:
-        return True
-    payload = job.payload if isinstance(job.payload, dict) else {}
-    source_type = str(payload.get("source_type") or ("podcast" if payload.get("media_type") == "audio" else "youtube")).strip().lower()
-    allowed = "youtube" if worker_type == "downloader-youtube" else "podcast"
-    return source_type == allowed
+    return True
 
 
 def _emit_update_finished_message(job: Job, *, status: str, error_message: str = "") -> None:
@@ -153,8 +143,6 @@ def requeue_existing_jobs(channel, worker_type: str) -> int:
     for job in rows:
         message = {"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1, "payload": job.payload}
         target_queue = queue_name(job.job_type, job.payload if isinstance(job.payload, dict) else None)
-        if worker_type in {"downloader-youtube", "downloader-podcast"} and target_queue != queue:
-            continue
         channel.basic_publish(
             exchange=settings.RABBITMQ_EXCHANGE,
             routing_key=target_queue,
@@ -250,7 +238,7 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
         channel.queue_declare(queue=queue, durable=True, arguments=queue_arguments(queue) or None)
         channel.queue_bind(queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue)
         channel.basic_qos(prefetch_count=safe_prefetch)
-        should_requeue_existing = requeue_existing_jobs_enabled() or worker_type in {"downloader-youtube", "downloader-podcast"}
+        should_requeue_existing = requeue_existing_jobs_enabled()
         if should_requeue_existing:
             requeued = requeue_existing_jobs(channel, worker_type)
             if requeued:
@@ -259,9 +247,6 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
                 log.info("Worker requeue existing DB jobs found no queued rows worker_type=%s queue=%s", worker_type, queue)
         else:
             log.info("Worker skipped existing DB job requeue worker_type=%s queue=%s enable_with=GETOFFLINE_REQUEUE_EXISTING_JOBS=1", worker_type, queue)
-        if worker_type == "downloader":
-            channel.queue_declare(queue=YOUTUBE_DOWNLOAD_QUEUE, durable=True, arguments=queue_arguments(YOUTUBE_DOWNLOAD_QUEUE) or None)
-            channel.queue_declare(queue=PODCAST_DOWNLOAD_QUEUE, durable=True, arguments=queue_arguments(PODCAST_DOWNLOAD_QUEUE) or None)
         if worker_type == "transcripts":
             enqueue_missing_transcript_jobs(channel)
         log.info("Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s", worker_type, queue, settings.RABBITMQ_EXCHANGE, safe_prefetch)
