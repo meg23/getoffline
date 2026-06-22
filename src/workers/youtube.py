@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 
 from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
-from workers.database import (
+from workers.download_store import (
     build_item_uid,
     ensure_config_seeded,
     get_stored_config,

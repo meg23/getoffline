@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import workers.podcasts as podcasts  # noqa: E402
 import workers.youtube as youtube  # noqa: E402
-from workers.database import build_item_uid, has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
+from workers.download_store import build_item_uid, has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
 
 
 class FakeYoutubeDL:

@@ -61,7 +61,7 @@ make run-app-debug
 
 The debug target starts `python -m app` with `GETOFFLINE_DJANGO_DEBUG=1`.
 
-The frontend now covers the core legacy `webapp.py` screens and actions in Django:
+The frontend now covers the core legacy `media_library_server.py` screens and actions in Django:
 
 - library listing with played/favorite filters
 - player page with media/subtitle endpoints and playback position saves

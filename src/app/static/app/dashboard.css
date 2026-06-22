@@ -595,7 +595,7 @@ tbody tr:nth-child(even) td {
   color: var(--muted);
   font-size: 0.9rem;
 }
-/* Legacy webapp.py mini-player parity overrides. Keep these last so they win over the generic modal player styles above. */
+/* Legacy media-library server mini-player parity overrides. Keep these last so they win over the generic modal player styles above. */
 .mini-player-backdrop {
   position: fixed;
   inset: 0;
