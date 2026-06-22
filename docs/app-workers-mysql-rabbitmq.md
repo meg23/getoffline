@@ -156,11 +156,12 @@ The job payload and status live in MySQL.
 
 ## Docker Compose with persistent MySQL
 
-The repository includes `docker-compose.yml` for running the frontend with bundled nginx, RabbitMQ, workers, and a persistent MySQL database. It builds separate Alpine images so the frontend/migration image installs only web/database/queue dependencies plus nginx, while the worker image carries the heavier media-processing dependencies only where they are needed:
+The repository includes `docker-compose.yml` for running the frontend with bundled nginx, RabbitMQ, workers, and a persistent MySQL database. It builds separate worker images so each runtime installs only the dependency set it needs:
 
 - `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, an Alpine image with Django, Gunicorn, and nginx for web/database/queue dependencies.
 - updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
-- transcript, summary, and transfer workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies until heavier processing packages are actually needed.
+- summary, transfer, and cleanup workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies.
+- transcript workers build from `deploy/docker/worker-transcripts.Dockerfile`, a Debian slim image that installs faster-whisper and CTranslate2 from normal Python wheels to avoid Alpine/native-wheel compatibility issues.
 - `frontend` publishes host port `8080`, serves static files with bundled nginx, and proxies dynamic requests to the Django app running under Gunicorn WSGI in the same container.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
 - `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.

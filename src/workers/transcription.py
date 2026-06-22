@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from pathlib import Path
 
 from workers.logger import get_logger
@@ -64,19 +65,41 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
         if model is None:
             cache_dir = Path(os.getenv("GETOFFLINE_MODEL_CACHE_DIR") or os.getenv("HF_HOME") or "/app/model-cache").expanduser()
             cache_dir.mkdir(parents=True, exist_ok=True)
+            load_started_at = time.monotonic()
             log.info("Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir)
             model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(cache_dir))
             _WHISPER_MODEL_CACHE[model_name] = model
+            log.info("Loaded faster-whisper model=%s elapsed_seconds=%.2f", model_name, time.monotonic() - load_started_at)
+        else:
+            log.info("Using cached faster-whisper model=%s", model_name)
 
     transcribe_kwargs = {"vad_filter": True}
     if language:
         transcribe_kwargs["language"] = language
+    input_size = input_file.stat().st_size if input_file.exists() else None
+    log.info(
+        "Starting faster-whisper transcription prefix=%s input=%s model=%s language=%s size_bytes=%s kwargs=%s",
+        log_prefix,
+        input_file,
+        model_name,
+        language,
+        input_size,
+        transcribe_kwargs,
+    )
     try:
-        segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
+        segments, info = model.transcribe(str(input_file), **transcribe_kwargs)
     except IndexError as exc:
         if "tuple index out of range" in str(exc):
             raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
         raise
+    log.info(
+        "faster-whisper transcription iterator ready prefix=%s detected_language=%s language_probability=%s duration=%s duration_after_vad=%s",
+        log_prefix,
+        getattr(info, "language", None),
+        getattr(info, "language_probability", None),
+        getattr(info, "duration", None),
+        getattr(info, "duration_after_vad", None),
+    )
     return _normalize_faster_whisper_result(segments, log_prefix=log_prefix)
 
 
@@ -96,6 +119,14 @@ def transcribe_with_whisper(
             log.info("Ignoring deprecated transcription mode=%s; using native in-process transcription", mode)
         result = _transcribe_in_process(input_file, model_name, language=language, log_prefix=log_prefix)
     except Exception as exc:
+        log.exception(
+            "Whisper transcription failed prefix=%s input=%s model=%s language=%s mode=%s",
+            log_prefix,
+            input_file,
+            model_name,
+            language,
+            mode,
+        )
         raise TranscriptionError(
             f"Transcription failed for {input_file.name} ({model_name}): {exc}"
         ) from exc
