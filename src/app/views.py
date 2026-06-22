@@ -17,7 +17,7 @@ from models.jobs import create_job
 from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig, TranscriptSegment
 
 from .queue import publish_job
-from .routing import FFMPEG_QUEUE, SERIAL_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, SYNC_QUEUE, TRANSCRIPT_QUEUE, queue_name
+from .routing import FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, SERIAL_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, SYNC_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_name
 
 
 ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "sync_media", "summarize_missing"}
@@ -337,6 +337,8 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
     queue_labels = {
         SERIAL_EPISODE_CHECK_QUEUE: "Updates",
         SERIAL_DOWNLOAD_QUEUE: "Downloads",
+        YOUTUBE_DOWNLOAD_QUEUE: "YouTube downloads",
+        PODCAST_DOWNLOAD_QUEUE: "Podcast downloads",
         FFMPEG_QUEUE: "FFmpeg",
         TRANSCRIPT_QUEUE: "Transcripts",
         SUMMARY_QUEUE: "Summaries",
@@ -348,11 +350,11 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
     }
     rows = (
         Job.objects.filter(profile_id=profile_id, status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING])
-        .values("job_type", "status")
+        .values("job_type", "status", "payload")
         .annotate(total=Count("id"))
     )
     for row in rows:
-        queue = queue_name(str(row["job_type"]))
+        queue = queue_name(str(row["job_type"]), row.get("payload") if isinstance(row.get("payload"), dict) else None)
         counts.setdefault(queue, {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0})
         counts[queue][str(row["status"])] = int(row["total"] or 0)
         queue_labels.setdefault(queue, queue.removeprefix("getoffline."))
