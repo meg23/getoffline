@@ -5,43 +5,23 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sign in to GetOffline</title>
-    <link rel="stylesheet" href="{% static 'app/login.css' %}?v=login-polish-1" />
+    <link rel="stylesheet" href="{% static 'app/login.css' %}?v=simple-login-1" />
   </head>
   <body class="login-page">
     <main class="login-shell">
-      <section class="login-hero" aria-label="GetOffline introduction">
-        <div class="login-brand-mark" aria-hidden="true">GO</div>
-        <p class="login-eyebrow">Personal offline media</p>
-        <h1>GetOffline</h1>
-        <p class="login-hero-copy">Sign in to manage your downloads, sources, playback history, and transfer queue from a private user library.</p>
-        <div class="login-feature-list" aria-label="Features">
-          <span>Isolated library</span>
-          <span>Saved playback</span>
-          <span>Background downloads</span>
-        </div>
-      </section>
-
       <section class="login-card" aria-labelledby="login-title">
-        <div class="login-card-header">
-          <p class="login-eyebrow">Welcome back</p>
-          <h2 id="login-title">Sign in</h2>
-          <p>Use the username and password created from the command line.</p>
-        </div>
+        <h1 id="login-title">GetOffline</h1>
+        <p class="login-copy">Sign in with your username and password.</p>
         {% if form.errors %}<p class="login-error" role="alert">Invalid username or password.</p>{% endif %}
         <form class="login-form" method="post" action="{% url 'login' %}">
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ next }}" />
-          <div class="login-field">
-            <label for="id_username">Username</label>
-            {{ form.username }}
-          </div>
-          <div class="login-field">
-            <label for="id_password">Password</label>
-            {{ form.password }}
-          </div>
+          <label for="id_username">Username</label>
+          {{ form.username }}
+          <label for="id_password">Password</label>
+          {{ form.password }}
           <button class="login-submit" type="submit">Sign in</button>
         </form>
-        <p class="login-help">Need access? Ask the server admin to run <code>python -m django create_user</code>.</p>
       </section>
     </main>
   </body>
