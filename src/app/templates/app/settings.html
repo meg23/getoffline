@@ -13,24 +13,19 @@
       <header class="settings-header">
         <h1>Settings</h1>
         <div class="profile-controls">
-          <a class="back-link" href="{% url 'library' %}?profile_id={{ profile_id }}">Library</a>
-          <form class="profile-switch-form" method="get" action="{% url 'settings' %}" aria-label="Switch profile">
+          <a class="back-link" href="{% url 'library' %}">Library</a>
+          <span class="profile-switch-form" aria-label="Signed in user">
             <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
-            <span class="profile-select-wrap">
-              <select id="profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">
-                {% for profile in profiles %}<option value="{{ profile.id }}" {% if profile.selected %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}
-              </select>
-            </span>
-          </form>
-          <span class="profile-icon-button">🔒</span>
-          <span class="profile-icon-button">+</span>
+            <span class="profile-name">{{ profile_name }}</span>
+          </span>
+          <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">↪</button></form>
         </div>
       </header>
 
       <section class="settings-section">
         <h2>General</h2>
         <form method="post" action="{% url 'save_config' %}">
-          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          {% csrf_token %}
           <label for="output_root">Output root</label>
           <input id="output_root" name="config__output_root" value="{{ settings.output_root }}" required />
           <div class="grid two">
@@ -46,23 +41,11 @@
         </form>
       </section>
 
-      <section class="settings-section">
-        <h2>Profile lock</h2>
-        <p class="section-help">Set a 4–12 digit PIN for this profile. After unlocking, access expires after one hour. Leave blank and save to remove the PIN.</p>
-        <p><strong>{{ pin_status }}</strong></p>
-        <form method="post" action="{% url 'save_config' %}">
-          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
-          <label for="profile_pin">Profile PIN</label>
-          <input id="profile_pin" name="config__profile_pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="Leave blank to remove PIN" />
-          <div class="actions"><button class="primary" type="submit">Save profile PIN</button></div>
-        </form>
-      </section>
-
       <section class="settings-section blue-section">
         <h2>Conversion preferences</h2>
         <p class="section-help">Downloaded media is passed to the FFmpeg worker before it becomes available in the library. The worker writes the preferred output, updates the database row, and removes the original downloaded file after a successful conversion.</p>
         <form method="post" action="{% url 'save_config' %}">
-          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          {% csrf_token %}
           <div class="grid two">
             <div><label>Audio format</label><select name="config__audio_format"><option value="mp3" {% if settings.audio_format == 'mp3' %}selected{% endif %}>MP3</option><option value="m4a" {% if settings.audio_format == 'm4a' %}selected{% endif %}>M4A</option><option value="opus" {% if settings.audio_format == 'opus' %}selected{% endif %}>Opus</option></select></div>
             <div><label>Video format</label><select name="config__video_format"><option value="mp4" {% if settings.video_format == 'mp4' %}selected{% endif %}>MP4</option><option value="mkv" {% if settings.video_format == 'mkv' %}selected{% endif %}>MKV</option></select></div>
@@ -79,7 +62,7 @@
         <h2>yt-dlp configuration</h2>
         <p class="section-help">Configure yt-dlp download behavior and authentication used for YouTube and media extraction.</p>
         <form method="post" action="{% url 'save_config' %}">
-          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          {% csrf_token %}
           <div class="grid two">
             <div><label>Default max downloads</label><input name="config__max_downloads" value="{{ settings.max_downloads }}" required /><p class="field-help">Used when a YouTube or podcast source does not set its own max downloads.</p></div>
             <div><label>Max YouTube video height</label><input type="number" min="144" step="1" name="config__ytdlp_video_max_height" value="{{ settings.ytdlp_video_max_height }}" required /><p class="field-help">Defaults to 720p. yt-dlp will prefer video formats at or below this height.</p></div>
@@ -94,7 +77,7 @@
       <section class="settings-section violet-section">
         <h2>Ollama configuration</h2>
         <form method="post" action="{% url 'save_config' %}">
-          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          {% csrf_token %}
           <div class="grid two">
             <div><label>Ollama summary model</label><input name="config__summary_model" value="{{ settings.summary_model }}" required /></div>
             <div><label>Ollama executable</label><input name="config__ollama_path" value="{{ settings.ollama_path }}" required /></div>
@@ -107,7 +90,7 @@
         <h2>Directory transfer</h2>
         <p class="section-help">Transfer selected media to local disk or an Android device. Android connection settings are hidden unless Android is selected.</p>
         <form method="post" action="{% url 'save_config' %}">
-          {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
+          {% csrf_token %}
           <div class="grid two">
             <div><label>Transfer destination</label><select id="android_sync_target" name="config__android_sync_target"><option value="directory" {% if settings.android_sync_target == 'directory' %}selected{% endif %}>Local disk</option><option value="android" {% if settings.android_sync_target != 'directory' %}selected{% endif %}>Android device</option></select></div>
             <div><input type="hidden" name="config__android_sync_enabled" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_enabled" value="1" {% if android_sync_enabled_checked %}checked{% endif %} /> Auto-transfer after downloads</label></div>
@@ -128,24 +111,24 @@
 
       <section class="settings-section">
         <h2>YouTube sources</h2>
-        <p class="section-help">These sources belong to profile <strong>{{ profile_name }}</strong>.</p>
+        <p class="section-help">These sources belong to user <strong>{{ profile_name }}</strong>.</p>
         <div class="source-list">{% for source in youtube_sources %}<article class="source-card"><h3>{{ source.name|default:'Unnamed YouTube source' }}</h3><p>{{ source.url }}</p><p class="row-status">{% if source.enabled %}enabled{% else %}disabled{% endif %} · max downloads: {{ source.max_downloads|default:'default' }}{% if source.delete_explicit_content %} · profanity filter on{% endif %}</p><form method="post" action="{% url 'update_source' source.id %}" class="grid two">{% csrf_token %}<div><label>Name</label><input name="name" value="{{ source.name }}" required /></div><div><label>URL</label><input name="url" value="{{ source.url }}" required /></div><div><label>Download type</label><select name="media_type"><option value="audio" {% if source.media_type != 'video' %}selected{% endif %}>audio</option><option value="video" {% if source.media_type == 'video' %}selected{% endif %}>video</option></select></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1" {% if source.subtitles %}selected{% endif %}>yes</option><option value="0" {% if not source.subtitles %}selected{% endif %}>no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" value="{{ source.max_downloads|default:'' }}" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" {% if source.delete_explicit_content %}checked{% endif %} /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Save source</button></div></form><div class="row-actions"><form method="post" action="{% url 'toggle_source' source.id %}">{% csrf_token %}<button>Toggle</button></form><form method="post" action="{% url 'delete_source' source.id %}">{% csrf_token %}<button class="danger">Delete</button></form></div></article>{% empty %}<p>No YouTube sources configured.</p>{% endfor %}</div>
         <h3>Add YouTube source</h3>
-        <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" /><input type="hidden" name="source_type" value="youtube" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Download type</label><select name="media_type"><option value="audio">audio</option><option value="video">video</option></select></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Add YouTube source</button></div></form>
+        <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="source_type" value="youtube" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Download type</label><select name="media_type"><option value="audio">audio</option><option value="video">video</option></select></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Add YouTube source</button></div></form>
       </section>
 
       <section class="settings-section">
         <h2>Podcast sources</h2>
-        <p class="section-help">These sources belong to profile <strong>{{ profile_name }}</strong>.</p>
+        <p class="section-help">These sources belong to user <strong>{{ profile_name }}</strong>.</p>
         <div class="source-list">{% for source in podcast_sources %}<article class="source-card"><h3>{{ source.name|default:'Unnamed podcast source' }}</h3><p>{{ source.url }}</p><p class="row-status">{% if source.enabled %}enabled{% else %}disabled{% endif %} · max downloads: {{ source.max_downloads|default:'default' }}{% if source.delete_explicit_content %} · profanity filter on{% endif %}</p><form method="post" action="{% url 'update_source' source.id %}" class="grid two">{% csrf_token %}<div><label>Name</label><input name="name" value="{{ source.name }}" required /></div><div><label>URL</label><input name="url" value="{{ source.url }}" required /></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1" {% if source.subtitles %}selected{% endif %}>yes</option><option value="0" {% if not source.subtitles %}selected{% endif %}>no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" value="{{ source.max_downloads|default:'' }}" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" {% if source.delete_explicit_content %}checked{% endif %} /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Save source</button></div></form><div class="row-actions"><form method="post" action="{% url 'toggle_source' source.id %}">{% csrf_token %}<button>Toggle</button></form><form method="post" action="{% url 'delete_source' source.id %}">{% csrf_token %}<button class="danger">Delete</button></form></div></article>{% empty %}<p>No podcast sources configured.</p>{% endfor %}</div>
         <h3>Add podcast source</h3>
-        <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" /><input type="hidden" name="source_type" value="podcast" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Add podcast source</button></div></form>
+        <form method="post" action="{% url 'add_source' %}" class="grid two">{% csrf_token %}<input type="hidden" name="source_type" value="podcast" /><div><label>Name</label><input name="name" required /></div><div><label>URL</label><input name="url" required /></div><div><label>Subtitles enabled</label><select name="subtitles"><option value="1">yes</option><option value="0">no</option></select></div><div><label>Max downloads</label><input type="number" min="1" step="1" name="max_downloads" placeholder="use default" /></div><div><label class="checkbox-label"><input type="checkbox" name="delete_explicit_content" value="1" /> Delete uploads containing profanity</label></div><div class="actions full"><button class="primary">Add podcast source</button></div></form>
       </section>
 
 
       <section class="settings-section queue-section">
         <h2>Queue counts</h2>
-        <p class="section-help">Current queued and running jobs for profile <strong>{{ profile_name }}</strong>, grouped by worker queue.</p>
+        <p class="section-help">Current queued and running jobs for user <strong>{{ profile_name }}</strong>, grouped by worker queue.</p>
         <div class="queue-count-table-wrap">
           <table class="queue-count-table">
             <thead>

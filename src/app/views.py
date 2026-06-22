@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from models.jobs import create_job
@@ -67,22 +68,17 @@ def _decorate_download(item: Download) -> Download:
     return item
 
 
-def _profile_choices(active_profile_id: str) -> list[dict[str, object]]:
-    profile_ids = {"default", active_profile_id}
-    for model in (Download, SourceConfig, ProfileConfigValue):
-        profile_ids.update(value for value in model.objects.values_list("profile_id", flat=True).distinct() if value)
-    return [
-        {
-            "id": profile_id,
-            "name": profile_id if profile_id != "default" else "max",
-            "selected": profile_id == active_profile_id,
-        }
-        for profile_id in sorted(profile_ids, key=lambda value: (value != "default", value.lower()))
-    ]
-
-
 def _profile_id(request: HttpRequest) -> str:
-    return str(request.GET.get("profile_id") or request.POST.get("profile_id") or request.session.get("profile_id") or "default")
+    """Return the storage partition for the signed-in user.
+
+    The database still stores a profile_id column for compatibility with workers and
+    existing data, but the web app no longer exposes profile switching. Each login
+    user owns one implicit partition named after their username.
+    """
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        return str(user.get_username() or "default")
+    return "default"
 
 
 def _redirect_back(request: HttpRequest, fallback: str = "library") -> HttpResponseRedirect:
@@ -184,6 +180,7 @@ def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
         return False
     return True
 
+@login_required
 def library(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
     _queue_missing_summary_batch(profile_id, reason="library_missing_summary")
@@ -193,7 +190,7 @@ def library(request: HttpRequest) -> HttpResponse:
     favorite_count = sum(1 for item in downloads if item.favorite)
     listened_seconds = downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
     recent_jobs = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10]
-    profile_name = profile_id if profile_id != "default" else "max"
+    profile_name = request.user.get_username() or profile_id
     return render(
         request,
         "app/library.html",
@@ -202,8 +199,7 @@ def library(request: HttpRequest) -> HttpResponse:
             "jobs": recent_jobs,
             "profile_id": profile_id,
             "profile_name": profile_name,
-            "profile_initial": (profile_name[:1] or "M").upper(),
-            "profiles": _profile_choices(profile_id),
+            "profile_initial": (profile_name[:1] or "U").upper(),
             "stats": {
                 "visible": len(downloads),
                 "played": played_count,
@@ -215,14 +211,16 @@ def library(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
 def jobs(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
     rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:100]
     return render(request, "app/jobs.html", {"jobs": rows, "profile_id": profile_id})
 
 
+@login_required
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.resolved_subtitle_path = _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
     item.has_subtitles = item.resolved_subtitle_path is not None
     if not hasattr(item, "summary") and item.download_status == "downloaded" and item.has_subtitles:
@@ -245,8 +243,9 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
     return render(request, "app/player.html", {"item": item, "seek_seconds": seek, "media_kind": media_kind})
 
 
+@login_required
 def media(request: HttpRequest, download_id: int) -> HttpResponse:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     path = _safe_path(item.file_path)
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     file_size = path.stat().st_size
@@ -274,8 +273,9 @@ def media(request: HttpRequest, download_id: int) -> HttpResponse:
     return response
 
 
+@login_required
 def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     path = _resolve_subtitle_path(item)
     if path is None:
         raise Http404("Subtitle unavailable")
@@ -317,7 +317,6 @@ PROFILE_DEFAULTS = {
     "android_sync_include_started": "1",
     "android_sync_include_played": "0",
     "android_sync_exclude_regex": "",
-    "profile_pin": "",
 }
 
 
@@ -368,6 +367,7 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
         for queue, values in sorted(counts.items(), key=lambda item: queue_labels[item[0]].lower())
     ]
 
+@login_required
 def settings_page(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
     settings = _profile_settings(profile_id)
@@ -377,7 +377,7 @@ def settings_page(request: HttpRequest) -> HttpResponse:
         legacy = DownloadSettings.objects.filter(pk=1).first()
         if legacy is not None:
             download_settings = ProfileDownloadSettings(profile_id=profile_id, youtube_cookie_text=legacy.youtube_cookie_text)
-    profile_name = profile_id if profile_id != "default" else "max"
+    profile_name = request.user.get_username() or profile_id
     return render(
         request,
         "app/settings.html",
@@ -389,20 +389,19 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "download_settings": download_settings,
             "profile_id": profile_id,
             "profile_name": profile_name,
-            "profile_initial": (profile_name[:1] or "M").upper(),
-            "profiles": _profile_choices(profile_id),
+            "profile_initial": (profile_name[:1] or "U").upper(),
             "manual_upload_filter_checked": _checked(settings, "manual_upload_delete_explicit_content"),
             "android_sync_enabled_checked": _checked(settings, "android_sync_enabled"),
             "android_sync_include_subtitles_checked": _checked(settings, "android_sync_include_subtitles"),
             "android_sync_include_unplayed_checked": _checked(settings, "android_sync_include_unplayed"),
             "android_sync_include_started_checked": _checked(settings, "android_sync_include_started"),
             "android_sync_include_played_checked": _checked(settings, "android_sync_include_played"),
-            "pin_status": "PIN is set" if settings.get("profile_pin") else "No PIN set",
             "queue_counts": _queue_counts(profile_id),
         },
     )
 
 
+@login_required
 def enqueue_job(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return HttpResponseBadRequest("POST required")
@@ -437,9 +436,10 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     next_url = str(request.POST.get("next") or "")
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return HttpResponseRedirect(next_url)
-    return HttpResponseRedirect(reverse("jobs") + f"?profile_id={profile_id}")
+    return HttpResponseRedirect(reverse("jobs"))
 
 
+@login_required
 def worker_message_status(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
     token = str(request.GET.get("token") or "").strip()
@@ -470,9 +470,10 @@ def worker_message_status(request: HttpRequest) -> JsonResponse:
     })
 
 
+@login_required
 @require_POST
 def mark_played(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.played = True
     item.played_at = timezone.now()
     item.last_seen_at = timezone.now()
@@ -480,9 +481,10 @@ def mark_played(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     return _redirect_back(request)
 
 
+@login_required
 @require_POST
 def mark_unplayed(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.played = False
     item.played_at = None
     item.last_seen_at = timezone.now()
@@ -490,27 +492,30 @@ def mark_unplayed(request: HttpRequest, download_id: int) -> HttpResponseRedirec
     return _redirect_back(request)
 
 
+@login_required
 @require_POST
 def favorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.favorite = True
     item.last_seen_at = timezone.now()
     item.save(update_fields=["favorite", "last_seen_at"])
     return _redirect_back(request)
 
 
+@login_required
 @require_POST
 def unfavorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.favorite = False
     item.last_seen_at = timezone.now()
     item.save(update_fields=["favorite", "last_seen_at"])
     return _redirect_back(request)
 
 
+@login_required
 @require_POST
 def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     try:
         position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
     except (TypeError, ValueError):
@@ -540,9 +545,10 @@ def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     return HttpResponse(status=204)
 
 
+@login_required
 @require_POST
 def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
-    item = get_object_or_404(Download, pk=download_id)
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     if item.file_path:
         Path(item.file_path).expanduser().unlink(missing_ok=True)
     item.download_status = "missing"
@@ -552,6 +558,7 @@ def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
 
 
 
+@login_required
 def transcript_search(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
     query = str(request.GET.get("q") or "").strip()
@@ -577,12 +584,13 @@ def transcript_search(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"results": results})
 
 
+@login_required
 @require_POST
 def edit_metadata(request: HttpRequest) -> JsonResponse:
     raw_id = str(request.POST.get("id") or "").strip()
     if not raw_id.isdigit():
         return JsonResponse({"ok": False, "error": "Invalid id"}, status=400)
-    item = get_object_or_404(Download, pk=int(raw_id))
+    item = get_object_or_404(Download, pk=int(raw_id), profile_id=_profile_id(request))
     title = str(request.POST.get("title") or "").strip()
     source_name = str(request.POST.get("source_name") or "").strip()
     if not title or not source_name:
@@ -593,6 +601,7 @@ def edit_metadata(request: HttpRequest) -> JsonResponse:
     item.save(update_fields=["title", "source_name", "last_seen_at"])
     return JsonResponse({"ok": True})
 
+@login_required
 @require_POST
 def save_config(request: HttpRequest) -> HttpResponseRedirect:
     profile_id = _profile_id(request)
@@ -631,9 +640,10 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
                 "updated_at": now,
             },
         )
-    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+    return HttpResponseRedirect(reverse("settings"))
 
 
+@login_required
 @require_POST
 def add_source(request: HttpRequest) -> HttpResponseRedirect:
     source_type = str(request.POST.get("source_type") or "").strip().lower()
@@ -654,12 +664,13 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
-    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+    return HttpResponseRedirect(reverse("settings"))
 
 
+@login_required
 @require_POST
 def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    source = get_object_or_404(SourceConfig, pk=source_id)
+    source = get_object_or_404(SourceConfig, pk=source_id, profile_id=_profile_id(request))
     source.name = str(request.POST.get("name") or source.name).strip()
     source.url = str(request.POST.get("url") or source.url).strip()
     if source.source_type == SourceConfig.SOURCE_YOUTUBE:
@@ -680,32 +691,35 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
             "updated_at",
         ]
     )
-    return HttpResponseRedirect(reverse("settings") + f"?profile_id={source.profile_id}")
+    return HttpResponseRedirect(reverse("settings"))
 
 
+@login_required
 @require_POST
 def toggle_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    source = get_object_or_404(SourceConfig, pk=source_id)
+    source = get_object_or_404(SourceConfig, pk=source_id, profile_id=_profile_id(request))
     source.enabled = not source.enabled
     source.updated_at = timezone.now()
     source.save(update_fields=["enabled", "updated_at"])
-    return HttpResponseRedirect(reverse("settings") + f"?profile_id={source.profile_id}")
+    return HttpResponseRedirect(reverse("settings"))
 
 
+@login_required
 @require_POST
 def delete_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    source = get_object_or_404(SourceConfig, pk=source_id)
+    source = get_object_or_404(SourceConfig, pk=source_id, profile_id=_profile_id(request))
     profile_id = source.profile_id
     source.delete()
-    return HttpResponseRedirect(reverse("settings") + f"?profile_id={profile_id}")
+    return HttpResponseRedirect(reverse("settings"))
 
 
+@login_required
 @require_POST
 def batch_update(request: HttpRequest) -> HttpResponseRedirect:
     ids = [int(value) for value in request.POST.getlist("ids") if str(value).isdigit()]
     action = str(request.POST.get("batch_action") or "").strip()
     now = timezone.now()
-    rows = Download.objects.filter(pk__in=ids)
+    rows = Download.objects.filter(pk__in=ids, profile_id=_profile_id(request))
     if action == "played":
         rows.update(played=True, played_at=now, last_seen_at=now)
     elif action == "unplayed":
