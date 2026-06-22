@@ -104,25 +104,25 @@
       </section>
 
       <section class="settings-section blue-section">
-        <h2>Directory sync</h2>
-        <p class="section-help">Sync selected media to local disk or an Android device. Android connection settings are hidden unless Android is selected.</p>
+        <h2>Directory transfer</h2>
+        <p class="section-help">Transfer selected media to local disk or an Android device. Android connection settings are hidden unless Android is selected.</p>
         <form method="post" action="{% url 'save_config' %}">
           {% csrf_token %}<input type="hidden" name="profile_id" value="{{ profile_id }}" />
           <div class="grid two">
-            <div><label>Sync destination</label><select id="android_sync_target" name="config__android_sync_target"><option value="directory" {% if settings.android_sync_target == 'directory' %}selected{% endif %}>Local disk</option><option value="android" {% if settings.android_sync_target != 'directory' %}selected{% endif %}>Android device</option></select></div>
-            <div><input type="hidden" name="config__android_sync_enabled" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_enabled" value="1" {% if android_sync_enabled_checked %}checked{% endif %} /> Auto-sync after downloads</label></div>
-            <div><label>Max items per sync</label><input type="number" min="1" name="config__android_sync_max_items" value="{{ settings.android_sync_max_items }}" required /></div>
+            <div><label>Transfer destination</label><select id="android_sync_target" name="config__android_sync_target"><option value="directory" {% if settings.android_sync_target == 'directory' %}selected{% endif %}>Local disk</option><option value="android" {% if settings.android_sync_target != 'directory' %}selected{% endif %}>Android device</option></select></div>
+            <div><input type="hidden" name="config__android_sync_enabled" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_enabled" value="1" {% if android_sync_enabled_checked %}checked{% endif %} /> Auto-transfer after downloads</label></div>
+            <div><label>Max items per transfer</label><input type="number" min="1" name="config__android_sync_max_items" value="{{ settings.android_sync_max_items }}" required /></div>
             <div><label>Exclude media matching regex</label><input name="config__android_sync_exclude_regex" value="{{ settings.android_sync_exclude_regex }}" placeholder="trailer|sample" /></div>
           </div>
           <div class="checkbox-grid">
             <input type="hidden" name="config__android_sync_include_subtitles" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_subtitles" value="1" {% if android_sync_include_subtitles_checked %}checked{% endif %} /> Include subtitles</label>
-            <input type="hidden" name="config__android_sync_include_unplayed" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_unplayed" value="1" {% if android_sync_include_unplayed_checked %}checked{% endif %} /> Sync unplayed media</label>
-            <input type="hidden" name="config__android_sync_include_started" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_started" value="1" {% if android_sync_include_started_checked %}checked{% endif %} /> Sync started media</label>
-            <input type="hidden" name="config__android_sync_include_played" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_played" value="1" {% if android_sync_include_played_checked %}checked{% endif %} /> Sync played media</label>
+            <input type="hidden" name="config__android_sync_include_unplayed" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_unplayed" value="1" {% if android_sync_include_unplayed_checked %}checked{% endif %} /> Transfer unplayed media</label>
+            <input type="hidden" name="config__android_sync_include_started" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_started" value="1" {% if android_sync_include_started_checked %}checked{% endif %} /> Transfer started media</label>
+            <input type="hidden" name="config__android_sync_include_played" value="0" /><label class="checkbox-label"><input type="checkbox" name="config__android_sync_include_played" value="1" {% if android_sync_include_played_checked %}checked{% endif %} /> Transfer played media</label>
           </div>
-          <div id="directory-sync-fields"><label>Directory path</label><input name="config__android_sync_directory" value="{{ settings.android_sync_directory }}" /></div>
-          <div id="android-sync-fields" class="grid two"><div><label>Android folder</label><input name="config__android_sync_destination" value="{{ settings.android_sync_destination }}" /></div><div><label>ADB executable</label><input name="config__android_sync_adb_path" value="{{ settings.android_sync_adb_path }}" /></div><div><label>ADB connection</label><select name="config__android_sync_connection_mode"><option value="usb" {% if settings.android_sync_connection_mode != 'wifi' %}selected{% endif %}>USB / already connected device</option><option value="wifi" {% if settings.android_sync_connection_mode == 'wifi' %}selected{% endif %}>Wi-Fi</option></select></div><div><label>Wi-Fi device address</label><input name="config__android_sync_wifi_address" value="{{ settings.android_sync_wifi_address }}" placeholder="192.168.1.50:5555" /></div></div>
-          <div class="actions"><button class="primary" type="submit">Save and sync</button></div>
+          <div id="directory-transfer-fields"><label>Directory path</label><input name="config__android_sync_directory" value="{{ settings.android_sync_directory }}" /></div>
+          <div id="android-transfer-fields" class="grid two"><div><label>Android folder</label><input name="config__android_sync_destination" value="{{ settings.android_sync_destination }}" /></div><div><label>ADB executable</label><input name="config__android_sync_adb_path" value="{{ settings.android_sync_adb_path }}" /></div><div><label>ADB connection</label><select name="config__android_sync_connection_mode"><option value="usb" {% if settings.android_sync_connection_mode != 'wifi' %}selected{% endif %}>USB / already connected device</option><option value="wifi" {% if settings.android_sync_connection_mode == 'wifi' %}selected{% endif %}>Wi-Fi</option></select></div><div><label>Wi-Fi device address</label><input name="config__android_sync_wifi_address" value="{{ settings.android_sync_wifi_address }}" placeholder="192.168.1.50:5555" /></div></div>
+          <div class="actions"><button class="primary" type="submit">Save and transfer</button></div>
         </form>
       </section>
 

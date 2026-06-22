@@ -181,13 +181,13 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  worker-sync:
+  worker-transfer:
     build:
       context: .
       dockerfile: deploy/docker/worker-base.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
-    command: python -m workers sync
+    command: python -m workers transfer
     depends_on:
       mysql:
         condition: service_healthy

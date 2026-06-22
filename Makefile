@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader run-worker-ffmpeg run-worker-transcripts run-worker-sync run-worker-summaries run-worker-cleanup run-scheduler
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-ffmpeg run-worker-transcripts run-worker-transfer run-worker-summaries run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -71,9 +71,13 @@ run-worker-updates: venv
 	@echo "Running single-concurrency updates worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers updates
 
-run-worker-downloader: venv
-	@echo "Running single-concurrency downloader worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader
+run-worker-downloader-youtube: venv
+	@echo "Running single-concurrency YouTube downloader worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader-youtube
+
+run-worker-downloader-podcast: venv
+	@echo "Running podcast downloader worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader-podcast
 
 run-worker-ffmpeg: venv
 	@echo "Running FFmpeg conversion worker..."
@@ -83,9 +87,9 @@ run-worker-transcripts: venv
 	@echo "Running parallel transcript worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transcripts --prefetch $${PREFETCH:-4}
 
-run-worker-sync: venv
-	@echo "Running sync worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers sync
+run-worker-transfer: venv
+	@echo "Running transfer worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transfer
 
 run-worker-summaries: venv
 	@echo "Running summaries worker..."

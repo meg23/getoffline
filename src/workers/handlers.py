@@ -1139,9 +1139,9 @@ def retention_cleanup(job: Job) -> None:
     )
 
 
-def sync_media(job: Job) -> None:
-    log.info("Sync worker placeholder started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
-    log.info("Sync worker placeholder finished job_id=%s", job.id)
+def transfer_media(job: Job) -> None:
+    log.info("Transfer worker placeholder started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
+    log.info("Transfer worker placeholder finished job_id=%s", job.id)
     return None
 
 
@@ -1154,6 +1154,6 @@ HANDLERS = {
     "generate_transcript": generate_transcript,
     "generate_summary": generate_summary,
     "summarize_missing": summarize_missing,
-    "sync_media": sync_media,
+    "transfer_media": transfer_media,
     "retention_cleanup": retention_cleanup,
 }
