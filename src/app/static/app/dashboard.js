@@ -187,9 +187,6 @@
     button.classList.toggle("is-spinning", loading);
     button.disabled = loading;
     button.setAttribute("aria-busy", loading ? "true" : "false");
-    button.textContent = loading
-      ? button.dataset.loadingLabel || "⟳"
-      : button.dataset.idleLabel || "⟳";
   }
 
   async function pollUntilDone(statusUrl) {

@@ -36,11 +36,11 @@
             {% csrf_token %}
             <input type="hidden" name="next" value="{% url 'library' %}" />
             <input type="hidden" name="job_type" value="update_downloads" />
-            <button id="transfer-button" class="icon-button icon-button-primary" type="submit" title="Transfer downloads" aria-label="Transfer downloads" data-idle-label="⟳" data-loading-label="⟳">⟳</button>
+            <button id="transfer-button" class="icon-button icon-button-primary" type="submit" title="Transfer downloads" aria-label="Transfer downloads"><span class="toolbar-icon toolbar-icon-download" aria-hidden="true"></span></button>
           </form>
-          <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link">+</button>
-          <button id="transcript-search-open" class="icon-button" type="button" title="Search transcripts" aria-label="Search transcripts">⌕</button>
-          <a class="icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">⚙</a>
+          <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link"><span class="toolbar-icon toolbar-icon-plus" aria-hidden="true"></span></button>
+          <button id="transcript-search-open" class="icon-button" type="button" title="Search transcripts" aria-label="Search transcripts"><span class="toolbar-icon toolbar-icon-search" aria-hidden="true"></span></button>
+          <a class="icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings"><span class="toolbar-icon toolbar-icon-settings" aria-hidden="true"></span></a>
           <div class="library-filter-wrap" role="group" aria-label="Library filters">
             <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
             <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
