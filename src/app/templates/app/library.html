@@ -18,9 +18,7 @@
               <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
               <span class="profile-name">{{ profile_name }}</span>
             </span>
-            <a class="profile-icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">⚙</a>
-            <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">↪</button></form>
-            <button id="quick-add-open-hero" class="profile-icon-button" type="button" title="Add media" aria-label="Add media">+</button>
+            <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻</button></form>
           </div>
         </div>
         <section class="summary-grid" aria-label="Library summary">
