@@ -1,32 +1,19 @@
 # syntax=docker/dockerfile:1.4
-FROM python:3.12-alpine AS wheels
+FROM python:3.12-slim AS wheels
 
 ARG FASTER_WHISPER_VERSION=1.1.0
-ARG CTRANSLATE2_VERSION=4.6.0
-ARG ONNXRUNTIME_VERSION=1.20.1
-ARG TARGETPLATFORM
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt \
-    && python -m pip download --no-cache-dir --no-deps --dest /wheels faster-whisper==${FASTER_WHISPER_VERSION} \
-    && case "${TARGETPLATFORM:-linux/amd64}" in \
-        linux/amd64) CTRANSLATE2_PLATFORM=manylinux2014_x86_64; ONNXRUNTIME_PLATFORM=manylinux_2_27_x86_64 ;; \
-        linux/arm64) CTRANSLATE2_PLATFORM=manylinux2014_aarch64; ONNXRUNTIME_PLATFORM=manylinux_2_27_aarch64 ;; \
-        *) echo "Unsupported Alpine transcript platform for prebuilt native wheels: ${TARGETPLATFORM}" >&2; exit 1 ;; \
-       esac \
-    && python -m pip download --no-cache-dir --no-deps --only-binary=:all: --dest /wheels \
-        --platform ${CTRANSLATE2_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
-        ctranslate2==${CTRANSLATE2_VERSION} \
-    && python -m pip download --no-cache-dir --no-deps --only-binary=:all: --dest /wheels \
-        --platform ${ONNXRUNTIME_PLATFORM} --implementation cp --python-version 312 --abi cp312 \
-        onnxruntime==${ONNXRUNTIME_VERSION}
+    && python -m pip wheel --no-cache-dir --wheel-dir /wheels faster-whisper==${FASTER_WHISPER_VERSION}
 
-FROM python:3.12-alpine AS model-cache
+FROM python:3.12-slim AS model-cache
 
 ARG WHISPER_MODEL=base
+ARG FASTER_WHISPER_VERSION=1.1.0
 ENV WHISPER_MODEL=${WHISPER_MODEL} \
     GETOFFLINE_MODEL_CACHE_DIR=/app/model-cache \
     HF_HOME=/app/model-cache \
@@ -35,30 +22,12 @@ ENV WHISPER_MODEL=${WHISPER_MODEL} \
 
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
-    apk add --no-cache libstdc++ gcompat \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
     && python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && /opt/venv/bin/python -m pip install --no-cache-dir --no-deps /wheels/faster_whisper-*.whl \
-    && /opt/venv/bin/python - <<'PY'
-import site
-import zipfile
-from pathlib import Path
-site_packages = Path(site.getsitepackages()[0])
-for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
-    wheels = sorted(Path('/wheels').glob(pattern))
-    if not wheels:
-        raise SystemExit(f'missing wheel: {pattern}')
-    with zipfile.ZipFile(wheels[0]) as wheel:
-        wheel.extractall(site_packages)
-# Alpine uses unpacked native wheels; avoid import-time evaluation of native type aliases.
-transcribe_py = site_packages / 'faster_whisper' / 'transcribe.py'
-transcribe_text = transcribe_py.read_text()
-if 'from __future__ import annotations' not in transcribe_text.splitlines()[:3]:
-    transcribe_text = 'from __future__ import annotations\n' + transcribe_text
-transcribe_text = transcribe_text.replace('ctranslate2.StorageView', 'object')
-transcribe_text = transcribe_text.replace('ctranslate2.models.WhisperGenerationResult', 'object')
-transcribe_py.write_text(transcribe_text)
-PY
+    && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels faster-whisper==${FASTER_WHISPER_VERSION}
 RUN /opt/venv/bin/python - <<'PY'
 import os
 from faster_whisper.utils import download_model
@@ -66,8 +35,9 @@ model = os.environ.get("WHISPER_MODEL", "base")
 download_model(model, output_dir=os.environ["GETOFFLINE_MODEL_CACHE_DIR"])
 PY
 
-FROM python:3.12-alpine
+FROM python:3.12-slim
 
+ARG FASTER_WHISPER_VERSION=1.1.0
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
@@ -78,33 +48,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/app/model-cache/xdg \
     PATH=/opt/venv/bin:$PATH
 
-RUN apk add --no-cache ca-certificates libgomp libstdc++ gcompat \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
     && python -m venv /opt/venv
 WORKDIR /app
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && python -m pip install --no-cache-dir --no-deps /wheels/faster_whisper-*.whl \
-    && python - <<'PY'
-import site
-import zipfile
-from pathlib import Path
-site_packages = Path(site.getsitepackages()[0])
-for pattern in ('ctranslate2-*.whl', 'onnxruntime-*.whl'):
-    wheels = sorted(Path('/wheels').glob(pattern))
-    if not wheels:
-        raise SystemExit(f'missing wheel: {pattern}')
-    with zipfile.ZipFile(wheels[0]) as wheel:
-        wheel.extractall(site_packages)
-# Alpine uses unpacked native wheels; avoid import-time evaluation of native type aliases.
-transcribe_py = site_packages / 'faster_whisper' / 'transcribe.py'
-transcribe_text = transcribe_py.read_text()
-if 'from __future__ import annotations' not in transcribe_text.splitlines()[:3]:
-    transcribe_text = 'from __future__ import annotations\n' + transcribe_text
-transcribe_text = transcribe_text.replace('ctranslate2.StorageView', 'object')
-transcribe_text = transcribe_text.replace('ctranslate2.models.WhisperGenerationResult', 'object')
-transcribe_py.write_text(transcribe_text)
-PY
+    && python -m pip install --no-cache-dir --no-index --find-links=/wheels faster-whisper==${FASTER_WHISPER_VERSION}
 RUN rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY --from=model-cache /app/model-cache /app/model-cache
 COPY src ./src
