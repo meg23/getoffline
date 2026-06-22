@@ -288,7 +288,7 @@ def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
 
 
 PROFILE_DEFAULTS = {
-    "output_root": "./downloads/profiles/default",
+    "output_root": "./downloads/default",
     "processing_workers": "2",
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
@@ -322,7 +322,7 @@ PROFILE_DEFAULTS = {
 
 def _profile_settings(profile_id: str) -> dict[str, str]:
     values = dict(PROFILE_DEFAULTS)
-    values["output_root"] = f"./downloads/profiles/{profile_id}"
+    values["output_root"] = f"./downloads/{profile_id}"
     values.update({row.key: row.value for row in AppConfigValue.objects.order_by("key")})
     values.update({row.key: row.value for row in ProfileConfigValue.objects.filter(profile_id=profile_id)})
     return values

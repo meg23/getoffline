@@ -102,7 +102,7 @@ def _profile_setting(profile_id: str, key: str, default: str) -> str:
 
 
 def _download_output_root(profile_id: str) -> Path:
-    root = _profile_setting(profile_id, "output_root", f"./downloads/profiles/{profile_id}")
+    root = _profile_setting(profile_id, "output_root", f"./downloads/{profile_id}")
     return Path(root).expanduser().resolve()
 
 
