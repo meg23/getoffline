@@ -16,7 +16,7 @@ class Command(BaseCommand):
         parser.add_argument("--password", required=True, help="Password for the user.")
         parser.add_argument("--admin", action="store_true", help="Grant staff and superuser flags.")
         parser.add_argument("--update", action="store_true", help="Update the password/flags when the user already exists.")
-        parser.add_argument("--downloads-root", default="./downloads/profiles", help="Root directory for per-user download folders.")
+        parser.add_argument("--downloads-root", default="./downloads", help="Root directory for per-user download folders.")
 
     def handle(self, *args, **options):
         username = options["username"].strip()

@@ -1,7 +1,7 @@
 import hashlib
 import os
 import subprocess
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -102,7 +102,7 @@ def _profile_setting(profile_id: str, key: str, default: str) -> str:
 
 
 def _download_output_root(profile_id: str) -> Path:
-    root = _profile_setting(profile_id, "output_root", f"./downloads/profiles/{profile_id}")
+    root = _profile_setting(profile_id, "output_root", f"./downloads/{profile_id}")
     return Path(root).expanduser().resolve()
 
 
@@ -629,11 +629,43 @@ def _source_limit(source: SourceConfig) -> int:
     return limit
 
 
-def _download_job_already_queued(idempotency_key: str) -> bool:
-    return Job.objects.filter(
-        idempotency_key=idempotency_key,
-        status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
-    ).exists()
+def _active_download_job(idempotency_key: str) -> Job | None:
+    return (
+        Job.objects.filter(
+            idempotency_key=idempotency_key,
+            status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+        )
+        .order_by("created_at", "id")
+        .first()
+    )
+
+
+def _stale_running_job_cutoff() -> datetime | None:
+    raw_timeout = str(os.getenv("GETOFFLINE_STALE_RUNNING_JOB_SECONDS", "21600")).strip()
+    if not raw_timeout.isdigit():
+        return None
+    timeout_seconds = int(raw_timeout)
+    if timeout_seconds <= 0:
+        return None
+    return timezone.now() - timedelta(seconds=timeout_seconds)
+
+
+def _make_stale_job_queued(job: Job) -> bool:
+    if job.status != Job.STATUS_RUNNING:
+        return False
+    cutoff = _stale_running_job_cutoff()
+    if cutoff is None:
+        return False
+    started_at = job.started_at or job.updated_at or job.created_at
+    if started_at and started_at > cutoff:
+        return False
+    job.status = Job.STATUS_QUEUED
+    job.error_message = "Reset stale running job so it can be published again."
+    job.started_at = None
+    job.finished_at = None
+    job.updated_at = timezone.now()
+    job.save(update_fields=["status", "error_message", "started_at", "finished_at", "updated_at"])
+    return True
 
 
 def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
@@ -830,12 +862,21 @@ def check_for_episodes(job: Job) -> None:
                 elif source.source_type == SourceConfig.SOURCE_YOUTUBE:
                     log.info("New YouTube episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s item_url=%s", profile_id, source.id, source.name, item_uid, title, item_url)
                 idempotency_key = _idempotency_key("download_episode", profile_id, source.id, item_uid or item_url or title)
-                if _download_job_already_queued(idempotency_key):
+                existing_job = _active_download_job(idempotency_key)
+                if existing_job is not None:
+                    was_stale = _make_stale_job_queued(existing_job)
+                    if existing_job.status == Job.STATUS_QUEUED:
+                        _publish_created_job(existing_job)
+                        total_enqueued += 1
                     source_enqueued += 1
                     log.info(
-                        "Download episode job already queued profile_id=%s source_id=%s item_uid=%s title=%s reserved_for_source=%s limit=%s",
+                        "Download episode job already active profile_id=%s source_id=%s job_id=%s job_status=%s republished=%s reset_stale=%s item_uid=%s title=%s reserved_for_source=%s limit=%s",
                         profile_id,
                         source.id,
+                        existing_job.id,
+                        existing_job.status,
+                        existing_job.status == Job.STATUS_QUEUED,
+                        was_stale,
                         item_uid,
                         title,
                         source_enqueued,

@@ -24,7 +24,7 @@ class ProfileManagerTests(unittest.TestCase):
             profile = manager.get_active()
             self.assertEqual(profile.profile_id, "default")
             self.assertEqual(profile.name, "default")
-            self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
+            self.assertEqual(profile.output_root, (root / "downloads" / "default").resolve())
             self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
             self.assertTrue(profile.database_path.exists())
             self.assertTrue((output_root / "existing.mp3").exists())
@@ -51,7 +51,7 @@ class ProfileManagerTests(unittest.TestCase):
 
             profile = manager.get_active()
             self.assertEqual(profile.name, "Home")
-            self.assertEqual(profile.output_root, (root / "profiles" / "default" / "downloads").resolve())
+            self.assertEqual(profile.output_root, (root / "downloads" / "default").resolve())
             self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
             self.assertTrue(legacy_output.exists())
 
@@ -61,7 +61,8 @@ class ProfileManagerTests(unittest.TestCase):
             profiles_root = root / "profiles"
             for profile_id in ("default", "max", "ozzie"):
                 profile_root = profiles_root / profile_id
-                (profile_root / "downloads").mkdir(parents=True)
+                (root / "downloads" / profile_id).mkdir(parents=True)
+                profile_root.mkdir(parents=True)
                 (profile_root / "downloads.sqlite3").touch()
             (profiles_root / ".DS_Store").write_text("", encoding="utf-8")
 
@@ -71,7 +72,7 @@ class ProfileManagerTests(unittest.TestCase):
                 [profile.profile_id for profile in manager.list_profiles()],
                 ["default", "max", "ozzie"],
             )
-            self.assertEqual(manager.profiles["max"].output_root, profiles_root / "max" / "downloads")
+            self.assertEqual(manager.profiles["max"].output_root, root / "downloads" / "max")
             self.assertEqual(manager.profiles["ozzie"].database_path, profiles_root / "ozzie" / "downloads.sqlite3")
 
     def test_profile_directory_with_content_at_root_uses_profile_root_as_output_root(self):
@@ -81,7 +82,7 @@ class ProfileManagerTests(unittest.TestCase):
             channel_root = profile_root / "My Channel"
             channel_root.mkdir(parents=True)
             (channel_root / "episode.mp3").write_bytes(b"audio")
-            (profile_root / "downloads").mkdir()
+            (root / "downloads" / "max").mkdir(parents=True)
             (profile_root / "downloads.sqlite3").touch()
 
             manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
@@ -92,7 +93,7 @@ class ProfileManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             profile_root = root / "profiles" / "max"
-            (profile_root / "downloads").mkdir(parents=True)
+            (root / "downloads" / "max").mkdir(parents=True)
             registry = root / "profiles.json"
             registry.write_text(
                 (
@@ -115,7 +116,7 @@ class ProfileManagerTests(unittest.TestCase):
             channel_root = profile_root / "XboxReady"
             channel_root.mkdir(parents=True)
             (channel_root / "episode.mp3").write_bytes(b"audio")
-            (profile_root / "downloads").mkdir()
+            (root / "downloads" / "max").mkdir(parents=True)
             database_path = profile_root / "downloads.sqlite3"
             database_path.touch()
             registry = root / "profiles.json"
@@ -139,7 +140,7 @@ class ProfileManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             profile_root = root / "profiles" / "max"
-            (profile_root / "downloads").mkdir(parents=True)
+            (root / "downloads" / "max").mkdir(parents=True)
             database_path = profile_root / "downloads.sqlite3"
             init_database(str(database_path))
             update_stored_defaults(
@@ -153,7 +154,7 @@ class ProfileManagerTests(unittest.TestCase):
             ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
 
             defaults = get_stored_config(str(database_path))["defaults"]
-            self.assertEqual(Path(defaults["output_root"]), profile_root / "downloads")
+            self.assertEqual(Path(defaults["output_root"]), root / "downloads" / "max")
             self.assertEqual(Path(defaults["database_path"]), database_path)
 
     def test_create_profile_has_isolated_database_and_settings(self):
@@ -171,6 +172,7 @@ class ProfileManagerTests(unittest.TestCase):
             self.assertEqual(created.name, "Alice")
             self.assertNotEqual(created.database_path, manager.profiles["default"].database_path)
             self.assertTrue(created.database_path.exists())
+            self.assertEqual(created.output_root, root / "downloads" / created.profile_id)
             self.assertEqual(Path(config["defaults"]["output_root"]), created.output_root)
             self.assertEqual(config["youtube"], [])
             self.assertEqual(config["podcasts"], [])
