@@ -15,7 +15,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 django.setup()
 
 from app.routing import (  # noqa: E402
-    SERIAL_DOWNLOAD_QUEUE,
     YOUTUBE_DOWNLOAD_QUEUE,
     PODCAST_DOWNLOAD_QUEUE,
     SERIAL_EPISODE_CHECK_QUEUE,
@@ -38,7 +37,6 @@ _STOP = False
 
 QUEUE_BY_WORKER = {
     "updates": SERIAL_EPISODE_CHECK_QUEUE,
-    "downloader": SERIAL_DOWNLOAD_QUEUE,
     "downloader-youtube": YOUTUBE_DOWNLOAD_QUEUE,
     "downloader-podcast": PODCAST_DOWNLOAD_QUEUE,
     "ffmpeg": FFMPEG_QUEUE,
@@ -50,7 +48,6 @@ QUEUE_BY_WORKER = {
 
 JOB_TYPES_BY_WORKER = {
     "updates": {"check_for_episodes", "update_downloads"},
-    "downloader": {"download_episode", "download_single"},
     "downloader-youtube": {"download_episode", "download_single"},
     "downloader-podcast": {"download_episode", "download_single"},
     "ffmpeg": {"transcode_media"},
@@ -60,7 +57,7 @@ JOB_TYPES_BY_WORKER = {
     "cleanup": {"retention_cleanup"},
 }
 
-SERIAL_WORKERS = {"updates", "downloader", "downloader-youtube"}
+SERIAL_WORKERS = {"updates", "downloader-youtube"}
 
 
 def _handle_signal(signum, _frame) -> None:
@@ -259,9 +256,6 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
                 log.info("Worker requeue existing DB jobs found no queued rows worker_type=%s queue=%s", worker_type, queue)
         else:
             log.info("Worker skipped existing DB job requeue worker_type=%s queue=%s enable_with=GETOFFLINE_REQUEUE_EXISTING_JOBS=1", worker_type, queue)
-        if worker_type == "downloader":
-            channel.queue_declare(queue=YOUTUBE_DOWNLOAD_QUEUE, durable=True, arguments=queue_arguments(YOUTUBE_DOWNLOAD_QUEUE) or None)
-            channel.queue_declare(queue=PODCAST_DOWNLOAD_QUEUE, durable=True, arguments=queue_arguments(PODCAST_DOWNLOAD_QUEUE) or None)
         if worker_type == "transcripts":
             enqueue_missing_transcript_jobs(channel)
         log.info("Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s", worker_type, queue, settings.RABBITMQ_EXCHANGE, safe_prefetch)

@@ -23,7 +23,7 @@ if django is not None:
     django.setup()
 
 from app.queue import job_priority  # noqa: E402
-from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, SERIAL_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_arguments, queue_name  # noqa: E402
+from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_arguments, queue_name  # noqa: E402
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
@@ -463,7 +463,6 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(job_priority({"job_type": "generate_transcript", "payload": {"download_id": 1, "startup_missing_subtitle": True}}), 2)
 
     def test_priority_queues_are_declared_with_max_priority(self):
-        self.assertEqual(queue_arguments(SERIAL_DOWNLOAD_QUEUE), {"x-max-priority": 10})
         self.assertEqual(queue_arguments(YOUTUBE_DOWNLOAD_QUEUE), {"x-max-priority": 10})
         self.assertEqual(queue_arguments(PODCAST_DOWNLOAD_QUEUE), {"x-max-priority": 10})
         self.assertEqual(queue_arguments(TRANSCRIPT_QUEUE), {"x-max-priority": 10})
@@ -472,7 +471,7 @@ class QueueRoutingTests(unittest.TestCase):
     def test_download_jobs_route_to_source_specific_download_queues(self):
         self.assertEqual(queue_name("update_downloads"), "getoffline.jobs.updates")
         self.assertEqual(queue_name("check_for_episodes"), "getoffline.jobs.updates")
-        self.assertEqual(queue_name("download_single"), "getoffline.jobs.downloads")
+        self.assertEqual(queue_name("download_single"), "getoffline.jobs.downloads.youtube")
         self.assertEqual(queue_name("download_single", {"source_type": "youtube"}), "getoffline.jobs.downloads.youtube")
         self.assertEqual(queue_name("download_episode", {"source_type": "podcast"}), "getoffline.jobs.downloads.podcast")
         self.assertEqual(queue_name("download_episode", {"source_type": "youtube"}), "getoffline.jobs.downloads.youtube")

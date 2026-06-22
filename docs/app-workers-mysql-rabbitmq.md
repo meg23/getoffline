@@ -142,7 +142,8 @@ make run-worker-sync
 ## Queue mapping
 
 - `getoffline.jobs.updates`: `update_downloads`, `check_for_episodes`
-- `getoffline.jobs.downloads`: `download_single`, `download_episode`
+- `getoffline.jobs.downloads.youtube`: YouTube and manual URL `download_single` / `download_episode`
+- `getoffline.jobs.downloads.podcast`: podcast `download_episode`
 - `getoffline.jobs.ffmpeg`: `transcode_media`
 - `getoffline.jobs.transcripts`: `generate_transcript`
 - `getoffline.jobs.summaries`: `summarize_missing`, `generate_summary`
