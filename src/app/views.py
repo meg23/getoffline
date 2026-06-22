@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import mimetypes
 import uuid
@@ -23,6 +24,8 @@ from .routing import FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_
 
 ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "transfer_media", "summarize_missing"}
 DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
+MEDIA_UPLOAD_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg", ".mp4", ".mkv", ".webm", ".mov"}
+VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
 log = logging.getLogger(__name__)
 
 
@@ -401,6 +404,79 @@ def settings_page(request: HttpRequest) -> HttpResponse:
     )
 
 
+
+
+def _normalize_upload_stem(value: str) -> str:
+    normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
+    normalized = re.sub(r"[^A-Za-z0-9._ -]+", "-", normalized).strip(". -")
+    return normalized or "manual-upload"
+
+
+def _write_manual_upload(profile_id: str, uploaded_file) -> tuple[Download, Path]:
+    original_name = Path(str(uploaded_file.name or "")).name
+    if not original_name:
+        raise ValueError("Missing filename")
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in MEDIA_UPLOAD_EXTENSIONS:
+        raise ValueError("Unsupported media type")
+
+    output_root = _profile_output_root(profile_id)
+    destination_root = output_root / "manual"
+    destination_root.mkdir(parents=True, exist_ok=True)
+    stem = _normalize_upload_stem(Path(original_name).stem)
+    destination_path = destination_root / f"{stem}{suffix}"
+    counter = 1
+    while destination_path.exists():
+        destination_path = destination_root / f"{stem}-{counter}{suffix}"
+        counter += 1
+
+    hasher = hashlib.sha1()
+    bytes_written = 0
+    with destination_path.open("wb") as destination:
+        for chunk in uploaded_file.chunks():
+            if not chunk:
+                continue
+            destination.write(chunk)
+            hasher.update(chunk)
+            bytes_written += len(chunk)
+    if bytes_written <= 0:
+        destination_path.unlink(missing_ok=True)
+        raise ValueError("Empty file payload")
+
+    now = timezone.now()
+    item_uid = f"manual-{hasher.hexdigest()}-{bytes_written}"
+    relative_path = str(destination_path.relative_to(output_root)) if destination_path.is_relative_to(output_root) else None
+    download, _created = Download.objects.update_or_create(
+        profile_id=profile_id,
+        item_uid=item_uid,
+        defaults={
+            "source_type": "manual",
+            "source_name": "Manual Uploads",
+            "source_url": None,
+            "item_id": item_uid,
+            "item_url": None,
+            "media_url": None,
+            "title": original_name,
+            "description": "Imported via browser drag-and-drop",
+            "uploader": "local",
+            "channel": "Manual Uploads",
+            "upload_date": now.date().isoformat(),
+            "duration_seconds": None,
+            "file_path": str(destination_path),
+            "file_path_relative": relative_path,
+            "file_ext": suffix.lstrip("."),
+            "file_size_bytes": bytes_written,
+            "subtitle_path": None,
+            "subtitle_path_relative": None,
+            "download_status": "downloaded",
+            "raw_metadata_json": '{"ingest_method":"drag-and-drop"}',
+            "last_seen_at": now,
+            "completed_at": now,
+        },
+    )
+    return download, destination_path
+
+
 @login_required
 def enqueue_job(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
@@ -468,6 +544,43 @@ def worker_message_status(request: HttpRequest) -> JsonResponse:
         "status": source_status,
         "error_message": str(payload.get("error_message") or ""),
     })
+
+
+
+@login_required
+@require_POST
+def manual_upload(request: HttpRequest) -> JsonResponse:
+    profile_id = _profile_id(request)
+    uploaded_files = request.FILES.getlist("files") or request.FILES.getlist("file")
+    if not uploaded_files:
+        return JsonResponse({"ok": False, "error_message": "No files uploaded."}, status=400)
+
+    created: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    for uploaded_file in uploaded_files:
+        try:
+            download, path = _write_manual_upload(profile_id, uploaded_file)
+            media_type = "video" if path.suffix.lower() in VIDEO_UPLOAD_EXTENSIONS else "audio"
+            job = create_job(
+                profile_id=profile_id,
+                job_type="generate_transcript",
+                payload={
+                    "download_id": download.id,
+                    "subtitles": True,
+                    "source_type": "manual",
+                    "media_type": media_type,
+                    "recent_download": True,
+                    "manual_upload": True,
+                },
+                idempotency_key=f"generate_transcript:{profile_id}:{download.id}",
+            )
+            publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+            created.append({"id": download.id, "title": download.title, "job_id": job.id})
+        except ValueError as exc:
+            errors.append({"filename": str(getattr(uploaded_file, "name", "")), "error": str(exc)})
+
+    status = 201 if created else 400
+    return JsonResponse({"ok": bool(created), "uploads": created, "errors": errors}, status=status)
 
 
 @login_required

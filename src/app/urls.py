@@ -12,6 +12,7 @@ urlpatterns = [
     path("worker-messages/status/", views.worker_message_status, name="worker_message_status"),
     path("batch-update/", views.batch_update, name="batch_update"),
     path("transcript-search/", views.transcript_search, name="transcript_search"),
+    path("manual-upload/", views.manual_upload, name="manual_upload"),
     path("edit-metadata/", views.edit_metadata, name="edit_metadata"),
     path("play/<int:download_id>/", views.player, name="player"),
     path("media/<int:download_id>/", views.media, name="media"),
