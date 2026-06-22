@@ -1,8 +1,6 @@
 import json
 from typing import Any, Dict
 
-import pika
-from django.conf import settings
 
 from .routing import MAX_QUEUE_PRIORITY, queue_arguments, queue_name
 
@@ -64,6 +62,9 @@ def _message_with_payload(message: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def publish_job(message: Dict[str, Any]) -> None:
+    import pika
+    from django.conf import settings
+
     message = _message_with_payload(message)
     job_type = str(message["job_type"])
     queue = queue_name(job_type, message.get("payload") if isinstance(message.get("payload"), dict) else None)

@@ -30,7 +30,7 @@ if django is not None:
     from models.models import Download, Job, MediaSummary, ScheduledJob, SourceConfig, ProfileConfigValue  # noqa: E402
     from app.views import _queue_counts, _queue_missing_summary_batch  # noqa: E402
     from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
-    from workers.handlers import check_for_episodes, retention_cleanup, transcode_media, _youtube_candidates  # noqa: E402
+    from workers.handlers import check_for_episodes, retention_cleanup, transcode_media, _idempotency_key, _youtube_candidates  # noqa: E402
 
 
 @override_settings(
@@ -381,6 +381,70 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(jobs.count(), 1)
         self.assertEqual(jobs.first().payload["item_uid"], "video-1")
         publish.assert_called_once()
+
+
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_episode_checker_republishes_existing_queued_download_job(self):
+        source = SourceConfig.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            name="Test Channel",
+            url="https://www.youtube.com/@example/videos",
+            enabled=True,
+            max_downloads=1,
+        )
+        existing = create_job(
+            profile_id="default",
+            job_type="download_episode",
+            payload={"source_id": source.id, "source_type": SourceConfig.SOURCE_YOUTUBE, "item_uid": "video-1"},
+            idempotency_key=_idempotency_key("download_episode", "default", source.id, "video-1"),
+        )
+        job = Job.objects.create(profile_id="default", job_type="check_for_episodes", status=Job.STATUS_QUEUED)
+        candidates = iter([
+            {"item_uid": "video-1", "item_url": "https://youtu.be/1", "media_url": "https://youtu.be/1", "title": "One"},
+        ])
+
+        with patch("workers.handlers._candidates_for_source", return_value=candidates), patch("workers.handlers._publish_created_job") as publish:
+            check_for_episodes(job)
+
+        self.assertEqual(Job.objects.filter(job_type="download_episode", payload__source_id=source.id).count(), 1)
+        publish.assert_called_once_with(existing)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_episode_checker_resets_and_republishes_stale_running_download_job(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        source = SourceConfig.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            name="Test Channel",
+            url="https://www.youtube.com/@example/videos",
+            enabled=True,
+            max_downloads=1,
+        )
+        existing = create_job(
+            profile_id="default",
+            job_type="download_episode",
+            payload={"source_id": source.id, "source_type": SourceConfig.SOURCE_YOUTUBE, "item_uid": "video-1"},
+            idempotency_key=_idempotency_key("download_episode", "default", source.id, "video-1"),
+        )
+        stale_started_at = timezone.now() - timedelta(hours=7)
+        Job.objects.filter(pk=existing.id).update(status=Job.STATUS_RUNNING, started_at=stale_started_at, updated_at=stale_started_at)
+        existing.refresh_from_db()
+        job = Job.objects.create(profile_id="default", job_type="check_for_episodes", status=Job.STATUS_QUEUED)
+        candidates = iter([
+            {"item_uid": "video-1", "item_url": "https://youtu.be/1", "media_url": "https://youtu.be/1", "title": "One"},
+        ])
+
+        with patch("workers.handlers._candidates_for_source", return_value=candidates), patch("workers.handlers._publish_created_job") as publish:
+            check_for_episodes(job)
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.status, Job.STATUS_QUEUED)
+        self.assertIsNone(existing.started_at)
+        publish.assert_called_once_with(existing)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_youtube_candidates_drill_into_channel_videos_tab(self):
