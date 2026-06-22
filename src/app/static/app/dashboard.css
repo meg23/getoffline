@@ -241,121 +241,15 @@ table {
   animation: transfer-spin 0.8s linear infinite;
 }
 .toolbar-icon {
-  position: relative;
-  display: inline-block;
-  width: 1.35rem;
-  height: 1.35rem;
+  display: block;
+  width: 1.3rem;
+  height: 1.3rem;
   color: currentColor;
-}
-.toolbar-icon-download::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 0.08rem;
-  width: 0.12rem;
-  height: 0.82rem;
-  border-radius: 999px;
-  background: currentColor;
-  transform: translateX(-50%);
-}
-.toolbar-icon-download::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 0.54rem;
-  width: 0.58rem;
-  height: 0.58rem;
-  border-right: 0.12rem solid currentColor;
-  border-bottom: 0.12rem solid currentColor;
-  transform: translateX(-50%) rotate(45deg);
-}
-.toolbar-icon-download {
-  border-bottom: 0.12rem solid currentColor;
-  border-radius: 0;
-  background:
-    linear-gradient(currentColor, currentColor) left 0.18rem bottom 0.08rem / 0.12rem 0.42rem no-repeat,
-    linear-gradient(currentColor, currentColor) right 0.18rem bottom 0.08rem / 0.12rem 0.42rem no-repeat;
-}
-.toolbar-icon-plus::before,
-.toolbar-icon-plus::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  border-radius: 999px;
-  background: currentColor;
-  transform: translate(-50%, -50%);
-}
-.toolbar-icon-plus::before {
-  width: 1.08rem;
-  height: 0.13rem;
-}
-.toolbar-icon-plus::after {
-  width: 0.13rem;
-  height: 1.08rem;
-}
-.toolbar-icon-search::before {
-  content: "";
-  position: absolute;
-  left: 0.05rem;
-  top: 0.02rem;
-  width: 0.82rem;
-  height: 0.82rem;
-  border: 0.18rem solid currentColor;
-  border-radius: 999px;
-}
-.toolbar-icon-search::after {
-  content: "";
-  position: absolute;
-  right: 0.06rem;
-  bottom: 0.1rem;
-  width: 0.56rem;
-  height: 0.18rem;
-  border-radius: 999px;
-  background: currentColor;
-  transform: rotate(45deg);
-  transform-origin: center;
-}
-.toolbar-icon-settings {
-  width: 1.42rem;
-  height: 1.42rem;
-  background: currentColor;
-  clip-path: polygon(
-    56% 0,
-    67% 13%,
-    84% 8%,
-    92% 23%,
-    80% 36%,
-    100% 45%,
-    100% 60%,
-    81% 68%,
-    91% 84%,
-    78% 94%,
-    63% 82%,
-    51% 100%,
-    35% 98%,
-    30% 80%,
-    11% 88%,
-    2% 75%,
-    14% 60%,
-    0 48%,
-    4% 32%,
-    22% 29%,
-    18% 11%,
-    33% 4%,
-    45% 17%
-  );
-}
-.toolbar-icon-settings::after {
-  content: "";
-  position: absolute;
-  inset: 0.46rem;
-  border-radius: 999px;
-  background: #eef3ff;
-}
-.icon-button:hover .toolbar-icon-settings::after,
-.icon-button-primary .toolbar-icon-settings::after {
-  background: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.25;
 }
 @keyframes transfer-spin {
   to {
@@ -944,7 +838,7 @@ tbody tr:nth-child(even) td {
 
 .profile-name {
   padding: 0 0.75rem;
-  color: #e9eefc;
+  color: #243251;
   font-weight: 700;
 }
 .profile-controls form {
