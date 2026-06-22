@@ -1,4 +1,5 @@
 import re
+import time
 from pathlib import Path
 
 from workers.logger import get_logger
@@ -43,6 +44,13 @@ def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
 
 def _normalize_existing_sidecars_for_media(media_file: Path):
     subtitle_path = media_file.with_suffix(".srt")
+    log.info(
+        "Checking for existing subtitle sidecar media=%s expected_subtitle=%s media_exists=%s subtitle_exists=%s",
+        media_file,
+        subtitle_path,
+        media_file.exists(),
+        subtitle_path.exists(),
+    )
     if subtitle_path.exists():
         _cleanup_subtitle_sidecars(media_file, subtitle_path)
         return subtitle_path
@@ -147,16 +155,21 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
 
     model_name = settings.get("subtitle_model", settings.get("model", "base"))
     subtitle_language = settings.get("subtitle_language", "en")
+    input_size = input_file.stat().st_size if input_file.exists() else None
+    started_at = time.monotonic()
     transcription_mode = str(settings.get("subtitle_transcription_mode", "in_process")).strip().lower()
     if transcription_mode != "in_process":
         log.info("Ignoring deprecated subtitle transcription mode: %s; using in_process", transcription_mode)
         transcription_mode = "in_process"
     log.info(
-        "Generating subtitles: %s (%s, language=%s, mode=%s)",
-        input_file.name,
+        "Generating subtitles: media=%s subtitle_path=%s model=%s language=%s mode=%s size_bytes=%s failed_marker=%s",
+        input_file,
+        subtitle_path,
         model_name,
         subtitle_language,
         transcription_mode,
+        input_size,
+        failed_marker_path,
     )
     try:
         result = transcribe_with_whisper(
@@ -183,6 +196,17 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
         raise
 
     segments = result.get("segments", [])
+    non_empty_segments = [segment for segment in segments if str(segment.get("text", "")).strip()]
+    log.info(
+        "Whisper subtitle result received media=%s raw_segments=%s non_empty_segments=%s text_chars=%s elapsed_seconds=%.2f",
+        input_file,
+        len(segments),
+        len(non_empty_segments),
+        len(str(result.get("text") or "")),
+        time.monotonic() - started_at,
+    )
+    if not non_empty_segments:
+        log.warning("Whisper returned no subtitle text media=%s raw_segments=%s", input_file, len(segments))
     subtitle_path.parent.mkdir(parents=True, exist_ok=True)
     with subtitle_path.open("w", encoding="utf-8") as srt_file:
         for index, segment in enumerate(segments, start=1):
@@ -207,7 +231,15 @@ def generate_whisper_subtitles(input_file: Path, settings: dict, subtitle_path: 
     _shift_srt_timestamps(subtitle_path, subtitle_offset)
 
     _cleanup_subtitle_sidecars(input_file, subtitle_path)
-    log.info("Subtitles generated: %s (offset: %.3fs)", subtitle_path.name, subtitle_offset)
+    output_size = subtitle_path.stat().st_size if subtitle_path.exists() else None
+    log.info(
+        "Subtitles generated media=%s subtitle_path=%s offset=%.3fs output_size_bytes=%s elapsed_seconds=%.2f",
+        input_file,
+        subtitle_path,
+        subtitle_offset,
+        output_size,
+        time.monotonic() - started_at,
+    )
     return subtitle_path
 
 
@@ -250,7 +282,7 @@ def create_subtitles(
                 logger.info("Generated %s subtitles: %s", context_label, subtitle_path.name)
             return subtitle_path
         except Exception as subtitle_exc:
-            logger.warning("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
+            logger.exception("Subtitle generation failed for %s: %s", media_file, subtitle_exc)
             return None
 
     if not media_file.exists():

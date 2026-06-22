@@ -1,6 +1,7 @@
 import hashlib
 import os
 import subprocess
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -1005,19 +1006,28 @@ def _subtitle_offset_for_download(download: Download, payload: dict) -> float | 
 
 def generate_transcript(job: Job) -> None:
     """Generate Whisper subtitles/transcript segments, then enqueue summary work."""
+    started_at = time.monotonic()
     log.info("Transcript worker started job_id=%s profile_id=%s payload=%s", job.id, job.profile_id, job.payload)
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
     if not download_id:
         log.warning("Transcript worker skipped job with no download_id job_id=%s", job.id)
         return
+    lookup_started_at = time.monotonic()
     download = Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
+    log.info(
+        "Transcript worker download lookup finished job_id=%s download_id=%s found=%s elapsed_seconds=%.3f",
+        job.id,
+        download_id,
+        download is not None,
+        time.monotonic() - lookup_started_at,
+    )
     if download is None:
         log.warning("Transcript worker skipped missing download job_id=%s download_id=%s profile_id=%s", job.id, download_id, job.profile_id)
         return
     media_path = Path(str(download.file_path or "")).expanduser().resolve()
     log.info(
-        "Transcript worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s subtitle_path=%s",
+        "Transcript worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s subtitle_path=%s status=%s size_bytes=%s last_seen_at=%s",
         job.id,
         download_id,
         download.title,
@@ -1026,6 +1036,9 @@ def generate_transcript(job: Job) -> None:
         download.file_path,
         download.file_ext,
         download.subtitle_path,
+        download.download_status,
+        download.file_size_bytes,
+        download.last_seen_at,
     )
     if not media_path.exists():
         log.warning("Transcript worker skipped missing media file job_id=%s download_id=%s path=%s", job.id, download_id, media_path)
@@ -1034,7 +1047,7 @@ def generate_transcript(job: Job) -> None:
         subtitle_offset = _subtitle_offset_for_download(download, payload)
         transcription_mode = _profile_setting(job.profile_id, "subtitle_transcription_mode", "in_process")
         log.info(
-            "Transcript worker starting subtitle generation job_id=%s download_id=%s enabled=%s media_path=%s size_bytes=%s offset=%s mode=%s",
+            "Transcript worker starting subtitle generation job_id=%s download_id=%s enabled=%s media_path=%s size_bytes=%s offset=%s mode=%s suffix=%s exists=%s",
             job.id,
             download_id,
             enabled,
@@ -1042,17 +1055,37 @@ def generate_transcript(job: Job) -> None:
             media_path.stat().st_size,
             subtitle_offset,
             transcription_mode,
+            media_path.suffix,
+            media_path.exists(),
         )
+        subtitle_started_at = time.monotonic()
         subtitle_path = create_subtitles(media_path, subtitle_offset, enabled, log, download.title or media_path.name, "download", transcription_mode)
+        log.info(
+            "Transcript worker subtitle generation finished job_id=%s download_id=%s subtitle_path=%s elapsed_seconds=%.2f",
+            job.id,
+            download_id,
+            subtitle_path,
+            time.monotonic() - subtitle_started_at,
+        )
         if subtitle_path is not None:
             output_root = _download_output_root(job.profile_id)
             download.subtitle_path = str(subtitle_path)
             download.subtitle_path_relative = str(subtitle_path.relative_to(output_root)) if subtitle_path.is_relative_to(output_root) else None
             download.save(update_fields=["subtitle_path", "subtitle_path_relative"])
             segments = _load_segments_from_subtitle(Path(subtitle_path))
-            TranscriptSegment.objects.filter(download=download).delete()
-            TranscriptSegment.objects.bulk_create([TranscriptSegment(download=download, subtitle_path=str(subtitle_path), start_seconds=0.0, end_seconds=None, text=text) for text in segments])
-            log.info("Transcript worker saved subtitles job_id=%s download_id=%s subtitle_path=%s segments=%s", job.id, download_id, subtitle_path, len(segments))
+            deleted_count, _ = TranscriptSegment.objects.filter(download=download).delete()
+            created_segments = [TranscriptSegment(download=download, subtitle_path=str(subtitle_path), start_seconds=0.0, end_seconds=None, text=text) for text in segments]
+            TranscriptSegment.objects.bulk_create(created_segments)
+            log.info(
+                "Transcript worker saved subtitles job_id=%s download_id=%s subtitle_path=%s loaded_segments=%s deleted_segments=%s inserted_segments=%s subtitle_size_bytes=%s",
+                job.id,
+                download_id,
+                subtitle_path,
+                len(segments),
+                deleted_count,
+                len(created_segments),
+                Path(subtitle_path).stat().st_size if Path(subtitle_path).exists() else None,
+            )
         else:
             log.warning("Transcript worker completed without subtitle output job_id=%s download_id=%s enabled=%s media_path=%s", job.id, download_id, enabled, media_path)
     child = create_job(
@@ -1062,7 +1095,13 @@ def generate_transcript(job: Job) -> None:
         idempotency_key=f"generate_summary:{job.profile_id}:{download_id}",
     )
     _publish_created_job(child)
-    log.info("Transcript worker queued summary job parent_job_id=%s download_id=%s child_job_id=%s", job.id, download_id, child.id)
+    log.info(
+        "Transcript worker queued summary job parent_job_id=%s download_id=%s child_job_id=%s elapsed_seconds=%.2f",
+        job.id,
+        download_id,
+        child.id,
+        time.monotonic() - started_at,
+    )
 
 
 def generate_summary(job: Job) -> None:
