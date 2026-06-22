@@ -66,7 +66,7 @@ def _message_with_payload(message: Dict[str, Any]) -> Dict[str, Any]:
 def publish_job(message: Dict[str, Any]) -> None:
     message = _message_with_payload(message)
     job_type = str(message["job_type"])
-    queue = queue_name(job_type)
+    queue = queue_name(job_type, message.get("payload") if isinstance(message.get("payload"), dict) else None)
     priority = max(0, min(MAX_QUEUE_PRIORITY, int(message.get("priority", job_priority(message)))))
     connection = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     try:
