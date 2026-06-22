@@ -3,6 +3,7 @@ import logging
 import mimetypes
 import uuid
 import re
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -16,7 +17,7 @@ from django.contrib.auth.decorators import login_required
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from models.jobs import create_job
-from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, SourceConfig, TranscriptSegment
+from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, ScheduledJob, SourceConfig, TranscriptSegment
 
 from .queue import publish_job
 from .routing import FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, TRANSFER_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_name
@@ -348,6 +349,53 @@ def _profile_settings(profile_id: str) -> dict[str, str]:
 
 def _checked(settings: dict[str, str], key: str) -> bool:
     return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sync_update_downloads_schedule(profile_id: str, raw_minutes: object, *, now=None) -> None:
+    """Keep the automatic update scheduler in sync with the settings page."""
+    now = now or timezone.now()
+    try:
+        minutes = int(str(raw_minutes or "").strip())
+    except (TypeError, ValueError):
+        return
+
+    schedule = ScheduledJob.objects.filter(profile_id=profile_id, job_type="update_downloads").first()
+    if minutes <= 0:
+        if schedule is not None and schedule.enabled:
+            schedule.enabled = False
+            schedule.updated_at = now
+            schedule.save(update_fields=["enabled", "updated_at"])
+        return
+
+    interval_seconds = max(60, minutes * 60)
+    next_run_at = now + timedelta(seconds=interval_seconds)
+    defaults = {
+        "enabled": True,
+        "interval_seconds": interval_seconds,
+        "payload": {"source": "scheduler"},
+        "idempotency_key_template": "scheduled:update_downloads:${profile_id}:${due_hour}",
+        "updated_at": now,
+    }
+    if schedule is None:
+        ScheduledJob.objects.create(
+            profile_id=profile_id,
+            job_type="update_downloads",
+            next_run_at=next_run_at,
+            **defaults,
+        )
+        return
+
+    update_fields = ["enabled", "interval_seconds", "payload", "idempotency_key_template", "updated_at"]
+    old_interval_seconds = schedule.interval_seconds
+    schedule.enabled = True
+    schedule.interval_seconds = interval_seconds
+    schedule.payload = {"source": "scheduler"}
+    schedule.idempotency_key_template = "scheduled:update_downloads:${profile_id}:${due_hour}"
+    if schedule.next_run_at <= now or old_interval_seconds != interval_seconds:
+        schedule.next_run_at = next_run_at
+        update_fields.append("next_run_at")
+    schedule.updated_at = now
+    schedule.save(update_fields=update_fields)
 
 
 def _queue_counts(profile_id: str) -> list[dict[str, object]]:
@@ -768,6 +816,8 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
                 "updated_at": now,
             },
         )
+    if "config__auto_update_minutes" in request.POST:
+        _sync_update_downloads_schedule(profile_id, request.POST.get("config__auto_update_minutes"), now=now)
     return HttpResponseRedirect(reverse("settings"))
 
 

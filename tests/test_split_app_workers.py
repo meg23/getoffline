@@ -29,7 +29,7 @@ from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRA
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
     from models.models import Download, Job, MediaSummary, ScheduledJob, SourceConfig, ProfileConfigValue, TranscriptSegment  # noqa: E402
-    from app.views import _queue_counts, _queue_missing_summary_batch, _write_manual_upload  # noqa: E402
+    from app.views import _queue_counts, _queue_missing_summary_batch, _sync_update_downloads_schedule, _write_manual_upload  # noqa: E402
     from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
     from workers.handlers import check_for_episodes, retention_cleanup, transcode_media, _idempotency_key, _youtube_candidates  # noqa: E402
     from workers.runner import enqueue_missing_summary_jobs  # noqa: E402
@@ -135,6 +135,54 @@ class SharedDjangoModelTests(TestCase):
         schedule.refresh_from_db()
         self.assertGreater(schedule.next_run_at, due_at)
         publish.assert_called_once_with({"job_id": job.id, "job_type": "transfer_media", "profile_id": "default", "attempt": 1})
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_auto_update_setting_creates_enabled_update_schedule(self):
+        from django.utils import timezone
+
+        now = timezone.now()
+
+        _sync_update_downloads_schedule("alice", "15", now=now)
+
+        schedule = ScheduledJob.objects.get(profile_id="alice", job_type="update_downloads")
+        self.assertTrue(schedule.enabled)
+        self.assertEqual(schedule.interval_seconds, 900)
+        self.assertEqual(schedule.payload, {"source": "scheduler"})
+        self.assertEqual(schedule.idempotency_key_template, "scheduled:update_downloads:${profile_id}:${due_hour}")
+        self.assertGreater(schedule.next_run_at, now)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_auto_update_setting_zero_disables_update_schedule(self):
+        from django.utils import timezone
+
+        schedule = ScheduledJob.objects.create(
+            profile_id="alice",
+            job_type="update_downloads",
+            interval_seconds=900,
+            payload={"source": "scheduler"},
+            idempotency_key_template="scheduled:update_downloads:${profile_id}:${due_hour}",
+            next_run_at=timezone.now(),
+        )
+
+        _sync_update_downloads_schedule("alice", "0")
+
+        schedule.refresh_from_db()
+        self.assertFalse(schedule.enabled)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_save_config_syncs_auto_update_schedule_for_logged_in_user(self):
+        client = Client()
+        from django.contrib.auth.models import User
+
+        User.objects.create_user(username="alice", password="pass")
+        self.assertTrue(client.login(username="alice", password="pass"))
+
+        response = client.post("/settings/save/", {"config__auto_update_minutes": "7"})
+
+        self.assertEqual(response.status_code, 302)
+        schedule = ScheduledJob.objects.get(profile_id="alice", job_type="update_downloads")
+        self.assertTrue(schedule.enabled)
+        self.assertEqual(schedule.interval_seconds, 420)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_retention_cleanup_deletes_expired_non_favorite_content(self):
