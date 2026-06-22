@@ -3,7 +3,7 @@ import re
 import threading
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List
 from urllib import error, request
 
 from workers.logger import get_logger

@@ -17,7 +17,6 @@ import traceback
 import time
 from collections import Counter
 from datetime import datetime, timezone
-from io import StringIO
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from dataclasses import dataclass, field
@@ -54,7 +53,7 @@ from workers.download_store import (
     update_source_config,
     update_download_settings,
     update_stored_defaults,
-    update_download_position_seconds,
+    update_download_position_seconds,  # noqa: F401 - re-exported for existing callers/tests.
     update_download_positions_batch,
     close_cached_descriptors,
     upsert_download,
@@ -254,7 +253,7 @@ def _render_pin_page(state: AppState, message: str = "") -> str:
         </form>
         """
     if active_profile and active_profile.has_pin:
-        pin_form = f"""
+        pin_form = """
         <form method="post" action="/pin" class="pin-form">
           <label for="pin">Enter profile PIN</label>
           <div class="pin-input-wrap">
@@ -1288,7 +1287,12 @@ def _ensure_transcript_index_for_row(db_path: Path, row: MediaRow, subtitle_path
         return len(parsed_segments)
 
 
-def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -> Optional[str]:
+def _ensure_summary_for_row(
+    db_path: Path,
+    row: MediaRow,
+    subtitle_path: Path,
+    defaults: Dict[str, object],
+) -> Optional[str]:
     with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
         existing = conn.execute(
             "SELECT summary_text FROM media_summaries WHERE download_id = ?",
@@ -1307,8 +1311,8 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     segment_texts = [str(item[0]) for item in segment_rows if item and item[0]]
     if not segment_texts:
         return None
-    summary_model = str(state.config.get("defaults", {}).get("summary_model") or "qwen2.5:0.5b")
-    summary_timeout_seconds = int((state.config.get("defaults", {}) or {}).get("summary_timeout_seconds") or 90)
+    summary_model = str(defaults.get("summary_model") or "qwen2.5:0.5b")
+    summary_timeout_seconds = int(defaults.get("summary_timeout_seconds") or 90)
     result = summarize_segments(
         segment_texts,
         model_name=summary_model,
@@ -1382,7 +1386,12 @@ def _index_transcripts_on_startup(state: AppState) -> None:
         except Exception:
             continue
         try:
-            _ensure_summary_for_row(state.database_path, row, subtitle_path)
+            _ensure_summary_for_row(
+                state.database_path,
+                row,
+                subtitle_path,
+                state.config.get("defaults", {}),
+            )
         except Exception as exc:
             log.debug("Summary generation skipped for row id=%s: %s", row.row_id, exc)
         if loaded:
@@ -2362,8 +2371,6 @@ def _render_index(
     table_rows = "\n".join(cards) if cards else "<tr><td colspan='7'>No media items found yet.</td></tr>"
     sync_running = status["is_running"] == "yes"
     android_status = android_status or {"is_running": "no", "last_result": "idle", "last_copied_count": "0", "last_skipped_count": "0"}
-    android_running = android_status.get("is_running") == "yes"
-    android_button_disabled = "disabled" if android_running else ""
     button_disabled = "disabled" if sync_running else ""
     sync_icon_class = " is-spinning" if sync_running else ""
     sync_icon_href = "#bi-arrow-repeat" if sync_running else "#bi-download"
@@ -2384,24 +2391,6 @@ def _render_index(
                 total_listened = _human_duration(get_total_listened_seconds(str(fallback)))
         else:
             raise
-    toggle_show_played = not show_played
-    query_bits = []
-    if toggle_show_played:
-        query_bits.append("show_played=1")
-    if favorites_only:
-        query_bits.append("favorites=1")
-    toggle_href = "/" + ("?" + "&".join(query_bits) if query_bits else "")
-    toggle_label = "Show everything" if toggle_show_played else "Show default"
-    toggle_icon = "bi-eye" if toggle_show_played else "bi-eye-slash"
-    toggle_favorites_only = not favorites_only
-    fav_query_bits = []
-    if show_played:
-        fav_query_bits.append("show_played=1")
-    if toggle_favorites_only:
-        fav_query_bits.append("favorites=1")
-    favorites_href = "/" + ("?" + "&".join(fav_query_bits) if fav_query_bits else "")
-    favorites_label = "Show favorites" if toggle_favorites_only else "Show all"
-    favorites_icon = "bi-heart" if toggle_favorites_only else "bi-heart-fill"
     return f"""<!doctype html>
 <html>
 <head>
@@ -4822,7 +4811,6 @@ def _render_settings(
     audio_quality = html.escape(str(defaults.get("audio_quality") or "0"))
     ffmpeg_audio_filter = html.escape(str(defaults.get("ffmpeg_audio_filter") or ""))
     max_downloads = html.escape(str(defaults.get("max_downloads") or "3"))
-    playlist_end = html.escape(str(defaults.get("playlist_end") or "3"))
     processing_workers = html.escape(str(defaults.get("processing_workers") or "2"))
     auto_update_minutes = html.escape(str(defaults.get("auto_update_minutes") or str(DEFAULT_AUTO_UPDATE_MINUTES)))
     auto_delete_content_days = html.escape(str(defaults.get("auto_delete_content_days") or "0"))
@@ -6389,7 +6377,7 @@ def make_handler(state: AppState):
                         threaddump_path = _write_python_threaddump()
                         log.warning("Captured Python threaddump to %s", threaddump_path)
                 elif settings_action == "clear_summaries":
-                    deleted = clear_all_summaries(str(state.database_path))
+                    clear_all_summaries(str(state.database_path))
 
                 elif settings_action == "update_sources":
                     source_type = str((form.get("source_type") or [""])[0]).strip().lower()
