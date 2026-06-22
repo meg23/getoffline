@@ -68,7 +68,21 @@ def _handle_signal(signum, _frame) -> None:
 
 
 def _worker_accepts_job(worker_type: str, job_id: int) -> bool:
-    return True
+    if worker_type not in {"downloader-youtube", "downloader-podcast"}:
+        return True
+    job = Job.objects.filter(pk=job_id).only("payload", "job_type").first()
+    if job is None:
+        return True
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    return _download_worker_accepts_payload(worker_type, payload)
+
+
+def _download_worker_accepts_payload(worker_type: str, payload: dict) -> bool:
+    if worker_type not in {"downloader-youtube", "downloader-podcast"}:
+        return True
+    source_type = str(payload.get("source_type") or ("podcast" if payload.get("media_type") == "audio" else "youtube")).strip().lower()
+    allowed = "youtube" if worker_type == "downloader-youtube" else "podcast"
+    return source_type == allowed
 
 
 def _emit_update_finished_message(job: Job, *, status: str, error_message: str = "") -> None:
@@ -141,8 +155,11 @@ def requeue_existing_jobs(channel, worker_type: str) -> int:
     rows = list(Job.objects.filter(status=Job.STATUS_QUEUED, job_type__in=job_types).order_by("created_at", "id")[:500])
     published = 0
     for job in rows:
-        message = {"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1, "payload": job.payload}
-        target_queue = queue_name(job.job_type, job.payload if isinstance(job.payload, dict) else None)
+        payload = job.payload if isinstance(job.payload, dict) else {}
+        if not _download_worker_accepts_payload(worker_type, payload):
+            continue
+        message = {"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1, "payload": payload}
+        target_queue = queue_name(job.job_type, payload)
         channel.basic_publish(
             exchange=settings.RABBITMQ_EXCHANGE,
             routing_key=target_queue,
@@ -238,7 +255,7 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
         channel.queue_declare(queue=queue, durable=True, arguments=queue_arguments(queue) or None)
         channel.queue_bind(queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue)
         channel.basic_qos(prefetch_count=safe_prefetch)
-        should_requeue_existing = requeue_existing_jobs_enabled()
+        should_requeue_existing = requeue_existing_jobs_enabled() or worker_type in {"downloader-youtube", "downloader-podcast"}
         if should_requeue_existing:
             requeued = requeue_existing_jobs(channel, worker_type)
             if requeued:

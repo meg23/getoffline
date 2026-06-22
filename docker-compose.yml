@@ -88,13 +88,34 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  worker-downloader:
+  worker-downloader-youtube:
     build:
       context: .
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
     environment: *getoffline-env
-    command: python -m workers downloader
+    command: python -m workers downloader-youtube
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      worker-ffmpeg:
+        condition: service_started
+
+  worker-downloader-podcast:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers downloader-podcast
+    deploy:
+      replicas: 2
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     depends_on:
