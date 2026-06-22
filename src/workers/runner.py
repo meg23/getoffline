@@ -19,7 +19,7 @@ from app.routing import (  # noqa: E402
     PODCAST_DOWNLOAD_QUEUE,
     SERIAL_EPISODE_CHECK_QUEUE,
     SUMMARY_QUEUE,
-    SYNC_QUEUE,
+    TRANSFER_QUEUE,
     TRANSCRIPT_QUEUE,
     FFMPEG_QUEUE,
     CLEANUP_QUEUE,
@@ -42,7 +42,7 @@ QUEUE_BY_WORKER = {
     "ffmpeg": FFMPEG_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
     "summaries": SUMMARY_QUEUE,
-    "sync": SYNC_QUEUE,
+    "transfer": TRANSFER_QUEUE,
     "cleanup": CLEANUP_QUEUE,
 }
 
@@ -53,7 +53,7 @@ JOB_TYPES_BY_WORKER = {
     "ffmpeg": {"transcode_media"},
     "transcripts": {"generate_transcript"},
     "summaries": {"generate_summary", "summarize_missing"},
-    "sync": {"sync_media"},
+    "transfer": {"transfer_media"},
     "cleanup": {"retention_cleanup"},
 }
 

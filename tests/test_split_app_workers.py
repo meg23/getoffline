@@ -48,9 +48,9 @@ class SharedDjangoModelTests(TestCase):
     def test_create_claim_and_finish_job(self):
         job = create_job(
             profile_id="default",
-            job_type="sync_media",
+            job_type="transfer_media",
             payload={"source": "test"},
-            idempotency_key="sync_media:default:test",
+            idempotency_key="transfer_media:default:test",
         )
         claimed = claim_job(job.id)
         self.assertIsNotNone(claimed)
@@ -75,7 +75,7 @@ class SharedDjangoModelTests(TestCase):
         due_at = timezone.now() - timedelta(minutes=1)
         schedule = ScheduledJob.objects.create(
             profile_id="default",
-            job_type="sync_media",
+            job_type="transfer_media",
             interval_seconds=3600,
             payload={"source": "test-scheduler"},
             idempotency_key_template="scheduled:${job_type}:${profile_id}:${due_hour}",
@@ -87,12 +87,12 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertEqual(len(job_ids), 1)
         job = Job.objects.get(id=job_ids[0])
-        self.assertEqual(job.job_type, "sync_media")
+        self.assertEqual(job.job_type, "transfer_media")
         self.assertEqual(job.payload["source"], "test-scheduler")
         self.assertEqual(job.payload["scheduled_job_id"], schedule.id)
         schedule.refresh_from_db()
         self.assertGreater(schedule.next_run_at, due_at)
-        publish.assert_called_once_with({"job_id": job.id, "job_type": "sync_media", "profile_id": "default", "attempt": 1})
+        publish.assert_called_once_with({"job_id": job.id, "job_type": "transfer_media", "profile_id": "default", "attempt": 1})
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_retention_cleanup_deletes_expired_non_favorite_content(self):
@@ -478,7 +478,7 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(queue_name("transcode_media"), "getoffline.jobs.ffmpeg")
 
     def test_non_download_jobs_get_separate_queues(self):
-        self.assertEqual(queue_name("sync_media"), "getoffline.jobs.sync_media")
+        self.assertEqual(queue_name("transfer_media"), "getoffline.jobs.transfer")
         self.assertEqual(queue_name("generate_transcript"), "getoffline.jobs.transcripts")
         self.assertEqual(queue_name("summarize_missing"), "getoffline.jobs.summaries")
         self.assertEqual(queue_name("generate_summary"), "getoffline.jobs.summaries")

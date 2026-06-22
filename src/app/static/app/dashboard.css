@@ -238,9 +238,9 @@ table {
 .icon-button.is-spinning {
   cursor: progress;
   opacity: 0.85;
-  animation: sync-spin 0.8s linear infinite;
+  animation: transfer-spin 0.8s linear infinite;
 }
-@keyframes sync-spin {
+@keyframes transfer-spin {
   to {
     transform: rotate(360deg);
   }

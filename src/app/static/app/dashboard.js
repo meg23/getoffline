@@ -174,8 +174,8 @@
     );
   }
 
-  const form = document.getElementById("sync-form");
-  const button = document.getElementById("sync-button");
+  const form = document.getElementById("transfer-form");
+  const button = document.getElementById("transfer-button");
   const csrf =
     form?.querySelector("[name=csrfmiddlewaretoken]")?.value ||
     decodeURIComponent(readCookie("csrftoken") || "");
@@ -198,12 +198,12 @@
       credentials: "same-origin",
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) throw new Error("Unable to check sync status.");
+    if (!response.ok) throw new Error("Unable to check transfer status.");
     const payload = await response.json();
     if (payload.finished || doneStatuses.has(String(payload.status || ""))) {
       setLoading(false);
       if (payload.status === "failed") {
-        window.alert(payload.error_message || "Sync failed while looking for updates.");
+        window.alert(payload.error_message || "Transfer failed while looking for updates.");
       } else {
         window.location.reload();
       }
@@ -218,7 +218,7 @@
     }, 1500);
   }
 
-  function syncFormData() {
+  function transferFormData() {
     const body = new FormData(form);
     if (button?.name && button?.value && !body.has(button.name)) {
       body.append(button.name, button.value);
@@ -239,7 +239,7 @@
     try {
       const response = await fetch(form.action, {
         method: "POST",
-        body: syncFormData(),
+        body: transferFormData(),
         credentials: "same-origin",
         headers: {
           Accept: "application/json",
@@ -247,9 +247,9 @@
           "X-Requested-With": "XMLHttpRequest",
         },
       });
-      if (!response.ok) throw new Error("Sync request failed.");
+      if (!response.ok) throw new Error("Transfer request failed.");
       const payload = await response.json();
-      if (!payload.status_url) throw new Error("Missing sync status URL.");
+      if (!payload.status_url) throw new Error("Missing transfer status URL.");
       pollUntilDone(payload.status_url).catch(() => schedulePoll(payload.status_url));
     } catch (_) {
       submitNormally();

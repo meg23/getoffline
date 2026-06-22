@@ -75,7 +75,7 @@ It can queue:
 - `download_single` / `download_episode` to download one item at a time
 - `generate_transcript` for parallel transcript generation
 - `summarize_missing` / `generate_summary` for parallel summary generation
-- `sync_media`
+- `transfer_media`
 - `retention_cleanup` for automatic old-content deletion
 
 ## Running workers
@@ -86,7 +86,8 @@ a time:
 
 ```bash
 make run-worker-updates
-make run-worker-downloader
+make run-worker-downloader-youtube
+make run-worker-downloader-podcast
 ```
 
 Transcript and summary work can be split and run concurrently by starting
@@ -131,12 +132,12 @@ Recurring work is created by the scheduler from `scheduled_jobs` rows. Start it 
 make run-scheduler
 ```
 
-Use `python -m django run_scheduler --install-defaults` to insert the default update, summary, sync, and retention schedules. Edit the `scheduled_jobs` table to change `enabled`, `interval_seconds`, `payload`, or `next_run_at`.
+Use `python -m django run_scheduler --install-defaults` to insert the default update, summary, transfer, and retention schedules. Edit the `scheduled_jobs` table to change `enabled`, `interval_seconds`, `payload`, or `next_run_at`.
 
-Sync work remains isolated on its own queue:
+Transfer work remains isolated on its own queue:
 
 ```bash
-make run-worker-sync
+make run-worker-transfer
 ```
 
 ## Queue mapping
@@ -147,7 +148,7 @@ make run-worker-sync
 - `getoffline.jobs.ffmpeg`: `transcode_media`
 - `getoffline.jobs.transcripts`: `generate_transcript`
 - `getoffline.jobs.summaries`: `summarize_missing`, `generate_summary`
-- `getoffline.jobs.sync_media`: `sync_media`
+- `getoffline.jobs.transfer`: `transfer_media`
 - `getoffline.jobs.cleanup`: `retention_cleanup`
 
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
@@ -159,17 +160,17 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 
 - `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, an Alpine image with Django, Gunicorn, and nginx for web/database/queue dependencies.
 - updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
-- transcript, summary, and sync workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies until heavier processing packages are actually needed.
+- transcript, summary, and transfer workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies until heavier processing packages are actually needed.
 - `frontend` publishes host port `8080`, serves static files with bundled nginx, and proxies dynamic requests to the Django app running under Gunicorn WSGI in the same container.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
 - `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.
 - `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
 - `worker-updates` discovers new episodes and publishes download jobs.
-- `worker-downloader` consumes download jobs one at a time.
+- `worker-downloader-youtube` consumes YouTube/manual URL download jobs one at a time, and `worker-downloader-podcast` consumes podcast download jobs.
 - `worker-ffmpeg` consumes conversion jobs and defaults to three Compose
   replicas so up to three conversions can run in parallel. Each replica uses a
   prefetch of one by default so one long encode does not reserve extra jobs.
-- `worker-transcripts`, `worker-summaries`, `worker-sync`, and `worker-cleanup` run the parallel/background processing queues.
+- `worker-transcripts`, `worker-summaries`, `worker-transfer`, and `worker-cleanup` run the parallel/background processing queues.
 - `scheduler` polls the database for due `scheduled_jobs` rows and publishes durable RabbitMQ jobs.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
 
