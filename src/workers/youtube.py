@@ -24,7 +24,7 @@ from workers.download_store import (
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from workers.summary_tasks import generate_missing_summaries
-from workers.utils import ensure_dir, normalize_media_filename, sanitize, sanitize_channel_name
+from workers.utils import ensure_dir, normalize_media_filename, sanitize_channel_name
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 

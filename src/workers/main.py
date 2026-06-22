@@ -1,10 +1,11 @@
 import argparse
 from pathlib import Path
+import os
 from typing import Dict, List
 
-from workers.config import load_bootstrap_config, load_config
+from workers.config import load_config
 from workers.podcasts import download_podcasts
-from workers.media_library_server import AppState, VIDEO_EXTENSIONS, import_local_media_file, run_webapp
+from workers.media_library_server import AppState, VIDEO_EXTENSIONS, import_local_media_file
 from workers.youtube import download_youtube_items
 
 
@@ -23,9 +24,15 @@ def run_downloads() -> None:
         print("\nNothing new was downloaded.")
 
 
+def _execute_django_runserver(addr: str) -> None:
+    from django.core.management import execute_from_command_line
+
+    execute_from_command_line(["getoffline", "runserver", addr])
+
+
 def run_server(host: str, port: int) -> None:
-    config = load_bootstrap_config()
-    run_webapp(config=config, host=host, port=port)
+    os.environ["GETOFFLINE_APP_ADDR"] = f"{host}:{int(port)}"
+    _execute_django_runserver(os.environ["GETOFFLINE_APP_ADDR"])
 
 
 def _path_sort_key(path: Path) -> str:
