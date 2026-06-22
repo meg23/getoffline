@@ -409,9 +409,11 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     requested_media_type = str(payload.get("media_type") or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")).strip().lower()
     if source_type == SourceConfig.SOURCE_YOUTUBE and requested_media_type != "audio" and max_height.isdigit():
         ydl_opts["format"] = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/best[height<={max_height}]/best"
-        # Download selected elementary streams only. The FFmpeg worker owns merge/transcode
-        # work so the downloader image does not need ffmpeg or yt-dlp FFmpeg postprocessors.
-        ydl_opts["allow_unplayable_formats"] = True
+        # Download selected elementary streams only. Point yt-dlp at a deliberately
+        # absent ffmpeg binary so it downloads separate files and leaves merge/transcode
+        # work to the FFmpeg worker without enabling yt-dlp's unplayable-format mode.
+        ydl_opts["ffmpeg_location"] = "/nonexistent/getoffline-downloader-no-ffmpeg"
+        ydl_opts["ignoreerrors"] = True
     if source_type == SourceConfig.SOURCE_YOUTUBE:
         _enable_youtube_quickjs_remote_component(ydl_opts, f"download job {job.id}", _profile_setting(job.profile_id, "js_runtime_path", "qjs"))
         _apply_ytdlp_player_js_variant_workaround(ydl_opts)
