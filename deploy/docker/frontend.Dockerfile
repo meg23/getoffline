@@ -35,7 +35,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
-RUN apk add --no-cache nginx \
+RUN apk add --no-cache curl nginx \
     && python -m venv /opt/venv \
     && mkdir -p /run/nginx /var/lib/nginx/tmp/client_body /app/staticfiles
 COPY deploy/requirements/frontend.txt /tmp/requirements.txt

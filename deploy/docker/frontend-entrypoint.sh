@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+python -m django migrate --run-syncdb
+python -m django sync_model_schema
 python -m django collectstatic --noinput
 
 gunicorn app.wsgi:application \

@@ -52,21 +52,11 @@ services:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     ports:
       - "8080:80"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
-  migrate:
-    build:
-      context: .
-      dockerfile: deploy/docker/frontend.Dockerfile
-    restart: "no"
-    environment: *getoffline-env
-    command: sh -c "python -m django migrate --run-syncdb && python -m django sync_model_schema"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     depends_on:
       mysql:
         condition: service_healthy
@@ -85,8 +75,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
   worker-downloader-youtube:
     build:
@@ -102,8 +92,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
       worker-ffmpeg:
         condition: service_started
 
@@ -123,8 +113,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
       worker-ffmpeg:
         condition: service_started
 
@@ -144,8 +134,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
   worker-transcripts:
     build:
@@ -163,8 +153,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
   worker-summaries:
     build:
@@ -180,8 +170,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
   worker-transfer:
     build:
@@ -195,8 +185,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
   scheduler:
     build:
@@ -210,8 +200,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
   worker-cleanup:
     build:
@@ -227,8 +217,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_healthy
 
 volumes:
   mysql-data:
