@@ -29,6 +29,21 @@ VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
 log = logging.getLogger(__name__)
 
 
+def _optional_int(value: object) -> int | None:
+    raw = str(value or "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
+def _optional_float(value: object) -> float | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def _human_size(size: int | None) -> str:
     if not size:
         return "—"
@@ -773,7 +788,8 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         media_type=str(request.POST.get("media_type") or "audio").strip().lower() if source_type == SourceConfig.SOURCE_YOUTUBE else None,
         enabled=True,
         subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
-        max_downloads=int(request.POST["max_downloads"]) if str(request.POST.get("max_downloads") or "").strip().isdigit() else None,
+        subtitle_offset_seconds=_optional_float(request.POST.get("subtitle_offset_seconds")),
+        max_downloads=_optional_int(request.POST.get("max_downloads")),
         delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
@@ -789,8 +805,8 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     if source.source_type == SourceConfig.SOURCE_YOUTUBE:
         source.media_type = str(request.POST.get("media_type") or source.media_type or "audio").strip().lower()
     source.subtitles = request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"}
-    raw_max = str(request.POST.get("max_downloads") or "").strip()
-    source.max_downloads = int(raw_max) if raw_max.isdigit() else None
+    source.subtitle_offset_seconds = _optional_float(request.POST.get("subtitle_offset_seconds"))
+    source.max_downloads = _optional_int(request.POST.get("max_downloads"))
     source.delete_explicit_content = request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"}
     source.updated_at = timezone.now()
     source.save(
@@ -799,11 +815,57 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
             "url",
             "media_type",
             "subtitles",
+            "subtitle_offset_seconds",
             "max_downloads",
             "delete_explicit_content",
             "updated_at",
         ]
     )
+    return HttpResponseRedirect(reverse("settings"))
+
+
+@login_required
+@require_POST
+def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect:
+    source_type = str(source_type or "").strip().lower()
+    if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
+        return HttpResponseBadRequest("Invalid source_type")
+    profile_id = _profile_id(request)
+    source_ids = [int(value) for value in request.POST.getlist("source_ids") if str(value).isdigit()]
+    sources = SourceConfig.objects.filter(pk__in=source_ids, profile_id=profile_id, source_type=source_type)
+    sources_by_id = {source.id: source for source in sources}
+    now = timezone.now()
+    for source_id in source_ids:
+        source = sources_by_id.get(source_id)
+        if source is None:
+            continue
+        prefix = f"source_{source_id}__"
+        if request.POST.get(prefix + "delete") in {"1", "true", "yes", "on"}:
+            source.delete()
+            continue
+        source.name = str(request.POST.get(prefix + "name") or source.name).strip()
+        source.url = str(request.POST.get(prefix + "url") or source.url).strip()
+        if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+            source.media_type = str(request.POST.get(prefix + "media_type") or source.media_type or "audio").strip().lower()
+        source.enabled = request.POST.get(prefix + "enabled", "1") in {"1", "true", "yes", "on"}
+        source.subtitles = request.POST.get(prefix + "subtitles", "1") in {"1", "true", "yes", "on"}
+        source.subtitle_offset_seconds = _optional_float(request.POST.get(prefix + "subtitle_offset_seconds"))
+        source.max_downloads = _optional_int(request.POST.get(prefix + "max_downloads"))
+        source.delete_explicit_content = request.POST.get(prefix + "delete_explicit_content") in {"1", "true", "yes", "on"}
+        source.updated_at = now
+        source.save(
+            update_fields=[
+                "name",
+                "url",
+                "media_type",
+                "enabled",
+                "subtitles",
+                "subtitle_offset_seconds",
+                "max_downloads",
+                "delete_explicit_content",
+                "updated_at",
+            ]
+        )
     return HttpResponseRedirect(reverse("settings"))
 
 
