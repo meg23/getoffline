@@ -1,4 +1,6 @@
+import importlib.util
 import json
+import os
 import re
 import threading
 from collections import Counter
@@ -15,12 +17,22 @@ STOP_WORDS = {
 }
 
 
-DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
+DEFAULT_SUMMARY_MODEL = "qwen2.5:0.5b"
+DEFAULT_OLLAMA_MODEL = DEFAULT_SUMMARY_MODEL
+DEFAULT_LLAMA_CPP_REPO_ID = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+DEFAULT_LLAMA_CPP_FILENAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+SUMMARY_BACKEND_ENV = "GETOFFLINE_SUMMARY_BACKEND"
+OLLAMA_URL_ENV = "GETOFFLINE_OLLAMA_URL"
+LLAMA_CPP_REPO_ENV = "GETOFFLINE_SUMMARY_LLAMA_CPP_REPO_ID"
+LLAMA_CPP_FILENAME_ENV = "GETOFFLINE_SUMMARY_LLAMA_CPP_FILENAME"
 DEFAULT_OLLAMA_TIMEOUT_SECONDS = 90
 log = get_logger("summarization")
 _MODEL_READY_LOCK = threading.Lock()
 _MODEL_READY = False
+_LLAMA_LOCK = threading.Lock()
+_LLAMA_MODEL = None
+_LLAMA_MODEL_KEY = None
 
 
 def _utcnow_iso() -> str:
@@ -81,7 +93,104 @@ def _truncate_for_prompt(text: str, max_chars: int = 6000) -> str:
     return stripped[:max_chars].rstrip() + "…"
 
 
-def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL, timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> str:
+def _summary_backend() -> str:
+    backend = str(os.getenv(SUMMARY_BACKEND_ENV) or "internal").strip().lower()
+    if backend in {"ollama", "internal", "extractive"}:
+        return backend
+    log.warning("Unknown summary backend=%s; using internal", backend)
+    return "internal"
+
+
+def _ollama_url() -> str:
+    configured_url = str(os.getenv(OLLAMA_URL_ENV) or "").strip()
+    return configured_url or DEFAULT_OLLAMA_URL
+
+
+def _llama_cpp_model_ref(model_name: str) -> tuple[str, str]:
+    repo_id = str(os.getenv(LLAMA_CPP_REPO_ENV) or "").strip() or DEFAULT_LLAMA_CPP_REPO_ID
+    filename = str(os.getenv(LLAMA_CPP_FILENAME_ENV) or "").strip()
+    if not filename and model_name and model_name not in {DEFAULT_SUMMARY_MODEL, DEFAULT_OLLAMA_MODEL}:
+        filename = model_name
+    return repo_id, filename or DEFAULT_LLAMA_CPP_FILENAME
+
+
+def _load_llama_cpp_model(model_name: str):
+    global _LLAMA_MODEL, _LLAMA_MODEL_KEY
+    if importlib.util.find_spec("llama_cpp") is None:
+        raise RuntimeError("llama-cpp-python is not installed in this environment")
+    repo_id, filename = _llama_cpp_model_ref(model_name)
+    model_key = (repo_id, filename)
+    with _LLAMA_LOCK:
+        if _LLAMA_MODEL is not None and _LLAMA_MODEL_KEY == model_key:
+            return _LLAMA_MODEL
+        from llama_cpp import Llama
+
+        log.info("Loading internal summary model repo_id=%s filename=%s", repo_id, filename)
+        _LLAMA_MODEL = Llama.from_pretrained(
+            repo_id=repo_id,
+            filename=filename,
+            n_ctx=int(os.getenv("GETOFFLINE_SUMMARY_CONTEXT_TOKENS", "8192")),
+            n_threads=int(os.getenv("GETOFFLINE_SUMMARY_THREADS", "4")),
+            verbose=False,
+        )
+        _LLAMA_MODEL_KEY = model_key
+        return _LLAMA_MODEL
+
+
+def _extract_json_summary(text: str) -> str:
+    raw_response = str(text or "").strip()
+    if not raw_response:
+        return ""
+    json_text = raw_response
+    if not json_text.startswith("{"):
+        match = re.search(r"\{.*\}", json_text, flags=re.DOTALL)
+        if match:
+            json_text = match.group(0)
+    if json_text.startswith("{"):
+        try:
+            parsed_response = json.loads(json_text)
+        except json.JSONDecodeError:
+            return raw_response
+        return str(parsed_response.get("summary") or "").strip()
+    return raw_response
+
+
+def _internal_llama_summary(text: str, model_name: str, timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> str:
+    del timeout_seconds
+    llm = _load_llama_cpp_model(model_name)
+    messages = [
+        {"role": "system", "content": "Return strict JSON only: {\"summary\": \"...\"}."},
+        {
+            "role": "user",
+            "content": (
+                "Write a concise 1-2 sentence paraphrased summary (max 220 chars). "
+                "Focus on topic + takeaway. Avoid filler, quotes, transcript-style wording, and any ad/promotional language. "
+                "Never mention sponsors, products, offers, discounts, or marketing claims.\n\n"
+                f"Transcript:\n{_truncate_for_prompt(text)}"
+            ),
+        },
+    ]
+    response = llm.create_chat_completion(
+        messages=messages,
+        max_tokens=120,
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    choices = response.get("choices") if isinstance(response, dict) else None
+    content = ""
+    if choices:
+        message = choices[0].get("message") or {}
+        content = str(message.get("content") or "").strip()
+    response_text = _extract_json_summary(content)
+    if response_text:
+        response_text = re.sub(r"\s+", " ", response_text)
+        if len(response_text) > 280:
+            response_text = response_text[:279].rstrip() + "…"
+        return response_text
+    raise RuntimeError("internal summary response did not include a usable summary")
+
+
+def _ollama_summary(text: str, model_name: str, url: str | None = None, timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS) -> str:
     prompt = (
         "Return strict JSON: {\"summary\": \"...\"}. "
         "Write a concise 1-2 sentence paraphrased summary (max 220 chars). "
@@ -97,7 +206,7 @@ def _ollama_summary(text: str, model_name: str, url: str = DEFAULT_OLLAMA_URL, t
         "options": {"num_predict": 120, "temperature": 0.2},
     }
     req = request.Request(
-        url,
+        url or _ollama_url(),
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -125,7 +234,7 @@ def ensure_local_summary_model(model_name: str = DEFAULT_OLLAMA_MODEL, ollama_pa
     global _MODEL_READY
     with _MODEL_READY_LOCK:
         if not _MODEL_READY:
-            log.info("Summary model readiness will be checked via Ollama HTTP API model=%s", model_name)
+            log.info("Summary model readiness will be checked backend=%s model=%s", _summary_backend(), model_name)
             _MODEL_READY = True
         return True
 
@@ -140,10 +249,16 @@ def summarize_segments(segments: List[str], model_name: str = DEFAULT_OLLAMA_MOD
     ensure_local_summary_model(model_name=model_name)
     if mode != "in_process":
         log.info("Ignoring deprecated summary mode=%s; using native in-process summary generation", mode)
+    backend = _summary_backend()
     try:
-        llm_summary = _ollama_summary(joined_text, model_name=model_name, timeout_seconds=timeout_seconds)
-        return {"summary_text": llm_summary, "model_name": model_name, "updated_at": _utcnow_iso()}
-    except RuntimeError:
+        if backend == "extractive":
+            raise RuntimeError("extractive summary backend requested")
+        if backend == "ollama":
+            llm_summary = _ollama_summary(joined_text, model_name=model_name, timeout_seconds=timeout_seconds)
+        else:
+            llm_summary = _internal_llama_summary(joined_text, model_name=model_name, timeout_seconds=timeout_seconds)
+        return {"summary_text": llm_summary, "model_name": f"{backend}:{model_name}", "updated_at": _utcnow_iso()}
+    except RuntimeError as exc:
         fallback = _extractive_summary(joined_text)
-        log.warning("Summary generation used extractive fallback requested_model=%s transcript_chars=%s", model_name, len(joined_text))
+        log.warning("Summary generation used extractive fallback backend=%s requested_model=%s transcript_chars=%s error=%s", backend, model_name, len(joined_text), exc)
         return {"summary_text": fallback, "model_name": "extractive-local", "updated_at": _utcnow_iso()}
