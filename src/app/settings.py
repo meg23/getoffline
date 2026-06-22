@@ -22,10 +22,14 @@ CSRF_COOKIE_SECURE = os.getenv("GETOFFLINE_CSRF_COOKIE_SECURE", "0").strip().low
 SESSION_COOKIE_SECURE = os.getenv("GETOFFLINE_SESSION_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
 ROOT_URLCONF = "app.urls"
 STATIC_URL = "/static/"
+LOGIN_URL = "/login/"
+LOGIN_REDIRECT_URL = "library"
+LOGOUT_REDIRECT_URL = "/login/"
 STATIC_ROOT = Path(os.getenv("GETOFFLINE_STATIC_ROOT", "/app/staticfiles"))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 INSTALLED_APPS = [
+    "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.staticfiles",
@@ -34,6 +38,7 @@ INSTALLED_APPS = [
 ]
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
 ]
@@ -42,7 +47,7 @@ TEMPLATES = [
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
-        "OPTIONS": {"context_processors": ["django.template.context_processors.request"]},
+        "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth"]},
     }
 ]
 DATABASES = {

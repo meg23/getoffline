@@ -13,17 +13,12 @@
       <header class="hero">
         <div class="hero-heading">
           <h1>GetOffline</h1>
-          <div class="profile-controls" aria-label="Profile controls">
-            <form class="profile-switch-form" method="get" action="{% url 'library' %}" aria-label="Switch profile">
+          <div class="profile-controls" aria-label="User controls">
+            <span class="profile-switch-form" aria-label="Signed in user">
               <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
-              <span class="profile-select-wrap">
-                <select id="profile-switcher" name="profile_id" aria-label="Switch profile" onchange="this.form.submit()">
-                  {% for profile in profiles %}<option value="{{ profile.id }}" {% if profile.selected %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}
-                </select>
-              </span>
-            </form>
-            <a class="profile-icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">🔒</a>
-            <button id="quick-add-open-hero" class="profile-icon-button" type="button" title="Add media" aria-label="Add media">+</button>
+              <span class="profile-name">{{ profile_name }}</span>
+            </span>
+            <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻</button></form>
           </div>
         </div>
         <section class="summary-grid" aria-label="Library summary">
@@ -39,8 +34,7 @@
         <div class="toolbar-actions">
           <form id="transfer-form" method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
             {% csrf_token %}
-            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
-            <input type="hidden" name="next" value="{% url 'library' %}?profile_id={{ profile_id }}" />
+            <input type="hidden" name="next" value="{% url 'library' %}" />
             <input type="hidden" name="job_type" value="update_downloads" />
             <button id="transfer-button" class="icon-button icon-button-primary" type="submit" title="Transfer downloads" aria-label="Transfer downloads" data-idle-label="⟳" data-loading-label="⟳">⟳</button>
           </form>
@@ -59,7 +53,6 @@
           </div>
           <form id="batch-form" method="post" action="{% url 'batch_update' %}" class="batch-toolbar-form">
             {% csrf_token %}
-            <input type="hidden" name="profile_id" value="{{ profile_id }}" />
             <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
               <option value="">Choose action</option>
               <option value="played">played</option>
@@ -108,7 +101,6 @@
         <h2 id="quick-add-title">Add YouTube link</h2>
         <form method="post" action="{% url 'enqueue_job' %}" class="modal-form">
           {% csrf_token %}
-          <input type="hidden" name="profile_id" value="{{ profile_id }}" />
           <label for="quick-add-url">URL</label>
           <input id="quick-add-url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
           <div class="modal-actions"><button type="button" data-modal-close>Cancel</button><button name="job_type" value="download_single" type="submit">Queue download</button></div>

@@ -824,3 +824,15 @@ tbody tr:nth-child(even) td {
     font-size: 0.92rem;
   }
 }
+
+.profile-name {
+  padding: 0 0.75rem;
+  color: #e9eefc;
+  font-weight: 700;
+}
+.profile-controls form {
+  margin: 0;
+}
+.profile-icon-button {
+  font: inherit;
+}

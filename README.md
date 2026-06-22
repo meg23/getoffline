@@ -17,7 +17,7 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
-- Separate profiles with isolated databases, settings, source feeds, playback history, and download folders
+- Username/password login with per-user settings, source feeds, playback history, and download folders
 - Optional offline transfer that copies selected media to a directory on disk or to a connected Android phone with `adb push`
 
 ## Requirements
@@ -117,9 +117,9 @@ Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`,
 
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
-Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20). Automatic checks continue for every profile, not only the profile currently visible in the web app.
+Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
 
-Use the profile menu in the top-right corner of the library or Settings page to switch profiles, create a profile, or rename the current profile. Every profile, including the initial `default` profile, stores its database and downloads under `profiles/<profile-id>/`. Existing default-profile data must be moved there manually before upgrading. Each profile has its own settings, source lists, playback history, and download directory.
+The web app requires username/password login. Create users from the command line after migrations with `python -m django create_user <username> --password <password>`. The old profile switcher has been removed; each signed-in user gets one implicit library/settings partition keyed by their username.
 
 ## Directory transfer
 
