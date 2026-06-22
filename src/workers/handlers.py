@@ -320,15 +320,23 @@ def transcode_media(job: Job) -> None:
 
 def _find_downloaded_files(info: dict, ydl) -> list[Path]:
     files: list[Path] = []
-    requested = info.get("requested_downloads") if isinstance(info, dict) else None
-    if isinstance(requested, list):
-        for item in requested:
-            if isinstance(item, dict):
-                candidate = item.get("filepath") or item.get("filename")
-                if candidate and Path(candidate).exists():
-                    path = Path(candidate).expanduser().resolve()
-                    if path not in files:
-                        files.append(path)
+    candidate_groups = [info.get("requested_downloads"), info.get("requested_formats")] if isinstance(info, dict) else []
+    for requested in candidate_groups:
+        if isinstance(requested, list):
+            for item in requested:
+                if isinstance(item, dict):
+                    candidate = item.get("filepath") or item.get("filename")
+                    if candidate and Path(candidate).exists():
+                        path = Path(candidate).expanduser().resolve()
+                        if path not in files:
+                            files.append(path)
+    merge_files = info.get("__files_to_merge") if isinstance(info, dict) else None
+    if isinstance(merge_files, list):
+        for candidate in merge_files:
+            if candidate and Path(candidate).exists():
+                path = Path(candidate).expanduser().resolve()
+                if path not in files:
+                    files.append(path)
     for key in ("filepath", "_filename", "filename"):
         candidate = info.get(key) if isinstance(info, dict) else None
         if candidate and Path(candidate).exists():
@@ -396,6 +404,18 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     output_dir = output_root / sanitize_channel_name(source_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     outtmpl = str(output_dir / "%(title).200B [%(id)s].%(ext)s")
+    downloaded_files_from_hooks: list[Path] = []
+
+    def remember_finished_download(event: dict) -> None:
+        _yt_dlp_progress_hook(event)
+        if event.get("status") != "finished":
+            return
+        candidate = event.get("filename") or event.get("tmpfilename")
+        if candidate and Path(candidate).exists():
+            path = Path(candidate).expanduser().resolve()
+            if path not in downloaded_files_from_hooks:
+                downloaded_files_from_hooks.append(path)
+
     ydl_opts = _yt_dlp_base_options(
         outtmpl=outtmpl,
         continuedl=True,
@@ -404,6 +424,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         noplaylist=True,
         playlist_items="1",
         playlistend=1,
+        progress_hooks=[remember_finished_download],
     )
     max_height = _profile_setting(job.profile_id, "ytdlp_video_max_height", "720").strip()
     requested_media_type = str(payload.get("media_type") or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")).strip().lower()
@@ -435,6 +456,9 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         if isinstance(info, dict):
             _log_youtube_response("yt-dlp download response", info)
             downloaded_files = _find_downloaded_files(info, ydl)
+            for path in downloaded_files_from_hooks:
+                if path not in downloaded_files:
+                    downloaded_files.append(path)
             downloaded_file = downloaded_files[0] if downloaded_files else None
         else:
             downloaded_files = []
