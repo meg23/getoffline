@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.profiles import Profile, ProfileManager  # noqa: E402
 from workers.content_filter import find_explicit_content  # noqa: E402
-from workers.database import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
-from workers.webapp import (  # noqa: E402
+from workers.download_store import init_database, mark_all_downloads_played, mark_download_favorite, mark_download_played, upsert_download  # noqa: E402
+from workers.media_library_server import (  # noqa: E402
     AppState,
     _LAST_DISCONNECT_LOGGED_AT,
     _log_stream_disconnect,
@@ -139,8 +139,8 @@ class WebAppHelpersTests(unittest.TestCase):
         error = sqlite3.OperationalError("unable to open database file")
 
         with (
-            mock.patch("workers.webapp.generate_missing_summaries", side_effect=error) as generate_mock,
-            mock.patch("workers.webapp.log.warning") as warning_mock,
+            mock.patch("workers.media_library_server.generate_missing_summaries", side_effect=error) as generate_mock,
+            mock.patch("workers.media_library_server.log.warning") as warning_mock,
         ):
             _generate_missing_summaries_on_startup(
                 state,
@@ -181,7 +181,7 @@ class WebAppHelpersTests(unittest.TestCase):
                 profile_manager=manager,
             )
 
-            with mock.patch("workers.webapp.trigger_background_update", side_effect=record_trigger):
+            with mock.patch("workers.media_library_server.trigger_background_update", side_effect=record_trigger):
                 _trigger_all_profile_updates(state)
 
             expected_paths = set()
@@ -321,18 +321,18 @@ class WebAppHelpersTests(unittest.TestCase):
 
 
     def test_fetch_downloaded_media_row_by_id_returns_none_when_locked(self):
-        with mock.patch("workers.webapp.init_database"), mock.patch(
-            "workers.webapp.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
-        ), mock.patch("workers.webapp.log.warning") as warning_mock:
+        with mock.patch("workers.media_library_server.init_database"), mock.patch(
+            "workers.media_library_server.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
+        ), mock.patch("workers.media_library_server.log.warning") as warning_mock:
             row = fetch_downloaded_media_row_by_id(Path("/tmp/test.sqlite3"), 1)
 
         self.assertIsNone(row)
         warning_mock.assert_called_once()
 
     def test_fetch_downloaded_media_rows_returns_empty_when_locked(self):
-        with mock.patch("workers.webapp.init_database"), mock.patch(
-            "workers.webapp.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
-        ), mock.patch("workers.webapp.log.warning") as warning_mock:
+        with mock.patch("workers.media_library_server.init_database"), mock.patch(
+            "workers.media_library_server.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")
+        ), mock.patch("workers.media_library_server.log.warning") as warning_mock:
             rows = fetch_downloaded_media_rows(Path("/tmp/test.sqlite3"))
 
         self.assertEqual(rows, [])
@@ -340,8 +340,8 @@ class WebAppHelpersTests(unittest.TestCase):
 
     def test_fetch_downloaded_media_rows_returns_empty_when_db_unavailable(self):
         with mock.patch(
-            "workers.webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
-        ), mock.patch("workers.webapp.log.warning") as warning_mock:
+            "workers.media_library_server.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("workers.media_library_server.log.warning") as warning_mock:
             rows = fetch_downloaded_media_rows(Path("/tmp/test.sqlite3"))
 
         self.assertEqual(rows, [])
@@ -361,16 +361,16 @@ class WebAppHelpersTests(unittest.TestCase):
 
     def test_fetch_downloaded_media_rows_handles_resolve_emfile_in_fallback(self):
         with mock.patch(
-            "workers.webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
-        ), mock.patch("workers.webapp.Path.resolve", side_effect=OSError(24, "Too many open files")):
+            "workers.media_library_server.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("workers.media_library_server.Path.resolve", side_effect=OSError(24, "Too many open files")):
             rows = fetch_downloaded_media_rows(Path("/tmp/missing/downloads.sqlite3"), Path("/tmp"))
 
         self.assertEqual(rows, [])
 
     def test_fetch_downloaded_media_row_by_id_returns_none_when_db_unavailable(self):
         with mock.patch(
-            "workers.webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
-        ), mock.patch("workers.webapp.log.warning") as warning_mock:
+            "workers.media_library_server.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+        ), mock.patch("workers.media_library_server.log.warning") as warning_mock:
             row = fetch_downloaded_media_row_by_id(Path("/tmp/test.sqlite3"), 1)
 
         self.assertIsNone(row)
@@ -379,7 +379,7 @@ class WebAppHelpersTests(unittest.TestCase):
 
     def test_render_index_handles_unavailable_database_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
-            "workers.webapp.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
+            "workers.media_library_server.init_database", side_effect=sqlite3.OperationalError("unable to open database file")
         ):
             body = _render_index(
                 rows=[],
@@ -564,8 +564,8 @@ class WebAppHelpersTests(unittest.TestCase):
             media = Path(tmpdir) / "episode.mp3"
             media.write_bytes(b"a")
 
-            with mock.patch("workers.webapp.log.info") as info_mock:
-                with mock.patch("workers.webapp.time.monotonic", side_effect=[100.0, 101.0, 132.0]):
+            with mock.patch("workers.media_library_server.log.info") as info_mock:
+                with mock.patch("workers.media_library_server.time.monotonic", side_effect=[100.0, 101.0, 132.0]):
                     _log_stream_disconnect(media)
                     _log_stream_disconnect(media)
                     _log_stream_disconnect(media)
@@ -583,8 +583,8 @@ class WebAppHelpersTests(unittest.TestCase):
 
         wait_mock = mock.Mock(side_effect=[False, True])
         with mock.patch.object(stop_event, "wait", wait_mock), mock.patch(
-            "workers.webapp.close_cached_descriptors", return_value=2
-        ) as cleanup_mock, mock.patch("workers.webapp.log.info") as info_mock:
+            "workers.media_library_server.close_cached_descriptors", return_value=2
+        ) as cleanup_mock, mock.patch("workers.media_library_server.log.info") as info_mock:
             _descriptor_cleanup_loop(state, stop_event)
 
         cleanup_mock.assert_called_once()
@@ -911,7 +911,7 @@ class WebAppHelpersTests(unittest.TestCase):
                 update_runner=lambda config, items: None,
             )
 
-            with mock.patch("workers.webapp.trigger_single_youtube_download", return_value=True):
+            with mock.patch("workers.media_library_server.trigger_single_youtube_download", return_value=True):
                 self.assertTrue(_trigger_redownload_for_row(state, row))
 
             updated = fetch_downloaded_media_row_by_id(db_path, row.row_id, root)
@@ -928,8 +928,8 @@ class WebAppHelpersTests(unittest.TestCase):
             file_ext="mp4",
             file_path="/tmp/video.mp4",
         )
-        with mock.patch("workers.webapp.trigger_single_youtube_download", return_value=False), mock.patch(
-            "workers.webapp.reset_download_playback"
+        with mock.patch("workers.media_library_server.trigger_single_youtube_download", return_value=False), mock.patch(
+            "workers.media_library_server.reset_download_playback"
         ) as mock_reset_playback:
             self.assertFalse(_trigger_redownload_for_row(state, row))
 
@@ -978,12 +978,12 @@ class WebAppHelpersTests(unittest.TestCase):
                 _ = args, kwargs
                 return next(youtube_configs)
 
-            with mock.patch("workers.webapp._single_youtube_download_config", side_effect=_next_youtube_config), mock.patch(
-                "workers.webapp._single_podcast_redownload_config", return_value={"marker": "two"}
+            with mock.patch("workers.media_library_server._single_youtube_download_config", side_effect=_next_youtube_config), mock.patch(
+                "workers.media_library_server._single_podcast_redownload_config", return_value={"marker": "two"}
             ), mock.patch("workers.youtube.download_youtube_items", side_effect=_fake_youtube), mock.patch(
                 "workers.podcasts.download_podcasts", side_effect=_fake_podcast
-            ), mock.patch("workers.webapp.reset_download_playback") as reset_playback, mock.patch(
-                "workers.webapp.log.info"
+            ), mock.patch("workers.media_library_server.reset_download_playback") as reset_playback, mock.patch(
+                "workers.media_library_server.log.info"
             ) as log_info:
                 self.assertTrue(trigger_batch_redownloads(state, rows))
                 deadline = time.time() + 2
@@ -1026,7 +1026,7 @@ class WebAppHelpersTests(unittest.TestCase):
                 raise RuntimeError("first failed")
             downloaded_items.append("second")
 
-        with mock.patch("workers.webapp._execute_redownload_row", side_effect=_execute), mock.patch("workers.webapp.log.exception"):
+        with mock.patch("workers.media_library_server._execute_redownload_row", side_effect=_execute), mock.patch("workers.media_library_server.log.exception"):
             self.assertTrue(trigger_batch_redownloads(state, rows))
             deadline = time.time() + 2
             while time.time() < deadline:
@@ -1049,7 +1049,7 @@ class WebAppHelpersTests(unittest.TestCase):
         ))
         row = SimpleNamespace(row_id=1, source_type="youtube", source_name="Source", title="Title", item_url="url")
 
-        with mock.patch("workers.webapp.log.warning") as log_warning:
+        with mock.patch("workers.media_library_server.log.warning") as log_warning:
             self.assertFalse(trigger_batch_redownloads(state, [row]))
 
         log_warning.assert_called_once_with("%s rejected: another download job is already running", "Batch redownload")
@@ -1283,9 +1283,9 @@ class WebAppHelpersTests(unittest.TestCase):
                 self.assertEqual(count, 0)
                 return find_explicit_content(Path(subtitle_path).read_text(encoding="utf-8"))
 
-            with mock.patch("workers.webapp.create_subtitles", side_effect=create_explicit_subtitle), mock.patch(
-                "workers.webapp.screen_transcript", side_effect=assert_not_registered_before_screen
-            ), mock.patch("workers.webapp.log_filtered_deletion") as deletion_log:
+            with mock.patch("workers.media_library_server.create_subtitles", side_effect=create_explicit_subtitle), mock.patch(
+                "workers.media_library_server.screen_transcript", side_effect=assert_not_registered_before_screen
+            ), mock.patch("workers.media_library_server.log_filtered_deletion") as deletion_log:
                 _postprocess_imported_media(state, metadata=metadata, media_path=media_path)
 
             self.assertFalse(media_path.exists())
@@ -1321,7 +1321,7 @@ class WebAppHelpersTests(unittest.TestCase):
                 update_runner=unused_update_runner,
             )
 
-            with mock.patch("workers.webapp.create_subtitles", return_value=None):
+            with mock.patch("workers.media_library_server.create_subtitles", return_value=None):
                 destination_path = import_local_media_file(state, source_path)
 
             self.assertEqual(destination_path.read_bytes(), b"video-content")
@@ -1476,7 +1476,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
             )
             row = fetch_downloaded_media_rows(db_path, root)[0]
 
-            with mock.patch("workers.webapp._trigger_android_delete_for_rows") as android_delete_mock:
+            with mock.patch("workers.media_library_server._trigger_android_delete_for_rows") as android_delete_mock:
                 updated = _mark_download_played_from_webapp(state, row.row_id, played=True)
 
             self.assertTrue(updated)
@@ -1518,7 +1518,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
                 update_runner=lambda config, items: None,
             )
 
-            with mock.patch("workers.webapp._trigger_android_delete_for_rows") as android_delete_mock:
+            with mock.patch("workers.media_library_server._trigger_android_delete_for_rows") as android_delete_mock:
                 updated = _mark_all_downloads_played_from_webapp(state)
 
             self.assertEqual(updated, 2)
@@ -1553,7 +1553,7 @@ class WebAppDatabaseRowsTests(unittest.TestCase):
                 last_position_seconds=0.0,
             )
 
-            with mock.patch("workers.webapp.delete_items_from_android") as delete_mock:
+            with mock.patch("workers.media_library_server.delete_items_from_android") as delete_mock:
                 delete_mock.return_value = SimpleNamespace(message="deleted 1", copied=1, failed=0, device_serial="ABC123")
                 _run_android_delete_job(state, [row])
 
@@ -2237,7 +2237,7 @@ class WebAppUpdateThreadTests(unittest.TestCase):
                 update_runner=_runner,
             )
 
-            with mock.patch("workers.webapp.trigger_android_sync") as android_sync_mock:
+            with mock.patch("workers.media_library_server.trigger_android_sync") as android_sync_mock:
                 started = trigger_background_update(state)
                 self.assertTrue(started)
 
@@ -2261,7 +2261,7 @@ class WebAppUpdateThreadTests(unittest.TestCase):
 
 class MediaSyncTests(unittest.TestCase):
     def test_android_sync_items_only_include_unplayed_existing_media(self):
-        from workers.webapp import _android_sync_items_from_rows
+        from workers.media_library_server import _android_sync_items_from_rows
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -2287,7 +2287,7 @@ class MediaSyncTests(unittest.TestCase):
 
 
     def test_android_sync_items_filters_statuses_and_exclusion_regex(self):
-        from workers.webapp import _android_sync_items_from_rows
+        from workers.media_library_server import _android_sync_items_from_rows
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

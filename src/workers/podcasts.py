@@ -6,7 +6,7 @@ from pathlib import Path
 
 import feedparser
 
-from workers.database import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
+from workers.download_store import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
 from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles

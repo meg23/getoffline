@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from workers.database import (
+from workers.download_store import (
     DOWNLOAD_STATUS_MISSING,
     DOWNLOAD_STATUS_RETENTION_DELETED,
     resolve_download_artifact_path,

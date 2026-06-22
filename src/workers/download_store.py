@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from logger import get_logger
+from workers.logger import get_logger
 
 try:
     from sqlalchemy import (
@@ -33,7 +33,7 @@ except ModuleNotFoundError:  # pragma: no cover
     HAS_SQLALCHEMY = False
 
 
-log = get_logger("database")
+log = get_logger("download_store")
 
 
 DOWNLOAD_STATUS_DOWNLOADED = "downloaded"
@@ -87,7 +87,6 @@ def resolve_database_path(defaults: Dict[str, Any], *, base_dir: Optional[str] =
         Path(str(defaults["output_root"]).strip()) / "downloads.sqlite3",
         base_dir=base_dir,
     )
-
 
 
 
@@ -379,12 +378,12 @@ DEFAULT_APP_CONFIG = {
     "processing_workers": "2",
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
-    "subtitle_transcription_mode": "subprocess",
+    "subtitle_transcription_mode": "in_process",
     "manual_upload_delete_explicit_content": "0",
     "telemetry_dumps_enabled": "0",
     "summary_model": "qwen2.5:0.5b",
     "ollama_path": "ollama",
-    "deno_path": "deno",
+    "js_runtime_path": "qjs",
     "android_sync_enabled": "0",
     "android_sync_target": "android",
     "android_sync_directory": "./offline-sync",
@@ -578,7 +577,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "auto_delete_content_days": max(0, _coerce_int(defaults.get("auto_delete_content_days"), 0)),
             "summary_model": str(defaults.get("summary_model") or "qwen2.5:0.5b"),
             "ollama_path": str(defaults.get("ollama_path") or "ollama"),
-            "deno_path": str(defaults.get("deno_path") or "deno"),
+            "js_runtime_path": str(defaults.get("js_runtime_path") or "qjs"),
             "android_sync_enabled": str(defaults.get("android_sync_enabled") or "0").strip().lower() in {"1", "true", "yes", "on"},
             "android_sync_target": str(defaults.get("android_sync_target") or "android"),
             "android_sync_directory": os.path.expanduser(str(defaults.get("android_sync_directory") or "./offline-sync")),
@@ -592,7 +591,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "android_sync_include_started": str(defaults.get("android_sync_include_started") or "1").strip().lower() in {"1", "true", "yes", "on"},
             "android_sync_include_played": str(defaults.get("android_sync_include_played") or "0").strip().lower() in {"1", "true", "yes", "on"},
             "android_sync_exclude_regex": str(defaults.get("android_sync_exclude_regex") or ""),
-            "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "subprocess"),
+            "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "in_process"),
             "manual_upload_delete_explicit_content": str(
                 defaults.get("manual_upload_delete_explicit_content") or "0"
             ).strip().lower() in {"1", "true", "yes", "on"},

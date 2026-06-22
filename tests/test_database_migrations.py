@@ -7,7 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.database import (  # noqa: E402
+from workers.download_store import (  # noqa: E402
     HAS_SQLALCHEMY,
     _record_revision,
     apply_migrations,
@@ -41,8 +41,8 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(path, os.path.abspath(os.path.join(tmpdir, "db.sqlite3")))
 
     def test_logs_when_sqlite_write_hits_lock(self):
-        with mock.patch("workers.database.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")):
-            with mock.patch("workers.database.log.warning") as warning_mock:
+        with mock.patch("workers.download_store.sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")):
+            with mock.patch("workers.download_store.log.warning") as warning_mock:
                 with self.assertRaises(sqlite3.OperationalError):
                     _record_revision("/tmp/test-lock.sqlite3", "0001_create_downloads")
 
@@ -50,8 +50,8 @@ class DatabaseMigrationsTests(unittest.TestCase):
                 self.assertIn("recording schema revision", str(warning_mock.call_args))
 
     def test_does_not_log_non_lock_sqlite_write_errors(self):
-        with mock.patch("workers.database.sqlite3.connect", side_effect=sqlite3.OperationalError("no such table")):
-            with mock.patch("workers.database.log.warning") as warning_mock:
+        with mock.patch("workers.download_store.sqlite3.connect", side_effect=sqlite3.OperationalError("no such table")):
+            with mock.patch("workers.download_store.log.warning") as warning_mock:
                 with self.assertRaises(sqlite3.OperationalError):
                     _record_revision("/tmp/test-lock.sqlite3", "0001_create_downloads")
 
@@ -221,14 +221,14 @@ class DatabaseMigrationsTests(unittest.TestCase):
 
     def test_get_download_position_seconds_returns_zero_when_locked(self):
         if HAS_SQLALCHEMY:
-            patch_target = "workers.database.Session"
+            patch_target = "workers.download_store.Session"
             side_effect = Exception("database is locked")
         else:
-            patch_target = "workers.database.sqlite3.connect"
+            patch_target = "workers.download_store.sqlite3.connect"
             side_effect = sqlite3.OperationalError("database is locked")
 
         with mock.patch(patch_target, side_effect=side_effect):
-            with mock.patch("workers.database.log.warning") as warning_mock:
+            with mock.patch("workers.download_store.log.warning") as warning_mock:
                 result = get_download_position_seconds("/tmp/test-lock.sqlite3", 42)
 
         self.assertEqual(result, 0.0)
@@ -236,14 +236,14 @@ class DatabaseMigrationsTests(unittest.TestCase):
 
     def test_update_download_position_seconds_returns_false_when_locked(self):
         if HAS_SQLALCHEMY:
-            patch_target = "workers.database.Session"
+            patch_target = "workers.download_store.Session"
             side_effect = Exception("database is locked")
         else:
-            patch_target = "workers.database.sqlite3.connect"
+            patch_target = "workers.download_store.sqlite3.connect"
             side_effect = sqlite3.OperationalError("database is locked")
 
         with mock.patch(patch_target, side_effect=side_effect):
-            with mock.patch("workers.database.log.warning") as warning_mock:
+            with mock.patch("workers.download_store.log.warning") as warning_mock:
                 result = update_download_position_seconds("/tmp/test-lock.sqlite3", 42, 12.3)
 
         self.assertFalse(result)

@@ -27,15 +27,15 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
-from content_retention import enforce_content_retention
-from media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
-from profiles import Profile, ProfileManager
-from logger import get_logger
-from summarization import ensure_local_summary_model, summarize_segments
-from summary_tasks import clear_all_summaries, generate_missing_summaries
-from subtitles import create_subtitles
-from database import (
+from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.content_retention import enforce_content_retention
+from workers.media_sync import AndroidSyncItem, config_from_defaults, delete_items_from_android, sync_items
+from workers.profiles import Profile, ProfileManager
+from workers.logger import get_logger
+from workers.summarization import ensure_local_summary_model, summarize_segments
+from workers.summary_tasks import clear_all_summaries, generate_missing_summaries
+from workers.subtitles import create_subtitles
+from workers.download_store import (
     DOWNLOAD_STATUS_RETENTION_DELETED,
     resolve_download_artifact_path,
     add_source_config,
@@ -91,7 +91,7 @@ IDLE_RSS_LOG_INTERVAL_SECONDS = 300
 DEBUG_MEMORY_ENABLED = str(os.getenv("DEBUG_MEMORY", "")).strip().lower() in {"1", "true", "yes", "on"}
 MEMORY_CEILING_MB = float(os.getenv("GETOFFLINE_MEMORY_CEILING_MB", "0") or "0")
 
-log = get_logger("webapp")
+log = get_logger("media_library_server")
 _DISCONNECT_LOG_LOCK = threading.Lock()
 _LAST_DISCONNECT_LOGGED_AT: Dict[str, float] = {}
 
@@ -349,8 +349,8 @@ def _render_profile_menu(profiles: List[Profile], active_profile: Optional[Profi
 
 
 def _default_update_runner(config: Dict, downloaded_items: List[str]) -> None:
-    from podcasts import download_podcasts
-    from youtube import download_youtube_items
+    from workers.podcasts import download_podcasts
+    from workers.youtube import download_youtube_items
 
     download_youtube_items(config, downloaded_items)
     download_podcasts(config, downloaded_items)
@@ -639,10 +639,87 @@ def _filter_imported_media(
     return explicit_match.category
 
 
+def _download_id_for_item_uid(db_path: Path, item_uid: str) -> Optional[int]:
+    with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM downloads
+            WHERE source_type = 'manual'
+              AND source_name = 'Manual Uploads'
+              AND item_uid = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (item_uid,),
+        ).fetchone()
+    return int(row[0]) if row else None
+
+
+def _index_and_summarize_imported_media(state: AppState, item_uid: str, subtitle_path: Path, defaults: Dict) -> None:
+    download_id = _download_id_for_item_uid(state.database_path, item_uid)
+    if download_id is None:
+        log.warning("Post-import transcript indexing skipped item_uid=%s reason=download-row-missing", item_uid)
+        return
+
+    segments = _subtitle_segments_from_path(subtitle_path)
+    if not segments:
+        log.warning("Post-import transcript indexing skipped item_uid=%s reason=no-segments", item_uid)
+        return
+
+    with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO transcript_segments (download_id, subtitle_path, start_seconds, end_seconds, text)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [(download_id, str(subtitle_path), start, end, text) for start, end, text in segments],
+        )
+        conn.commit()
+
+    try:
+        result = summarize_segments(
+            [text for _, _, text in segments],
+            model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
+            mode="in_process",
+            timeout_seconds=max(1, int(defaults.get("summary_timeout_seconds") or 90)),
+        )
+    except Exception as exc:
+        log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
+        return
+
+    summary_text = str(result.get("summary_text") or "").strip()
+    if not summary_text:
+        log.warning("Post-import summary generation returned empty output item_uid=%s", item_uid)
+        return
+
+    with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+        conn.execute(
+            """
+            INSERT INTO media_summaries (download_id, summary_text, model_name, source_segment_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(download_id) DO UPDATE SET
+              summary_text = excluded.summary_text,
+              model_name = excluded.model_name,
+              source_segment_count = excluded.source_segment_count,
+              updated_at = excluded.updated_at
+            """,
+            (
+                download_id,
+                summary_text,
+                str(result.get("model_name") or "unknown"),
+                len(segments),
+                str(result.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            ),
+        )
+        conn.commit()
+    log.info("Post-import transcript indexed and summary generated item_uid=%s download_id=%s segments=%s", item_uid, download_id, len(segments))
+
+
 def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Path) -> None:
     defaults = (state.config or {}).get("defaults") or {}
     item_uid = str(metadata["item_uid"])
-    subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "subprocess")
+    subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "in_process")
     subtitle_offset = defaults.get("subtitle_time_offset_seconds")
     try:
         subtitle_path = create_subtitles(
@@ -688,15 +765,7 @@ def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Pat
         metadata["download_status"],
     )
     if subtitle_path:
-        try:
-            generate_missing_summaries(
-                str(state.database_path),
-                limit=1,
-                model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
-                timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90),
-            )
-        except Exception as exc:
-            log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
+        _index_and_summarize_imported_media(state, item_uid, Path(subtitle_path), defaults)
 
 
 def _extract_multipart_file(content_type: str, body: bytes, field_name: str) -> Tuple[str, bytes]:
@@ -1243,7 +1312,7 @@ def _ensure_summary_for_row(db_path: Path, row: MediaRow, subtitle_path: Path) -
     result = summarize_segments(
         segment_texts,
         model_name=summary_model,
-        mode="subprocess",
+        mode="in_process",
         timeout_seconds=max(1, summary_timeout_seconds),
     )
     summary_text = str(result.get("summary_text") or "").strip()
@@ -1944,7 +2013,7 @@ def _finish_download_job(
 
 
 def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
-    from youtube import download_youtube_items
+    from workers.youtube import download_youtube_items
 
     downloaded_items: List[str] = []
     entry = (single_config.get("youtube") or [{}])[0]
@@ -1964,7 +2033,7 @@ def _run_single_youtube_download(state: AppState, single_config: Dict) -> None:
 
 
 def _run_single_podcast_download(state: AppState, single_config: Dict) -> None:
-    from podcasts import download_podcasts
+    from workers.podcasts import download_podcasts
 
     downloaded_items: List[str] = []
     entry = (single_config.get("podcasts") or [{}])[0]
@@ -2030,7 +2099,7 @@ def _single_youtube_download_config(
     subtitles_enabled: Optional[bool],
     allow_live_streams: bool,
 ) -> Dict:
-    from youtube import resolve_youtube_source_name
+    from workers.youtube import resolve_youtube_source_name
 
     cookie_path = materialize_youtube_cookie_file(str(state.database_path))
     source_name = resolve_youtube_source_name(url, cookie_path)
@@ -2111,8 +2180,8 @@ def _redownload_row_context(row: MediaRow) -> str:
 
 
 def _execute_redownload_row(state: AppState, row: MediaRow, downloaded_items: List[str]) -> None:
-    from podcasts import download_podcasts
-    from youtube import download_youtube_items
+    from workers.podcasts import download_podcasts
+    from workers.youtube import download_youtube_items
 
     reset_download_playback(str(state.database_path), row.row_id)
     if row.source_type == "youtube" and row.item_url:
@@ -3157,6 +3226,99 @@ def _render_index(
         <progress id="upload-progress-bar" max="100" value="0" style="width:100%;height:16px;"></progress>
       </div>
     </div>
+    <script>
+      (() => {{
+        const dragDropHint = document.getElementById('drag-drop-upload-hint');
+        const uploadProgressWrap = document.getElementById('upload-progress-wrap');
+        const uploadProgressBar = document.getElementById('upload-progress-bar');
+        const uploadProgressLabel = document.getElementById('upload-progress-label');
+        let dragCounter = 0;
+
+        const dataTransferHasFiles = (dataTransfer) => {{
+          if (!dataTransfer) return false;
+          if (dataTransfer.files && dataTransfer.files.length > 0) return true;
+          if (dataTransfer.items && Array.from(dataTransfer.items).some((item) => item.kind === 'file')) return true;
+          const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+          return types.some((type) => String(type).toLowerCase() === 'files');
+        }};
+
+        const setDragOverlay = (isVisible) => {{
+          if (!dragDropHint) return;
+          dragDropHint.style.display = isVisible ? 'flex' : 'none';
+        }};
+
+        const uploadFile = (file, index, total) => new Promise((resolve, reject) => {{
+          const xhr = new XMLHttpRequest();
+          const formData = new FormData();
+          const prefix = total > 1 ? `(${{index + 1}}/${{total}}) ` : '';
+          formData.append('media_file', file, file.name || 'upload.bin');
+          xhr.open('POST', '/import-media', true);
+          if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
+          if (uploadProgressBar) uploadProgressBar.value = 0;
+          if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name || 'upload.bin'}}… 0%`;
+          xhr.upload.onprogress = (progressEvent) => {{
+            if (!progressEvent.lengthComputable) return;
+            const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
+            if (uploadProgressBar) uploadProgressBar.value = pct;
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `${{prefix}}Uploading ${{file.name || 'upload.bin'}}… ${{pct}}%`;
+          }};
+          xhr.onload = () => {{
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`HTTP ${{xhr.status}}`));
+          }};
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(formData);
+        }});
+
+        const handleDropUpload = async (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          dragCounter = 0;
+          setDragOverlay(false);
+          const files = Array.from(event.dataTransfer.files || []);
+          if (!files.length) return;
+          let completedUploads = 0;
+          try {{
+            for (let index = 0; index < files.length; index += 1) {{
+              await uploadFile(files[index], index, files.length);
+              completedUploads += 1;
+              if (uploadProgressBar) uploadProgressBar.value = 100;
+              if (uploadProgressLabel) uploadProgressLabel.textContent = `Processing complete: ${{files[index].name || 'upload.bin'}}`;
+            }}
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Created transcripts and summaries for ${{completedUploads}} upload${{completedUploads === 1 ? '' : 's'}}.`;
+            window.location.reload();
+          }} catch (err) {{
+            if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed after ${{completedUploads}} completed upload${{completedUploads === 1 ? '' : 's'}}.`;
+            window.alert(`Failed to import file: ${{err}}`);
+          }} finally {{
+            window.setTimeout(() => {{
+              if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
+            }}, 1200);
+          }}
+        }};
+
+        document.addEventListener('dragenter', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          dragCounter += 1;
+          setDragOverlay(true);
+        }}, true);
+        document.addEventListener('dragover', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setDragOverlay(true);
+        }}, true);
+        document.addEventListener('dragleave', (event) => {{
+          if (!dataTransferHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          dragCounter = Math.max(0, dragCounter - 1);
+          if (dragCounter === 0) setDragOverlay(false);
+        }}, true);
+        document.addEventListener('drop', handleDropUpload, true);
+      }})();
+    </script>
 
     <table id="downloads-table">
       <colgroup>
@@ -3259,77 +3421,6 @@ def _render_index(
           muted: !!media.muted,
         }}));
       }};
-
-      const dragDropHint = document.getElementById('drag-drop-upload-hint');
-      const uploadProgressWrap = document.getElementById('upload-progress-wrap');
-      const uploadProgressBar = document.getElementById('upload-progress-bar');
-      const uploadProgressLabel = document.getElementById('upload-progress-label');
-      let dragCounter = 0;
-      const setDragOverlay = (isVisible) => {{
-        if (!dragDropHint) return;
-        dragDropHint.style.display = isVisible ? 'flex' : 'none';
-      }};
-      const containsFiles = (event) => {{
-        const types = event?.dataTransfer?.types;
-        return !!(types && Array.from(types).includes('Files'));
-      }};
-      window.addEventListener('dragenter', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter += 1;
-        setDragOverlay(true);
-      }});
-      window.addEventListener('dragover', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-      }});
-      window.addEventListener('dragleave', (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter = Math.max(0, dragCounter - 1);
-        if (dragCounter === 0) setDragOverlay(false);
-      }});
-      window.addEventListener('drop', async (event) => {{
-        if (!containsFiles(event)) return;
-        event.preventDefault();
-        dragCounter = 0;
-        setDragOverlay(false);
-        const files = Array.from(event.dataTransfer.files || []);
-        if (!files.length) return;
-        const file = files[0];
-        try {{
-          const resp = await new Promise((resolve, reject) => {{
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/import-media', true);
-            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-            xhr.setRequestHeader('X-Upload-Filename', encodeURIComponent(file.name || 'upload.bin'));
-            if (uploadProgressWrap) uploadProgressWrap.style.display = 'flex';
-            if (uploadProgressBar) uploadProgressBar.value = 0;
-            if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… 0%`;
-
-            xhr.upload.onprogress = (progressEvent) => {{
-              if (!progressEvent.lengthComputable) return;
-              const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
-              if (uploadProgressBar) uploadProgressBar.value = pct;
-              if (uploadProgressLabel) uploadProgressLabel.textContent = `Uploading ${{file.name}}… ${{pct}}%`;
-            }};
-            xhr.onload = () => resolve({{ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status }});
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send(file);
-          }});
-          if (!resp.ok) throw new Error(`HTTP ${{resp.status}}`);
-          if (uploadProgressBar) uploadProgressBar.value = 100;
-          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload complete: ${{file.name}}`;
-          window.location.reload();
-        }} catch (err) {{
-          if (uploadProgressLabel) uploadProgressLabel.textContent = `Upload failed: ${{file.name}}`;
-          window.alert(`Failed to import file: ${{err}}`);
-        }} finally {{
-          window.setTimeout(() => {{
-            if (uploadProgressWrap) uploadProgressWrap.style.display = 'none';
-          }}, 1200);
-        }}
-      }});
 
       const clearSyncReloadTimer = () => {{
         if (syncReloadTimer) {{
@@ -3897,9 +3988,26 @@ def _render_index(
         const active = state.kind === 'video' ? miniVideo : miniAudio;
         active.style.display = 'block';
         applyStoredMediaSettings(active);
+        const resumeAtLoad = Math.max(0, Number(state.currentTime || 0));
         const source = document.createElement('source');
-        source.src = state.src;
+        source.src = resumeAtLoad > 0 ? state.src + '#t=' + resumeAtLoad.toFixed(3) : state.src;
         active.appendChild(source);
+
+        let miniResumeApplied = !(resumeAtLoad > 0);
+        function applyMiniResume() {{
+          if (miniResumeApplied) return true;
+          const target = Number.isFinite(active.duration) && active.duration > 1
+            ? Math.min(resumeAtLoad, Math.max(active.duration - 1, 0))
+            : resumeAtLoad;
+          try {{
+            if (Math.abs(Number(active.currentTime || 0) - target) > 0.75) active.currentTime = target;
+            miniResumeApplied = Math.abs(Number(active.currentTime || 0) - target) <= 0.75;
+            console.debug('[getoffline] mini resume seek', {{ rowId: state.rowId, target, currentTime: active.currentTime, applied: miniResumeApplied }});
+          }} catch (err) {{
+            console.debug('[getoffline] mini resume seek failed', {{ rowId: state.rowId, target, err }});
+          }}
+          return miniResumeApplied;
+        }}
 
         let subtitleTrackEl = null;
         if (state.kind === 'audio' && state.hasSubtitles) {{
@@ -3913,15 +4021,20 @@ def _render_index(
         }}
 
         active.addEventListener('loadedmetadata', () => {{
-          active.currentTime = Math.max(0, Number(state.currentTime || 0));
+          applyMiniResume();
           if (!state.paused) active.play().catch(() => {{}});
         }}, {{ once: true }});
+        active.addEventListener('canplay', applyMiniResume, {{ once: true }});
+        active.addEventListener('playing', applyMiniResume);
         active.addEventListener('loadeddata', () => scheduleMiniTranscriptInit(state, active, subtitleTrackEl), {{ once: true }});
+        active.autoplay = !state.paused;
         active.load();
+        if (!state.paused) active.play().catch((err) => console.debug('[getoffline] mini autoplay failed', {{ rowId: state.rowId, err }}));
 
         detachMiniHandlers(active);
 
         const persist = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           localStorage.setItem('getofflineMiniPlayerState', JSON.stringify({{
             ...state,
             currentTime: active.currentTime || 0,
@@ -3929,10 +4042,12 @@ def _render_index(
           }}));
         }};
         const timeupdateHandler = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           persist();
           if (!active.paused) postMiniProgress(state, active.currentTime || 0, false, 'mini-timeupdate');
         }};
         const pauseHandler = () => {{
+          if (!miniResumeApplied && !applyMiniResume()) return;
           persist();
           postMiniProgress(state, active.currentTime || 0, true, 'mini-pause');
         }};
@@ -4376,7 +4491,7 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
     <h2>{title}</h2>
     <p class="meta">{source}</p>
     <{media_kind} id="player" class="player" controls preload="metadata">
-      <source src="/media?id={row.row_id}" />
+      <source src="/media?id={row.row_id}#t={resume_value:.3f}" />
       {subtitles_html}
       Your browser does not support this media type.
     </{media_kind}>
@@ -4555,17 +4670,21 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       }}
 
       function applyInitialSeek() {{
-        if (hasAppliedInitialSeek) return;
+        if (hasAppliedInitialSeek) return true;
         const initialSeconds = getMiniPlayerResumeSeconds() ?? startSeconds;
-        if (initialSeconds <= 0) return;
+        if (initialSeconds <= 0) {{
+          hasAppliedInitialSeek = true;
+          return true;
+        }}
         const target = Number.isFinite(player.duration) && player.duration > 1
           ? Math.min(initialSeconds, Math.max(player.duration - 1, 0))
           : initialSeconds;
         try {{
-          player.currentTime = target;
-          hasAppliedInitialSeek = true;
+          if (Math.abs(Number(player.currentTime || 0) - target) > 0.75) player.currentTime = target;
+          hasAppliedInitialSeek = Math.abs(Number(player.currentTime || 0) - target) <= 0.75;
           updateLabel(target);
         }} catch (_) {{}}
+        return hasAppliedInitialSeek;
       }}
 
       function syncTranscriptFromTrack() {{
@@ -4644,10 +4763,12 @@ def _render_player(row: MediaRow, media_path: Path, resume_seconds: float, has_s
       scheduleTranscriptInit();
 
       player.addEventListener('timeupdate', () => {{
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return;
         persistMiniPlayerState();
         if (!player.paused) postProgress(player.currentTime, false);
       }});
       player.addEventListener('pause', () => {{
+        if (!hasAppliedInitialSeek && !applyInitialSeek()) return;
         persistMiniPlayerState();
         postProgress(player.currentTime, true, 'pause');
       }});
@@ -4707,7 +4828,7 @@ def _render_settings(
     auto_delete_content_days = html.escape(str(defaults.get("auto_delete_content_days") or "0"))
     summary_model = html.escape(str(defaults.get("summary_model") or "qwen2.5:0.5b"))
     ollama_path = html.escape(str(defaults.get("ollama_path") or "ollama"))
-    deno_path = html.escape(str(defaults.get("deno_path") or "deno"))
+    js_runtime_path = html.escape(str(defaults.get("js_runtime_path") or "qjs"))
     def default_checked(key: str, fallback: bool = False) -> str:
         value = defaults.get(key, fallback)
         if isinstance(value, bool):
@@ -4739,7 +4860,7 @@ def _render_settings(
     android_sync_include_played_checked = default_checked("android_sync_include_played", False)
     android_sync_exclude_regex = html.escape(str(defaults.get("android_sync_exclude_regex") or ""))
     resolved_ollama_path = html.escape(str(shutil.which(str(defaults.get("ollama_path") or "ollama")) or "not found"))
-    resolved_deno_path = html.escape(str(shutil.which(str(defaults.get("deno_path") or "deno")) or "not found"))
+    resolved_js_runtime_path = html.escape(str(shutil.which(str(defaults.get("js_runtime_path") or "qjs")) or "not found"))
     telemetry_dumps_enabled = bool(defaults.get("telemetry_dumps_enabled"))
     telemetry_dumps_checked = " checked" if telemetry_dumps_enabled else ""
     manual_upload_filter_checked = default_checked("manual_upload_delete_explicit_content")
@@ -5131,11 +5252,11 @@ def _render_settings(
             <input id="max_downloads" name="max_downloads" value="{max_downloads}" required />
           </div>
           <div>
-            <label for="deno_path">Deno executable</label>
-            <input id="deno_path" name="deno_path" value="{deno_path}" required />
+            <label for="js_runtime_path">JavaScript runtime executable</label>
+            <input id="js_runtime_path" name="js_runtime_path" value="{js_runtime_path}" required />
           </div>
         </div>
-        <p><strong>Resolved path:</strong> Deno <code>{resolved_deno_path}</code></p>
+        <p><strong>Resolved path:</strong> JavaScript runtime <code>{resolved_js_runtime_path}</code></p>
         <label for="youtube_cookie_text">YouTube cookies.txt content</label>
         <textarea id="youtube_cookie_text" name="youtube_cookie_text" placeholder="# Netscape HTTP Cookie File">{cookie_value}</textarea>
         <div class="actions">
@@ -5691,7 +5812,7 @@ def make_handler(state: AppState):
                 return
 
             if path == "/youtube-search":
-                from youtube import search_youtube_videos
+                from workers.youtube import search_youtube_videos
 
                 query_text = str((query.get("q") or [""])[0]).strip()
                 results = search_youtube_videos(query_text, limit=10) if query_text else []
@@ -6180,7 +6301,7 @@ def make_handler(state: AppState):
                         "ffmpeg_audio_filter": (form.get("ffmpeg_audio_filter") or [""])[0],
                         "max_downloads": (form.get("max_downloads") or [""])[0],
                         "playlist_end": (form.get("max_downloads") or [""])[0],
-                        "deno_path": (form.get("deno_path") or [""])[0],
+                        "js_runtime_path": (form.get("js_runtime_path") or [""])[0],
                     }
                     sanitized_updates = {
                         k: str(v).strip()

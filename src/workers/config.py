@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from workers.database import (
+from workers.download_store import (
     DEFAULT_APP_CONFIG,
     ensure_config_seeded,
     get_stored_config,
