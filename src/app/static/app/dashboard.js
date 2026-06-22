@@ -673,3 +673,110 @@
     if (saved && saved.paused === false) renderMini(saved);
   } catch (_) {}
 })();
+
+(() => {
+  function readCookie(name) {
+    return (
+      document.cookie
+        .split(";")
+        .map((v) => v.trim())
+        .find((v) => v.startsWith(`${name}=`))
+        ?.slice(name.length + 1) || ""
+    );
+  }
+
+  const dropZone = document.body;
+  const overlay = document.getElementById("manual-upload-dropzone");
+  const status = document.getElementById("manual-upload-status");
+  const uploadUrl = overlay?.dataset.uploadUrl || "/manual-upload/";
+  const csrf =
+    document.querySelector("[name=csrfmiddlewaretoken]")?.value ||
+    decodeURIComponent(readCookie("csrftoken") || "");
+  const supportedExtensions = new Set([
+    "mp3",
+    "m4a",
+    "wav",
+    "flac",
+    "aac",
+    "ogg",
+    "mp4",
+    "mkv",
+    "webm",
+    "mov",
+  ]);
+  let dragDepth = 0;
+
+  function hasFiles(event) {
+    return Array.from(event.dataTransfer?.types || []).includes("Files");
+  }
+  function showOverlay() {
+    overlay?.classList.add("is-visible");
+    overlay?.setAttribute("aria-hidden", "false");
+    if (status) status.textContent = "Drop videos here to upload as manual uploads.";
+  }
+  function hideOverlay() {
+    dragDepth = 0;
+    overlay?.classList.remove("is-visible", "is-uploading");
+    overlay?.setAttribute("aria-hidden", "true");
+  }
+  function supportedFiles(fileList) {
+    return Array.from(fileList || []).filter((file) => {
+      const ext = String(file.name || "").split(".").pop()?.toLowerCase() || "";
+      return supportedExtensions.has(ext) || String(file.type || "").startsWith("video/");
+    });
+  }
+  async function uploadFiles(files) {
+    if (!files.length) {
+      if (status) status.textContent = "No supported media files were dropped.";
+      window.setTimeout(hideOverlay, 1600);
+      return;
+    }
+    overlay?.classList.add("is-uploading");
+    if (status) status.textContent = `Uploading ${files.length} manual upload${files.length === 1 ? "" : "s"}…`;
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file, file.name));
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      body,
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "X-CSRFToken": csrf,
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      const message = payload.error_message || payload.errors?.[0]?.error || "Upload failed.";
+      throw new Error(message);
+    }
+    if (status) status.textContent = "Upload queued. Refreshing library…";
+    window.setTimeout(() => window.location.reload(), 800);
+  }
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (eventName === "dragenter") dragDepth += 1;
+      event.dataTransfer.dropEffect = "copy";
+      showOverlay();
+    });
+  });
+  dropZone.addEventListener("dragleave", (event) => {
+    if (!hasFiles(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) hideOverlay();
+  });
+  dropZone.addEventListener("drop", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const files = supportedFiles(event.dataTransfer.files);
+    uploadFiles(files).catch((error) => {
+      if (status) status.textContent = error.message || "Upload failed.";
+      window.setTimeout(hideOverlay, 2400);
+    });
+  });
+})();

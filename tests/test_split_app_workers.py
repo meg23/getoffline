@@ -11,6 +11,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
 try:
     import django  # noqa: E402
+    from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
     from django.test import Client, TestCase, override_settings  # noqa: E402
 except ModuleNotFoundError:  # pragma: no cover - dependency may be absent outside project venv
     django = None
@@ -28,7 +29,7 @@ from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRA
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
     from models.models import Download, Job, MediaSummary, ScheduledJob, SourceConfig, ProfileConfigValue, TranscriptSegment  # noqa: E402
-    from app.views import _queue_counts, _queue_missing_summary_batch  # noqa: E402
+    from app.views import _queue_counts, _queue_missing_summary_batch, _write_manual_upload  # noqa: E402
     from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
     from workers.handlers import check_for_episodes, retention_cleanup, transcode_media, _idempotency_key, _youtube_candidates  # noqa: E402
     from workers.runner import enqueue_missing_summary_jobs  # noqa: E402
@@ -66,6 +67,46 @@ class SharedDjangoModelTests(TestCase):
         first = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         second = create_job(profile_id="default", job_type="summarize_missing", idempotency_key="summary:default")
         self.assertEqual(first.id, second.id)
+
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_manual_upload_writes_download_metadata_with_original_filename(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ProfileConfigValue.objects.create(profile_id="default", key="output_root", value=tmpdir)
+            uploaded = SimpleUploadedFile("Vacation Clip.mp4", b"video-bytes", content_type="video/mp4")
+
+            download, path = _write_manual_upload("default", uploaded)
+
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_bytes(), b"video-bytes")
+            self.assertEqual(path.parent, Path(tmpdir) / "manual")
+            self.assertEqual(download.source_type, "manual")
+            self.assertEqual(download.source_name, "Manual Uploads")
+            self.assertEqual(download.title, "Vacation Clip.mp4")
+            self.assertEqual(download.file_ext, "mp4")
+            self.assertEqual(download.file_path_relative, "manual/Vacation Clip.mp4")
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_manual_upload_endpoint_queues_transcript_pipeline(self):
+        client = Client()
+        from django.contrib.auth.models import User
+
+        User.objects.create_user(username="default", password="pass")
+        self.assertTrue(client.login(username="default", password="pass"))
+        with tempfile.TemporaryDirectory() as tmpdir, patch("app.views.publish_job") as publish:
+            ProfileConfigValue.objects.create(profile_id="default", key="output_root", value=tmpdir)
+
+            response = client.post(
+                "/manual-upload/",
+                {"files": SimpleUploadedFile("Drop Movie.webm", b"video-bytes", content_type="video/webm")},
+            )
+
+            self.assertEqual(response.status_code, 201)
+            download = Download.objects.get(title="Drop Movie.webm")
+            job = Job.objects.get(job_type="generate_transcript", payload__download_id=download.id)
+            self.assertEqual(job.payload["source_type"], "manual")
+            self.assertEqual(job.payload["media_type"], "video")
+            publish.assert_called_once_with({"job_id": job.id, "job_type": "generate_transcript", "profile_id": "default", "attempt": 1})
 
 
     @unittest.skipIf(django is None, "Django is not installed")
