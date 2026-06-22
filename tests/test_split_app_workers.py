@@ -27,10 +27,11 @@ from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRA
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import Download, Job, MediaSummary, ScheduledJob, SourceConfig, ProfileConfigValue  # noqa: E402
+    from models.models import Download, Job, MediaSummary, ScheduledJob, SourceConfig, ProfileConfigValue, TranscriptSegment  # noqa: E402
     from app.views import _queue_counts, _queue_missing_summary_batch  # noqa: E402
     from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
     from workers.handlers import check_for_episodes, retention_cleanup, transcode_media, _idempotency_key, _youtube_candidates  # noqa: E402
+    from workers.runner import enqueue_missing_summary_jobs  # noqa: E402
 
 
 @override_settings(
@@ -160,6 +161,66 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(job.payload["reason"], "test_missing_summary")
         self.assertTrue(job.payload["auto_enqueue"])
         publish.assert_called_once_with({"job_id": job.id, "job_type": "summarize_missing", "profile_id": "default", "attempt": 1})
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_startup_missing_summary_scan_enqueues_transcript_backed_missing_and_blank_summaries(self):
+        missing = Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="startup-missing-summary",
+            title="Startup Missing Summary",
+            file_path="/tmp/startup-missing.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="/tmp/startup-missing.srt",
+        )
+        blank = Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="startup-blank-summary",
+            title="Startup Blank Summary",
+            file_path="/tmp/startup-blank.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="",
+        )
+        TranscriptSegment.objects.create(download=blank, subtitle_path="/tmp/startup-blank.srt", start_seconds=0.0, text="Transcript text")
+        MediaSummary.objects.create(download=blank, summary_text="", model_name="test")
+        no_transcript = Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="startup-no-transcript",
+            title="Startup No Transcript",
+            file_path="/tmp/startup-no-transcript.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="",
+        )
+        with_summary = Download.objects.create(
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_name="Channel",
+            item_uid="startup-with-summary",
+            title="Startup With Summary",
+            file_path="/tmp/startup-with-summary.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            subtitle_path="/tmp/startup-with-summary.srt",
+        )
+        MediaSummary.objects.create(download=with_summary, summary_text="Already summarized", model_name="test")
+
+        with patch("workers.runner.publish_job") as publish:
+            enqueued = enqueue_missing_summary_jobs()
+
+        self.assertEqual(enqueued, 2)
+        self.assertTrue(Job.objects.filter(job_type="generate_summary", payload__download_id=missing.id).exists())
+        self.assertTrue(Job.objects.filter(job_type="generate_summary", payload__download_id=blank.id).exists())
+        self.assertFalse(Job.objects.filter(job_type="generate_summary", payload__download_id=no_transcript.id).exists())
+        self.assertFalse(Job.objects.filter(job_type="generate_summary", payload__download_id=with_summary.id).exists())
+        self.assertEqual(publish.call_count, 2)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_missing_summary_batch_skips_rows_without_subtitles_or_with_summary(self):

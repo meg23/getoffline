@@ -100,6 +100,8 @@ PREFETCH=4 make run-worker-transcripts
 PREFETCH=4 make run-worker-summaries
 ```
 
+Summary generation runs inside the summaries container by default with `GETOFFLINE_SUMMARY_BACKEND=internal`, using `llama-cpp-python` and a cached Qwen2.5 0.5B GGUF model. Set `GETOFFLINE_SUMMARY_BACKEND=ollama` and `GETOFFLINE_OLLAMA_URL` only if you explicitly want to use an external Ollama server instead. Set `GETOFFLINE_SUMMARY_BACKEND=extractive` for the deterministic no-LLM fallback.
+
 The FFmpeg worker is required for new downloads to move past the downloaded
 state because the downloader now publishes `transcode_media` jobs before
 transcript generation. When checking logs after a download, expect to see the

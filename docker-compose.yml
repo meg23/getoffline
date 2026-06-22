@@ -169,9 +169,11 @@ services:
   worker-summaries:
     build:
       context: .
-      dockerfile: deploy/docker/worker-base.Dockerfile
+      dockerfile: deploy/docker/worker-summaries.Dockerfile
     restart: unless-stopped
-    environment: *getoffline-env
+    environment:
+      <<: *getoffline-env
+      GETOFFLINE_SUMMARY_BACKEND: ${GETOFFLINE_SUMMARY_BACKEND:-internal}
     command: sh -c "python -m workers summaries --prefetch $${PREFETCH:-4}"
     depends_on:
       mysql:
