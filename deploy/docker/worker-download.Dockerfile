@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=app.settings \
     PATH=/opt/venv/bin:/usr/local/bin:$PATH
 
-RUN apk add --no-cache ca-certificates quickjs \
+RUN apk add --no-cache ca-certificates ffmpeg quickjs \
     && python -m venv /opt/venv
 WORKDIR /app
 COPY deploy/requirements/worker-download.txt /tmp/requirements.txt

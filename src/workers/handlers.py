@@ -444,7 +444,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         # Download selected elementary streams only. Point yt-dlp at a deliberately
         # absent ffmpeg binary so it downloads separate files and leaves merge/transcode
         # work to the downloader's inline FFmpeg post-processing without enabling yt-dlp's unplayable-format mode.
-        ydl_opts["ffmpeg_location"] = "/nonexistent/getoffline-downloader-no-ffmpeg"
+        ydl_opts["ffmpeg_location"] = "/usr/bin/ffmpeg"
         ydl_opts["ignoreerrors"] = True
     if source_type == SourceConfig.SOURCE_YOUTUBE:
         include_shorts = bool(payload.get("include_shorts", False))
