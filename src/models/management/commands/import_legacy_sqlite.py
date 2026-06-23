@@ -96,14 +96,17 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--media-root",
-            help="Directory where imported media files are available to the Django app. Rewrites stored paths from relative paths and saves this as the profile output_root.",
+            help=(
+                "Profile media directory visible to the Django app. "
+                "Defaults to /app/downloads/<profile-id>."
+            ),
         )
 
     def handle(self, *args, **options):
         sqlite_path = Path(options["sqlite_path"]).expanduser()
         profile_id = str(options["profile_id"]).strip() or "default"
         self.progress_interval = max(1, int(options["progress_interval"]))
-        media_root = self._media_root(options.get("media_root"))
+        media_root = self._media_root(options.get("media_root"), profile_id)
         if not sqlite_path.exists():
             raise CommandError(f"Legacy SQLite database not found: {sqlite_path}")
 
@@ -147,7 +150,7 @@ class Command(BaseCommand):
         profile_id: str,
         *,
         skip_config: bool,
-        media_root: Optional[Path],
+        media_root: Path,
     ) -> dict[str, int]:
         counts = {"downloads": 0, "transcript_segments": 0, "media_summaries": 0, "source_configs": 0}
         if not skip_config:
@@ -156,9 +159,8 @@ class Command(BaseCommand):
             self._write_progress(f"Imported {counts['source_configs']} sources/settings rows.")
         else:
             self._write_progress("Skipping settings and sources.")
-        if media_root is not None:
-            self._write_progress(f"Setting profile media root to: {media_root}")
-            self._set_profile_output_root(profile_id, media_root)
+        self._write_progress(f"Setting profile media root to: {media_root}")
+        self._set_profile_output_root(profile_id, media_root)
         self._write_progress("Importing downloads...")
         id_map = self._import_downloads(legacy, profile_id, media_root)
         counts["downloads"] = len(id_map)
@@ -222,7 +224,7 @@ class Command(BaseCommand):
             count += 1
         return count
 
-    def _import_downloads(self, legacy: sqlite3.Connection, profile_id: str, media_root: Optional[Path]) -> dict[int, int]:
+    def _import_downloads(self, legacy: sqlite3.Connection, profile_id: str, media_root: Path) -> dict[int, int]:
         id_map = {}
         count = 0
         for row in legacy.execute("SELECT * FROM downloads ORDER BY id"):
@@ -288,7 +290,7 @@ class Command(BaseCommand):
         existing.save()
         return existing
 
-    def _download_payload(self, row: sqlite3.Row, profile_id: str, media_root: Optional[Path]) -> dict[str, Any]:
+    def _download_payload(self, row: sqlite3.Row, profile_id: str, media_root: Path) -> dict[str, Any]:
         now = timezone.now()
         payload = {"profile_id": profile_id}
         columns = self._row_columns(row)
@@ -312,10 +314,10 @@ class Command(BaseCommand):
         self._rewrite_media_paths(payload, media_root)
         return payload
 
-    def _media_root(self, value: Any) -> Optional[Path]:
-        if not value:
-            return None
-        return Path(str(value)).expanduser().resolve()
+    def _media_root(self, value: Any, profile_id: str) -> Path:
+        if value:
+            return Path(str(value)).expanduser().resolve()
+        return Path("/app/downloads") / profile_id
 
     def _set_profile_output_root(self, profile_id: str, media_root: Path) -> None:
         ProfileConfigValue.objects.update_or_create(
@@ -324,9 +326,7 @@ class Command(BaseCommand):
             defaults={"value": str(media_root), "updated_at": timezone.now()},
         )
 
-    def _rewrite_media_paths(self, payload: dict[str, Any], media_root: Optional[Path]) -> None:
-        if media_root is None:
-            return
+    def _rewrite_media_paths(self, payload: dict[str, Any], media_root: Path) -> None:
         self._rewrite_payload_path(payload, "file_path", "file_path_relative", media_root)
         self._rewrite_payload_path(payload, "subtitle_path", "subtitle_path_relative", media_root)
 
