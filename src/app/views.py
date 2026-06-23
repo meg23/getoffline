@@ -855,6 +855,8 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         subtitle_offset_seconds=_optional_float(request.POST.get("subtitle_offset_seconds")),
         max_downloads=_optional_int(request.POST.get("max_downloads")),
         delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
+        include_shorts=source_type == SourceConfig.SOURCE_YOUTUBE and request.POST.get("include_shorts") in {"1", "true", "yes", "on"},
+        include_livestreams=source_type == SourceConfig.SOURCE_YOUTUBE and request.POST.get("include_livestreams") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings"))
@@ -872,6 +874,9 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     source.subtitle_offset_seconds = _optional_float(request.POST.get("subtitle_offset_seconds"))
     source.max_downloads = _optional_int(request.POST.get("max_downloads"))
     source.delete_explicit_content = request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"}
+    if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+        source.include_shorts = request.POST.get("include_shorts") in {"1", "true", "yes", "on"}
+        source.include_livestreams = request.POST.get("include_livestreams") in {"1", "true", "yes", "on"}
     source.updated_at = timezone.now()
     source.save(
         update_fields=[
@@ -882,6 +887,8 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
             "subtitle_offset_seconds",
             "max_downloads",
             "delete_explicit_content",
+            "include_shorts",
+            "include_livestreams",
             "updated_at",
         ]
     )
@@ -916,6 +923,9 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
         source.subtitle_offset_seconds = _optional_float(request.POST.get(prefix + "subtitle_offset_seconds"))
         source.max_downloads = _optional_int(request.POST.get(prefix + "max_downloads"))
         source.delete_explicit_content = request.POST.get(prefix + "delete_explicit_content") in {"1", "true", "yes", "on"}
+        if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+            source.include_shorts = request.POST.get(prefix + "include_shorts") in {"1", "true", "yes", "on"}
+            source.include_livestreams = request.POST.get(prefix + "include_livestreams") in {"1", "true", "yes", "on"}
         source.updated_at = now
         source.save(
             update_fields=[
@@ -927,6 +937,8 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
                 "subtitle_offset_seconds",
                 "max_downloads",
                 "delete_explicit_content",
+                "include_shorts",
+                "include_livestreams",
                 "updated_at",
             ]
         )

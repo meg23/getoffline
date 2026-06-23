@@ -65,6 +65,8 @@ SOURCE_FIELDS = [
     "enabled",
     "max_downloads",
     "delete_explicit_content",
+    "include_shorts",
+    "include_livestreams",
 ]
 
 
@@ -362,6 +364,14 @@ class Command(BaseCommand):
         if "delete_explicit_content" in columns:
             delete_explicit_content = bool(row["delete_explicit_content"])
 
+        include_shorts = False
+        if "include_shorts" in columns:
+            include_shorts = bool(row["include_shorts"])
+
+        include_livestreams = False
+        if "include_livestreams" in columns:
+            include_livestreams = bool(row["include_livestreams"])
+
         updated_at = now
         if "updated_at" in columns:
             updated_at = self._datetime(row["updated_at"], now)
@@ -377,6 +387,8 @@ class Command(BaseCommand):
             "enabled": enabled,
             "max_downloads": max_downloads,
             "delete_explicit_content": delete_explicit_content,
+            "include_shorts": include_shorts,
+            "include_livestreams": include_livestreams,
             "updated_at": updated_at,
         }
 

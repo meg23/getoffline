@@ -326,6 +326,10 @@ def _run_migration_0011(db_path: str) -> None:
     _migration_0011_add_source_explicit_content_filter(db_path)
 
 
+def _run_migration_0012(db_path: str) -> None:
+    _migration_0012_add_youtube_include_flags(db_path)
+
+
 MIGRATIONS = [
     ("0001_create_downloads", _migration_0001_create_downloads),
     ("0002_add_playback_columns", _migration_0002_add_playback_columns),
@@ -364,6 +368,10 @@ MIGRATIONS = [
     (
         "0011_add_source_explicit_content_filter",
         _run_migration_0011,
+    ),
+    (
+        "0012_add_youtube_include_flags",
+        _run_migration_0012,
     ),
 ]
 
@@ -474,6 +482,17 @@ def _migration_0011_add_source_explicit_content_filter(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0012_add_youtube_include_flags(db_path: str) -> None:
+    columns = _table_columns_sqlite(db_path, "source_configs")
+    missing = [column for column in ("include_shorts", "include_livestreams") if column not in columns]
+    if not missing:
+        return
+    with sqlite3.connect(db_path) as conn:
+        for column in missing:
+            conn.execute(f"ALTER TABLE source_configs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
 def apply_migrations(db_path: str) -> None:
     _ensure_schema_migrations_table(db_path)
     for revision, migrate in MIGRATIONS:
@@ -537,7 +556,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         row = conn.execute("SELECT youtube_cookie_text FROM download_settings WHERE id = 1").fetchone()
         source_rows = conn.execute(
             """
-            SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content
+            SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, include_shorts, include_livestreams
             FROM source_configs
             ORDER BY source_type, position, id
             """
@@ -545,7 +564,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
 
     youtube = []
     podcasts = []
-    for row_id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset, source_max_downloads, delete_explicit_content in source_rows:
+    for row_id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset, source_max_downloads, delete_explicit_content, include_shorts, include_livestreams in source_rows:
         payload = {
             "id": int(row_id),
             "name": name,
@@ -553,6 +572,8 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "enabled": bool(enabled),
             "subtitles": bool(subtitles),
             "delete_explicit_content": bool(delete_explicit_content),
+            "include_shorts": bool(include_shorts),
+            "include_livestreams": bool(include_livestreams),
         }
         if subtitle_offset is not None:
             payload["subtitle_offset_seconds"] = subtitle_offset
@@ -686,8 +707,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                 conn.execute(
                     """
                     INSERT INTO source_configs (
-                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, include_shorts, include_livestreams, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "youtube",
@@ -700,6 +721,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                         item.get("subtitle_offset_seconds"),
                         item.get("max_downloads"),
                         1 if bool(item.get("delete_explicit_content", False)) else 0,
+                        1 if bool(item.get("include_shorts", False)) else 0,
+                        1 if bool(item.get("include_livestreams", False)) else 0,
                         now,
                     ),
                 )
@@ -708,8 +731,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                 conn.execute(
                     """
                     INSERT INTO source_configs (
-                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_type, position, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, include_shorts, include_livestreams, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "podcast",
@@ -722,6 +745,8 @@ def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[
                         item.get("subtitle_offset_seconds"),
                         item.get("max_downloads"),
                         1 if bool(item.get("delete_explicit_content", False)) else 0,
+                        1 if bool(item.get("include_shorts", False)) else 0,
+                        1 if bool(item.get("include_livestreams", False)) else 0,
                         now,
                     ),
                 )
@@ -752,6 +777,8 @@ def add_source_config(
     subtitle_offset_seconds: Optional[float],
     max_downloads: Optional[int] = None,
     delete_explicit_content: bool = False,
+    include_shorts: bool = False,
+    include_livestreams: bool = False,
     enabled: bool = True,
 ) -> None:
     ensure_config_seeded(db_path)
@@ -780,6 +807,8 @@ def add_source_config(
                     subtitle_offset_seconds,
                     max_downloads,
                     1 if delete_explicit_content else 0,
+                    1 if include_shorts else 0,
+                    1 if include_livestreams else 0,
                     now,
                 ),
             )

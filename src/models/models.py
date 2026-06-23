@@ -58,6 +58,8 @@ class SourceConfig(models.Model):
     subtitle_offset_seconds = models.FloatField(blank=True, null=True)
     max_downloads = models.IntegerField(blank=True, null=True)
     delete_explicit_content = models.BooleanField(default=False)
+    include_shorts = models.BooleanField(default=False)
+    include_livestreams = models.BooleanField(default=False)
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

@@ -437,6 +437,20 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         ydl_opts["ffmpeg_location"] = "/nonexistent/getoffline-downloader-no-ffmpeg"
         ydl_opts["ignoreerrors"] = True
     if source_type == SourceConfig.SOURCE_YOUTUBE:
+        include_shorts = bool(payload.get("include_shorts", False))
+        include_livestreams = bool(payload.get("include_livestreams", False))
+
+        def skip_unwanted_youtube_entries(info_dict, *, incomplete=False):
+            _ = incomplete
+            if not include_livestreams and _is_youtube_livestream_entry(info_dict):
+                return "Skipping YouTube livestream entry from source."
+            if not include_shorts and _is_youtube_short_entry(info_dict):
+                return "Skipping YouTube Shorts entry from source."
+            return None
+
+        ydl_opts["match_filter"] = skip_unwanted_youtube_entries
+        if not include_shorts:
+            ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})["skip"] = ["shorts"]
         _enable_youtube_quickjs_remote_component(ydl_opts, f"download job {job.id}", _profile_setting(job.profile_id, "js_runtime_path", "qjs"))
         _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
@@ -701,6 +715,24 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
         }
 
 
+
+def _is_youtube_short_entry(entry: dict) -> bool:
+    urls = [str(entry.get(key) or "") for key in ("webpage_url", "original_url", "url", "ie_key")]
+    return any("/shorts/" in value for value in urls)
+
+
+def _is_youtube_livestream_entry(entry: dict) -> bool:
+    live_status = str(entry.get("live_status") or "").strip().lower()
+    return bool(entry.get("is_live")) or live_status in {"is_live", "is_upcoming", "was_live", "post_live"}
+
+
+def _youtube_source_skip_reason(source: SourceConfig, entry: dict) -> str | None:
+    if not getattr(source, "include_livestreams", False) and _is_youtube_livestream_entry(entry):
+        return "Skipping YouTube livestream entry from source."
+    if not getattr(source, "include_shorts", False) and _is_youtube_short_entry(entry):
+        return "Skipping YouTube Shorts entry from source."
+    return None
+
 def _youtube_entries_from_url(url: str, limit: int, *, source: SourceConfig, reason: str) -> list[dict]:
     ydl_opts = _yt_dlp_base_options(
         extract_flat=True,
@@ -731,6 +763,10 @@ def _youtube_entries_from_url(url: str, limit: int, *, source: SourceConfig, rea
 
 
 def _youtube_candidate_from_entry(source: SourceConfig, entry: dict) -> dict | None:
+    skip_reason = _youtube_source_skip_reason(source, entry)
+    if skip_reason:
+        log.info("%s source_id=%s source_name=%s entry_id=%s title=%s", skip_reason, source.id, source.name, entry.get("id"), entry.get("title"))
+        return None
     item_id = str(entry.get("id") or "").strip()
     item_url = _youtube_video_url(entry)
     if not _is_youtube_video_url(item_url):
@@ -763,6 +799,9 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
     for entry in entries:
         if yielded >= limit:
             break
+        if _youtube_source_skip_reason(source, entry):
+            log.info("Skipping unwanted YouTube entry source_id=%s source_name=%s entry_id=%s title=%s", source.id, source.name, entry.get("id"), entry.get("title"))
+            continue
         candidate = _youtube_candidate_from_entry(source, entry)
         if candidate is not None:
             yielded += 1
@@ -901,6 +940,8 @@ def check_for_episodes(job: Job) -> None:
                         "published": candidate.get("published") or "",
                         "subtitles": bool(source.subtitles),
                         "subtitle_offset_seconds": source.subtitle_offset_seconds,
+                        "include_shorts": bool(getattr(source, "include_shorts", False)),
+                        "include_livestreams": bool(getattr(source, "include_livestreams", False)),
                     },
                     idempotency_key=idempotency_key,
                 )

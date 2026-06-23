@@ -543,6 +543,13 @@ def _download_youtube_items_in_process(config, downloaded_items):
             return f"Skipping live stream: {title}"
         return None
 
+    def skip_shorts(info_dict, *, incomplete=False):
+        _ = incomplete
+        url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or info_dict.get("url") or "")
+        if "/shorts/" in url:
+            return "Skipping YouTube Shorts entry from playlist."
+        return None
+
     for entry in config.get("youtube", []):
         if not entry.get("enabled", True):
             continue
@@ -820,6 +827,20 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 else:
                     log.info("Post-processed for %s via %s: %s", name, postprocessor, path.name)
 
+            include_shorts = bool(entry.get("include_shorts", False))
+            include_livestreams = bool(entry.get("include_livestreams", entry.get("allow_live_streams", False)))
+
+            def skip_unwanted_entries(info_dict, *, incomplete=False):
+                live_result = None if include_livestreams else skip_live_streams(info_dict, incomplete=incomplete)
+                if live_result:
+                    return live_result
+                shorts_result = None if include_shorts else skip_shorts(info_dict, incomplete=incomplete)
+                if shorts_result:
+                    return shorts_result
+                return skip_known_downloads(info_dict, incomplete=incomplete)
+
+            youtube_extractor_args = {} if include_shorts else {"skip": ["shorts"]}
+
             ydl_opts = {
                 "playlistend": source_max_downloads,
                 "restrictfilenames": True,
@@ -827,13 +848,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
                 "writethumbnail": True,
                 "extractor_args": {
-                    "youtube": {
-                        "skip": ["shorts"],
-                    }
+                    "youtube": youtube_extractor_args
                 },
                 "progress_hooks": [record_download_progress],
                 "postprocessor_hooks": [record_postprocess_file],
-                "match_filter": skip_known_downloads,
+                "match_filter": skip_unwanted_entries,
                 "overwrites": is_forced_redownload,
                 "continuedl": not is_forced_redownload,
                 "ignoreerrors": True,
