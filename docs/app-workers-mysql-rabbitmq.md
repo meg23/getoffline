@@ -95,28 +95,22 @@ multiple worker processes for the same queue, or by setting `PREFETCH` for each
 process:
 
 ```bash
-PREFETCH=1 make run-worker-ffmpeg
 PREFETCH=4 make run-worker-transcripts
 PREFETCH=4 make run-worker-summaries
 ```
 
 Summary generation runs inside the summaries container by default with `GETOFFLINE_SUMMARY_BACKEND=internal`, using `llama-cpp-python` and a cached Qwen2.5 0.5B GGUF model. Set `GETOFFLINE_SUMMARY_BACKEND=ollama` and `GETOFFLINE_OLLAMA_URL` only if you explicitly want to use an external Ollama server instead. Set `GETOFFLINE_SUMMARY_BACKEND=extractive` for the deterministic no-LLM fallback.
 
-The FFmpeg worker is required for new downloads to move past the downloaded
-state because the downloader now publishes `transcode_media` jobs before
-transcript generation. When checking logs after a download, expect to see the
-downloader publish `job_type=transcode_media`, then a separate `worker-ffmpeg`
-container or `make run-worker-ffmpeg` process log `Worker starting
-worker_type=ffmpeg` and `FFmpeg conversion starting`.
+FFmpeg post-processing now runs inline in the YouTube and podcast downloader workers before transcript and summary jobs are queued. If downloads stall, inspect the relevant downloader logs for `Downloader FFmpeg conversion starting` and `Download worker queued next stage`.
 
 The normal media workflow is: updates discover items, downloads fetch one item,
 the downloader skips FFmpeg when the file already matches the profile's target
-format or queues `transcode_media` when conversion is needed, transcripts run on
+format or runs inline FFmpeg conversion when needed, transcripts run on
 the final media file, summaries run after transcripts, and the summary stage
 removes any pre-transcode original media once downstream work has completed.
 When conversion is needed, the downloader defers creating the library `Download`
-row until the FFmpeg worker has produced the final MP4/MP3 output, so partially
-processed video files do not appear in the database-backed library.
+row until inline FFmpeg post-processing has produced the final MP4/MP3 output,
+so partially processed video files do not appear in the database-backed library.
 The default video conversion target is H.264/AAC in MP4 with an ultrafast x264
 preset because it is much faster than HEVC and broadly compatible with Jellyfin
 clients.
@@ -147,7 +141,6 @@ make run-worker-transfer
 - `getoffline.jobs.updates`: `update_downloads`, `check_for_episodes`
 - `getoffline.jobs.downloads.youtube`: YouTube and manual URL `download_single` / `download_episode`
 - `getoffline.jobs.downloads.podcast`: podcast `download_episode`
-- `getoffline.jobs.ffmpeg`: `transcode_media`
 - `getoffline.jobs.transcripts`: `generate_transcript`
 - `getoffline.jobs.summaries`: `summarize_missing`, `generate_summary`
 - `getoffline.jobs.transfer`: `transfer_media`
@@ -170,9 +163,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 - `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
 - `worker-updates` discovers new episodes and publishes download jobs.
 - `worker-downloader-youtube` consumes YouTube/manual URL download jobs one at a time, and `worker-downloader-podcast` consumes podcast download jobs.
-- `worker-ffmpeg` consumes conversion jobs and defaults to three Compose
-  replicas so up to three conversions can run in parallel. Each replica uses a
-  prefetch of one by default so one long encode does not reserve extra jobs.
+- YouTube and podcast downloader workers run FFmpeg post-processing inline before publishing transcript work.
 - `worker-transcripts`, `worker-summaries`, `worker-transfer`, and `worker-cleanup` run the parallel/background processing queues.
 - `scheduler` polls the database for due `scheduled_jobs` rows and publishes durable RabbitMQ jobs.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
@@ -195,5 +186,5 @@ docker compose up --build -d
 On startup, `frontend` and every worker wait for the one-shot `migrate` service to finish successfully, so tables such as `downloads` are created before the web UI serves requests. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
 
 ```bash
-docker compose up -d --scale worker-ffmpeg=3 --scale worker-transcripts=4 --scale worker-summaries=4
+docker compose up -d --scale worker-transcripts=4 --scale worker-summaries=4
 ```

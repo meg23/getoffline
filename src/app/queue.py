@@ -27,8 +27,6 @@ def job_priority(message: Dict[str, Any]) -> int:
         if _as_bool(payload.get("redownload")):
             return 9
         return 5
-    if job_type == "transcode_media":
-        return 8 if _as_bool(payload.get("recent_download")) or payload.get("download_id") else 4
     if job_type == "generate_transcript":
         if _as_bool(payload.get("startup_missing_subtitle")):
             return 2

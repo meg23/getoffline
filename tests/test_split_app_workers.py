@@ -24,7 +24,7 @@ if django is not None:
     django.setup()
 
 from app.queue import job_priority  # noqa: E402
-from app.routing import CLEANUP_QUEUE, FFMPEG_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_arguments, queue_name  # noqa: E402
+from app.routing import CLEANUP_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_arguments, queue_name  # noqa: E402
 
 if django is not None:
     from models.jobs import claim_job, create_job, finish_job  # noqa: E402
@@ -680,7 +680,6 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(queue_arguments(YOUTUBE_DOWNLOAD_QUEUE), {"x-max-priority": 10})
         self.assertEqual(queue_arguments(PODCAST_DOWNLOAD_QUEUE), {"x-max-priority": 10})
         self.assertEqual(queue_arguments(TRANSCRIPT_QUEUE), {"x-max-priority": 10})
-        self.assertEqual(queue_arguments(FFMPEG_QUEUE), {"x-max-priority": 10})
 
     def test_download_jobs_route_to_source_specific_download_queues(self):
         self.assertEqual(queue_name("update_downloads"), "getoffline.jobs.updates")
@@ -689,7 +688,7 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(queue_name("download_single", {"source_type": "youtube"}), "getoffline.jobs.downloads.youtube")
         self.assertEqual(queue_name("download_episode", {"source_type": "podcast"}), "getoffline.jobs.downloads.podcast")
         self.assertEqual(queue_name("download_episode", {"source_type": "youtube"}), "getoffline.jobs.downloads.youtube")
-        self.assertEqual(queue_name("transcode_media"), "getoffline.jobs.ffmpeg")
+        self.assertEqual(queue_name("transcode_media", {"source_type": "youtube"}), YOUTUBE_DOWNLOAD_QUEUE)
 
     def test_non_download_jobs_get_separate_queues(self):
         self.assertEqual(queue_name("transfer_media"), "getoffline.jobs.transfer")
