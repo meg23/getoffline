@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-ffmpeg run-worker-transcripts run-worker-transfer run-worker-summaries run-worker-cleanup run-scheduler
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-summaries run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -79,9 +79,6 @@ run-worker-downloader-podcast: venv
 	@echo "Running podcast downloader worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader-podcast
 
-run-worker-ffmpeg: venv
-	@echo "Running FFmpeg conversion worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers ffmpeg --prefetch $${PREFETCH:-1}
 
 run-worker-transcripts: venv
 	@echo "Running parallel transcript worker..."
