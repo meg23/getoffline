@@ -94,11 +94,16 @@ class Command(BaseCommand):
             default=500,
             help="Print progress after this many rows while importing large tables (default: 500).",
         )
+        parser.add_argument(
+            "--media-root",
+            help="Directory where imported media files are available to the Django app. Rewrites stored paths from relative paths and saves this as the profile output_root.",
+        )
 
     def handle(self, *args, **options):
         sqlite_path = Path(options["sqlite_path"]).expanduser()
         profile_id = str(options["profile_id"]).strip() or "default"
         self.progress_interval = max(1, int(options["progress_interval"]))
+        media_root = self._media_root(options.get("media_root"))
         if not sqlite_path.exists():
             raise CommandError(f"Legacy SQLite database not found: {sqlite_path}")
 
@@ -111,7 +116,7 @@ class Command(BaseCommand):
                 if options["replace_profile"]:
                     self._write_progress(f"Clearing existing rows for destination profile: {profile_id}")
                     self._delete_profile(profile_id)
-                counts = self._import_all(legacy, profile_id, skip_config=options["skip_config"])
+                counts = self._import_all(legacy, profile_id, skip_config=options["skip_config"], media_root=media_root)
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -136,7 +141,14 @@ class Command(BaseCommand):
         ProfileConfigValue.objects.filter(profile_id=profile_id).delete()
         ProfileDownloadSettings.objects.filter(profile_id=profile_id).delete()
 
-    def _import_all(self, legacy: sqlite3.Connection, profile_id: str, *, skip_config: bool) -> dict[str, int]:
+    def _import_all(
+        self,
+        legacy: sqlite3.Connection,
+        profile_id: str,
+        *,
+        skip_config: bool,
+        media_root: Optional[Path],
+    ) -> dict[str, int]:
         counts = {"downloads": 0, "transcript_segments": 0, "media_summaries": 0, "source_configs": 0}
         if not skip_config:
             self._write_progress("Importing settings and sources...")
@@ -144,8 +156,11 @@ class Command(BaseCommand):
             self._write_progress(f"Imported {counts['source_configs']} sources/settings rows.")
         else:
             self._write_progress("Skipping settings and sources.")
+        if media_root is not None:
+            self._write_progress(f"Setting profile media root to: {media_root}")
+            self._set_profile_output_root(profile_id, media_root)
         self._write_progress("Importing downloads...")
-        id_map = self._import_downloads(legacy, profile_id)
+        id_map = self._import_downloads(legacy, profile_id, media_root)
         counts["downloads"] = len(id_map)
         self._write_progress(f"Imported {counts['downloads']} downloads.")
         self._write_progress("Importing transcript segments...")
@@ -207,11 +222,11 @@ class Command(BaseCommand):
             count += 1
         return count
 
-    def _import_downloads(self, legacy: sqlite3.Connection, profile_id: str) -> dict[int, int]:
+    def _import_downloads(self, legacy: sqlite3.Connection, profile_id: str, media_root: Optional[Path]) -> dict[int, int]:
         id_map = {}
         count = 0
         for row in legacy.execute("SELECT * FROM downloads ORDER BY id"):
-            payload = self._download_payload(row, profile_id)
+            payload = self._download_payload(row, profile_id, media_root)
             download = self._upsert_download(payload)
             id_map[int(row["id"])] = int(download.id)
             count += 1
@@ -273,7 +288,7 @@ class Command(BaseCommand):
         existing.save()
         return existing
 
-    def _download_payload(self, row: sqlite3.Row, profile_id: str) -> dict[str, Any]:
+    def _download_payload(self, row: sqlite3.Row, profile_id: str, media_root: Optional[Path]) -> dict[str, Any]:
         now = timezone.now()
         payload = {"profile_id": profile_id}
         columns = self._row_columns(row)
@@ -294,7 +309,38 @@ class Command(BaseCommand):
             elif field in {"last_position_seconds", "total_listened_seconds"}:
                 value = float(value or 0)
             payload[field] = value
+        self._rewrite_media_paths(payload, media_root)
         return payload
+
+    def _media_root(self, value: Any) -> Optional[Path]:
+        if not value:
+            return None
+        return Path(str(value)).expanduser().resolve()
+
+    def _set_profile_output_root(self, profile_id: str, media_root: Path) -> None:
+        ProfileConfigValue.objects.update_or_create(
+            profile_id=profile_id,
+            key="output_root",
+            defaults={"value": str(media_root), "updated_at": timezone.now()},
+        )
+
+    def _rewrite_media_paths(self, payload: dict[str, Any], media_root: Optional[Path]) -> None:
+        if media_root is None:
+            return
+        self._rewrite_payload_path(payload, "file_path", "file_path_relative", media_root)
+        self._rewrite_payload_path(payload, "subtitle_path", "subtitle_path_relative", media_root)
+
+    def _rewrite_payload_path(
+        self,
+        payload: dict[str, Any],
+        absolute_key: str,
+        relative_key: str,
+        media_root: Path,
+    ) -> None:
+        relative_path = payload.get(relative_key)
+        if not relative_path:
+            return
+        payload[absolute_key] = str(media_root / str(relative_path))
 
     def _source_payload(self, row: sqlite3.Row, now: Any) -> dict[str, Any]:
         columns = self._row_columns(row)
