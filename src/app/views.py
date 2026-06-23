@@ -124,6 +124,20 @@ def _profile_output_root(profile_id: str) -> Path:
     return Path(str(value)).expanduser().resolve()
 
 
+def _resolve_media_path(item: Download) -> Path:
+    candidates: list[Path] = []
+    if item.file_path_relative:
+        candidates.append(_profile_output_root(item.profile_id) / str(item.file_path_relative))
+    if item.file_path:
+        candidates.append(Path(str(item.file_path)))
+    for candidate in candidates:
+        try:
+            return _safe_path(str(candidate))
+        except Http404:
+            continue
+    raise Http404("File unavailable")
+
+
 def _srt_to_vtt(content: str) -> str:
     lines = content.replace("\ufeff", "").splitlines()
     timestamp_re = re.compile(
@@ -143,7 +157,7 @@ def _srt_to_vtt(content: str) -> str:
 
 
 def _resolve_subtitle_path(item: Download) -> Path | None:
-    media_path = _safe_path(item.file_path)
+    media_path = _resolve_media_path(item)
     candidates: list[Path] = []
     if item.subtitle_path:
         candidates.append(Path(str(item.subtitle_path)))
@@ -265,7 +279,7 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
 @login_required
 def media(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
-    path = _safe_path(item.file_path)
+    path = _resolve_media_path(item)
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     file_size = path.stat().st_size
     range_header = request.headers.get("Range", "")

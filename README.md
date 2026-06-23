@@ -68,6 +68,15 @@ YouTube live streams are skipped automatically for configured playlist and chann
 
 For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, keep the FFmpeg worker running so downloaded files are converted after download, and run multiple transfer or summary workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
 
+To migrate an older standalone SQLite library into the split Django/MySQL database, first run `make migrate-db`, create the destination user if needed, and then run:
+
+```bash
+PYTHONPATH=src DJANGO_SETTINGS_MODULE=app.settings python -m django import_legacy_sqlite /path/to/downloads.sqlite3 --profile-id <username>
+```
+
+Use `--replace-profile` to clear the destination user's existing imported library/settings before loading the SQLite data again. Imported media and subtitle paths are rewritten from their relative path columns under `/app/downloads/<profile-id>` by default, and the destination profile's `output_root` is set to that same container-visible folder. Pass `--media-root /app/downloads/custom-folder` only when the files are mounted somewhere else. The importer prints progress as each major table starts and every 500 imported rows by default; pass `--progress-interval 50` (or another positive number) for more frequent updates. It copies downloads, source settings, playback flags, transcripts, and summaries; legacy youtube-dl format columns that are no longer represented by the Django models are ignored.
+
+
 ## Usage
 
 Build and run the app:
