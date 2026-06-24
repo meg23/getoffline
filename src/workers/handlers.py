@@ -575,6 +575,25 @@ def _find_downloaded_file(info: dict, ydl) -> Path | None:
     return files[0] if files else None
 
 
+def _is_expected_ytdlp_download_error(exc: Exception) -> bool:
+    """Return True for yt-dlp failures caused by unavailable remote media."""
+    exc_type = type(exc).__name__
+    if exc_type not in {"DownloadError", "ExtractorError"}:
+        return False
+    message = str(exc).lower()
+    expected_fragments = (
+        "video unavailable",
+        "has been removed",
+        "removed by the uploader",
+        "private video",
+        "this video is unavailable",
+        "this video is private",
+        "this video has been deleted",
+        "account associated with this video has been terminated",
+    )
+    return any(fragment in message for fragment in expected_fragments)
+
+
 def _is_youtube_video_url(url: str) -> bool:
     lowered = str(url or "").lower()
     return (
@@ -732,7 +751,18 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     from yt_dlp import YoutubeDL
 
     with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(download_url, download=True) or {}
+        try:
+            info = ydl.extract_info(download_url, download=True) or {}
+        except Exception as exc:
+            if _is_expected_ytdlp_download_error(exc):
+                log.warning(
+                    "yt-dlp skipped unavailable media job_id=%s url=%s error=%s",
+                    job.id,
+                    download_url,
+                    exc,
+                )
+                return None
+            raise
         if isinstance(info, dict):
             _log_youtube_response("yt-dlp download response", info)
             downloaded_files = _find_downloaded_files(info, ydl)
