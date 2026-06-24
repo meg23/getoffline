@@ -521,7 +521,19 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     }
     media_kind = str(payload.get("media_type") or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")).strip().lower()
     target_ext = "mp3" if media_kind == "audio" else downloaded_file.suffix.lstrip(".").lower()
-    ffmpeg_input_files = downloaded_files if len(downloaded_files) > 1 else [downloaded_file]
+
+    # yt-dlp can report both the final merged/downloaded file and the temporary
+    # elementary stream files that were used to create it. After yt-dlp finishes,
+    # those temporary .fXXX files may already be removed, so do not pass them to
+    # our inline FFmpeg step unless they still exist and we are intentionally
+    # doing a video stream merge. Audio extraction/conversion should always use
+    # the final downloaded media file as the single input.
+    if media_kind == "audio":
+        ffmpeg_input_files = [downloaded_file]
+    else:
+        existing_downloaded_files = [path for path in downloaded_files if path.exists()]
+        ffmpeg_input_files = existing_downloaded_files if len(existing_downloaded_files) > 1 else [downloaded_file]
+
     if (media_kind == "audio" and downloaded_file.suffix.lstrip(".").lower() != target_ext) or len(ffmpeg_input_files) > 1:
         final_ext = target_ext if media_kind == "audio" else _preferred_target_ext(job.profile_id, media_kind)
         target_file_path = str(output_dir / f"{downloaded_file.stem.split('.f')[0]}.{final_ext}") if len(ffmpeg_input_files) > 1 else ""
