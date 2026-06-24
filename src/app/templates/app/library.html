@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GetOffline Media Library</title>
     <link rel="stylesheet" href="{% static 'app/dashboard.css' %}" />
-    <script src="{% static 'app/dashboard.js' %}?v=manual-upload-drop-1" defer></script>
+    <script src="{% static 'app/dashboard.js' %}?v=light-library-rows-1" defer></script>
   </head>
   <body>
     <div class="container">
@@ -18,15 +18,34 @@
               <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
               <span class="profile-name">{{ profile_name }}</span>
             </span>
-            <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻</button></form>
+            <form method="post" action="{% url 'logout' %}">
+              {% csrf_token %}
+              <button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻</button>
+            </form>
           </div>
         </div>
+
         <section class="summary-grid" aria-label="Library summary">
-          <article class="summary-card"><div class="summary-label">Visible Items</div><div id="summary-visible-items" class="summary-value">{{ stats.visible }}</div></article>
-          <article class="summary-card"><div class="summary-label">Played</div><div id="summary-played-items" class="summary-value">{{ stats.played }}</div></article>
-          <article class="summary-card"><div class="summary-label">New</div><div id="summary-new-items" class="summary-value">{{ stats.new }}</div></article>
-          <article class="summary-card"><div class="summary-label">Favorites</div><div id="summary-favorite-items" class="summary-value">{{ stats.favorites }}</div></article>
-          <article class="summary-card"><div class="summary-label">Listened</div><div id="summary-listened-items" class="summary-value">{{ stats.listened }}</div></article>
+          <article class="summary-card">
+            <div class="summary-label">Visible Items</div>
+            <div id="summary-visible-items" class="summary-value">{{ stats.visible }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Played</div>
+            <div id="summary-played-items" class="summary-value">{{ stats.played }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">New</div>
+            <div id="summary-new-items" class="summary-value">{{ stats.new }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Favorites</div>
+            <div id="summary-favorite-items" class="summary-value">{{ stats.favorites }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Listened</div>
+            <div id="summary-listened-items" class="summary-value">{{ stats.listened }}</div>
+          </article>
         </section>
       </header>
 
@@ -43,24 +62,28 @@
               </svg>
             </button>
           </form>
+
           <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link">
             <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
               <path d="M12 5v14" />
               <path d="M5 12h14" />
             </svg>
           </button>
+
           <button id="transcript-search-open" class="icon-button" type="button" title="Search transcripts" aria-label="Search transcripts">
             <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="6" />
               <path d="m16 16 4 4" />
             </svg>
           </button>
+
           <a class="icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">
             <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
               <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.05a2 2 0 0 1-3.92 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.05-.04a2 2 0 0 1 0-3.92L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.05a2 2 0 0 1 3.92 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.03.38.23.73.6 1l.05.04a2 2 0 0 1 0 3.92L20 14c-.37.27-.57.62-.6 1Z" />
             </svg>
           </a>
+
           <div class="library-filter-wrap" role="group" aria-label="Library filters">
             <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
             <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode">
@@ -71,6 +94,7 @@
             </select>
             <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">×</button>
           </div>
+
           <form id="batch-form" method="post" action="{% url 'batch_update' %}" class="batch-toolbar-form">
             {% csrf_token %}
             <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
@@ -90,29 +114,95 @@
 
       <main class="table-card" aria-label="Media library">
         <table>
-          <colgroup><col class="channel-col" /><col class="episode-col" /><col class="source-col" /><col class="type-col" /><col class="size-col" /><col class="status-col" /><col class="selection-col" /></colgroup>
+          <colgroup>
+            <col class="channel-col" />
+            <col class="episode-col" />
+            <col class="source-col" />
+            <col class="type-col" />
+            <col class="size-col" />
+            <col class="status-col" />
+            <col class="selection-col" />
+          </colgroup>
           <thead>
             <tr>
-              <th class="channel-col">Channel</th><th class="episode-col">Episode</th><th class="source-col">Source</th><th class="type-col">Type</th><th class="size-col">Size</th><th class="status-col">Status</th><th class="selection-cell"><input id="select-all" type="checkbox" aria-label="Select all visible rows" /></th>
+              <th class="channel-col">Channel</th>
+              <th class="episode-col">Episode</th>
+              <th class="source-col">Source</th>
+              <th class="type-col">Type</th>
+              <th class="size-col">Size</th>
+              <th class="status-col">Status</th>
+              <th class="selection-cell">
+                <input id="select-all" type="checkbox" aria-label="Select all visible rows" />
+              </th>
             </tr>
           </thead>
           <tbody id="downloads-table-body">
             {% for item in downloads %}
-              <tr data-row-id="{{ item.id }}" data-played="{% if item.played %}1{% else %}0{% endif %}" data-favorite="{% if item.favorite %}1{% else %}0{% endif %}" data-channel="{{ item.source_name|default:'' }}" data-title="{{ item.title|default:'' }}" data-kind="{{ item.display_kind }}" data-media-url="{% url 'media' item.id %}" data-subtitle-url="{% if item.has_subtitles %}{% url 'subtitle' item.id %}{% endif %}" data-resume-seconds="{{ item.last_position_seconds|default:0 }}">
-                <td class="channel-col" title="{{ item.source_name|default:'' }}">{{ item.source_name|default:item.source_type }}</td>
-                <td class="episode-col"><a class="episode-link" href="{% url 'player' item.id %}" data-row-id="{{ item.id }}" data-kind="{{ item.display_kind }}" data-source="{{ item.source_name|default:item.source_type }}" data-has-subtitles="{% if item.has_subtitles %}1{% else %}0{% endif %}" data-resume-seconds="{{ item.last_position_seconds|default:0 }}" data-summary="{{ item.summary.summary_text|default:item.description|default:item.title|default:'Untitled' }}" data-title="{{ item.title|default:'Untitled' }}" data-play-link="1">{{ item.title|default:'Untitled' }}</a></td>
-                <td class="source-col"><span class="pill status-new">{{ item.source_type|upper }}</span></td>
-                <td class="type-col"><span class="pill">{{ item.display_type }}</span></td>
-                <td class="size-col">{{ item.display_size }}</td>
-                <td class="status-col"><span class="pill {{ item.status_class }}">{{ item.status_label }}</span></td>
-                <td class="selection-cell"><input form="batch-form" type="checkbox" class="row-selector" name="ids" value="{{ item.id }}" aria-label="Select {{ item.title|default:'item' }}" /></td>
+              <tr
+                data-row-id="{{ item.id }}"
+                data-played="{% if item.played %}1{% else %}0{% endif %}"
+                data-favorite="{% if item.favorite %}1{% else %}0{% endif %}"
+                data-channel="{{ item.source_name|default:'' }}"
+                data-title="{{ item.title|default:'' }}"
+                data-kind="{{ item.display_kind }}"
+                data-media-url="{% url 'media' item.id %}"
+                data-subtitle-url="{% if item.has_subtitles %}{% url 'subtitle' item.id %}{% endif %}"
+                data-resume-seconds="{{ item.last_position_seconds|default:0 }}"
+              >
+                <td class="channel-col" title="{{ item.source_name|default:'' }}">
+                  {{ item.source_name|default:item.source_type }}
+                </td>
+
+                <td class="episode-col">
+                  <a
+                    class="episode-link"
+                    href="{% url 'player' item.id %}"
+                    data-row-id="{{ item.id }}"
+                    data-kind="{{ item.display_kind }}"
+                    data-source="{{ item.source_name|default:item.source_type }}"
+                    data-has-subtitles="{% if item.has_subtitles %}1{% else %}0{% endif %}"
+                    data-resume-seconds="{{ item.last_position_seconds|default:0 }}"
+                    data-title="{{ item.title|default:'Untitled' }}"
+                    data-play-link="1"
+                  >{{ item.title|default:'Untitled' }}</a>
+                </td>
+
+                <td class="source-col">
+                  <span class="pill status-new">{{ item.source_type|upper }}</span>
+                </td>
+
+                <td class="type-col">
+                  <span class="pill">{{ item.display_type }}</span>
+                </td>
+
+                <td class="size-col">
+                  {{ item.display_size }}
+                </td>
+
+                <td class="status-col">
+                  <span class="pill {{ item.status_class }}">{{ item.status_label }}</span>
+                </td>
+
+                <td class="selection-cell">
+                  <input
+                    form="batch-form"
+                    type="checkbox"
+                    class="row-selector"
+                    name="ids"
+                    value="{{ item.id }}"
+                    aria-label="Select {{ item.title|default:'item' }}"
+                  />
+                </td>
               </tr>
             {% empty %}
-              <tr><td colspan="7" class="empty-state">No media items found yet.</td></tr>
+              <tr>
+                <td colspan="7" class="empty-state">No media items found yet.</td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </main>
+
       <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
     </div>
 
@@ -123,7 +213,10 @@
           {% csrf_token %}
           <label for="quick-add-url">URL</label>
           <input id="quick-add-url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
-          <div class="modal-actions"><button type="button" data-modal-close>Cancel</button><button name="job_type" value="download_single" type="submit">Queue download</button></div>
+          <div class="modal-actions">
+            <button type="button" data-modal-close>Cancel</button>
+            <button name="job_type" value="download_single" type="submit">Queue download</button>
+          </div>
         </form>
       </section>
     </div>
@@ -133,10 +226,11 @@
         <h2 id="search-title">Search transcripts</h2>
         <input id="transcript-search-input" type="search" placeholder="Search words in transcripts..." />
         <div id="transcript-search-results" class="quick-add-results" aria-live="polite"></div>
-        <div class="modal-actions"><button type="button" data-modal-close>Close</button></div>
+        <div class="modal-actions">
+          <button type="button" data-modal-close>Close</button>
+        </div>
       </section>
     </div>
-
 
     <div id="metadata-edit-backdrop" class="modal-backdrop" aria-hidden="true">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
@@ -148,7 +242,10 @@
           <input id="metadata-edit-item-title" name="title" type="text" required />
           <label for="metadata-edit-source-name">Source name</label>
           <input id="metadata-edit-source-name" name="source_name" type="text" required />
-          <div class="modal-actions"><button id="metadata-edit-cancel" type="button" data-modal-close>Cancel</button><button type="submit">Save</button></div>
+          <div class="modal-actions">
+            <button id="metadata-edit-cancel" type="button" data-modal-close>Cancel</button>
+            <button type="submit">Save</button>
+          </div>
         </form>
       </section>
     </div>
@@ -163,9 +260,12 @@
         </div>
         <audio id="mini-player-audio" class="mini-player-media" controls preload="metadata"></audio>
         <video id="mini-player-video" class="mini-player-media" controls preload="metadata"></video>
-        <section class="mini-player-transcript-wrap"><div id="mini-player-transcript" class="mini-player-transcript" aria-live="polite"></div></section>
+        <section class="mini-player-transcript-wrap">
+          <div id="mini-player-transcript" class="mini-player-transcript" aria-live="polite"></div>
+        </section>
       </section>
     </section>
+
     <section id="manual-upload-dropzone" class="manual-upload-dropzone" data-upload-url="{% url 'manual_upload' %}" aria-hidden="true">
       <div class="manual-upload-card">
         <div class="manual-upload-icon" aria-hidden="true">⇪</div>

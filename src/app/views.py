@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import time
 import mimetypes
 import uuid
 import re
@@ -79,11 +80,16 @@ def _decorate_download(item: Download) -> Download:
     if item.download_status in {"missing", "retention_deleted"}:
         item.status_label = "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
         item.status_class = "status-missing"
-    try:
-        item.resolved_subtitle_path = _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
-    except Http404:
-        item.resolved_subtitle_path = None
-    item.has_subtitles = item.resolved_subtitle_path is not None
+
+    # Important performance fix:
+    # Do not call _resolve_subtitle_path() here. That function checks the
+    # filesystem and calls _profile_output_root(), so doing it for every row
+    # makes the library page slow when many downloads are listed.
+    #
+    # The actual /subtitle/<id>/ endpoint still does the real filesystem
+    # validation when the player requests subtitles.
+    item.resolved_subtitle_path = None
+    item.has_subtitles = bool(item.subtitle_path or item.subtitle_path_relative)
     return item
 
 
@@ -215,16 +221,66 @@ def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
 
 @login_required
 def library(request: HttpRequest) -> HttpResponse:
+    total_start = time.perf_counter()
     profile_id = _profile_id(request)
-    _queue_missing_summary_batch(profile_id, reason="library_missing_summary")
-    downloads_qs = Download.objects.select_related("summary").filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
-    downloads = [_decorate_download(item) for item in downloads_qs.order_by("-last_seen_at", "-id")[:500]]
+
+    # Performance: do not scan/queue missing summaries on every library page load.
+    # Run summarize_missing from an explicit action or when downloads/transcripts finish instead.
+
+    setup_start = time.perf_counter()
+    downloads_qs = (
+        Download.objects
+        .select_related("summary")
+        .filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
+        # Keep the library query narrow. Avoid pulling raw yt-dlp metadata JSON.
+        # Keep description + summary_text because app/library.html currently uses
+        # them for the mini-player/summary tooltip fallback.
+        .only(
+            "id",
+            "profile_id",
+            "source_type",
+            "source_name",
+            "title",
+            "description",
+            "file_path",
+            "file_path_relative",
+            "file_ext",
+            "file_size_bytes",
+            "subtitle_path",
+            "subtitle_path_relative",
+            "download_status",
+            "last_seen_at",
+            "played",
+            "favorite",
+            "last_position_seconds",
+            "total_listened_seconds",
+            "summary__download_id",
+            "summary__summary_text",
+        )
+    )
+    setup_elapsed = time.perf_counter() - setup_start
+
+    rows_start = time.perf_counter()
+    downloads = [
+        _decorate_download(item)
+        for item in downloads_qs.order_by("-last_seen_at", "-id")[:100]
+    ]
+    rows_elapsed = time.perf_counter() - rows_start
+
+    stats_start = time.perf_counter()
     played_count = sum(1 for item in downloads if item.played)
     favorite_count = sum(1 for item in downloads if item.favorite)
     listened_seconds = downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
-    recent_jobs = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10]
+    stats_elapsed = time.perf_counter() - stats_start
+
+    jobs_start = time.perf_counter()
+    recent_jobs = list(Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10])
+    jobs_elapsed = time.perf_counter() - jobs_start
+
     profile_name = request.user.get_username() or profile_id
-    return render(
+
+    render_start = time.perf_counter()
+    response = render(
         request,
         "app/library.html",
         {
@@ -242,6 +298,21 @@ def library(request: HttpRequest) -> HttpResponse:
             },
         },
     )
+    render_elapsed = time.perf_counter() - render_start
+    total_elapsed = time.perf_counter() - total_start
+
+    log.info(
+        profile_id,
+        setup_elapsed,
+        rows_elapsed,
+        stats_elapsed,
+        jobs_elapsed,
+        render_elapsed,
+        total_elapsed,
+        len(downloads),
+    )
+
+    return response
 
 
 @login_required
