@@ -732,6 +732,56 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_batch_update_transcript_refresh_supersedes_active_job(self):
+        client = Client()
+        from django.contrib.auth.models import User
+
+        User.objects.create_user(username="default", password="pass")
+        self.assertTrue(client.login(username="default", password="pass"))
+        download = Download.objects.create(
+            profile_id="default",
+            source_type="youtube",
+            source_name="Test Channel",
+            item_uid="video-refresh-active",
+            title="Refresh Active",
+            file_path="/tmp/refresh-active.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+        )
+        active_job = Job.objects.create(
+            profile_id="default",
+            job_type="generate_transcript",
+            status=Job.STATUS_RUNNING,
+            payload={"download_id": download.id},
+            idempotency_key=f"generate_transcript:default:{download.id}",
+        )
+
+        with patch("app.views.publish_job") as publish:
+            response = client.post(
+                "/batch-update/",
+                {"ids": [str(download.id)], "batch_action": "transcript-summary"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        active_job.refresh_from_db()
+        self.assertEqual(active_job.status, Job.STATUS_FAILED)
+        self.assertIn("Superseded", active_job.error_message)
+        replacement = Job.objects.get(
+            job_type="generate_transcript",
+            status=Job.STATUS_QUEUED,
+            payload__download_id=download.id,
+        )
+        self.assertNotEqual(replacement.id, active_job.id)
+        publish.assert_called_once_with(
+            {
+                "job_id": replacement.id,
+                "job_type": "generate_transcript",
+                "profile_id": "default",
+                "attempt": 1,
+            }
+        )
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_queues_summary_refresh(self):
         client = Client()
         from django.contrib.auth.models import User
