@@ -1,4 +1,7 @@
+import math
 import os
+import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -15,6 +18,90 @@ _WHISPER_MODEL_LOCK = threading.Lock()
 
 class TranscriptionError(RuntimeError):
     """Raised when Whisper transcription cannot be completed for a media file."""
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        log.warning("Ignoring invalid %s=%r; using %s", name, raw_value, default)
+        return default
+
+
+def _probe_audio_duration(input_file: Path) -> float | None:
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(input_file),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        log.warning("Unable to probe audio duration for %s: %s", input_file, exc)
+        return None
+    try:
+        duration = float(completed.stdout.strip())
+    except ValueError:
+        log.warning(
+            "Unable to parse ffprobe duration for %s: %r", input_file, completed.stdout
+        )
+        return None
+    if not math.isfinite(duration) or duration <= 0:
+        return None
+    return duration
+
+
+def _extract_audio_chunk(
+    input_file: Path, output_file: Path, start: float, duration: float
+) -> None:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{duration:.3f}",
+            "-i",
+            str(input_file),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "wav",
+            str(output_file),
+        ],
+        check=True,
+    )
+
+
+def _offset_transcription_result(result: dict, offset_seconds: float) -> dict:
+    offset_segments = []
+    for segment in result.get("segments", []):
+        offset_segment = dict(segment)
+        offset_segment["start"] = (
+            float(offset_segment.get("start", 0.0)) + offset_seconds
+        )
+        offset_segment["end"] = float(offset_segment.get("end", 0.0)) + offset_seconds
+        offset_segments.append(offset_segment)
+    return {"text": result.get("text", ""), "segments": offset_segments}
 
 
 def _normalize_faster_whisper_result(
@@ -99,15 +186,84 @@ def _transcribe_in_process(
     if language:
         transcribe_kwargs["language"] = language
     input_size = input_file.stat().st_size if input_file.exists() else None
+    duration_seconds = _probe_audio_duration(input_file)
+    chunk_threshold_seconds = _env_float(
+        "GETOFFLINE_TRANSCRIPTION_CHUNK_THRESHOLD_SECONDS", 30 * 60
+    )
+    chunk_seconds = _env_float("GETOFFLINE_TRANSCRIPTION_CHUNK_SECONDS", 15 * 60)
+    if (
+        duration_seconds is not None
+        and chunk_seconds > 0
+        and duration_seconds > chunk_threshold_seconds
+    ):
+        log.info(
+            "Transcribing long audio in chunks prefix=%s input=%s duration=%.2fs chunk_seconds=%.2fs model=%s language=%s size_bytes=%s kwargs=%s",
+            log_prefix,
+            input_file,
+            duration_seconds,
+            chunk_seconds,
+            model_name,
+            language,
+            input_size,
+            transcribe_kwargs,
+        )
+        all_text_parts = []
+        all_segments = []
+        chunk_count = int(math.ceil(duration_seconds / chunk_seconds))
+        with tempfile.TemporaryDirectory(prefix="getoffline-transcription-") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            for chunk_index in range(chunk_count):
+                start = chunk_index * chunk_seconds
+                remaining = max(duration_seconds - start, 0)
+                current_duration = min(chunk_seconds, remaining)
+                if current_duration <= 0:
+                    break
+                chunk_file = tmpdir_path / f"chunk-{chunk_index:05d}.wav"
+                log.info(
+                    "Extracting transcription chunk prefix=%s chunk=%s/%s start=%.2fs duration=%.2fs",
+                    log_prefix,
+                    chunk_index + 1,
+                    chunk_count,
+                    start,
+                    current_duration,
+                )
+                _extract_audio_chunk(input_file, chunk_file, start, current_duration)
+                chunk_result = _transcribe_audio_file(
+                    model,
+                    chunk_file,
+                    transcribe_kwargs,
+                    f"{log_prefix}-chunk-{chunk_index + 1}",
+                )
+                offset_result = _offset_transcription_result(chunk_result, start)
+                if offset_result["text"]:
+                    all_text_parts.append(offset_result["text"])
+                all_segments.extend(offset_result["segments"])
+                chunk_file.unlink(missing_ok=True)
+        log.info(
+            "Chunked faster-whisper transcription complete prefix=%s chunks=%s segments=%s text_chars=%s",
+            log_prefix,
+            chunk_count,
+            len(all_segments),
+            sum(len(part) for part in all_text_parts),
+        )
+        return {"text": " ".join(all_text_parts).strip(), "segments": all_segments}
+
     log.info(
-        "Starting faster-whisper transcription prefix=%s input=%s model=%s language=%s size_bytes=%s kwargs=%s",
+        "Starting faster-whisper transcription prefix=%s input=%s model=%s language=%s size_bytes=%s duration=%s kwargs=%s",
         log_prefix,
         input_file,
         model_name,
         language,
         input_size,
+        duration_seconds,
         transcribe_kwargs,
     )
+    return _transcribe_audio_file(model, input_file, transcribe_kwargs, log_prefix)
+
+
+def _transcribe_audio_file(
+    model, input_file: Path, transcribe_kwargs: dict, log_prefix: str
+):
     try:
         segments, info = model.transcribe(str(input_file), **transcribe_kwargs)
     except IndexError as exc:

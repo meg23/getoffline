@@ -49,7 +49,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libgomp1 libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv /opt/venv
 WORKDIR /app
