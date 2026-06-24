@@ -8,7 +8,9 @@ import traceback
 from workers.transcription import _normalize_faster_whisper_result
 
 
-def transcribe_worker_once(input_file: str, model_name: str, language: str | None = None):
+def transcribe_worker_once(
+    input_file: str, model_name: str, language: str | None = None
+):
     model = None
     segments = None
     try:
@@ -22,7 +24,9 @@ def transcribe_worker_once(input_file: str, model_name: str, language: str | Non
             segments, _info = model.transcribe(str(input_file), **transcribe_kwargs)
         except IndexError as exc:
             if "tuple index out of range" in str(exc):
-                raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
+                raise RuntimeError(
+                    f"No decodable audio stream found in media file: {input_file}"
+                ) from exc
             raise
         return _normalize_faster_whisper_result(segments)
     finally:

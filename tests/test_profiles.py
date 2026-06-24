@@ -6,12 +6,18 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.download_store import get_stored_config, init_database, update_stored_defaults  # noqa: E402
+from workers.download_store import (
+    get_stored_config,
+    init_database,
+    update_stored_defaults,
+)  # noqa: E402
 from workers.profiles import ProfileManager  # noqa: E402
 
 
 class ProfileManagerTests(unittest.TestCase):
-    def test_default_profile_uses_profiles_directory_without_moving_existing_paths(self):
+    def test_default_profile_uses_profiles_directory_without_moving_existing_paths(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             output_root = root / "downloads"
@@ -24,13 +30,20 @@ class ProfileManagerTests(unittest.TestCase):
             profile = manager.get_active()
             self.assertEqual(profile.profile_id, "default")
             self.assertEqual(profile.name, "default")
-            self.assertEqual(profile.output_root, (root / "downloads" / "default").resolve())
-            self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
+            self.assertEqual(
+                profile.output_root, (root / "downloads" / "default").resolve()
+            )
+            self.assertEqual(
+                profile.database_path,
+                (root / "profiles" / "default" / "downloads.sqlite3").resolve(),
+            )
             self.assertTrue(profile.database_path.exists())
             self.assertTrue((output_root / "existing.mp3").exists())
             self.assertFalse((profile.output_root / "existing.mp3").exists())
 
-    def test_registered_default_profile_is_normalized_without_moving_existing_paths(self):
+    def test_registered_default_profile_is_normalized_without_moving_existing_paths(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             legacy_output = root / "legacy-media"
@@ -51,8 +64,13 @@ class ProfileManagerTests(unittest.TestCase):
 
             profile = manager.get_active()
             self.assertEqual(profile.name, "Home")
-            self.assertEqual(profile.output_root, (root / "downloads" / "default").resolve())
-            self.assertEqual(profile.database_path, (root / "profiles" / "default" / "downloads.sqlite3").resolve())
+            self.assertEqual(
+                profile.output_root, (root / "downloads" / "default").resolve()
+            )
+            self.assertEqual(
+                profile.database_path,
+                (root / "profiles" / "default" / "downloads.sqlite3").resolve(),
+            )
             self.assertTrue(legacy_output.exists())
 
     def test_existing_profile_directories_are_discovered_without_a_registry(self):
@@ -66,16 +84,25 @@ class ProfileManagerTests(unittest.TestCase):
                 (profile_root / "downloads.sqlite3").touch()
             (profiles_root / ".DS_Store").write_text("", encoding="utf-8")
 
-            manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+            manager = ProfileManager(
+                root / "profiles.json", root / "legacy", root / "legacy.sqlite3"
+            )
 
             self.assertEqual(
                 [profile.profile_id for profile in manager.list_profiles()],
                 ["default", "max", "ozzie"],
             )
-            self.assertEqual(manager.profiles["max"].output_root, root / "downloads" / "max")
-            self.assertEqual(manager.profiles["ozzie"].database_path, profiles_root / "ozzie" / "downloads.sqlite3")
+            self.assertEqual(
+                manager.profiles["max"].output_root, root / "downloads" / "max"
+            )
+            self.assertEqual(
+                manager.profiles["ozzie"].database_path,
+                profiles_root / "ozzie" / "downloads.sqlite3",
+            )
 
-    def test_profile_directory_with_content_at_root_uses_profile_root_as_output_root(self):
+    def test_profile_directory_with_content_at_root_uses_profile_root_as_output_root(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             profile_root = root / "profiles" / "max"
@@ -85,7 +112,9 @@ class ProfileManagerTests(unittest.TestCase):
             (root / "downloads" / "max").mkdir(parents=True)
             (profile_root / "downloads.sqlite3").touch()
 
-            manager = ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+            manager = ProfileManager(
+                root / "profiles.json", root / "legacy", root / "legacy.sqlite3"
+            )
 
             self.assertEqual(manager.profiles["max"].output_root, profile_root)
 
@@ -151,7 +180,9 @@ class ProfileManagerTests(unittest.TestCase):
                 },
             )
 
-            ProfileManager(root / "profiles.json", root / "legacy", root / "legacy.sqlite3")
+            ProfileManager(
+                root / "profiles.json", root / "legacy", root / "legacy.sqlite3"
+            )
 
             defaults = get_stored_config(str(database_path))["defaults"]
             self.assertEqual(Path(defaults["output_root"]), root / "downloads" / "max")
@@ -170,10 +201,16 @@ class ProfileManagerTests(unittest.TestCase):
             config = manager.load_config(created)
 
             self.assertEqual(created.name, "Alice")
-            self.assertNotEqual(created.database_path, manager.profiles["default"].database_path)
+            self.assertNotEqual(
+                created.database_path, manager.profiles["default"].database_path
+            )
             self.assertTrue(created.database_path.exists())
-            self.assertEqual(created.output_root, root / "downloads" / created.profile_id)
-            self.assertEqual(Path(config["defaults"]["output_root"]), created.output_root)
+            self.assertEqual(
+                created.output_root, root / "downloads" / created.profile_id
+            )
+            self.assertEqual(
+                Path(config["defaults"]["output_root"]), created.output_root
+            )
             self.assertEqual(config["youtube"], [])
             self.assertEqual(config["podcasts"], [])
 
@@ -181,11 +218,15 @@ class ProfileManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             registry = root / "profiles.json"
-            manager = ProfileManager(registry, root / "downloads", root / "downloads" / "downloads.sqlite3")
+            manager = ProfileManager(
+                registry, root / "downloads", root / "downloads" / "downloads.sqlite3"
+            )
             created = manager.create("Alice")
             renamed = manager.rename_active("Family")
 
-            restored = ProfileManager(registry, root / "downloads", root / "downloads" / "downloads.sqlite3")
+            restored = ProfileManager(
+                registry, root / "downloads", root / "downloads" / "downloads.sqlite3"
+            )
 
             self.assertEqual(renamed.profile_id, created.profile_id)
             self.assertEqual(restored.get_active().name, "Family")
@@ -195,7 +236,9 @@ class ProfileManagerTests(unittest.TestCase):
     def test_profile_names_are_unique_case_insensitively(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            manager = ProfileManager(root / "profiles.json", root / "downloads", root / "downloads.sqlite3")
+            manager = ProfileManager(
+                root / "profiles.json", root / "downloads", root / "downloads.sqlite3"
+            )
             manager.create("Alice")
 
             with self.assertRaises(ValueError):
@@ -205,7 +248,9 @@ class ProfileManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             registry = root / "profiles.json"
-            manager = ProfileManager(registry, root / "downloads", root / "downloads.sqlite3")
+            manager = ProfileManager(
+                registry, root / "downloads", root / "downloads.sqlite3"
+            )
             profile = manager.set_pin("default", "1234")
 
             self.assertTrue(profile.has_pin)
@@ -213,14 +258,18 @@ class ProfileManagerTests(unittest.TestCase):
             self.assertTrue(manager.verify_pin("default", "1234"))
             self.assertFalse(manager.verify_pin("default", "9999"))
 
-            restored = ProfileManager(registry, root / "downloads", root / "downloads.sqlite3")
+            restored = ProfileManager(
+                registry, root / "downloads", root / "downloads.sqlite3"
+            )
             self.assertTrue(restored.get_active().has_pin)
             self.assertTrue(restored.verify_pin("default", "1234"))
 
     def test_blank_profile_pin_removes_lock(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            manager = ProfileManager(root / "profiles.json", root / "downloads", root / "downloads.sqlite3")
+            manager = ProfileManager(
+                root / "profiles.json", root / "downloads", root / "downloads.sqlite3"
+            )
             manager.set_pin("default", "1234")
 
             profile = manager.set_pin("default", "")

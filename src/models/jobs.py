@@ -6,7 +6,13 @@ from django.utils import timezone
 from .models import Job
 
 
-def create_job(*, profile_id: str, job_type: str, payload: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Job:
+def create_job(
+    *,
+    profile_id: str,
+    job_type: str,
+    payload: Optional[Dict[str, Any]] = None,
+    idempotency_key: Optional[str] = None,
+) -> Job:
     if idempotency_key:
         existing = Job.objects.filter(
             idempotency_key=idempotency_key,
@@ -25,7 +31,11 @@ def create_job(*, profile_id: str, job_type: str, payload: Optional[Dict[str, An
 
 @transaction.atomic
 def claim_job(job_id: int) -> Optional[Job]:
-    job = Job.objects.select_for_update().filter(pk=int(job_id), status=Job.STATUS_QUEUED).first()
+    job = (
+        Job.objects.select_for_update()
+        .filter(pk=int(job_id), status=Job.STATUS_QUEUED)
+        .first()
+    )
     if job is None:
         return None
     now = timezone.now()

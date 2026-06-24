@@ -62,6 +62,13 @@ def enqueue_due_scheduled_jobs(*, now=None, limit: int = 100) -> list[int]:
             schedule.next_run_at = _next_run_after(schedule, due_at)
             schedule.updated_at = now
             schedule.save(update_fields=["last_run_at", "next_run_at", "updated_at"])
-        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+        publish_job(
+            {
+                "job_id": job.id,
+                "job_type": job.job_type,
+                "profile_id": job.profile_id,
+                "attempt": 1,
+            }
+        )
         enqueued_job_ids.append(job.id)
     return enqueued_job_ids

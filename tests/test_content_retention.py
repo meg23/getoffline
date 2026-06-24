@@ -13,17 +13,28 @@ from workers.download_store import init_database, is_downloaded, upsert_download
 
 
 class ContentRetentionTests(unittest.TestCase):
-    def _insert_download(self, db_path: str, media_path: Path, *, item_uid: str, source_type: str = "youtube"):
+    def _insert_download(
+        self,
+        db_path: str,
+        media_path: Path,
+        *,
+        item_uid: str,
+        source_type: str = "youtube",
+    ):
         upsert_download(
             db_path,
             {
                 "source_type": source_type,
-                "source_name": "Manual Uploads" if source_type == "manual" else "Test Source",
+                "source_name": "Manual Uploads"
+                if source_type == "manual"
+                else "Test Source",
                 "item_uid": item_uid,
                 "title": item_uid,
                 "file_path": str(media_path),
                 "file_ext": media_path.suffix.lstrip("."),
-                "file_size_bytes": media_path.stat().st_size if media_path.exists() else 0,
+                "file_size_bytes": media_path.stat().st_size
+                if media_path.exists()
+                else 0,
                 "subtitle_enabled": False,
                 "download_status": "downloaded",
                 "storage_root": str(media_path.parent),
@@ -97,10 +108,14 @@ class ContentRetentionTests(unittest.TestCase):
             init_database(db_path)
             media_path = root / "manual.mp3"
             media_path.write_bytes(b"manual")
-            self._insert_download(db_path, media_path, item_uid="manual", source_type="manual")
+            self._insert_download(
+                db_path, media_path, item_uid="manual", source_type="manual"
+            )
             old_time = datetime.now(timezone.utc) - timedelta(days=365)
             with sqlite3.connect(db_path) as conn:
-                conn.execute("UPDATE downloads SET completed_at = ?", (old_time.isoformat(),))
+                conn.execute(
+                    "UPDATE downloads SET completed_at = ?", (old_time.isoformat(),)
+                )
                 conn.commit()
 
             result = enforce_content_retention(db_path, str(root), 1)
@@ -108,10 +123,14 @@ class ContentRetentionTests(unittest.TestCase):
             self.assertTrue(media_path.exists())
             self.assertEqual(result.ignored_manual, 1)
             with sqlite3.connect(db_path) as conn:
-                status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
+                status = conn.execute(
+                    "SELECT download_status FROM downloads"
+                ).fetchone()[0]
             self.assertEqual(status, "downloaded")
 
-    def test_favorite_content_is_not_deleted_but_absent_favorites_are_marked_missing(self):
+    def test_favorite_content_is_not_deleted_but_absent_favorites_are_marked_missing(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             db_path = str(root / "downloads.sqlite3")
@@ -156,7 +175,9 @@ class ContentRetentionTests(unittest.TestCase):
 
             self.assertEqual(result.marked_missing, 0)
             with sqlite3.connect(db_path) as conn:
-                status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
+                status = conn.execute(
+                    "SELECT download_status FROM downloads"
+                ).fetchone()[0]
             self.assertEqual(status, "downloaded")
 
 

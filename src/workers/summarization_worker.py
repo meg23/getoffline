@@ -5,7 +5,12 @@ import json
 import sys
 from typing import Dict
 
-from workers.summarization import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_TIMEOUT_SECONDS, _ollama_summary, _utcnow_iso
+from workers.summarization import (
+    DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+    _ollama_summary,
+    _utcnow_iso,
+)
 
 
 def summarize_worker_once(
@@ -14,8 +19,14 @@ def summarize_worker_once(
     timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS,
 ) -> Dict[str, str]:
     try:
-        summary = _ollama_summary(text, model_name=model_name, timeout_seconds=timeout_seconds)
-        return {"summary_text": summary, "model_name": model_name, "updated_at": _utcnow_iso()}
+        summary = _ollama_summary(
+            text, model_name=model_name, timeout_seconds=timeout_seconds
+        )
+        return {
+            "summary_text": summary,
+            "model_name": model_name,
+            "updated_at": _utcnow_iso(),
+        }
     finally:
         gc.collect()
 
@@ -26,7 +37,9 @@ def main() -> None:
         result = summarize_worker_once(
             text=str(args.get("text") or ""),
             model_name=str(args.get("model_name") or DEFAULT_OLLAMA_MODEL),
-            timeout_seconds=int(args.get("timeout_seconds") or DEFAULT_OLLAMA_TIMEOUT_SECONDS),
+            timeout_seconds=int(
+                args.get("timeout_seconds") or DEFAULT_OLLAMA_TIMEOUT_SECONDS
+            ),
         )
         sys.stdout.write(json.dumps(result))
     except Exception as exc:

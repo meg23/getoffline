@@ -8,7 +8,15 @@ from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseRedirect,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
@@ -18,15 +26,49 @@ from django.contrib.auth.decorators import login_required
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from models.jobs import create_job
-from models.models import AppConfigValue, Download, DownloadSettings, Job, ProfileConfigValue, ProfileDownloadSettings, ScheduledJob, SourceConfig, TranscriptSegment
+from models.models import (
+    AppConfigValue,
+    Download,
+    DownloadSettings,
+    Job,
+    ProfileConfigValue,
+    ProfileDownloadSettings,
+    ScheduledJob,
+    SourceConfig,
+    TranscriptSegment,
+)
 
 from .queue import publish_job
-from .routing import PODCAST_DOWNLOAD_QUEUE, SERIAL_EPISODE_CHECK_QUEUE, SUMMARY_QUEUE, TRANSFER_QUEUE, TRANSCRIPT_QUEUE, YOUTUBE_DOWNLOAD_QUEUE, queue_name
+from .routing import (
+    PODCAST_DOWNLOAD_QUEUE,
+    SERIAL_EPISODE_CHECK_QUEUE,
+    SUMMARY_QUEUE,
+    TRANSFER_QUEUE,
+    TRANSCRIPT_QUEUE,
+    YOUTUBE_DOWNLOAD_QUEUE,
+    queue_name,
+)
 
 
-ALLOWED_JOB_TYPES = {"update_downloads", "download_single", "transfer_media", "summarize_missing"}
+ALLOWED_JOB_TYPES = {
+    "update_downloads",
+    "download_single",
+    "transfer_media",
+    "summarize_missing",
+}
 DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
-MEDIA_UPLOAD_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg", ".mp4", ".mkv", ".webm", ".mov"}
+MEDIA_UPLOAD_EXTENSIONS = {
+    ".mp3",
+    ".m4a",
+    ".wav",
+    ".flac",
+    ".aac",
+    ".ogg",
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".mov",
+}
 VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
 log = logging.getLogger(__name__)
 
@@ -67,8 +109,14 @@ def _human_duration(seconds: float | int | None) -> str:
 def _decorate_download(item: Download) -> Download:
     position = float(item.last_position_seconds or 0.0)
     item.display_size = _human_size(item.file_size_bytes)
-    item.display_type = (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?").upper()
-    item.display_kind = "video" if item.display_type.lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+    item.display_type = (
+        item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?"
+    ).upper()
+    item.display_kind = (
+        "video"
+        if item.display_type.lower() in {"mp4", "mkv", "webm", "mov"}
+        else "audio"
+    )
     item.status_label = "UNPLAYED"
     item.status_class = "status-unplayed"
     if position > 0 and not item.played:
@@ -78,7 +126,9 @@ def _decorate_download(item: Download) -> Download:
         item.status_label = "PLAYED"
         item.status_class = "status-played"
     if item.download_status in {"missing", "retention_deleted"}:
-        item.status_label = "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
+        item.status_label = (
+            "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
+        )
         item.status_class = "status-missing"
 
     # Important performance fix:
@@ -106,8 +156,12 @@ def _profile_id(request: HttpRequest) -> str:
     return "default"
 
 
-def _redirect_back(request: HttpRequest, fallback: str = "library") -> HttpResponseRedirect:
-    return HttpResponseRedirect(request.POST.get("next") or request.headers.get("Referer") or reverse(fallback))
+def _redirect_back(
+    request: HttpRequest, fallback: str = "library"
+) -> HttpResponseRedirect:
+    return HttpResponseRedirect(
+        request.POST.get("next") or request.headers.get("Referer") or reverse(fallback)
+    )
 
 
 def _safe_path(raw_path: str | None) -> Path:
@@ -124,7 +178,9 @@ def _profile_output_root(profile_id: str) -> Path:
         ProfileConfigValue.objects.filter(profile_id=profile_id, key="output_root")
         .values_list("value", flat=True)
         .first()
-        or AppConfigValue.objects.filter(key="output_root").values_list("value", flat=True).first()
+        or AppConfigValue.objects.filter(key="output_root")
+        .values_list("value", flat=True)
+        .first()
         or PROFILE_DEFAULTS["output_root"]
     )
     return Path(str(value)).expanduser().resolve()
@@ -133,7 +189,9 @@ def _profile_output_root(profile_id: str) -> Path:
 def _resolve_media_path(item: Download) -> Path:
     candidates: list[Path] = []
     if item.file_path_relative:
-        candidates.append(_profile_output_root(item.profile_id) / str(item.file_path_relative))
+        candidates.append(
+            _profile_output_root(item.profile_id) / str(item.file_path_relative)
+        )
     if item.file_path:
         candidates.append(Path(str(item.file_path)))
     for candidate in candidates:
@@ -168,7 +226,9 @@ def _resolve_subtitle_path(item: Download) -> Path | None:
     if item.subtitle_path:
         candidates.append(Path(str(item.subtitle_path)))
     if item.subtitle_path_relative:
-        candidates.append(_profile_output_root(item.profile_id) / str(item.subtitle_path_relative))
+        candidates.append(
+            _profile_output_root(item.profile_id) / str(item.subtitle_path_relative)
+        )
     candidates.extend([media_path.with_suffix(".srt"), media_path.with_suffix(".vtt")])
 
     root = _profile_output_root(item.profile_id)
@@ -209,7 +269,14 @@ def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
         idempotency_key=idempotency_key,
     )
     try:
-        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+        publish_job(
+            {
+                "job_id": job.id,
+                "job_type": job.job_type,
+                "profile_id": job.profile_id,
+                "attempt": 1,
+            }
+        )
     except Exception:
         job.status = Job.STATUS_FAILED
         job.error_message = "Failed to publish automatic summarize_missing job"
@@ -218,6 +285,7 @@ def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
         job.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
         return False
     return True
+
 
 @login_required
 def library(request: HttpRequest) -> HttpResponse:
@@ -229,8 +297,7 @@ def library(request: HttpRequest) -> HttpResponse:
 
     setup_start = time.perf_counter()
     downloads_qs = (
-        Download.objects
-        .select_related("summary")
+        Download.objects.select_related("summary")
         .filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
         # Keep the library query narrow. Avoid pulling raw yt-dlp metadata JSON.
         # Keep description + summary_text because app/library.html currently uses
@@ -270,11 +337,15 @@ def library(request: HttpRequest) -> HttpResponse:
     stats_start = time.perf_counter()
     played_count = sum(1 for item in downloads if item.played)
     favorite_count = sum(1 for item in downloads if item.favorite)
-    listened_seconds = downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
+    listened_seconds = (
+        downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
+    )
     stats_elapsed = time.perf_counter() - stats_start
 
     jobs_start = time.perf_counter()
-    recent_jobs = list(Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10])
+    recent_jobs = list(
+        Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10]
+    )
     jobs_elapsed = time.perf_counter() - jobs_start
 
     profile_name = request.user.get_username() or profile_id
@@ -318,23 +389,36 @@ def library(request: HttpRequest) -> HttpResponse:
 @login_required
 def jobs(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
-    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:100]
+    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[
+        :100
+    ]
     return render(request, "app/jobs.html", {"jobs": rows, "profile_id": profile_id})
 
 
 @login_required
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
-    item.resolved_subtitle_path = _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
+    item.resolved_subtitle_path = (
+        _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
+    )
     item.has_subtitles = item.resolved_subtitle_path is not None
-    if not hasattr(item, "summary") and item.download_status == "downloaded" and item.has_subtitles:
+    if (
+        not hasattr(item, "summary")
+        and item.download_status == "downloaded"
+        and item.has_subtitles
+    ):
         _queue_missing_summary_batch(item.profile_id, reason="player_missing_summary")
     try:
         requested_seek = float(request.GET.get("t") or 0.0)
     except (TypeError, ValueError):
         requested_seek = 0.0
     seek = max(float(item.last_position_seconds or 0.0), requested_seek)
-    media_kind = "video" if (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")).lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+    media_kind = (
+        "video"
+        if (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")).lower()
+        in {"mp4", "mkv", "webm", "mov"}
+        else "audio"
+    )
     log.info(
         "player render download_id=%s media_kind=%s saved_position=%.3f requested_seek=%.3f rendered_seek=%.3f played=%s",
         item.id,
@@ -344,7 +428,11 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
         seek,
         item.played,
     )
-    return render(request, "app/player.html", {"item": item, "seek_seconds": seek, "media_kind": media_kind})
+    return render(
+        request,
+        "app/player.html",
+        {"item": item, "seek_seconds": seek, "media_kind": media_kind},
+    )
 
 
 @login_required
@@ -427,8 +515,15 @@ PROFILE_DEFAULTS = {
 def _profile_settings(profile_id: str) -> dict[str, str]:
     values = dict(PROFILE_DEFAULTS)
     values["output_root"] = f"./downloads/{profile_id}"
-    values.update({row.key: row.value for row in AppConfigValue.objects.order_by("key")})
-    values.update({row.key: row.value for row in ProfileConfigValue.objects.filter(profile_id=profile_id)})
+    values.update(
+        {row.key: row.value for row in AppConfigValue.objects.order_by("key")}
+    )
+    values.update(
+        {
+            row.key: row.value
+            for row in ProfileConfigValue.objects.filter(profile_id=profile_id)
+        }
+    )
     return values
 
 
@@ -436,7 +531,9 @@ def _checked(settings: dict[str, str], key: str) -> bool:
     return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _sync_update_downloads_schedule(profile_id: str, raw_minutes: object, *, now=None) -> None:
+def _sync_update_downloads_schedule(
+    profile_id: str, raw_minutes: object, *, now=None
+) -> None:
     """Keep the automatic update scheduler in sync with the settings page."""
     now = now or timezone.now()
     try:
@@ -444,7 +541,9 @@ def _sync_update_downloads_schedule(profile_id: str, raw_minutes: object, *, now
     except (TypeError, ValueError):
         return
 
-    schedule = ScheduledJob.objects.filter(profile_id=profile_id, job_type="update_downloads").first()
+    schedule = ScheduledJob.objects.filter(
+        profile_id=profile_id, job_type="update_downloads"
+    ).first()
     if minutes <= 0:
         if schedule is not None and schedule.enabled:
             schedule.enabled = False
@@ -470,12 +569,20 @@ def _sync_update_downloads_schedule(profile_id: str, raw_minutes: object, *, now
         )
         return
 
-    update_fields = ["enabled", "interval_seconds", "payload", "idempotency_key_template", "updated_at"]
+    update_fields = [
+        "enabled",
+        "interval_seconds",
+        "payload",
+        "idempotency_key_template",
+        "updated_at",
+    ]
     old_interval_seconds = schedule.interval_seconds
     schedule.enabled = True
     schedule.interval_seconds = interval_seconds
     schedule.payload = {"source": "scheduler"}
-    schedule.idempotency_key_template = "scheduled:update_downloads:${profile_id}:${due_hour}"
+    schedule.idempotency_key_template = (
+        "scheduled:update_downloads:${profile_id}:${due_hour}"
+    )
     if schedule.next_run_at <= now or old_interval_seconds != interval_seconds:
         schedule.next_run_at = next_run_at
         update_fields.append("next_run_at")
@@ -493,16 +600,20 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
         TRANSFER_QUEUE: "Transfer",
     }
     counts = {
-        queue: {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0}
-        for queue in queue_labels
+        queue: {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0} for queue in queue_labels
     }
     rows = (
-        Job.objects.filter(profile_id=profile_id, status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING])
+        Job.objects.filter(
+            profile_id=profile_id, status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING]
+        )
         .values("job_type", "status", "payload")
         .annotate(total=Count("id"))
     )
     for row in rows:
-        queue = queue_name(str(row["job_type"]), row.get("payload") if isinstance(row.get("payload"), dict) else None)
+        queue = queue_name(
+            str(row["job_type"]),
+            row.get("payload") if isinstance(row.get("payload"), dict) else None,
+        )
         counts.setdefault(queue, {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0})
         counts[queue][str(row["status"])] = int(row["total"] or 0)
         queue_labels.setdefault(queue, queue.removeprefix("getoffline."))
@@ -514,19 +625,28 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
             "running": values[Job.STATUS_RUNNING],
             "total": values[Job.STATUS_QUEUED] + values[Job.STATUS_RUNNING],
         }
-        for queue, values in sorted(counts.items(), key=lambda item: queue_labels[item[0]].lower())
+        for queue, values in sorted(
+            counts.items(), key=lambda item: queue_labels[item[0]].lower()
+        )
     ]
+
 
 @login_required
 def settings_page(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
     settings = _profile_settings(profile_id)
-    sources = SourceConfig.objects.filter(profile_id=profile_id).order_by("source_type", "position", "id")
-    download_settings = ProfileDownloadSettings.objects.filter(profile_id=profile_id).first()
+    sources = SourceConfig.objects.filter(profile_id=profile_id).order_by(
+        "source_type", "position", "id"
+    )
+    download_settings = ProfileDownloadSettings.objects.filter(
+        profile_id=profile_id
+    ).first()
     if download_settings is None and profile_id == "default":
         legacy = DownloadSettings.objects.filter(pk=1).first()
         if legacy is not None:
-            download_settings = ProfileDownloadSettings(profile_id=profile_id, youtube_cookie_text=legacy.youtube_cookie_text)
+            download_settings = ProfileDownloadSettings(
+                profile_id=profile_id, youtube_cookie_text=legacy.youtube_cookie_text
+            )
     profile_name = request.user.get_username() or profile_id
     return render(
         request,
@@ -540,17 +660,25 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "profile_initial": (profile_name[:1] or "U").upper(),
-            "manual_upload_filter_checked": _checked(settings, "manual_upload_delete_explicit_content"),
+            "manual_upload_filter_checked": _checked(
+                settings, "manual_upload_delete_explicit_content"
+            ),
             "android_sync_enabled_checked": _checked(settings, "android_sync_enabled"),
-            "android_sync_include_subtitles_checked": _checked(settings, "android_sync_include_subtitles"),
-            "android_sync_include_unplayed_checked": _checked(settings, "android_sync_include_unplayed"),
-            "android_sync_include_started_checked": _checked(settings, "android_sync_include_started"),
-            "android_sync_include_played_checked": _checked(settings, "android_sync_include_played"),
+            "android_sync_include_subtitles_checked": _checked(
+                settings, "android_sync_include_subtitles"
+            ),
+            "android_sync_include_unplayed_checked": _checked(
+                settings, "android_sync_include_unplayed"
+            ),
+            "android_sync_include_started_checked": _checked(
+                settings, "android_sync_include_started"
+            ),
+            "android_sync_include_played_checked": _checked(
+                settings, "android_sync_include_played"
+            ),
             "queue_counts": _queue_counts(profile_id),
         },
     )
-
-
 
 
 def _normalize_upload_stem(value: str) -> str:
@@ -592,7 +720,11 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> tuple[Download, Path
 
     now = timezone.now()
     item_uid = f"manual-{hasher.hexdigest()}-{bytes_written}"
-    relative_path = str(destination_path.relative_to(output_root)) if destination_path.is_relative_to(output_root) else None
+    relative_path = (
+        str(destination_path.relative_to(output_root))
+        if destination_path.is_relative_to(output_root)
+        else None
+    )
     download, _created = Download.objects.update_or_create(
         profile_id=profile_id,
         item_uid=item_uid,
@@ -646,8 +778,20 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     if job_type == "update_downloads":
         default_idempotency = f"{job_type}:{profile_id}:{completion_token}"
     idempotency_key = request.POST.get("idempotency_key") or default_idempotency
-    job = create_job(profile_id=profile_id, job_type=job_type, payload=payload, idempotency_key=idempotency_key)
-    publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+    job = create_job(
+        profile_id=profile_id,
+        job_type=job_type,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+    publish_job(
+        {
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "profile_id": job.profile_id,
+            "attempt": 1,
+        }
+    )
     wants_json = (
         request.headers.get("x-requested-with") == "XMLHttpRequest"
         or request.headers.get("accept") == "application/json"
@@ -655,9 +799,18 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
     if wants_json:
         status_query = urlencode({"profile_id": profile_id, "token": completion_token})
         status_url = f"{reverse('worker_message_status')}?{status_query}"
-        return JsonResponse({"ok": True, "job_id": job.id, "status": job.status, "status_url": status_url})
+        return JsonResponse(
+            {
+                "ok": True,
+                "job_id": job.id,
+                "status": job.status,
+                "status_url": status_url,
+            }
+        )
     next_url = str(request.POST.get("next") or "")
-    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}
+    ):
         return HttpResponseRedirect(next_url)
     return HttpResponseRedirect(reverse("jobs"))
 
@@ -668,7 +821,11 @@ def worker_message_status(request: HttpRequest) -> JsonResponse:
     token = str(request.GET.get("token") or "").strip()
     if not token:
         return JsonResponse(
-            {"finished": False, "ok": False, "error_message": "Missing completion token"},
+            {
+                "finished": False,
+                "ok": False,
+                "error_message": "Missing completion token",
+            },
             status=400,
         )
     message = (
@@ -685,13 +842,14 @@ def worker_message_status(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"finished": False, "ok": True, "status": "pending"})
     payload = message.payload if isinstance(message.payload, dict) else {}
     source_status = str(payload.get("source_status") or "")
-    return JsonResponse({
-        "finished": True,
-        "ok": source_status != Job.STATUS_FAILED,
-        "status": source_status,
-        "error_message": str(payload.get("error_message") or ""),
-    })
-
+    return JsonResponse(
+        {
+            "finished": True,
+            "ok": source_status != Job.STATUS_FAILED,
+            "status": source_status,
+            "error_message": str(payload.get("error_message") or ""),
+        }
+    )
 
 
 @login_required
@@ -700,14 +858,18 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
     uploaded_files = request.FILES.getlist("files") or request.FILES.getlist("file")
     if not uploaded_files:
-        return JsonResponse({"ok": False, "error_message": "No files uploaded."}, status=400)
+        return JsonResponse(
+            {"ok": False, "error_message": "No files uploaded."}, status=400
+        )
 
     created: list[dict[str, object]] = []
     errors: list[dict[str, str]] = []
     for uploaded_file in uploaded_files:
         try:
             download, path = _write_manual_upload(profile_id, uploaded_file)
-            media_type = "video" if path.suffix.lower() in VIDEO_UPLOAD_EXTENSIONS else "audio"
+            media_type = (
+                "video" if path.suffix.lower() in VIDEO_UPLOAD_EXTENSIONS else "audio"
+            )
             job = create_job(
                 profile_id=profile_id,
                 job_type="generate_transcript",
@@ -721,13 +883,26 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
                 },
                 idempotency_key=f"generate_transcript:{profile_id}:{download.id}",
             )
-            publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
-            created.append({"id": download.id, "title": download.title, "job_id": job.id})
+            publish_job(
+                {
+                    "job_id": job.id,
+                    "job_type": job.job_type,
+                    "profile_id": job.profile_id,
+                    "attempt": 1,
+                }
+            )
+            created.append(
+                {"id": download.id, "title": download.title, "job_id": job.id}
+            )
         except ValueError as exc:
-            errors.append({"filename": str(getattr(uploaded_file, "name", "")), "error": str(exc)})
+            errors.append(
+                {"filename": str(getattr(uploaded_file, "name", "")), "error": str(exc)}
+            )
 
     status = 201 if created else 400
-    return JsonResponse({"ok": bool(created), "uploads": created, "errors": errors}, status=status)
+    return JsonResponse(
+        {"ok": bool(created), "uploads": created, "errors": errors}, status=status
+    )
 
 
 @login_required
@@ -787,7 +962,12 @@ def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     item.total_listened_seconds = float(item.total_listened_seconds or 0.0) + delta
     item.last_position_updated_at = timezone.now()
     item.last_seen_at = timezone.now()
-    update_fields = ["last_position_seconds", "total_listened_seconds", "last_position_updated_at", "last_seen_at"]
+    update_fields = [
+        "last_position_seconds",
+        "total_listened_seconds",
+        "last_position_updated_at",
+        "last_seen_at",
+    ]
     log.info(
         "player save_position download_id=%s position=%.3f reason=%s completed=%s previous=%.3f delta=%.3f",
         item.id,
@@ -817,7 +997,6 @@ def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     return _redirect_back(request)
 
 
-
 @login_required
 def transcript_search(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
@@ -837,7 +1016,8 @@ def transcript_search(request: HttpRequest) -> JsonResponse:
             "source_name": segment.download.source_name or segment.download.source_type,
             "start_seconds": segment.start_seconds,
             "text": segment.text,
-            "url": reverse("player", args=[segment.download_id]) + f"?t={int(segment.start_seconds)}",
+            "url": reverse("player", args=[segment.download_id])
+            + f"?t={int(segment.start_seconds)}",
         }
         for segment in segments
     ]
@@ -854,12 +1034,15 @@ def edit_metadata(request: HttpRequest) -> JsonResponse:
     title = str(request.POST.get("title") or "").strip()
     source_name = str(request.POST.get("source_name") or "").strip()
     if not title or not source_name:
-        return JsonResponse({"ok": False, "error": "Title and source name are required"}, status=400)
+        return JsonResponse(
+            {"ok": False, "error": "Title and source name are required"}, status=400
+        )
     item.title = title
     item.source_name = source_name
     item.last_seen_at = timezone.now()
     item.save(update_fields=["title", "source_name", "last_seen_at"])
     return JsonResponse({"ok": True})
+
 
 @login_required
 @require_POST
@@ -874,9 +1057,16 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
         "android_sync_include_started",
         "android_sync_include_played",
     }
-    posted_config_keys = {key.removeprefix("config__") for key in request.POST if key.startswith("config__")}
+    posted_config_keys = {
+        key.removeprefix("config__")
+        for key in request.POST
+        if key.startswith("config__")
+    }
     for checkbox_key in checkbox_keys:
-        if checkbox_key in posted_config_keys and f"config__{checkbox_key}" not in request.POST:
+        if (
+            checkbox_key in posted_config_keys
+            and f"config__{checkbox_key}" not in request.POST
+        ):
             ProfileConfigValue.objects.update_or_create(
                 profile_id=profile_id,
                 key=checkbox_key,
@@ -901,7 +1091,9 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
             },
         )
     if "config__auto_update_minutes" in request.POST:
-        _sync_update_downloads_schedule(profile_id, request.POST.get("config__auto_update_minutes"), now=now)
+        _sync_update_downloads_schedule(
+            profile_id, request.POST.get("config__auto_update_minutes"), now=now
+        )
     return HttpResponseRedirect(reverse("settings"))
 
 
@@ -912,21 +1104,34 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
     if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
     profile_id = _profile_id(request)
-    position = (SourceConfig.objects.filter(profile_id=profile_id, source_type=source_type).order_by("-position").values_list("position", flat=True).first() or -1) + 1
+    position = (
+        SourceConfig.objects.filter(profile_id=profile_id, source_type=source_type)
+        .order_by("-position")
+        .values_list("position", flat=True)
+        .first()
+        or -1
+    ) + 1
     SourceConfig.objects.create(
         profile_id=profile_id,
         source_type=source_type,
         position=position,
         name=str(request.POST.get("name") or "").strip(),
         url=str(request.POST.get("url") or "").strip(),
-        media_type=str(request.POST.get("media_type") or "audio").strip().lower() if source_type == SourceConfig.SOURCE_YOUTUBE else None,
+        media_type=str(request.POST.get("media_type") or "audio").strip().lower()
+        if source_type == SourceConfig.SOURCE_YOUTUBE
+        else None,
         enabled=True,
         subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
-        subtitle_offset_seconds=_optional_float(request.POST.get("subtitle_offset_seconds")),
+        subtitle_offset_seconds=_optional_float(
+            request.POST.get("subtitle_offset_seconds")
+        ),
         max_downloads=_optional_int(request.POST.get("max_downloads")),
-        delete_explicit_content=request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"},
-        include_shorts=source_type == SourceConfig.SOURCE_YOUTUBE and request.POST.get("include_shorts") in {"1", "true", "yes", "on"},
-        include_livestreams=source_type == SourceConfig.SOURCE_YOUTUBE and request.POST.get("include_livestreams") in {"1", "true", "yes", "on"},
+        delete_explicit_content=request.POST.get("delete_explicit_content")
+        in {"1", "true", "yes", "on"},
+        include_shorts=source_type == SourceConfig.SOURCE_YOUTUBE
+        and request.POST.get("include_shorts") in {"1", "true", "yes", "on"},
+        include_livestreams=source_type == SourceConfig.SOURCE_YOUTUBE
+        and request.POST.get("include_livestreams") in {"1", "true", "yes", "on"},
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings"))
@@ -935,18 +1140,41 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
 @login_required
 @require_POST
 def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    source = get_object_or_404(SourceConfig, pk=source_id, profile_id=_profile_id(request))
+    source = get_object_or_404(
+        SourceConfig, pk=source_id, profile_id=_profile_id(request)
+    )
     source.name = str(request.POST.get("name") or source.name).strip()
     source.url = str(request.POST.get("url") or source.url).strip()
     if source.source_type == SourceConfig.SOURCE_YOUTUBE:
-        source.media_type = str(request.POST.get("media_type") or source.media_type or "audio").strip().lower()
+        source.media_type = (
+            str(request.POST.get("media_type") or source.media_type or "audio")
+            .strip()
+            .lower()
+        )
     source.subtitles = request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"}
-    source.subtitle_offset_seconds = _optional_float(request.POST.get("subtitle_offset_seconds"))
+    source.subtitle_offset_seconds = _optional_float(
+        request.POST.get("subtitle_offset_seconds")
+    )
     source.max_downloads = _optional_int(request.POST.get("max_downloads"))
-    source.delete_explicit_content = request.POST.get("delete_explicit_content") in {"1", "true", "yes", "on"}
+    source.delete_explicit_content = request.POST.get("delete_explicit_content") in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     if source.source_type == SourceConfig.SOURCE_YOUTUBE:
-        source.include_shorts = request.POST.get("include_shorts") in {"1", "true", "yes", "on"}
-        source.include_livestreams = request.POST.get("include_livestreams") in {"1", "true", "yes", "on"}
+        source.include_shorts = request.POST.get("include_shorts") in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        source.include_livestreams = request.POST.get("include_livestreams") in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
     source.updated_at = timezone.now()
     source.save(
         update_fields=[
@@ -972,8 +1200,14 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
     if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
     profile_id = _profile_id(request)
-    source_ids = [int(value) for value in request.POST.getlist("source_ids") if str(value).isdigit()]
-    sources = SourceConfig.objects.filter(pk__in=source_ids, profile_id=profile_id, source_type=source_type)
+    source_ids = [
+        int(value)
+        for value in request.POST.getlist("source_ids")
+        if str(value).isdigit()
+    ]
+    sources = SourceConfig.objects.filter(
+        pk__in=source_ids, profile_id=profile_id, source_type=source_type
+    )
     sources_by_id = {source.id: source for source in sources}
     now = timezone.now()
     for source_id in source_ids:
@@ -987,15 +1221,44 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
         source.name = str(request.POST.get(prefix + "name") or source.name).strip()
         source.url = str(request.POST.get(prefix + "url") or source.url).strip()
         if source.source_type == SourceConfig.SOURCE_YOUTUBE:
-            source.media_type = str(request.POST.get(prefix + "media_type") or source.media_type or "audio").strip().lower()
-        source.enabled = request.POST.get(prefix + "enabled", "1") in {"1", "true", "yes", "on"}
-        source.subtitles = request.POST.get(prefix + "subtitles", "1") in {"1", "true", "yes", "on"}
-        source.subtitle_offset_seconds = _optional_float(request.POST.get(prefix + "subtitle_offset_seconds"))
+            source.media_type = (
+                str(
+                    request.POST.get(prefix + "media_type")
+                    or source.media_type
+                    or "audio"
+                )
+                .strip()
+                .lower()
+            )
+        source.enabled = request.POST.get(prefix + "enabled", "1") in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        source.subtitles = request.POST.get(prefix + "subtitles", "1") in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        source.subtitle_offset_seconds = _optional_float(
+            request.POST.get(prefix + "subtitle_offset_seconds")
+        )
         source.max_downloads = _optional_int(request.POST.get(prefix + "max_downloads"))
-        source.delete_explicit_content = request.POST.get(prefix + "delete_explicit_content") in {"1", "true", "yes", "on"}
+        source.delete_explicit_content = request.POST.get(
+            prefix + "delete_explicit_content"
+        ) in {"1", "true", "yes", "on"}
         if source.source_type == SourceConfig.SOURCE_YOUTUBE:
-            source.include_shorts = request.POST.get(prefix + "include_shorts") in {"1", "true", "yes", "on"}
-            source.include_livestreams = request.POST.get(prefix + "include_livestreams") in {"1", "true", "yes", "on"}
+            source.include_shorts = request.POST.get(prefix + "include_shorts") in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            source.include_livestreams = request.POST.get(
+                prefix + "include_livestreams"
+            ) in {"1", "true", "yes", "on"}
         source.updated_at = now
         source.save(
             update_fields=[
@@ -1018,7 +1281,9 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
 @login_required
 @require_POST
 def toggle_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    source = get_object_or_404(SourceConfig, pk=source_id, profile_id=_profile_id(request))
+    source = get_object_or_404(
+        SourceConfig, pk=source_id, profile_id=_profile_id(request)
+    )
     source.enabled = not source.enabled
     source.updated_at = timezone.now()
     source.save(update_fields=["enabled", "updated_at"])
@@ -1028,8 +1293,9 @@ def toggle_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
 @login_required
 @require_POST
 def delete_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
-    source = get_object_or_404(SourceConfig, pk=source_id, profile_id=_profile_id(request))
-    profile_id = source.profile_id
+    source = get_object_or_404(
+        SourceConfig, pk=source_id, profile_id=_profile_id(request)
+    )
     source.delete()
     return HttpResponseRedirect(reverse("settings"))
 
@@ -1062,8 +1328,23 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
             job = create_job(
                 profile_id=profile_id,
                 job_type="download_single",
-                payload={"source": "django_app", "url": item.item_url or item.media_url or item.source_url, "source_type": item.source_type, "source_name": item.source_name, "media_type": "audio" if item.source_type == "podcast" else "video", "subtitles": True, "redownload": True},
+                payload={
+                    "source": "django_app",
+                    "url": item.item_url or item.media_url or item.source_url,
+                    "source_type": item.source_type,
+                    "source_name": item.source_name,
+                    "media_type": "audio" if item.source_type == "podcast" else "video",
+                    "subtitles": True,
+                    "redownload": True,
+                },
                 idempotency_key=f"download_single:{profile_id}:{item.pk}",
             )
-            publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+            publish_job(
+                {
+                    "job_id": job.id,
+                    "job_type": job.job_type,
+                    "profile_id": job.profile_id,
+                    "attempt": 1,
+                }
+            )
     return _redirect_back(request)

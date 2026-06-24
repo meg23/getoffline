@@ -45,10 +45,26 @@ class Command(BaseCommand):
     help = "Enqueue due ScheduledJob rows, optionally running continuously."
 
     def add_arguments(self, parser):
-        parser.add_argument("--loop", action="store_true", help="Keep polling for due scheduled jobs.")
-        parser.add_argument("--poll-seconds", type=int, default=60, help="Polling interval when --loop is used.")
-        parser.add_argument("--limit", type=int, default=100, help="Maximum due schedules to enqueue per pass.")
-        parser.add_argument("--install-defaults", action="store_true", help="Create default scheduler rows if missing.")
+        parser.add_argument(
+            "--loop", action="store_true", help="Keep polling for due scheduled jobs."
+        )
+        parser.add_argument(
+            "--poll-seconds",
+            type=int,
+            default=60,
+            help="Polling interval when --loop is used.",
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=100,
+            help="Maximum due schedules to enqueue per pass.",
+        )
+        parser.add_argument(
+            "--install-defaults",
+            action="store_true",
+            help="Create default scheduler rows if missing.",
+        )
 
     def handle(self, *args, **options):
         if options["install_defaults"]:
@@ -57,7 +73,9 @@ class Command(BaseCommand):
             poll_seconds = max(5, int(options["poll_seconds"]))
             while True:
                 count = self._run_once(limit=options["limit"])
-                self.stdout.write(f"Scheduler pass enqueued {count} job(s); sleeping {poll_seconds}s")
+                self.stdout.write(
+                    f"Scheduler pass enqueued {count} job(s); sleeping {poll_seconds}s"
+                )
                 time.sleep(poll_seconds)
         else:
             count = self._run_once(limit=options["limit"])
@@ -78,7 +96,11 @@ class Command(BaseCommand):
                 },
             )
             if created:
-                self.stdout.write(self.style.SUCCESS(f"Created scheduled job {schedule.job_type} for {schedule.profile_id}"))
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Created scheduled job {schedule.job_type} for {schedule.profile_id}"
+                    )
+                )
 
     def _run_once(self, *, limit: int) -> int:
         return len(enqueue_due_scheduled_jobs(limit=limit))

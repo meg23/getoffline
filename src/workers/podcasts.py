@@ -6,8 +6,20 @@ from pathlib import Path
 
 import feedparser
 
-from workers.download_store import build_item_uid, ensure_config_seeded, get_stored_config, init_database, is_downloaded, resolve_database_path, upsert_download
-from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.download_store import (
+    build_item_uid,
+    ensure_config_seeded,
+    get_stored_config,
+    init_database,
+    is_downloaded,
+    resolve_database_path,
+    upsert_download,
+)
+from workers.content_filter import (
+    delete_media_artifacts,
+    log_filtered_deletion,
+    screen_transcript,
+)
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
 from workers.summary_tasks import generate_missing_summaries
@@ -53,7 +65,9 @@ def _resolve_scan_limit(entry: dict, defaults: dict, source_max_downloads: int) 
         or defaults.get("podcast_scan_limit")
     )
     if configured:
-        return max(source_max_downloads, _coerce_positive_int(configured, source_max_downloads))
+        return max(
+            source_max_downloads, _coerce_positive_int(configured, source_max_downloads)
+        )
     return max(source_max_downloads, source_max_downloads * 10, 50)
 
 
@@ -106,13 +120,17 @@ def _episode_payload(
     artwork_url=None,
 ):
     file_value = Path(file_path).expanduser().resolve() if file_path else None
-    file_size = file_value.stat().st_size if file_value and file_value.exists() else None
+    file_size = (
+        file_value.stat().st_size if file_value and file_value.exists() else None
+    )
 
     return {
         "source_type": "podcast",
         "source_name": source_name,
         "source_url": source_url,
-        "item_uid": build_item_uid(item_id=None, item_url=media_url, media_url=media_url, title=title),
+        "item_uid": build_item_uid(
+            item_id=None, item_url=media_url, media_url=media_url, title=title
+        ),
         "item_id": None,
         "item_url": media_url,
         "media_url": media_url,
@@ -137,7 +155,9 @@ def _episode_payload(
         "resolution": "audio-only",
         "fps": None,
         "subtitle_enabled": subtitle_enabled,
-        "subtitle_path": str(Path(subtitle_path).expanduser().resolve()) if subtitle_path else None,
+        "subtitle_path": str(Path(subtitle_path).expanduser().resolve())
+        if subtitle_path
+        else None,
         "download_status": download_status,
         "error_message": error_message,
         "raw_metadata": {
@@ -149,8 +169,6 @@ def _episode_payload(
             "image_url": artwork_url,
         },
     }
-
-
 
 
 def _image_href(value: object) -> str:
@@ -177,13 +195,22 @@ def _image_dimension(value: object, key: str) -> int:
         return 0
 
 
-def _append_artwork_candidate(candidates: list, value: object, source_priority: int = 0) -> None:
+def _append_artwork_candidate(
+    candidates: list, value: object, source_priority: int = 0
+) -> None:
     image_url = _image_href(value)
     if not image_url:
         return
     width = _image_dimension(value, "width")
     height = _image_dimension(value, "height")
-    candidates.append({"url": image_url, "width": width, "height": height, "source_priority": source_priority})
+    candidates.append(
+        {
+            "url": image_url,
+            "width": width,
+            "height": height,
+            "source_priority": source_priority,
+        }
+    )
 
 
 def _candidate_values(container: object, key: str) -> list:
@@ -272,11 +299,17 @@ def _download_podcasts_in_process(config, downloaded_items):
             url = entry["url"]
             entry_subtitles_enabled = entry.get("subtitles", True)
             delete_explicit_content = bool(entry.get("delete_explicit_content", False))
-            if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+            if str(
+                os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")
+            ).strip().lower() not in {"1", "true", "yes", "on"}:
                 entry_subtitles_enabled = False
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
-            source_max_downloads = _coerce_positive_int(entry.get("max_downloads") or defaults.get("max_downloads") or 3, 3)
-            podcast_scan_limit = _resolve_scan_limit(entry, defaults, source_max_downloads)
+            source_max_downloads = _coerce_positive_int(
+                entry.get("max_downloads") or defaults.get("max_downloads") or 3, 3
+            )
+            podcast_scan_limit = _resolve_scan_limit(
+                entry, defaults, source_max_downloads
+            )
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)
 
@@ -328,7 +361,9 @@ def _download_podcasts_in_process(config, downloaded_items):
                 if len(episode_jobs) >= source_max_downloads:
                     break
 
-                if not forced_redownload and is_downloaded(db_path, "podcast", name, item_uid):
+                if not forced_redownload and is_downloaded(
+                    db_path, "podcast", name, item_uid
+                ):
                     continue
 
                 out_path = f"{folder}/{safe_episode_title}.%(ext)s"
@@ -354,7 +389,9 @@ def _download_podcasts_in_process(config, downloaded_items):
                     "noprogress": True,
                     "logger": _YoutubeDlQuietLogger(),
                 }
-                ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
+                ffmpeg_audio_filter = str(
+                    defaults.get("ffmpeg_audio_filter") or ""
+                ).strip()
                 if ffmpeg_audio_filter:
                     ydl_opts["postprocessor_args"] = ["-af", ffmpeg_audio_filter]
 
@@ -369,7 +406,8 @@ def _download_podcasts_in_process(config, downloaded_items):
                         "description": candidate["description"],
                         "artwork_url": candidate["artwork_url"],
                         "mp3_url": mp3_url,
-                        "final_audio": Path(folder) / f"{safe_episode_title}.{defaults['audio_format']}",
+                        "final_audio": Path(folder)
+                        / f"{safe_episode_title}.{defaults['audio_format']}",
                         "ydl_opts": ydl_opts,
                     }
                 )
@@ -417,13 +455,22 @@ def _download_podcasts_in_process(config, downloaded_items):
                     subtitle_path = create_subtitles(
                         media_file=job["final_audio"],
                         subtitle_offset_seconds=job["subtitle_offset_seconds"],
-                        entry_subtitles_enabled=(job["entry_subtitles_enabled"] or job["delete_explicit_content"]),
-                        subtitle_transcription_mode=defaults.get("subtitle_transcription_mode", "in_process"),
+                        entry_subtitles_enabled=(
+                            job["entry_subtitles_enabled"]
+                            or job["delete_explicit_content"]
+                        ),
+                        subtitle_transcription_mode=defaults.get(
+                            "subtitle_transcription_mode", "in_process"
+                        ),
                         logger=log,
                         context_name=f"podcast {job['name']}",
                         context_label="podcast",
                     )
-                    explicit_match = screen_transcript(subtitle_path) if job["delete_explicit_content"] else None
+                    explicit_match = (
+                        screen_transcript(subtitle_path)
+                        if job["delete_explicit_content"]
+                        else None
+                    )
                     if explicit_match is not None:
                         deleted_paths = delete_media_artifacts(job["final_audio"])
                         log_filtered_deletion(
@@ -452,7 +499,9 @@ def _download_podcasts_in_process(config, downloaded_items):
                                 artwork_url=job.get("artwork_url"),
                             ),
                         )
-                        downloaded_items.append(f"Filtered podcast: {job['name']} – {job['episode_title']}")
+                        downloaded_items.append(
+                            f"Filtered podcast: {job['name']} – {job['episode_title']}"
+                        )
                         log.warning(
                             "Deleted podcast after transcript screening: %s – %s (%s)",
                             job["name"],
@@ -464,7 +513,9 @@ def _download_podcasts_in_process(config, downloaded_items):
                         subtitle_path.unlink(missing_ok=True)
                         subtitle_path = None
                     if subtitle_path:
-                        downloaded_items.append(f"Subtitles: Podcast – {subtitle_path.name}")
+                        downloaded_items.append(
+                            f"Subtitles: Podcast – {subtitle_path.name}"
+                        )
 
                     upsert_download(
                         db_path,
@@ -483,9 +534,18 @@ def _download_podcasts_in_process(config, downloaded_items):
                             artwork_url=job.get("artwork_url"),
                         ),
                     )
-                    generate_missing_summaries(db_path, limit=5, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"), timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90))
+                    generate_missing_summaries(
+                        db_path,
+                        limit=5,
+                        model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
+                        timeout_seconds=int(
+                            defaults.get("summary_timeout_seconds") or 90
+                        ),
+                    )
 
-                    downloaded_items.append(f"Podcast: {job['name']} – {job['episode_title']}")
+                    downloaded_items.append(
+                        f"Podcast: {job['name']} – {job['episode_title']}"
+                    )
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
@@ -503,7 +563,6 @@ def download_podcasts(config, downloaded_items):
     _download_podcasts_in_process(config, downloaded_items)
 
 
-
 YoutubeDL = None
 
 
@@ -511,5 +570,6 @@ def _get_youtubedl():
     global YoutubeDL
     if YoutubeDL is None:
         from yt_dlp import YoutubeDL as _YoutubeDL
+
         YoutubeDL = _YoutubeDL
     return YoutubeDL

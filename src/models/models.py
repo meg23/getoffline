@@ -19,12 +19,18 @@ class ProfileConfigValue(models.Model):
 
     class Meta:
         db_table = "profile_config"
-        constraints = [models.UniqueConstraint(fields=["profile_id", "key"], name="uniq_profile_config_key")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile_id", "key"], name="uniq_profile_config_key"
+            )
+        ]
         indexes = [models.Index(fields=["profile_id", "key"])]
 
 
 class ProfileDownloadSettings(models.Model):
-    profile_id = models.CharField(max_length=191, unique=True, default="default", db_index=True)
+    profile_id = models.CharField(
+        max_length=191, unique=True, default="default", db_index=True
+    )
     youtube_cookie_text = models.TextField(blank=True, null=True)
     cookie_updated_at = models.DateTimeField(blank=True, null=True)
     updated_at = models.DateTimeField(default=timezone.now)
@@ -92,7 +98,9 @@ class Download(models.Model):
     file_size_bytes = models.BigIntegerField(blank=True, null=True)
     subtitle_path = models.TextField(blank=True, null=True)
     subtitle_path_relative = models.TextField(blank=True, null=True)
-    download_status = models.CharField(max_length=32, default="downloaded", db_index=True)
+    download_status = models.CharField(
+        max_length=32, default="downloaded", db_index=True
+    )
     raw_metadata_json = models.TextField(blank=True, null=True)
     first_seen_at = models.DateTimeField(default=timezone.now)
     last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -116,7 +124,13 @@ class Download(models.Model):
 
 
 class MediaSummary(models.Model):
-    download = models.OneToOneField(Download, primary_key=True, db_column="download_id", on_delete=models.CASCADE, related_name="summary")
+    download = models.OneToOneField(
+        Download,
+        primary_key=True,
+        db_column="download_id",
+        on_delete=models.CASCADE,
+        related_name="summary",
+    )
     summary_text = models.TextField()
     model_name = models.CharField(max_length=255)
     source_segment_count = models.IntegerField(default=0)
@@ -127,7 +141,12 @@ class MediaSummary(models.Model):
 
 
 class TranscriptSegment(models.Model):
-    download = models.ForeignKey(Download, db_column="download_id", on_delete=models.CASCADE, related_name="transcript_segments")
+    download = models.ForeignKey(
+        Download,
+        db_column="download_id",
+        on_delete=models.CASCADE,
+        related_name="transcript_segments",
+    )
     subtitle_path = models.TextField()
     start_seconds = models.FloatField()
     end_seconds = models.FloatField(blank=True, null=True)
@@ -171,7 +190,9 @@ class Job(models.Model):
     job_type = models.CharField(max_length=64, db_index=True)
     status = models.CharField(max_length=32, default=STATUS_QUEUED, db_index=True)
     payload = models.JSONField(default=dict, blank=True)
-    idempotency_key = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    idempotency_key = models.CharField(
+        max_length=255, blank=True, null=True, db_index=True
+    )
     error_message = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)

@@ -12,7 +12,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import workers.podcasts as podcasts  # noqa: E402
 import workers.youtube as youtube  # noqa: E402
-from workers.download_store import build_item_uid, has_episode_title_for_source, is_downloaded, upsert_download, init_database  # noqa: E402
+from workers.download_store import (
+    build_item_uid,
+    has_episode_title_for_source,
+    is_downloaded,
+    upsert_download,
+    init_database,
+)  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -73,7 +79,10 @@ def _fake_explicit_subtitle_generator(media_path, subtitle_settings):
     _ = subtitle_settings
     media_path = Path(media_path)
     srt_path = media_path.with_suffix(".srt")
-    srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nThis is fucking explicit.\n", encoding="utf-8")
+    srt_path.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nThis is fucking explicit.\n",
+        encoding="utf-8",
+    )
     return srt_path
 
 
@@ -88,24 +97,27 @@ def _build_sample_config(output_root):
             "audio_quality": 0,
             "processing_workers": 1,
         },
-        "youtube": [{
-            "name": "Test YouTube Source",
-            "url": "https://youtube.com/playlist?list=test-playlist",
-            "type": "audio",
-            "subtitles": True,
-        }],
-        "podcasts": [{
-            "name": "Test Podcast Source",
-            "url": "https://feeds.example.com/test-podcast.xml",
-            "subtitles": True,
-        }],
+        "youtube": [
+            {
+                "name": "Test YouTube Source",
+                "url": "https://youtube.com/playlist?list=test-playlist",
+                "type": "audio",
+                "subtitles": True,
+            }
+        ],
+        "podcasts": [
+            {
+                "name": "Test Podcast Source",
+                "url": "https://feeds.example.com/test-podcast.xml",
+                "subtitles": True,
+            }
+        ],
     }
 
 
 class DownloadFlowTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
-
 
     def test_source_max_downloads_limits_youtube_playlistend(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,8 +126,12 @@ class DownloadFlowTests(unittest.TestCase):
             config["defaults"]["playlist_end"] = 9
             config["youtube"][0]["max_downloads"] = 2
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -128,20 +144,49 @@ class DownloadFlowTests(unittest.TestCase):
             config["podcasts"][0]["max_downloads"] = 2
             fake_feed = SimpleNamespace(
                 entries=[
-                    SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-1.mp3")]),
-                    SimpleNamespace(title="Episode 2", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-2.mp3")]),
-                    SimpleNamespace(title="Episode 3", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-3.mp3")]),
+                    SimpleNamespace(
+                        title="Episode 1",
+                        enclosures=[
+                            SimpleNamespace(
+                                href="https://cdn.example.com/episode-1.mp3"
+                            )
+                        ],
+                    ),
+                    SimpleNamespace(
+                        title="Episode 2",
+                        enclosures=[
+                            SimpleNamespace(
+                                href="https://cdn.example.com/episode-2.mp3"
+                            )
+                        ],
+                    ),
+                    SimpleNamespace(
+                        title="Episode 3",
+                        enclosures=[
+                            SimpleNamespace(
+                                href="https://cdn.example.com/episode-3.mp3"
+                            )
+                        ],
+                    ),
                 ]
             )
 
             downloaded_items = []
-            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with (
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
                 podcasts.download_podcasts(config, downloaded_items)
 
             self.assertEqual(len(FakeYoutubeDL.instances), 2)
-            self.assertEqual(len([item for item in downloaded_items if item.startswith("Podcast:")]), 2)
+            self.assertEqual(
+                len([item for item in downloaded_items if item.startswith("Podcast:")]),
+                2,
+            )
 
     def test_sample_config_single_youtube_and_podcast_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -158,19 +203,31 @@ class DownloadFlowTests(unittest.TestCase):
             )
 
             downloaded_items = []
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
 
             self.assertEqual(len(FakeYoutubeDL.instances), 2)
-            self.assertEqual(FakeYoutubeDL.instances[0].urls, [config["youtube"][0]["url"]])
+            self.assertEqual(
+                FakeYoutubeDL.instances[0].urls, [config["youtube"][0]["url"]]
+            )
             self.assertEqual(FakeYoutubeDL.instances[1].urls, [mp3_url])
             self.assertTrue(FakeYoutubeDL.instances[0].opts.get("writethumbnail"))
 
-            youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(config["youtube"][0]["name"])
-            podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(config["podcasts"][0]["name"])
+            youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(
+                config["youtube"][0]["name"]
+            )
+            podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(
+                config["podcasts"][0]["name"]
+            )
 
             youtube_mp3 = next(youtube_folder.glob("*.mp3"), None)
             podcast_mp3 = next(podcast_folder.glob("*.mp3"), None)
@@ -182,9 +239,15 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertFalse(any(youtube_folder.glob("*.visualizer.mp4")))
             self.assertFalse(any(podcast_folder.glob("*.visualizer.mp4")))
 
-            self.assertTrue(any(item.startswith("YouTube: ") for item in downloaded_items))
-            self.assertTrue(any(item.startswith("Podcast: ") for item in downloaded_items))
-            self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+            self.assertTrue(
+                any(item.startswith("YouTube: ") for item in downloaded_items)
+            )
+            self.assertTrue(
+                any(item.startswith("Podcast: ") for item in downloaded_items)
+            )
+            self.assertTrue(
+                any(item.startswith("Subtitles: Podcast") for item in downloaded_items)
+            )
 
     def test_explicit_filter_deletes_youtube_download_and_records_filtered_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -193,22 +256,42 @@ class DownloadFlowTests(unittest.TestCase):
             config["youtube"][0]["delete_explicit_content"] = True
             downloaded_items = []
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator
-            ), patch("workers.youtube.log_filtered_deletion") as deletion_log:
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_explicit_subtitle_generator,
+                ),
+                patch("workers.youtube.log_filtered_deletion") as deletion_log,
+            ):
                 youtube.download_youtube_items(config, downloaded_items)
 
-            youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(config["youtube"][0]["name"])
+            youtube_folder = Path(tmpdir) / youtube.sanitize_channel_name(
+                config["youtube"][0]["name"]
+            )
             self.assertFalse(any(youtube_folder.glob("*.mp3")))
             self.assertFalse(any(youtube_folder.glob("*.srt")))
-            self.assertTrue(any(item.startswith("Filtered YouTube:") for item in downloaded_items))
+            self.assertTrue(
+                any(item.startswith("Filtered YouTube:") for item in downloaded_items)
+            )
             with sqlite3.connect(Path(tmpdir) / "downloads.sqlite3") as conn:
-                status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
+                status = conn.execute(
+                    "SELECT download_status FROM downloads"
+                ).fetchone()[0]
             self.assertEqual(status, "filtered")
-            self.assertTrue(is_downloaded(str(Path(tmpdir) / "downloads.sqlite3"), "youtube", "TestYouTubeSource", "video-1"))
+            self.assertTrue(
+                is_downloaded(
+                    str(Path(tmpdir) / "downloads.sqlite3"),
+                    "youtube",
+                    "TestYouTubeSource",
+                    "video-1",
+                )
+            )
             deletion_log.assert_called_once()
             self.assertEqual(deletion_log.call_args.kwargs["source_type"], "youtube")
-            self.assertEqual(deletion_log.call_args.kwargs["match"].category, "profanity")
+            self.assertEqual(
+                deletion_log.call_args.kwargs["match"].category, "profanity"
+            )
 
     def test_explicit_filter_deletes_podcast_download_and_records_filtered_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -216,23 +299,42 @@ class DownloadFlowTests(unittest.TestCase):
             config["podcasts"][0]["subtitles"] = False
             config["podcasts"][0]["delete_explicit_content"] = True
             fake_feed = SimpleNamespace(
-                entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href="https://cdn.example.com/episode-1.mp3")])]
+                entries=[
+                    SimpleNamespace(
+                        title="Episode 1",
+                        enclosures=[
+                            SimpleNamespace(
+                                href="https://cdn.example.com/episode-1.mp3"
+                            )
+                        ],
+                    )
+                ]
             )
             downloaded_items = []
 
-            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_explicit_subtitle_generator), patch(
-                "workers.podcasts.log_filtered_deletion"
-            ) as deletion_log:
+            with (
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_explicit_subtitle_generator,
+                ),
+                patch("workers.podcasts.log_filtered_deletion") as deletion_log,
+            ):
                 podcasts.download_podcasts(config, downloaded_items)
 
-            podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(config["podcasts"][0]["name"])
+            podcast_folder = Path(tmpdir) / podcasts.sanitize_channel_name(
+                config["podcasts"][0]["name"]
+            )
             self.assertFalse(any(podcast_folder.glob("*.mp3")))
             self.assertFalse(any(podcast_folder.glob("*.srt")))
-            self.assertTrue(any(item.startswith("Filtered podcast:") for item in downloaded_items))
+            self.assertTrue(
+                any(item.startswith("Filtered podcast:") for item in downloaded_items)
+            )
             with sqlite3.connect(Path(tmpdir) / "downloads.sqlite3") as conn:
-                status = conn.execute("SELECT download_status FROM downloads").fetchone()[0]
+                status = conn.execute(
+                    "SELECT download_status FROM downloads"
+                ).fetchone()[0]
             self.assertEqual(status, "filtered")
             self.assertTrue(
                 is_downloaded(
@@ -244,31 +346,70 @@ class DownloadFlowTests(unittest.TestCase):
             )
             deletion_log.assert_called_once()
             self.assertEqual(deletion_log.call_args.kwargs["source_type"], "podcast")
-            self.assertEqual(deletion_log.call_args.kwargs["match"].category, "profanity")
-
+            self.assertEqual(
+                deletion_log.call_args.kwargs["match"].category, "profanity"
+            )
 
     def test_podcast_artwork_prefers_highest_resolution_image(self):
         feed = SimpleNamespace(
             feed=SimpleNamespace(
-                image={"href": "https://example.com/feed-64.jpg", "width": "64", "height": "64"},
-                itunes_image={"href": "https://example.com/feed-1400.jpg", "width": "1400", "height": "1400"},
+                image={
+                    "href": "https://example.com/feed-64.jpg",
+                    "width": "64",
+                    "height": "64",
+                },
+                itunes_image={
+                    "href": "https://example.com/feed-1400.jpg",
+                    "width": "1400",
+                    "height": "1400",
+                },
             )
         )
         entry = SimpleNamespace(
-            image={"href": "https://example.com/entry-300.jpg", "width": "300", "height": "300"},
+            image={
+                "href": "https://example.com/entry-300.jpg",
+                "width": "300",
+                "height": "300",
+            },
             media_thumbnail=[
-                {"url": "https://example.com/entry-120.jpg", "width": "120", "height": "120"},
-                {"url": "https://example.com/entry-3000.jpg", "width": "3000", "height": "3000"},
+                {
+                    "url": "https://example.com/entry-120.jpg",
+                    "width": "120",
+                    "height": "120",
+                },
+                {
+                    "url": "https://example.com/entry-3000.jpg",
+                    "width": "3000",
+                    "height": "3000",
+                },
             ],
         )
 
-        self.assertEqual(podcasts._podcast_artwork_url(feed, entry), "https://example.com/entry-3000.jpg")
+        self.assertEqual(
+            podcasts._podcast_artwork_url(feed, entry),
+            "https://example.com/entry-3000.jpg",
+        )
 
     def test_podcast_artwork_prefers_itunes_art_when_thumbnail_is_small(self):
-        feed = SimpleNamespace(feed=SimpleNamespace(itunes_image={"href": "https://example.com/show-art.jpg"}))
-        entry = SimpleNamespace(media_thumbnail=[{"url": "https://example.com/small.jpg", "width": "120", "height": "120"}])
+        feed = SimpleNamespace(
+            feed=SimpleNamespace(
+                itunes_image={"href": "https://example.com/show-art.jpg"}
+            )
+        )
+        entry = SimpleNamespace(
+            media_thumbnail=[
+                {
+                    "url": "https://example.com/small.jpg",
+                    "width": "120",
+                    "height": "120",
+                }
+            ]
+        )
 
-        self.assertEqual(podcasts._podcast_artwork_url(feed, entry), "https://example.com/show-art.jpg")
+        self.assertEqual(
+            podcasts._podcast_artwork_url(feed, entry),
+            "https://example.com/show-art.jpg",
+        )
 
     def test_youtube_metadata_records_best_thumbnail_and_downloaded_sidecar(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -285,8 +426,16 @@ class DownloadFlowTests(unittest.TestCase):
                     "title": "Episode",
                     "webpage_url": "https://youtube.com/watch?v=abc123",
                     "thumbnails": [
-                        {"url": "https://example.com/small.jpg", "width": 120, "height": 90},
-                        {"url": "https://example.com/large.jpg", "width": 1920, "height": 1080},
+                        {
+                            "url": "https://example.com/small.jpg",
+                            "width": 120,
+                            "height": 90,
+                        },
+                        {
+                            "url": "https://example.com/large.jpg",
+                            "width": 1920,
+                            "height": 1080,
+                        },
                     ],
                 },
                 output_file=str(media),
@@ -306,47 +455,74 @@ class DownloadFlowTests(unittest.TestCase):
             config = _build_sample_config(tmpdir)
             downloaded_items = []
 
-            fake_stdout = '{"downloaded_items":["YouTube: Test YouTube Source – Test Video"]}'
-            with patch("workers.youtube.subprocess.run") as run_mock, patch("workers.youtube._parent_rss_mb", side_effect=[120.0, 121.0]):
-                run_mock.return_value = SimpleNamespace(returncode=0, stdout=fake_stdout, stderr="")
+            fake_stdout = (
+                '{"downloaded_items":["YouTube: Test YouTube Source – Test Video"]}'
+            )
+            with (
+                patch("workers.youtube.subprocess.run") as run_mock,
+                patch("workers.youtube._parent_rss_mb", side_effect=[120.0, 121.0]),
+            ):
+                run_mock.return_value = SimpleNamespace(
+                    returncode=0, stdout=fake_stdout, stderr=""
+                )
                 youtube.download_youtube_items(config, downloaded_items)
 
             self.assertEqual(run_mock.call_count, 1)
-            self.assertEqual(downloaded_items, ["YouTube: Test YouTube Source – Test Video"])
-
-
+            self.assertEqual(
+                downloaded_items, ["YouTube: Test YouTube Source – Test Video"]
+            )
 
     def test_podcast_parent_process_invokes_short_lived_subprocess_and_tracks_rss(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
             downloaded_items = []
 
-            fake_stdout = '{"downloaded_items":["Podcast: Test Podcast Source – Episode 1"]}'
-            with patch("workers.podcasts.subprocess.run") as run_mock, patch("workers.podcasts._parent_rss_mb", side_effect=[220.0, 221.0]):
-                run_mock.return_value = SimpleNamespace(returncode=0, stdout=fake_stdout, stderr="")
+            fake_stdout = (
+                '{"downloaded_items":["Podcast: Test Podcast Source – Episode 1"]}'
+            )
+            with (
+                patch("workers.podcasts.subprocess.run") as run_mock,
+                patch("workers.podcasts._parent_rss_mb", side_effect=[220.0, 221.0]),
+            ):
+                run_mock.return_value = SimpleNamespace(
+                    returncode=0, stdout=fake_stdout, stderr=""
+                )
                 podcasts.download_podcasts(config, downloaded_items)
 
             self.assertEqual(run_mock.call_count, 1)
-            self.assertEqual(downloaded_items, ["Podcast: Test Podcast Source – Episode 1"])
-
+            self.assertEqual(
+                downloaded_items, ["Podcast: Test Podcast Source – Episode 1"]
+            )
 
     def test_downloads_are_tracked_in_sqlite_database(self):
         import sqlite3
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
-            config["defaults"]["database_path"] = os.path.join(tmpdir, "downloads.sqlite3")
+            config["defaults"]["database_path"] = os.path.join(
+                tmpdir, "downloads.sqlite3"
+            )
 
             mp3_url = "https://cdn.example.com/episode-1.mp3"
             podcast_title = "Episode 1: A Normal Podcast Title"
             fake_feed = SimpleNamespace(
-                entries=[SimpleNamespace(title=podcast_title, enclosures=[SimpleNamespace(href=mp3_url)])]
+                entries=[
+                    SimpleNamespace(
+                        title=podcast_title, enclosures=[SimpleNamespace(href=mp3_url)]
+                    )
+                ]
             )
 
             downloaded_items = []
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
                 youtube.download_youtube_items(config, downloaded_items)
                 podcasts.download_podcasts(config, downloaded_items)
 
@@ -364,6 +540,7 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertIn("title", rows[0][4])
             self.assertIn("title", rows[1][4])
 
+
 class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
@@ -379,16 +556,22 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                        },
-                "youtube": [{
-                    "name": "Sample",
-                    "url": "https://youtube.com/watch?v=video-1",
-                    "type": "audio",
-                        }],
+                },
+                "youtube": [
+                    {
+                        "name": "Sample",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "audio",
+                    }
+                ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -432,22 +615,28 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_quality": 0,
                     "processing_workers": 4,
                 },
-                "youtube": [{
-                    "name": "Sample",
-                    "url": "https://youtube.com/watch?v=video-1",
-                    "type": "audio",
-                    "subtitles": True,
-                }],
+                "youtube": [
+                    {
+                        "name": "Sample",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "audio",
+                        "subtitles": True,
+                    }
+                ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.youtube.ThreadPoolExecutor", RecordingExecutor
-            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch("workers.youtube.ThreadPoolExecutor", RecordingExecutor),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
                 youtube.download_youtube_items(config, [])
 
             self.assertEqual(len(RecordingExecutor.instances), 1)
             self.assertEqual(RecordingExecutor.instances[0].max_workers, 1)
-
 
     def test_youtube_download_enables_ejs_remote_component_when_quickjs_available(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -461,17 +650,30 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_quality": 0,
                     "processing_workers": 1,
                 },
-                "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
+                "youtube": [
+                    {
+                        "name": "Sample",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "audio",
+                    }
+                ],
             }
 
-            with patch("workers.youtube.shutil.which", return_value="/usr/bin/qjs"), patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
+            with (
+                patch("workers.youtube.shutil.which", return_value="/usr/bin/qjs"),
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+            ):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
             self.assertEqual(opts.get("remote_components"), ["ejs:github"])
-            self.assertEqual(opts.get("js_runtimes"), {"quickjs": {"path": "/usr/bin/qjs"}})
+            self.assertEqual(
+                opts.get("js_runtimes"), {"quickjs": {"path": "/usr/bin/qjs"}}
+            )
 
-    def test_youtube_download_uses_configured_quickjs_path_for_ejs_remote_component(self):
+    def test_youtube_download_uses_configured_quickjs_path_for_ejs_remote_component(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             quickjs_dir = Path(tmpdir) / "quickjs-bin"
             quickjs_dir.mkdir()
@@ -489,12 +691,22 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "processing_workers": 1,
                     "js_runtime_path": str(quickjs_path),
                 },
-                "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
+                "youtube": [
+                    {
+                        "name": "Sample",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "audio",
+                    }
+                ],
             }
 
             original_path = os.environ.get("PATH", "")
             try:
-                os.environ["PATH"] = os.pathsep.join(part for part in original_path.split(os.pathsep) if part != str(quickjs_dir))
+                os.environ["PATH"] = os.pathsep.join(
+                    part
+                    for part in original_path.split(os.pathsep)
+                    if part != str(quickjs_dir)
+                )
                 with patch("workers.youtube.YoutubeDL", FakeYoutubeDL):
                     youtube.download_youtube_items(config, [])
                 path_after_download = os.environ["PATH"]
@@ -503,8 +715,13 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
 
             opts = FakeYoutubeDL.instances[0].opts
             self.assertEqual(opts.get("remote_components"), ["ejs:github"])
-            self.assertEqual(opts.get("js_runtimes"), {"quickjs": {"path": str(quickjs_path.resolve())}})
-            self.assertEqual(path_after_download.split(os.pathsep)[0], str(quickjs_dir.resolve()))
+            self.assertEqual(
+                opts.get("js_runtimes"),
+                {"quickjs": {"path": str(quickjs_path.resolve())}},
+            )
+            self.assertEqual(
+                path_after_download.split(os.pathsep)[0], str(quickjs_dir.resolve())
+            )
 
     def test_youtube_summary_ignores_subtitle_sidecar_finished_events(self):
         class FakeYoutubeDLWithSubtitleEvents(FakeYoutubeDL):
@@ -551,13 +768,13 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                        },
+                },
                 "youtube": [
                     {
                         "name": "WarFronts",
                         "url": "https://youtube.com/watch?v=video-1",
                         "type": "video",
-                                    "subtitles": True,
+                        "subtitles": True,
                     }
                 ],
             }
@@ -566,10 +783,10 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             with patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithSubtitleEvents):
                 youtube.download_youtube_items(config, downloaded_items)
 
-            youtube_items = [item for item in downloaded_items if item.startswith("YouTube: ")]
+            youtube_items = [
+                item for item in downloaded_items if item.startswith("YouTube: ")
+            ]
             self.assertEqual(youtube_items, ["YouTube: WarFronts – Main Title"])
-
-
 
     def test_youtube_download_uses_full_entry_extraction(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -673,10 +890,26 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 self.urls.extend(urls)
                 flt = self.opts.get("match_filter")
                 entries = [
-                    {"id": "a1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=a1"},
-                    {"id": "a1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=a1"},
-                    {"id": "b2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=b2"},
-                    {"id": "b2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=b2"},
+                    {
+                        "id": "a1",
+                        "title": "Alpha",
+                        "webpage_url": "https://youtube.com/watch?v=a1",
+                    },
+                    {
+                        "id": "a1",
+                        "title": "Alpha",
+                        "webpage_url": "https://youtube.com/watch?v=a1",
+                    },
+                    {
+                        "id": "b2",
+                        "title": "Beta",
+                        "webpage_url": "https://youtube.com/watch?v=b2",
+                    },
+                    {
+                        "id": "b2",
+                        "title": "Beta",
+                        "webpage_url": "https://youtube.com/watch?v=b2",
+                    },
                 ]
                 for entry in entries:
                     if flt:
@@ -702,14 +935,22 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLDuplicateFilterCalls), self.assertLogs("getoffline", level="WARNING") as logs:
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDLDuplicateFilterCalls),
+                self.assertLogs("getoffline", level="WARNING") as logs,
+            ):
                 youtube.download_youtube_items(config, [])
 
             combined = "\n".join(logs.output)
-            self.assertIn("No new YouTube media downloaded for DupCounts (playlist_items_seen=2, allowed_after_filters=2, skipped_by_filters=0", combined)
+            self.assertIn(
+                "No new YouTube media downloaded for DupCounts (playlist_items_seen=2, allowed_after_filters=2, skipped_by_filters=0",
+                combined,
+            )
             self.assertIn("ytdlp_items_announced=0", combined)
-            self.assertIn("YouTube accepted playlist entries for DupCounts but did not emit item download events.", combined)
-
+            self.assertIn(
+                "YouTube accepted playlist entries for DupCounts but did not emit item download events.",
+                combined,
+            )
 
     def test_youtube_no_download_warning_includes_ytdlp_announced_item_count(self):
         class FakeYoutubeDLAnnouncedButNoProgress(FakeYoutubeDL):
@@ -717,8 +958,20 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 self.urls.extend(urls)
                 flt = self.opts.get("match_filter")
                 if flt:
-                    flt({"id": "x1", "title": "Alpha", "webpage_url": "https://youtube.com/watch?v=x1"})
-                    flt({"id": "x2", "title": "Beta", "webpage_url": "https://youtube.com/watch?v=x2"})
+                    flt(
+                        {
+                            "id": "x1",
+                            "title": "Alpha",
+                            "webpage_url": "https://youtube.com/watch?v=x1",
+                        }
+                    )
+                    flt(
+                        {
+                            "id": "x2",
+                            "title": "Beta",
+                            "webpage_url": "https://youtube.com/watch?v=x2",
+                        }
+                    )
 
                 logger = self.opts.get("logger")
                 if logger:
@@ -745,12 +998,18 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLAnnouncedButNoProgress), self.assertLogs("getoffline", level="WARNING") as logs:
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDLAnnouncedButNoProgress),
+                self.assertLogs("getoffline", level="WARNING") as logs,
+            ):
                 youtube.download_youtube_items(config, [])
 
             combined = "\n".join(logs.output)
             self.assertIn("ytdlp_items_announced=2", combined)
-            self.assertIn("yt-dlp announced 2 playlist item(s) for AnnouncedNoProgress but produced no file events", combined)
+            self.assertIn(
+                "yt-dlp announced 2 playlist item(s) for AnnouncedNoProgress but produced no file events",
+                combined,
+            )
 
     def test_youtube_logs_item_failures_when_progress_hook_reports_error(self):
         class FakeYoutubeDLErrorStatus(FakeYoutubeDL):
@@ -790,12 +1049,21 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLErrorStatus), self.assertLogs("getoffline", level="WARNING") as logs:
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDLErrorStatus),
+                self.assertLogs("getoffline", level="WARNING") as logs,
+            ):
                 youtube.download_youtube_items(config, [])
 
             combined = "\n".join(logs.output)
-            self.assertIn("YouTube item failed for ErrorChannel: HTTP Error 403: Forbidden", combined)
-            self.assertIn("YouTube download errors for ErrorChannel: HTTP Error 403: Forbidden=1", combined)
+            self.assertIn(
+                "YouTube item failed for ErrorChannel: HTTP Error 403: Forbidden",
+                combined,
+            )
+            self.assertIn(
+                "YouTube download errors for ErrorChannel: HTTP Error 403: Forbidden=1",
+                combined,
+            )
 
     def test_podcast_subtitles_default_to_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -808,22 +1076,37 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_format": "mp3",
                     "audio_quality": 0,
                     "processing_workers": 1,
-                        },
-                "podcasts": [{
-                    "name": "PodcastA",
-                    "url": "https://example.com/rss",
-                        }],
+                },
+                "podcasts": [
+                    {
+                        "name": "PodcastA",
+                        "url": "https://example.com/rss",
+                    }
+                ],
             }
             mp3_url = "https://cdn.example.com/episode-1.mp3"
-            fake_feed = SimpleNamespace(entries=[SimpleNamespace(title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)])])
+            fake_feed = SimpleNamespace(
+                entries=[
+                    SimpleNamespace(
+                        title="Episode 1", enclosures=[SimpleNamespace(href=mp3_url)]
+                    )
+                ]
+            )
 
-            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with (
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
                 downloaded_items = []
                 podcasts.download_podcasts(config, downloaded_items)
 
-            self.assertTrue(any(item.startswith("Subtitles: Podcast") for item in downloaded_items))
+            self.assertTrue(
+                any(item.startswith("Subtitles: Podcast") for item in downloaded_items)
+            )
 
     def test_youtube_database_file_path_tracks_normalized_filename(self):
         import sqlite3
@@ -879,8 +1162,12 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithOddDots), patch(
-                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithOddDots),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -889,7 +1176,11 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "SELECT file_path FROM downloads WHERE source_type='youtube' LIMIT 1"
                 ).fetchone()[0]
 
-            self.assertTrue(stored_path.endswith("20260312-They_re.FINALLY_Doing_It_-_BIG_Xbox_News.mp3"))
+            self.assertTrue(
+                stored_path.endswith(
+                    "20260312-They_re.FINALLY_Doing_It_-_BIG_Xbox_News.mp3"
+                )
+            )
             self.assertTrue(Path(stored_path).exists())
 
     def test_youtube_database_prefers_postprocessed_audio_path_and_size(self):
@@ -902,7 +1193,9 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 outtmpl = self.opts.get("outtmpl")
                 webm_path = (
                     outtmpl.replace("%(upload_date)s", "20260312")
-                    .replace("%(title)s", "They_re_FINALLY_Doing_It_-_BIG_Xbox_News....")
+                    .replace(
+                        "%(title)s", "They_re_FINALLY_Doing_It_-_BIG_Xbox_News...."
+                    )
                     .replace("%(ext)s", "webm")
                 )
                 mp3_path = webm_path.replace("....webm", ".mp3")
@@ -960,8 +1253,14 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                 ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLWithSeparatePostprocess), patch(
-                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with (
+                patch(
+                    "workers.youtube.YoutubeDL", FakeYoutubeDLWithSeparatePostprocess
+                ),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -1003,8 +1302,22 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "webpage_url": "https://youtube.com/watch?v=video-merge-1",
                 }
                 for hook in self.opts.get("progress_hooks", []):
-                    hook({"status": "finished", "info_dict": info_dict, "filename": video_part, "total_bytes": 4096})
-                    hook({"status": "finished", "info_dict": info_dict, "filename": audio_part, "total_bytes": 2048})
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": video_part,
+                            "total_bytes": 4096,
+                        }
+                    )
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": audio_part,
+                            "total_bytes": 2048,
+                        }
+                    )
 
                 with open(merged, "w", encoding="utf-8") as f:
                     f.write("merged")
@@ -1031,11 +1344,13 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "processing_workers": 1,
                     "database_path": os.path.join(tmpdir, "downloads.sqlite3"),
                 },
-                "youtube": [{
-                    "name": "MergeChannel",
-                    "url": "https://youtube.com/watch?v=video-merge-1",
-                    "type": "video",
-                }],
+                "youtube": [
+                    {
+                        "name": "MergeChannel",
+                        "url": "https://youtube.com/watch?v=video-merge-1",
+                        "type": "video",
+                    }
+                ],
                 "podcasts": [],
             }
 
@@ -1053,8 +1368,9 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertNotIn(".f398.mp4", row[0])
             self.assertNotIn(".f140.m4a", row[0])
 
-
-    def test_video_download_generates_sidecar_subtitles_without_burning_into_video(self):
+    def test_video_download_generates_sidecar_subtitles_without_burning_into_video(
+        self,
+    ):
         class FakeYoutubeDLVideoOnly(FakeYoutubeDL):
             def download(self, urls):
                 self.urls.extend(urls)
@@ -1095,16 +1411,22 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
                     "audio_quality": 0,
                     "processing_workers": 1,
                 },
-                "youtube": [{
-                    "name": "VideoSubs",
-                    "url": "https://youtube.com/watch?v=video-with-subs",
-                    "type": "video",
-                    "subtitles": True,
-                }],
+                "youtube": [
+                    {
+                        "name": "VideoSubs",
+                        "url": "https://youtube.com/watch?v=video-with-subs",
+                        "type": "video",
+                        "subtitles": True,
+                    }
+                ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLVideoOnly), patch(
-                "workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDLVideoOnly),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
             ):
                 youtube.download_youtube_items(config, [])
 
@@ -1112,7 +1434,6 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             mp4_file = next(folder.glob("*.mp4"), None)
             self.assertIsNotNone(mp4_file)
             self.assertTrue(mp4_file.with_suffix(".srt").exists())
-
 
 
 class SubtitleSidecarCleanupTests(unittest.TestCase):
@@ -1130,7 +1451,10 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
             en_srt.write_text("en srt", encoding="utf-8")
             en_vtt.write_text("vtt", encoding="utf-8")
 
-            with patch("workers.subtitles.generate_whisper_subtitles", side_effect=_fake_subtitle_generator):
+            with patch(
+                "workers.subtitles.generate_whisper_subtitles",
+                side_effect=_fake_subtitle_generator,
+            ):
                 subtitle_path = subtitles.create_subtitles(
                     media_file=media,
                     subtitle_offset_seconds=None,
@@ -1148,11 +1472,13 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
         import workers.subtitles as subtitles
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            media = Path(tmpdir) / "20260310-Pakistan_and_Afghanistan_are_Still_At_War.mp3"
+            media = (
+                Path(tmpdir) / "20260310-Pakistan_and_Afghanistan_are_Still_At_War.mp3"
+            )
             media.write_text("fake", encoding="utf-8")
 
-            srt_main = media.with_suffix('.srt')
-            srt_main.write_text('main', encoding='utf-8')
+            srt_main = media.with_suffix(".srt")
+            srt_main.write_text("main", encoding="utf-8")
             en_orig = media.with_name(f"{media.stem}.en-orig.srt")
             en_srt = media.with_name(f"{media.stem}.en.srt")
             en_orig.write_text("orig", encoding="utf-8")
@@ -1220,16 +1546,23 @@ class SubtitleFailureCachingTests(unittest.TestCase):
             marker = media.with_suffix(".srt.failed")
             self.assertTrue(marker.exists())
 
+
 class YoutubeSourceResolverTests(unittest.TestCase):
     def test_resolve_youtube_source_name_prefers_channel(self):
         class FakeYoutubeDLForMetadata(FakeYoutubeDL):
             def extract_info(self, url, download=False):
                 self.urls.append(url)
                 self.download_called = download
-                return {"channel": "Channel_Name", "uploader": "Uploader", "title": "Video Title"}
+                return {
+                    "channel": "Channel_Name",
+                    "uploader": "Uploader",
+                    "title": "Video Title",
+                }
 
         with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForMetadata):
-            source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
+            source_name = youtube.resolve_youtube_source_name(
+                "https://youtube.com/watch?v=video-1"
+            )
 
         self.assertEqual(source_name, "ChannelName")
 
@@ -1240,10 +1573,11 @@ class YoutubeSourceResolverTests(unittest.TestCase):
                 return {"title": "A_Title_Only"}
 
         with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForMetadata):
-            source_name = youtube.resolve_youtube_source_name("https://youtube.com/watch?v=video-1")
+            source_name = youtube.resolve_youtube_source_name(
+                "https://youtube.com/watch?v=video-1"
+            )
 
         self.assertEqual(source_name, "ATitleOnly")
-
 
     def test_search_youtube_videos_returns_normalized_results(self):
         class FakeYoutubeDLForSearch(FakeYoutubeDL):
@@ -1255,7 +1589,11 @@ class YoutubeSourceResolverTests(unittest.TestCase):
                         {
                             "title": "Sample video",
                             "webpage_url": "https://www.youtube.com/watch?v=abc123",
-                            "thumbnails": [{"url": "https://img.youtube.com/vi/abc123/hqdefault.jpg"}],
+                            "thumbnails": [
+                                {
+                                    "url": "https://img.youtube.com/vi/abc123/hqdefault.jpg"
+                                }
+                            ],
                             "channel": "Sample channel",
                             "duration_string": "12:34",
                         }
@@ -1282,6 +1620,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
 
         self.assertEqual(results, [])
 
+
 class PodcastRetryTests(unittest.TestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
@@ -1307,26 +1646,37 @@ class PodcastRetryTests(unittest.TestCase):
                     "audio_quality": 0,
                     "processing_workers": 1,
                 },
-                "podcasts": [{
-                    "name": "RetryCast",
-                    "url": "https://example.com/feed.rss",
-                    "subtitles": False,
-                }],
+                "podcasts": [
+                    {
+                        "name": "RetryCast",
+                        "url": "https://example.com/feed.rss",
+                        "subtitles": False,
+                    }
+                ],
             }
 
             mp3_url = "https://cdn.example.com/retry-episode.mp3"
             fake_feed = SimpleNamespace(
-                entries=[SimpleNamespace(title="Retry Episode", enclosures=[SimpleNamespace(href=mp3_url)])]
+                entries=[
+                    SimpleNamespace(
+                        title="Retry Episode",
+                        enclosures=[SimpleNamespace(href=mp3_url)],
+                    )
+                ]
             )
 
-            with patch("workers.podcasts.YoutubeDL", FlakyPodcastYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", return_value=fake_feed
-            ), patch("workers.podcasts.time.sleep", return_value=None):
+            with (
+                patch("workers.podcasts.YoutubeDL", FlakyPodcastYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch("workers.podcasts.time.sleep", return_value=None),
+            ):
                 downloaded_items = []
                 podcasts.download_podcasts(config, downloaded_items)
 
             self.assertEqual(FlakyPodcastYoutubeDL.attempts, 3)
-            self.assertTrue(any(item.startswith("Podcast: RetryCast") for item in downloaded_items))
+            self.assertTrue(
+                any(item.startswith("Podcast: RetryCast") for item in downloaded_items)
+            )
 
             opts = FlakyPodcastYoutubeDL.instances[0].opts
             self.assertTrue(opts["continuedl"])
@@ -1380,13 +1730,22 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                     "processing_workers": 1,
                     "database_path": db_path,
                 },
-                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+                "youtube": [
+                    {
+                        "name": "MyChannel",
+                        "url": "https://youtube.com/playlist?list=123",
+                        "type": "video",
+                    }
+                ],
             }
 
             with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
-            self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
+            self.assertIn(
+                "Skipping already downloaded item in DB",
+                FakeYoutubeDLForFilter.match_filter_result,
+            )
 
     def _run_youtube_match_filter(self, tmpdir, database_row, incoming_info):
         class FakeYoutubeDLForFilter(FakeYoutubeDL):
@@ -1497,13 +1856,22 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                     "processing_workers": 1,
                     "database_path": db_path,
                 },
-                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+                "youtube": [
+                    {
+                        "name": "MyChannel",
+                        "url": "https://youtube.com/playlist?list=123",
+                        "type": "video",
+                    }
+                ],
             }
 
             with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
-            self.assertIn("Skipping already downloaded item in DB", FakeYoutubeDLForFilter.match_filter_result)
+            self.assertIn(
+                "Skipping already downloaded item in DB",
+                FakeYoutubeDLForFilter.match_filter_result,
+            )
 
     def test_audio_download_applies_ffmpeg_filter_with_post_pass(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1518,12 +1886,21 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                     "processing_workers": 1,
                     "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
                 },
-                "youtube": [{"name": "Sample", "url": "https://youtube.com/watch?v=video-1", "type": "audio"}],
+                "youtube": [
+                    {
+                        "name": "Sample",
+                        "url": "https://youtube.com/watch?v=video-1",
+                        "type": "audio",
+                    }
+                ],
             }
 
-            with patch("workers.youtube.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.youtube._apply_ffmpeg_audio_filter", return_value=True
-            ) as mock_apply_filter:
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch(
+                    "workers.youtube._apply_ffmpeg_audio_filter", return_value=True
+                ) as mock_apply_filter,
+            ):
                 youtube.download_youtube_items(config, [])
 
             opts = FakeYoutubeDL.instances[0].opts
@@ -1589,7 +1966,9 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
             self.assertTrue(opts["overwrites"])
             self.assertFalse(opts["continuedl"])
 
-    def test_forced_podcast_redownload_targets_episode_and_overwrites_existing_file(self):
+    def test_forced_podcast_redownload_targets_episode_and_overwrites_existing_file(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "downloads.sqlite3")
             init_database(db_path)
@@ -1632,8 +2011,12 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 ],
             }
 
-            with patch("workers.podcasts.YoutubeDL", FakeYoutubeDL), patch(
-                "workers.podcasts.feedparser.parse", side_effect=AssertionError("feed should not be fetched")
+            with (
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch(
+                    "workers.podcasts.feedparser.parse",
+                    side_effect=AssertionError("feed should not be fetched"),
+                ),
             ):
                 podcasts.download_podcasts(config, [])
 
@@ -1683,15 +2066,27 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                     "processing_workers": 1,
                     "database_path": db_path,
                 },
-                "youtube": [{"name": "MyChannel", "url": "https://youtube.com/playlist?list=123", "type": "video"}],
+                "youtube": [
+                    {
+                        "name": "MyChannel",
+                        "url": "https://youtube.com/playlist?list=123",
+                        "type": "video",
+                    }
+                ],
             }
 
             with patch("workers.youtube.YoutubeDL", FakeYoutubeDLForFilter):
                 youtube.download_youtube_items(config, [])
 
-            self.assertEqual(FakeYoutubeDLForFilter.match_filter_result, "Skipping YouTube Shorts entry from playlist.")
+            self.assertEqual(
+                FakeYoutubeDLForFilter.match_filter_result,
+                "Skipping YouTube Shorts entry from playlist.",
+            )
             opts = FakeYoutubeDLForFilter.instances[-1].opts
-            self.assertEqual(opts.get("extractor_args", {}).get("youtube", {}).get("skip"), ["shorts"])
+            self.assertEqual(
+                opts.get("extractor_args", {}).get("youtube", {}).get("skip"),
+                ["shorts"],
+            )
 
     def test_has_episode_title_for_source_is_case_insensitive(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1711,8 +2106,16 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 },
             )
 
-            self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
-            self.assertFalse(has_episode_title_for_source(db_path, "youtube", "MyChannel", "another episode"))
+            self.assertTrue(
+                has_episode_title_for_source(
+                    db_path, "youtube", "MyChannel", "episode forty two"
+                )
+            )
+            self.assertFalse(
+                has_episode_title_for_source(
+                    db_path, "youtube", "MyChannel", "another episode"
+                )
+            )
 
     def test_has_episode_title_for_source_accepts_missing_files_when_db_has_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1731,7 +2134,11 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 },
             )
 
-            self.assertTrue(has_episode_title_for_source(db_path, "youtube", "MyChannel", "episode forty two"))
+            self.assertTrue(
+                has_episode_title_for_source(
+                    db_path, "youtube", "MyChannel", "episode forty two"
+                )
+            )
 
     def test_is_downloaded_true_for_terminal_missing_statuses(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1771,7 +2178,10 @@ class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
                 },
             )
 
-            self.assertTrue(is_downloaded(db_path, "youtube", "MyChannel", "existing-1"))
+            self.assertTrue(
+                is_downloaded(db_path, "youtube", "MyChannel", "existing-1")
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

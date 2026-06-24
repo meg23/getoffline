@@ -17,7 +17,9 @@ class TranscriptionError(RuntimeError):
     """Raised when Whisper transcription cannot be completed for a media file."""
 
 
-def _normalize_faster_whisper_result(segments_iterable, *, log_prefix: str = "transcription"):
+def _normalize_faster_whisper_result(
+    segments_iterable, *, log_prefix: str = "transcription"
+):
     segments = []
     text_parts = []
     last_end = 0.0
@@ -54,7 +56,12 @@ def _normalize_faster_whisper_result(segments_iterable, *, log_prefix: str = "tr
     return {"text": " ".join(text_parts).strip(), "segments": segments}
 
 
-def _transcribe_in_process(input_file: Path, model_name: str, language: str = None, log_prefix: str = "transcription"):
+def _transcribe_in_process(
+    input_file: Path,
+    model_name: str,
+    language: str = None,
+    log_prefix: str = "transcription",
+):
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -63,13 +70,28 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
     with _WHISPER_MODEL_LOCK:
         model = _WHISPER_MODEL_CACHE.get(model_name)
         if model is None:
-            cache_dir = Path(os.getenv("GETOFFLINE_MODEL_CACHE_DIR") or os.getenv("HF_HOME") or "/app/model-cache").expanduser()
+            cache_dir = Path(
+                os.getenv("GETOFFLINE_MODEL_CACHE_DIR")
+                or os.getenv("HF_HOME")
+                or "/app/model-cache"
+            ).expanduser()
             cache_dir.mkdir(parents=True, exist_ok=True)
             load_started_at = time.monotonic()
-            log.info("Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir)
-            model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(cache_dir))
+            log.info(
+                "Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir
+            )
+            model = WhisperModel(
+                model_name,
+                device="cpu",
+                compute_type="int8",
+                download_root=str(cache_dir),
+            )
             _WHISPER_MODEL_CACHE[model_name] = model
-            log.info("Loaded faster-whisper model=%s elapsed_seconds=%.2f", model_name, time.monotonic() - load_started_at)
+            log.info(
+                "Loaded faster-whisper model=%s elapsed_seconds=%.2f",
+                model_name,
+                time.monotonic() - load_started_at,
+            )
         else:
             log.info("Using cached faster-whisper model=%s", model_name)
 
@@ -90,7 +112,9 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
         segments, info = model.transcribe(str(input_file), **transcribe_kwargs)
     except IndexError as exc:
         if "tuple index out of range" in str(exc):
-            raise RuntimeError(f"No decodable audio stream found in media file: {input_file}") from exc
+            raise RuntimeError(
+                f"No decodable audio stream found in media file: {input_file}"
+            ) from exc
         raise
     log.info(
         "faster-whisper transcription iterator ready prefix=%s detected_language=%s language_probability=%s duration=%s duration_after_vad=%s",
@@ -104,20 +128,34 @@ def _transcribe_in_process(input_file: Path, model_name: str, language: str = No
 
 
 def transcribe_with_whisper(
-    input_file: Path, model_name: str, log_prefix: str, language: str = None, mode: str = "in_process"
+    input_file: Path,
+    model_name: str,
+    log_prefix: str,
+    language: str = None,
+    mode: str = "in_process",
 ):
     input_file = Path(input_file).resolve()
     cache_key = (str(input_file), input_file.stat().st_mtime_ns, model_name, language)
     with _TRANSCRIPTION_CACHE_LOCK:
         cached = _TRANSCRIPTION_CACHE.get(cache_key)
     if cached is not None:
-        log.info("Reusing cached transcription for %s: %s (%s)", log_prefix, input_file.name, model_name)
+        log.info(
+            "Reusing cached transcription for %s: %s (%s)",
+            log_prefix,
+            input_file.name,
+            model_name,
+        )
         return cached
 
     try:
         if mode != "in_process":
-            log.info("Ignoring deprecated transcription mode=%s; using native in-process transcription", mode)
-        result = _transcribe_in_process(input_file, model_name, language=language, log_prefix=log_prefix)
+            log.info(
+                "Ignoring deprecated transcription mode=%s; using native in-process transcription",
+                mode,
+            )
+        result = _transcribe_in_process(
+            input_file, model_name, language=language, log_prefix=log_prefix
+        )
     except Exception as exc:
         log.exception(
             "Whisper transcription failed prefix=%s input=%s model=%s language=%s mode=%s",

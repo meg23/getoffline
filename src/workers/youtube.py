@@ -9,7 +9,11 @@ from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 
-from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.content_filter import (
+    delete_media_artifacts,
+    log_filtered_deletion,
+    screen_transcript,
+)
 from workers.download_store import (
     build_item_uid,
     ensure_config_seeded,
@@ -33,7 +37,6 @@ log = get_logger("youtube")
 
 _YTDLP_REMOTE_COMPONENT = "ejs:github"
 _THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
-
 
 
 def _thumbnail_dimension(value: object, key: str) -> int:
@@ -81,7 +84,11 @@ def _find_thumbnail_sidecar(*paths: object) -> Optional[str]:
             continue
         path = Path(raw_path).expanduser()
         candidates = []
-        if path.exists() and path.is_file() and path.suffix.lower() in _THUMBNAIL_EXTENSIONS:
+        if (
+            path.exists()
+            and path.is_file()
+            and path.suffix.lower() in _THUMBNAIL_EXTENSIONS
+        ):
             candidates.append(path)
         for suffix in _THUMBNAIL_EXTENSIONS:
             candidates.append(path.with_suffix(suffix))
@@ -101,9 +108,8 @@ def _find_thumbnail_sidecar(*paths: object) -> Optional[str]:
 def _normalize_ytdlp_message(message: str) -> str:
     text = str(message or "").strip()
     if text.startswith("[youtube] "):
-        return text[len("[youtube] "):].strip()
+        return text[len("[youtube] ") :].strip()
     return text
-
 
 
 def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bool:
@@ -126,7 +132,10 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
     try:
         completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
-        log.warning("Skipping FFmpeg audio filter for %s because ffmpeg is not installed", source.name)
+        log.warning(
+            "Skipping FFmpeg audio filter for %s because ffmpeg is not installed",
+            source.name,
+        )
         output_file.unlink(missing_ok=True)
         return False
 
@@ -163,12 +172,18 @@ def _prepend_runtime_to_path(runtime_binary: str) -> None:
         os.environ["PATH"] = os.pathsep.join([runtime_dir, *path_parts])
 
 
-def _enable_youtube_quickjs_remote_component(ydl_opts: Dict, context_label: str, js_runtime_path: Optional[str] = None):
+def _enable_youtube_quickjs_remote_component(
+    ydl_opts: Dict, context_label: str, js_runtime_path: Optional[str] = None
+):
     """Configure yt-dlp's YouTube EJS remote component to use QuickJS when available."""
     quickjs_binary = _resolve_quickjs_binary(js_runtime_path)
     if not quickjs_binary:
         configured = str(js_runtime_path or "qjs").strip() or "qjs"
-        log.warning("QuickJS executable %r was not found; skipping yt-dlp EJS remote component for %s. If challenge solving fails, install the quickjs package or set the JavaScript runtime path in Settings.", configured, context_label)
+        log.warning(
+            "QuickJS executable %r was not found; skipping yt-dlp EJS remote component for %s. If challenge solving fails, install the quickjs package or set the JavaScript runtime path in Settings.",
+            configured,
+            context_label,
+        )
         return
 
     _prepend_runtime_to_path(quickjs_binary)
@@ -178,7 +193,9 @@ def _enable_youtube_quickjs_remote_component(ydl_opts: Dict, context_label: str,
     if isinstance(existing_value, list):
         components = existing_value
     elif isinstance(existing_value, str) and existing_value.strip():
-        components = [part.strip() for part in existing_value.split(",") if part.strip()]
+        components = [
+            part.strip() for part in existing_value.split(",") if part.strip()
+        ]
     else:
         components = []
 
@@ -186,8 +203,12 @@ def _enable_youtube_quickjs_remote_component(ydl_opts: Dict, context_label: str,
         components.append(_YTDLP_REMOTE_COMPONENT)
 
     ydl_opts["remote_components"] = components
-    log.info("Enabled yt-dlp remote component %s for %s (quickjs runtime: %s)", _YTDLP_REMOTE_COMPONENT, context_label, quickjs_binary)
-
+    log.info(
+        "Enabled yt-dlp remote component %s for %s (quickjs runtime: %s)",
+        _YTDLP_REMOTE_COMPONENT,
+        context_label,
+        quickjs_binary,
+    )
 
 
 def _apply_ytdlp_player_js_variant_workaround(ydl_opts: Dict):
@@ -203,6 +224,7 @@ def _apply_ytdlp_player_js_variant_workaround(ydl_opts: Dict):
     youtube_args["player_js_variant"] = ["main"]
     extractor_args["youtube"] = youtube_args
     ydl_opts["extractor_args"] = extractor_args
+
 
 def _clean_log_title(value: str) -> str:
     text = str(value or "").strip()
@@ -229,8 +251,6 @@ def _human_size(num_bytes: Optional[float]) -> str:
     return f"{num_bytes:.0f} B"
 
 
-
-
 def _extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
     candidate = str(url or "").strip()
     if not candidate:
@@ -255,6 +275,7 @@ def _extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
                 return parts[1].strip() or None
 
     return None
+
 
 def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> str:
     source_url = str(url or "").strip()
@@ -315,7 +336,12 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
 
     try:
         with _get_youtubedl()(ydl_opts) as ydl:
-            payload = ydl.extract_info(f"ytsearch{bounded_limit}:{search_query}", download=False) or {}
+            payload = (
+                ydl.extract_info(
+                    f"ytsearch{bounded_limit}:{search_query}", download=False
+                )
+                or {}
+            )
     except Exception as exc:
         log.warning("YouTube search failed for query=%r: %s", search_query, exc)
         return []
@@ -339,7 +365,9 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
                 "title": str(item.get("title") or "Untitled").strip(),
                 "url": video_url,
                 "thumbnail": thumbnail_url,
-                "channel": str(item.get("channel") or item.get("uploader") or "").strip(),
+                "channel": str(
+                    item.get("channel") or item.get("uploader") or ""
+                ).strip(),
                 "duration": str(item.get("duration_string") or "").strip(),
             }
         )
@@ -418,7 +446,7 @@ def _process_media_file(
     return downloaded_summary_items
 
 
-def _resolve_subtitle_worker_count(configured_workers: int) -> int:
+def _resolve_subtitle_worker_count(_configured_workers: int) -> int:
     """Serialize Whisper subtitle work to avoid unstable multi-worker crashes."""
     return 1
 
@@ -445,7 +473,9 @@ def _resolve_scan_limit(entry: Dict, defaults: Dict, source_max_downloads: int) 
         or defaults.get("playlist_scan_limit")
     )
     if configured:
-        return max(source_max_downloads, _coerce_positive_int(configured, source_max_downloads))
+        return max(
+            source_max_downloads, _coerce_positive_int(configured, source_max_downloads)
+        )
     return max(source_max_downloads, source_max_downloads * 10, 50)
 
 
@@ -481,7 +511,9 @@ def _build_youtube_payload(
     media_url = str(info.get("requested_url") or "").strip() or None
     item_id = str(info.get("id") or "").strip() or None
     if not item_id:
-        item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
+        item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(
+            media_url
+        )
     title = str(info.get("title") or "").strip() or None
 
     thumbnail_url = _best_thumbnail_url(info)
@@ -518,7 +550,9 @@ def _build_youtube_payload(
         "source_type": "youtube",
         "source_name": source_name,
         "source_url": source_url,
-        "item_uid": build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title),
+        "item_uid": build_item_uid(
+            item_id=item_id, item_url=item_url, media_url=media_url, title=title
+        ),
         "item_id": item_id,
         "item_url": item_url,
         "media_url": media_url,
@@ -564,14 +598,24 @@ def _download_youtube_items_in_process(config, downloaded_items):
     def skip_live_streams(info_dict, *, incomplete=False):
         _ = incomplete
         live_status = (info_dict.get("live_status") or "").lower()
-        if info_dict.get("is_live") or live_status in {"is_live", "is_upcoming", "was_live", "post_live"}:
+        if info_dict.get("is_live") or live_status in {
+            "is_live",
+            "is_upcoming",
+            "was_live",
+            "post_live",
+        }:
             title = _clean_log_title(info_dict.get("title"))
             return f"Skipping live stream: {title}"
         return None
 
     def skip_shorts(info_dict, *, incomplete=False):
         _ = incomplete
-        url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or info_dict.get("url") or "")
+        url = str(
+            info_dict.get("webpage_url")
+            or info_dict.get("original_url")
+            or info_dict.get("url")
+            or ""
+        )
         if "/shorts/" in url:
             return "Skipping YouTube Shorts entry from playlist."
         return None
@@ -590,13 +634,22 @@ def _download_youtube_items_in_process(config, downloaded_items):
             delete_explicit_content = bool(entry.get("delete_explicit_content", False))
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
             source_max_downloads = _coerce_positive_int(
-                entry.get("max_downloads") or defaults.get("max_downloads") or defaults.get("playlist_end") or 3,
+                entry.get("max_downloads")
+                or defaults.get("max_downloads")
+                or defaults.get("playlist_end")
+                or 3,
                 3,
             )
-            playlist_scan_limit = _resolve_scan_limit(entry, defaults, source_max_downloads)
+            playlist_scan_limit = _resolve_scan_limit(
+                entry, defaults, source_max_downloads
+            )
             should_generate_subtitles = entry_subtitles_enabled
-            subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "in_process"))
-            if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
+            subtitle_transcription_mode = str(
+                defaults.get("subtitle_transcription_mode", "in_process")
+            )
+            if str(
+                os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")
+            ).strip().lower() not in {"1", "true", "yes", "on"}:
                 should_generate_subtitles = False
             should_transcribe = should_generate_subtitles or delete_explicit_content
             is_forced_redownload = bool(entry.get("redownload", False))
@@ -620,7 +673,16 @@ def _download_youtube_items_in_process(config, downloaded_items):
             subtitle_futures_by_media: Dict[Path, object] = {}
 
             subtitle_or_aux_exts = {
-                ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".ttml", ".srv1", ".srv2", ".srv3", ".json3",
+                ".srt",
+                ".vtt",
+                ".ass",
+                ".ssa",
+                ".lrc",
+                ".ttml",
+                ".srv1",
+                ".srv2",
+                ".srv3",
+                ".json3",
                 *_THUMBNAIL_EXTENSIONS,
             }
 
@@ -630,7 +692,10 @@ def _download_youtube_items_in_process(config, downloaded_items):
 
             def _resolve_postprocessed_audio_path(candidate_path: Path) -> Path:
                 expected_ext = f".{defaults['audio_format']}"
-                if candidate_path.suffix.lower() == expected_ext and candidate_path.exists():
+                if (
+                    candidate_path.suffix.lower() == expected_ext
+                    and candidate_path.exists()
+                ):
                     return candidate_path
 
                 converted = candidate_path.with_suffix(expected_ext)
@@ -638,7 +703,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     return converted
 
                 target_stem = _normalized_stem(candidate_path.stem)
-                siblings = sorted(candidate_path.parent.glob(f"*{expected_ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
+                siblings = sorted(
+                    candidate_path.parent.glob(f"*{expected_ext}"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
                 for sibling in siblings:
                     if _normalized_stem(sibling.stem) == target_stem:
                         return sibling
@@ -656,9 +725,13 @@ def _download_youtube_items_in_process(config, downloaded_items):
             def _entry_key(info_dict: dict) -> str:
                 return get_download_key(
                     info_dict,
-                    str(info_dict.get("url") or info_dict.get("title") or "unknown-entry").strip() or "unknown-entry",
+                    str(
+                        info_dict.get("url")
+                        or info_dict.get("title")
+                        or "unknown-entry"
+                    ).strip()
+                    or "unknown-entry",
                 )
-
 
             def _is_subtitle_or_aux_download(output_file: str) -> bool:
                 path = Path(str(output_file or ""))
@@ -678,12 +751,18 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 return file_stem or "unknown title"
 
             def _record_download_failure(reason: str):
-                reason_key = str(reason or "unknown failure").strip() or "unknown failure"
-                failed_download_reasons[reason_key] = failed_download_reasons.get(reason_key, 0) + 1
+                reason_key = (
+                    str(reason or "unknown failure").strip() or "unknown failure"
+                )
+                failed_download_reasons[reason_key] = (
+                    failed_download_reasons.get(reason_key, 0) + 1
+                )
 
             def _record_skip(reason: str, info_dict: dict):
                 reason_key = str(reason or "unknown").strip() or "unknown"
-                skip_reason_counts[reason_key] = skip_reason_counts.get(reason_key, 0) + 1
+                skip_reason_counts[reason_key] = (
+                    skip_reason_counts.get(reason_key, 0) + 1
+                )
 
                 if reason_key not in skip_reason_examples:
                     title = _clean_log_title(info_dict.get("title"))
@@ -698,13 +777,29 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     reason = "Skipping because source max new downloads reached"
                     _record_skip(reason, info_dict)
                     return reason
-                live_reason = None if allow_live_streams else skip_live_streams(info_dict, incomplete=incomplete)
+                live_reason = (
+                    None
+                    if allow_live_streams
+                    else skip_live_streams(info_dict, incomplete=incomplete)
+                )
                 if live_reason:
                     _record_skip(live_reason, info_dict)
                     return live_reason
 
-                webpage_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip().lower()
-                if info_dict.get("_type") == "url" and info_dict.get("ie_key") == "Youtube" and not webpage_url:
+                webpage_url = (
+                    str(
+                        info_dict.get("webpage_url")
+                        or info_dict.get("original_url")
+                        or ""
+                    )
+                    .strip()
+                    .lower()
+                )
+                if (
+                    info_dict.get("_type") == "url"
+                    and info_dict.get("ie_key") == "Youtube"
+                    and not webpage_url
+                ):
                     webpage_url = str(info_dict.get("url") or "").strip().lower()
 
                 candidate_urls = [
@@ -712,41 +807,71 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     str(info_dict.get("original_url") or "").strip().lower(),
                     str(info_dict.get("url") or "").strip().lower(),
                 ]
-                if any("/shorts/" in candidate for candidate in candidate_urls if candidate):
+                if any(
+                    "/shorts/" in candidate for candidate in candidate_urls if candidate
+                ):
                     reason = "Skipping YouTube Shorts entry from playlist."
                     _record_skip(reason, info_dict)
                     return reason
 
-                item_url = str(info_dict.get("webpage_url") or info_dict.get("original_url") or "").strip() or None
+                item_url = (
+                    str(
+                        info_dict.get("webpage_url")
+                        or info_dict.get("original_url")
+                        or ""
+                    ).strip()
+                    or None
+                )
                 media_url = str(info_dict.get("url") or "").strip() or None
                 item_id = str(info_dict.get("id") or "").strip() or None
                 if not item_id:
-                    item_id = _extract_youtube_video_id(item_url) or _extract_youtube_video_id(media_url)
+                    item_id = _extract_youtube_video_id(
+                        item_url
+                    ) or _extract_youtube_video_id(media_url)
                 title = str(info_dict.get("title") or "").strip() or None
-                item_uid = build_item_uid(item_id=item_id, item_url=item_url, media_url=media_url, title=title)
-                legacy_item_uid = build_item_uid(item_id=None, item_url=item_url, media_url=media_url, title=title)
+                item_uid = build_item_uid(
+                    item_id=item_id, item_url=item_url, media_url=media_url, title=title
+                )
+                legacy_item_uid = build_item_uid(
+                    item_id=None, item_url=item_url, media_url=media_url, title=title
+                )
                 if not is_forced_redownload and (
                     is_downloaded(db_path, "youtube", name, item_uid)
-                    or (legacy_item_uid != item_uid and is_downloaded(db_path, "youtube", name, legacy_item_uid))
+                    or (
+                        legacy_item_uid != item_uid
+                        and is_downloaded(db_path, "youtube", name, legacy_item_uid)
+                    )
                 ):
                     reason = "Skipping already downloaded item in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
-                if not is_forced_redownload and title and has_episode_title_for_source(db_path, "youtube", name, title):
+                if (
+                    not is_forced_redownload
+                    and title
+                    and has_episode_title_for_source(db_path, "youtube", name, title)
+                ):
                     reason = "Skipping duplicate title in DB"
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
                 candidate_entries_allowed_keys.add(entry_key)
                 title = _clean_log_title(info_dict.get("title"))
-                if title != "unknown title" and title not in candidate_entries_allowed_examples and len(candidate_entries_allowed_examples) < 3:
+                if (
+                    title != "unknown title"
+                    and title not in candidate_entries_allowed_examples
+                    and len(candidate_entries_allowed_examples) < 3
+                ):
                     candidate_entries_allowed_examples.append(title)
                 return None
 
             def record_download_progress(d):
                 status = str(d.get("status") or "unknown")
-                progress_status_counts[status] = progress_status_counts.get(status, 0) + 1
+                progress_status_counts[status] = (
+                    progress_status_counts.get(status, 0) + 1
+                )
                 info = d.get("info_dict") or {}
-                output_file = d.get("filename") or info.get("_filename") or "unknown file"
+                output_file = (
+                    d.get("filename") or info.get("_filename") or "unknown file"
+                )
                 download_key = get_download_key(info, output_file)
                 title = _get_best_title(info, output_file, download_key)
 
@@ -768,10 +893,16 @@ def _download_youtube_items_in_process(config, downloaded_items):
                             )
                     elif download_key not in download_progress_markers:
                         download_progress_markers[download_key] = 0
-                        log.info("Download progress for %s: %s (size unknown)", name, output_file)
+                        log.info(
+                            "Download progress for %s: %s (size unknown)",
+                            name,
+                            output_file,
+                        )
 
                 if status == "error":
-                    reason = str(d.get("error") or "yt-dlp reported an item download error")
+                    reason = str(
+                        d.get("error") or "yt-dlp reported an item download error"
+                    )
                     _record_download_failure(reason)
                     log.warning("YouTube item failed for %s: %s", name, reason)
 
@@ -807,23 +938,35 @@ def _download_youtube_items_in_process(config, downloaded_items):
                         completed_download_ids.add(download_key)
                         downloaded_items.append(f"YouTube: {name} – {title}")
 
-                    if subtitle_executor is not None and download_type == "video" and should_transcribe and output_file:
+                    if (
+                        subtitle_executor is not None
+                        and download_type == "video"
+                        and should_transcribe
+                        and output_file
+                    ):
                         candidate_file = Path(output_file).expanduser().resolve()
-                        if candidate_file.exists() and candidate_file not in subtitle_futures_by_media:
-                            subtitle_futures_by_media[candidate_file] = subtitle_executor.submit(
-                                _process_media_file,
-                                candidate_file,
-                                name,
-                                should_transcribe,
-                                subtitle_offset_seconds,
-                                subtitle_transcription_mode,
+                        if (
+                            candidate_file.exists()
+                            and candidate_file not in subtitle_futures_by_media
+                        ):
+                            subtitle_futures_by_media[candidate_file] = (
+                                subtitle_executor.submit(
+                                    _process_media_file,
+                                    candidate_file,
+                                    name,
+                                    should_transcribe,
+                                    subtitle_offset_seconds,
+                                    subtitle_transcription_mode,
+                                )
                             )
 
             def record_postprocess_file(d):
                 info = d.get("info_dict") or {}
                 postprocessor = d.get("postprocessor") or "unknown"
                 pp_status = d.get("status")
-                candidate = d.get("filepath") or info.get("filepath") or info.get("_filename")
+                candidate = (
+                    d.get("filepath") or info.get("filepath") or info.get("_filename")
+                )
                 if not candidate:
                     return
 
@@ -833,41 +976,74 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 expected_ext = f".{defaults['audio_format']}"
 
                 if download_type == "audio":
-                    if path.suffix.lower() != expected_ext and postprocessor == "FFmpegExtractAudio":
+                    if (
+                        path.suffix.lower() != expected_ext
+                        and postprocessor == "FFmpegExtractAudio"
+                    ):
                         path = _resolve_postprocessed_audio_path(path)
-                    elif path.suffix.lower() != expected_ext and path.with_suffix(expected_ext).exists():
+                    elif (
+                        path.suffix.lower() != expected_ext
+                        and path.with_suffix(expected_ext).exists()
+                    ):
                         path = path.with_suffix(expected_ext)
 
                     resolved_path = path.resolve()
                     extracted_audio_files.append(resolved_path)
                     postprocessed_file_by_key[download_key] = resolved_path
 
-                    if subtitle_executor is not None and should_transcribe and resolved_path not in subtitle_futures_by_media:
-                        subtitle_futures_by_media[resolved_path] = subtitle_executor.submit(
-                            _process_media_file,
-                            resolved_path,
-                            name,
-                            should_transcribe,
-                            subtitle_offset_seconds,
-                            subtitle_transcription_mode,
+                    if (
+                        subtitle_executor is not None
+                        and should_transcribe
+                        and resolved_path not in subtitle_futures_by_media
+                    ):
+                        subtitle_futures_by_media[resolved_path] = (
+                            subtitle_executor.submit(
+                                _process_media_file,
+                                resolved_path,
+                                name,
+                                should_transcribe,
+                                subtitle_offset_seconds,
+                                subtitle_transcription_mode,
+                            )
                         )
                 else:
                     resolved_path = path.resolve()
                     postprocessed_file_by_key[download_key] = resolved_path
 
                 if pp_status:
-                    log.info("Post-process %s for %s via %s: %s", pp_status, name, postprocessor, path.name)
+                    log.info(
+                        "Post-process %s for %s via %s: %s",
+                        pp_status,
+                        name,
+                        postprocessor,
+                        path.name,
+                    )
                 else:
-                    log.info("Post-processed for %s via %s: %s", name, postprocessor, path.name)
+                    log.info(
+                        "Post-processed for %s via %s: %s",
+                        name,
+                        postprocessor,
+                        path.name,
+                    )
 
             include_shorts = bool(entry.get("include_shorts", False))
-            include_livestreams = bool(entry.get("include_livestreams", entry.get("allow_live_streams", False)))
+            include_livestreams = bool(
+                entry.get("include_livestreams", entry.get("allow_live_streams", False))
+            )
 
             def skip_unwanted_entries(info_dict, *, incomplete=False):
-                live_result = None if include_livestreams else skip_live_streams(info_dict, incomplete=incomplete)
+                live_result = (
+                    None
+                    if include_livestreams
+                    else skip_live_streams(info_dict, incomplete=incomplete)
+                )
                 if live_result:
                     return live_result
-                shorts_result = None if include_shorts else skip_shorts(info_dict, incomplete=incomplete)
+                shorts_result = (
+                    None
+                    if include_shorts
+                    else skip_shorts(info_dict, incomplete=incomplete)
+                )
                 if shorts_result:
                     return shorts_result
                 return skip_known_downloads(info_dict, incomplete=incomplete)
@@ -880,9 +1056,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 "outtmpl_na_placeholder": "NA",
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
                 "writethumbnail": True,
-                "extractor_args": {
-                    "youtube": youtube_extractor_args
-                },
+                "extractor_args": {"youtube": youtube_extractor_args},
                 "progress_hooks": [record_download_progress],
                 "postprocessor_hooks": [record_postprocess_file],
                 "match_filter": skip_unwanted_entries,
@@ -896,13 +1070,19 @@ def _download_youtube_items_in_process(config, downloaded_items):
             }
             if cookie_path:
                 ydl_opts["cookiefile"] = cookie_path
-            _enable_youtube_quickjs_remote_component(ydl_opts, f"download source {name}", defaults.get("js_runtime_path", "qjs"))
+            _enable_youtube_quickjs_remote_component(
+                ydl_opts,
+                f"download source {name}",
+                defaults.get("js_runtime_path", "qjs"),
+            )
             _apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
             ffmpeg_audio_filter = str(defaults.get("ffmpeg_audio_filter") or "").strip()
 
             if download_type == "video":
-                ydl_opts["format"] = "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]"
+                ydl_opts["format"] = (
+                    "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]"
+                )
                 if ffmpeg_audio_filter:
                     ydl_opts["postprocessors"] = [
                         {
@@ -944,9 +1124,14 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 source_max_downloads,
                 playlist_scan_limit,
             )
-            log.info("YouTube download mode for %s: full entry extraction enabled", name)
+            log.info(
+                "YouTube download mode for %s: full entry extraction enabled", name
+            )
             if is_forced_redownload:
-                log.info("YouTube download mode for %s: forced redownload (duplicate skip disabled)", name)
+                log.info(
+                    "YouTube download mode for %s: forced redownload (duplicate skip disabled)",
+                    name,
+                )
             if allow_live_streams:
                 log.info("YouTube download mode for %s: live streams allowed", name)
             before_audio = {p.resolve() for p in Path(folder).glob("*.mp3")}
@@ -954,7 +1139,9 @@ def _download_youtube_items_in_process(config, downloaded_items):
 
             configured_subtitle_workers = int(defaults.get("processing_workers", 2))
             configured_subtitle_workers = max(1, configured_subtitle_workers)
-            subtitle_worker_count = _resolve_subtitle_worker_count(configured_subtitle_workers)
+            subtitle_worker_count = _resolve_subtitle_worker_count(
+                configured_subtitle_workers
+            )
             if subtitle_worker_count < configured_subtitle_workers:
                 log.warning(
                     "Configured %d processing worker(s), but YouTube subtitle generation is limited to %d worker for stability.",
@@ -984,7 +1171,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     normalized_audio = normalize_media_filename(audio_path)
                     normalized_path_map[original_audio] = normalized_audio.resolve()
                     if normalized_audio != audio_path:
-                        log.info("Normalized YouTube filename: %s -> %s", audio_path.name, normalized_audio.name)
+                        log.info(
+                            "Normalized YouTube filename: %s -> %s",
+                            audio_path.name,
+                            normalized_audio.name,
+                        )
                     normalized_audio_files.append(normalized_audio)
                 new_audio_files = sorted(set(normalized_audio_files))
 
@@ -1007,7 +1198,9 @@ def _download_youtube_items_in_process(config, downloaded_items):
 
             if skip_reason_counts:
                 skip_parts = []
-                for reason, count in sorted(skip_reason_counts.items(), key=lambda item: item[0].lower()):
+                for reason, count in sorted(
+                    skip_reason_counts.items(), key=lambda item: item[0].lower()
+                ):
                     example = skip_reason_examples.get(reason)
                     if example:
                         skip_parts.append(f"{reason}={count} (e.g., {example})")
@@ -1016,8 +1209,16 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 log.info("YouTube skips for %s: %s", name, "; ".join(skip_parts))
 
             if failed_download_reasons:
-                failure_parts = [f"{reason}={count}" for reason, count in sorted(failed_download_reasons.items(), key=lambda item: item[0].lower())]
-                log.warning("YouTube download errors for %s: %s", name, "; ".join(failure_parts))
+                failure_parts = [
+                    f"{reason}={count}"
+                    for reason, count in sorted(
+                        failed_download_reasons.items(),
+                        key=lambda item: item[0].lower(),
+                    )
+                ]
+                log.warning(
+                    "YouTube download errors for %s: %s", name, "; ".join(failure_parts)
+                )
 
             if not completed_download_ids:
                 seen_count = len(candidate_entries_seen_keys)
@@ -1039,15 +1240,29 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     announced_count,
                 )
 
-                if allowed_count > 0 and hook_finished_count == 0 and hook_error_count == 0:
-                    example_text = ", ".join(candidate_entries_allowed_examples) if candidate_entries_allowed_examples else "no example titles"
+                if (
+                    allowed_count > 0
+                    and hook_finished_count == 0
+                    and hook_error_count == 0
+                ):
+                    example_text = (
+                        ", ".join(candidate_entries_allowed_examples)
+                        if candidate_entries_allowed_examples
+                        else "no example titles"
+                    )
                     log.warning(
                         "YouTube accepted playlist entries for %s but did not emit item download events. Sample allowed entries: %s",
                         name,
                         example_text,
                     )
-                if announced_count > 0 and hook_finished_count == 0 and hook_error_count == 0:
-                    unavailable_count = ytdlp_message_stats.get("messages_unavailable", 0)
+                if (
+                    announced_count > 0
+                    and hook_finished_count == 0
+                    and hook_error_count == 0
+                ):
+                    unavailable_count = ytdlp_message_stats.get(
+                        "messages_unavailable", 0
+                    )
                     private_count = ytdlp_message_stats.get("messages_private", 0)
                     auth_count = ytdlp_message_stats.get("messages_auth", 0)
                     if unavailable_count or private_count or auth_count:
@@ -1066,9 +1281,13 @@ def _download_youtube_items_in_process(config, downloaded_items):
                             name,
                         )
 
-            media_files_for_subtitles = new_audio_files if download_type == "audio" else delta_video
+            media_files_for_subtitles = (
+                new_audio_files if download_type == "audio" else delta_video
+            )
             worker_count = subtitle_worker_count
-            worker_count = max(1, min(worker_count, len(media_files_for_subtitles) or 1))
+            worker_count = max(
+                1, min(worker_count, len(media_files_for_subtitles) or 1)
+            )
             log.info(
                 "Running YouTube subtitle processing with %d worker(s) for %s (type=%s)",
                 worker_count,
@@ -1093,7 +1312,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 try:
                     downloaded_items.extend(future.result())
                 except Exception as processing_exc:
-                    log.warning("YouTube post-processing failed for %s: %s", name, processing_exc)
+                    log.warning(
+                        "YouTube post-processing failed for %s: %s",
+                        name,
+                        processing_exc,
+                    )
 
             subtitle_executor.shutdown(wait=True)
 
@@ -1118,7 +1341,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
 
                 resolved_media_path = Path(resolved_file).expanduser().resolve()
                 subtitle_path = resolved_media_path.with_suffix(".srt")
-                explicit_match = screen_transcript(subtitle_path) if delete_explicit_content else None
+                explicit_match = (
+                    screen_transcript(subtitle_path)
+                    if delete_explicit_content
+                    else None
+                )
                 if explicit_match is not None:
                     deleted_paths = delete_media_artifacts(resolved_media_path)
                     log_filtered_deletion(
@@ -1142,7 +1369,9 @@ def _download_youtube_items_in_process(config, downloaded_items):
                             error_message=f"Deleted by transcript filter: {explicit_match.category}",
                         ),
                     )
-                    downloaded_items.append(f"Filtered YouTube: {name} – {info.get('title') or resolved_media_path.stem}")
+                    downloaded_items.append(
+                        f"Filtered YouTube: {name} – {info.get('title') or resolved_media_path.stem}"
+                    )
                     log.warning(
                         "Deleted YouTube download after transcript screening: %s – %s (%s)",
                         name,
@@ -1156,7 +1385,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 if subtitle_path.exists() and not should_generate_subtitles:
                     subtitle_path.unlink(missing_ok=True)
                 if should_generate_subtitles and not subtitle_path.exists():
-                    log.warning("Expected subtitle sidecar missing before DB upsert source=%s file=%s", name, resolved_file)
+                    log.warning(
+                        "Expected subtitle sidecar missing before DB upsert source=%s file=%s",
+                        name,
+                        resolved_file,
+                    )
 
                 upsert_download(
                     db_path,
@@ -1173,7 +1406,12 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 record.clear()
                 del info
             finished_download_info.clear()
-            generate_missing_summaries(db_path, limit=10, model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"), timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90))
+            generate_missing_summaries(
+                db_path,
+                limit=10,
+                model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
+                timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90),
+            )
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 
@@ -1191,7 +1429,6 @@ def download_youtube_items(config, downloaded_items):
     _download_youtube_items_in_process(config, downloaded_items)
 
 
-
 YoutubeDL = None
 
 
@@ -1199,5 +1436,6 @@ def _get_youtubedl():
     global YoutubeDL
     if YoutubeDL is None:
         from yt_dlp import YoutubeDL as _YoutubeDL
+
         YoutubeDL = _YoutubeDL
     return YoutubeDL

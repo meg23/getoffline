@@ -83,11 +83,21 @@ def enforce_content_retention(
 
         ignored_manual = sum(1 for row in rows if str(row[1]).lower() == "manual")
         ignored_favorites = 0
-        for row_id, source_type, file_path, relative_path, completed_at, first_seen_at, favorite in rows:
+        for (
+            row_id,
+            source_type,
+            file_path,
+            relative_path,
+            completed_at,
+            first_seen_at,
+            favorite,
+        ) in rows:
             if str(source_type).lower() == "manual":
                 continue
 
-            resolved = resolve_download_artifact_path(output_root, file_path, relative_path)
+            resolved = resolve_download_artifact_path(
+                output_root, file_path, relative_path
+            )
             media_path = Path(resolved) if resolved else None
             if media_path is None or not media_path.is_file():
                 status_updates.append(
@@ -99,7 +109,9 @@ def enforce_content_retention(
                 ignored_favorites += 1
                 continue
 
-            content_date = _parse_database_timestamp(completed_at) or _parse_database_timestamp(first_seen_at)
+            content_date = _parse_database_timestamp(
+                completed_at
+            ) or _parse_database_timestamp(first_seen_at)
             if content_date is None or content_date > cutoff:
                 continue
 
@@ -108,7 +120,9 @@ def enforce_content_retention(
             except FileNotFoundError:
                 pass
             except OSError as exc:
-                log.warning("Unable to delete expired media file %s: %s", media_path, exc)
+                log.warning(
+                    "Unable to delete expired media file %s: %s", media_path, exc
+                )
                 continue
             else:
                 deleted_files += 1

@@ -23,7 +23,9 @@ class ContentFilterTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.category, "profanity")
         self.assertEqual(match.sentence, "That was fucking ridiculous.")
-        self.assertIsNone(find_explicit_content("The shiitake mushrooms were delicious."))
+        self.assertIsNone(
+            find_explicit_content("The shiitake mushrooms were delicious.")
+        )
 
     def test_returns_only_the_sentence_containing_the_match(self):
         match = find_explicit_content(
@@ -65,7 +67,10 @@ class ContentFilterTests(unittest.TestCase):
             self.assertFalse(subtitle.exists())
             self.assertFalse(thumbnail.exists())
             self.assertTrue(other.exists())
-            self.assertEqual(set(deleted_paths), {media.resolve(), subtitle.resolve(), thumbnail.resolve()})
+            self.assertEqual(
+                set(deleted_paths),
+                {media.resolve(), subtitle.resolve(), thumbnail.resolve()},
+            )
 
     def test_filtered_deletion_writes_stable_audit_event(self):
         media_path = Path("/tmp/episode.mp3")
