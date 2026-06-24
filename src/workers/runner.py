@@ -7,6 +7,7 @@ from typing import Dict
 
 import django
 import pika
+from pika import exceptions as pika_exceptions
 from django.conf import settings
 from django.db import close_old_connections
 from django.db.models import Q
@@ -56,6 +57,29 @@ JOB_TYPES_BY_WORKER = {
 }
 
 SERIAL_WORKERS = {"updates", "downloader-youtube"}
+
+
+def worker_rabbitmq_parameters():
+    """Return RabbitMQ connection parameters safe for long-running jobs.
+
+    BlockingConnection only services RabbitMQ heartbeats while control returns to
+    pika. Transcript generation can legitimately run longer than RabbitMQ's
+    default heartbeat interval, so worker consumer connections disable heartbeat
+    checks unless the URL explicitly opts into a heartbeat query parameter.
+    """
+    params = pika.URLParameters(settings.RABBITMQ_URL)
+    if "heartbeat=" not in settings.RABBITMQ_URL.lower():
+        params.heartbeat = 0
+    return params
+
+
+def close_connection_if_open(connection) -> None:
+    if getattr(connection, "is_closed", False):
+        return
+    try:
+        connection.close()
+    except pika_exceptions.ConnectionWrongStateError:
+        log.warning("RabbitMQ connection already closed before worker shutdown")
 
 
 def _handle_signal(signum, _frame) -> None:
@@ -298,7 +322,7 @@ def run_worker(
         worker_type in SERIAL_WORKERS,
         safe_max_messages,
     )
-    connection = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
+    connection = pika.BlockingConnection(worker_rabbitmq_parameters())
     log.info("RabbitMQ connected worker_type=%s queue=%s", worker_type, queue)
     try:
         channel = connection.channel()
@@ -377,7 +401,7 @@ def run_worker(
             "Worker consumer cancelled worker_type=%s queue=%s", worker_type, queue
         )
     finally:
-        connection.close()
+        close_connection_if_open(connection)
         log.info(
             "RabbitMQ connection closed worker_type=%s queue=%s", worker_type, queue
         )

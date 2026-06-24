@@ -1024,5 +1024,39 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(queue_name("generate_summary"), "getoffline.jobs.summaries")
 
 
+@unittest.skipIf(django is None, "Django is not installed")
+class WorkerRabbitMQConnectionTests(unittest.TestCase):
+    def test_worker_rabbitmq_parameters_disables_default_heartbeat(self):
+        from workers import runner
+
+        with patch.object(
+            runner.settings,
+            "RABBITMQ_URL",
+            "amqp://guest:guest@rabbitmq:5672/%2F",
+        ):
+            params = runner.worker_rabbitmq_parameters()
+
+        self.assertEqual(params.heartbeat, 0)
+
+    def test_worker_rabbitmq_parameters_respects_url_heartbeat(self):
+        from workers import runner
+
+        with patch.object(
+            runner.settings,
+            "RABBITMQ_URL",
+            "amqp://guest:guest@rabbitmq:5672/%2F?heartbeat=300",
+        ):
+            params = runner.worker_rabbitmq_parameters()
+
+        self.assertEqual(params.heartbeat, 300)
+
+    def test_close_connection_if_open_skips_already_closed_connection(self):
+        from workers import runner
+
+        connection = SimpleNamespace(is_closed=True, close=lambda: self.fail("closed"))
+
+        runner.close_connection_if_open(connection)
+
+
 if __name__ == "__main__":
     unittest.main()
