@@ -49,10 +49,14 @@ def clear_all_summaries(db_path: str) -> int:
     return int(deleted or 0)
 
 
-def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = "qwen2.5:0.5b", timeout_seconds: int = 90) -> int:
+def generate_missing_summaries(
+    db_path: str,
+    limit: int = 20,
+    model_name: str = "qwen2.5:0.5b",
+    timeout_seconds: int = 90,
+) -> int:
     generated = 0
     with sqlite3.connect(db_path) as conn:
-
         stats_row = conn.execute(
             """
             SELECT
@@ -108,7 +112,13 @@ def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = 
                 timeout_seconds=max(1, int(timeout_seconds)),
             )
         except Exception as exc:
-            log.error("Summary generation failed id=%s title=%s model=%s error=%s", row_id, title, model_name, exc)
+            log.error(
+                "Summary generation failed id=%s title=%s model=%s error=%s",
+                row_id,
+                title,
+                model_name,
+                exc,
+            )
             continue
         summary = str(result.get("summary_text") or "").strip()
         if not summary:
@@ -126,12 +136,28 @@ def generate_missing_summaries(db_path: str, limit: int = 20, model_name: str = 
                   source_segment_count=excluded.source_segment_count,
                   updated_at=excluded.updated_at
                 """,
-                (int(row_id), summary, model_name, len(segments), str(result.get("updated_at") or "")),
+                (
+                    int(row_id),
+                    summary,
+                    model_name,
+                    len(segments),
+                    str(result.get("updated_at") or ""),
+                ),
             )
             conn.commit()
         generated += 1
-        log.info("Summary generated id=%s title=%s model=%s chars=%s", row_id, title, model_name, len(summary))
+        log.info(
+            "Summary generated id=%s title=%s model=%s chars=%s",
+            row_id,
+            title,
+            model_name,
+            len(summary),
+        )
 
     if rows:
-        log.info("Summary generation pass complete candidates=%s generated=%s", len(rows), generated)
+        log.info(
+            "Summary generation pass complete candidates=%s generated=%s",
+            len(rows),
+            generated,
+        )
     return generated

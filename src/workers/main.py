@@ -5,7 +5,11 @@ from typing import Dict, List
 
 from workers.config import load_config
 from workers.podcasts import download_podcasts
-from workers.media_library_server import AppState, VIDEO_EXTENSIONS, import_local_media_file
+from workers.media_library_server import (
+    AppState,
+    VIDEO_EXTENSIONS,
+    import_local_media_file,
+)
 from workers.youtube import download_youtube_items
 
 
@@ -39,7 +43,9 @@ def _path_sort_key(path: Path) -> str:
     return str(path).casefold()
 
 
-def _directory_video_files(directory: Path, recursive: bool, excluded_root: Path) -> List[Path]:
+def _directory_video_files(
+    directory: Path, recursive: bool, excluded_root: Path
+) -> List[Path]:
     iterator = directory.rglob("*") if recursive else directory.iterdir()
     files = []
     for candidate in iterator:
@@ -48,7 +54,10 @@ def _directory_video_files(directory: Path, recursive: bool, excluded_root: Path
             continue
         if resolved_candidate.suffix.lower().lstrip(".") not in VIDEO_EXTENSIONS:
             continue
-        if resolved_candidate == excluded_root or excluded_root in resolved_candidate.parents:
+        if (
+            resolved_candidate == excluded_root
+            or excluded_root in resolved_candidate.parents
+        ):
             continue
         files.append(resolved_candidate)
     return sorted(files, key=_path_sort_key)
@@ -61,12 +70,16 @@ def _unused_update_runner(config: Dict, downloaded_items: List[str]) -> None:
 def run_directory_import(directory: str, recursive: bool = False) -> int:
     source_directory = Path(directory).expanduser().resolve()
     if not source_directory.is_dir():
-        print(f"Import directory does not exist or is not a directory: {source_directory}")
+        print(
+            f"Import directory does not exist or is not a directory: {source_directory}"
+        )
         return 2
 
     config = load_config()
     output_root = Path(str(config["defaults"]["output_root"])).expanduser().resolve()
-    database_path = Path(str(config["defaults"]["database_path"])).expanduser().resolve()
+    database_path = (
+        Path(str(config["defaults"]["database_path"])).expanduser().resolve()
+    )
     state = AppState(
         output_root=output_root,
         database_path=database_path,
@@ -95,13 +108,17 @@ def run_directory_import(directory: str, recursive: bool = False) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="GetOffline media downloader and browser player")
+    parser = argparse.ArgumentParser(
+        description="GetOffline media downloader and browser player"
+    )
     parser.set_defaults(host="127.0.0.1", port=8080)
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("download", help="Run YouTube and podcast downloads")
 
-    serve_parser = subparsers.add_parser("serve", help="Start local web UI to browse/play downloaded media")
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start local web UI to browse/play downloaded media"
+    )
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8080)
 
@@ -109,8 +126,12 @@ def parse_args() -> argparse.Namespace:
         "import-directory",
         help="Import video files from a directory using the browser drag-and-drop workflow",
     )
-    import_parser.add_argument("directory", help="Directory containing video files to import")
-    import_parser.add_argument("--recursive", action="store_true", help="Include videos in subdirectories")
+    import_parser.add_argument(
+        "directory", help="Directory containing video files to import"
+    )
+    import_parser.add_argument(
+        "--recursive", action="store_true", help="Include videos in subdirectories"
+    )
 
     return parser.parse_args()
 

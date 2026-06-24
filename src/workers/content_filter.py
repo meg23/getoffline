@@ -27,7 +27,7 @@ _PROFANITY_TERMS = {
     "ass",
     "piss",
     "damn",
-    "dick"
+    "dick",
 }
 
 _SEXUAL_TERMS = {
@@ -44,7 +44,7 @@ _SEXUAL_TERMS = {
     "pornographic",
     "sexual intercourse",
     "sex",
-    "sexual"
+    "sexual",
 }
 
 _SRT_METADATA_RE = re.compile(
@@ -63,7 +63,9 @@ class ExplicitContentMatch:
 
 def transcript_text(subtitle_path: Path) -> str:
     """Return normalized spoken text from an SRT/VTT-like subtitle file."""
-    lines = Path(subtitle_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = (
+        Path(subtitle_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    )
     spoken_lines = []
     for line in lines:
         stripped_line = line.strip()
@@ -77,7 +79,10 @@ def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
     """Find a conservative profanity or sexual-content term in transcript text."""
     transcript = str(text or "").strip()
     sentences = _SENTENCE_BOUNDARY_RE.split(transcript)
-    for category, terms in (("profanity", _PROFANITY_TERMS), ("sexual content", _SEXUAL_TERMS)):
+    for category, terms in (
+        ("profanity", _PROFANITY_TERMS),
+        ("sexual content", _SEXUAL_TERMS),
+    ):
         for term in sorted(terms, key=len, reverse=True):
             for sentence in sentences:
                 normalized = " " + _NON_WORD_RE.sub(" ", sentence.lower()).strip() + " "
@@ -111,7 +116,9 @@ def delete_media_artifacts(media_path: Path) -> List[Path]:
             if existed:
                 deleted_paths.append(candidate)
         except OSError as exc:
-            log.warning("Could not delete filtered media artifact %s: %s", candidate, exc)
+            log.warning(
+                "Could not delete filtered media artifact %s: %s", candidate, exc
+            )
     return sorted(deleted_paths, key=lambda path: str(path))
 
 

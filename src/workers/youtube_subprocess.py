@@ -12,7 +12,7 @@ def _download_youtube_entry_in_subprocess(payload: Dict) -> Dict:
     return {"downloaded_items": downloaded_items}
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     payload = json.loads(sys.stdin.read())
     result = _download_youtube_entry_in_subprocess(payload)
     sys.stdout.write(json.dumps(result))

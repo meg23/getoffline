@@ -79,7 +79,9 @@ def _resolve_path(value: Any, *, base_dir: Optional[str] = None) -> str:
     return str(candidate.resolve())
 
 
-def resolve_database_path(defaults: Dict[str, Any], *, base_dir: Optional[str] = None) -> str:
+def resolve_database_path(
+    defaults: Dict[str, Any], *, base_dir: Optional[str] = None
+) -> str:
     configured = defaults.get("database_path")
     if configured:
         return _resolve_path(configured, base_dir=base_dir)
@@ -89,8 +91,13 @@ def resolve_database_path(defaults: Dict[str, Any], *, base_dir: Optional[str] =
     )
 
 
-
-def build_item_uid(*, item_id: Optional[str], item_url: Optional[str], media_url: Optional[str], title: Optional[str]) -> str:
+def build_item_uid(
+    *,
+    item_id: Optional[str],
+    item_url: Optional[str],
+    media_url: Optional[str],
+    title: Optional[str],
+) -> str:
     for candidate in (item_id, item_url, media_url):
         if candidate:
             return str(candidate)[:255]
@@ -110,7 +117,10 @@ def _coerce_json(value: Any) -> Optional[str]:
 
 def _table_columns_sqlite(db_path: str, table_name: str) -> set[str]:
     with sqlite3.connect(db_path) as conn:
-        return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        return {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
 
 
 def _ensure_schema_migrations_table(db_path: str) -> None:
@@ -225,7 +235,9 @@ def _migration_0006_add_favorite_column(db_path: str) -> None:
     if "favorite" in columns:
         return
     with sqlite3.connect(db_path) as conn:
-        conn.execute("ALTER TABLE downloads ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "ALTER TABLE downloads ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
+        )
         conn.commit()
 
 
@@ -460,7 +472,9 @@ def _migration_0005_add_source_enabled(db_path: str) -> None:
     if "enabled" in columns:
         return
     with sqlite3.connect(db_path) as conn:
-        conn.execute("ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            "ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
+        )
         conn.commit()
 
 
@@ -478,18 +492,26 @@ def _migration_0011_add_source_explicit_content_filter(db_path: str) -> None:
     if "delete_explicit_content" in columns:
         return
     with sqlite3.connect(db_path) as conn:
-        conn.execute("ALTER TABLE source_configs ADD COLUMN delete_explicit_content INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "ALTER TABLE source_configs ADD COLUMN delete_explicit_content INTEGER NOT NULL DEFAULT 0"
+        )
         conn.commit()
 
 
 def _migration_0012_add_youtube_include_flags(db_path: str) -> None:
     columns = _table_columns_sqlite(db_path, "source_configs")
-    missing = [column for column in ("include_shorts", "include_livestreams") if column not in columns]
+    missing = [
+        column
+        for column in ("include_shorts", "include_livestreams")
+        if column not in columns
+    ]
     if not missing:
         return
     with sqlite3.connect(db_path) as conn:
         for column in missing:
-            conn.execute(f"ALTER TABLE source_configs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                f"ALTER TABLE source_configs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+            )
         conn.commit()
 
 
@@ -509,7 +531,9 @@ def _coerce_int(value: Any, fallback: int) -> int:
         return int(fallback)
 
 
-def ensure_config_seeded(db_path: str, defaults: Optional[Dict[str, Any]] = None) -> None:
+def ensure_config_seeded(
+    db_path: str, defaults: Optional[Dict[str, Any]] = None
+) -> None:
     # Database initialization/migrations are expected to run during process startup.
     now = _utcnow().isoformat()
     seed = dict(DEFAULT_APP_CONFIG)
@@ -553,7 +577,9 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         for key, value in conn.execute("SELECT key, value FROM app_config"):
             defaults[key] = value
 
-        row = conn.execute("SELECT youtube_cookie_text FROM download_settings WHERE id = 1").fetchone()
+        row = conn.execute(
+            "SELECT youtube_cookie_text FROM download_settings WHERE id = 1"
+        ).fetchone()
         source_rows = conn.execute(
             """
             SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, include_shorts, include_livestreams
@@ -564,7 +590,20 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
 
     youtube = []
     podcasts = []
-    for row_id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset, source_max_downloads, delete_explicit_content, include_shorts, include_livestreams in source_rows:
+    for (
+        row_id,
+        source_type,
+        name,
+        url,
+        media_type,
+        enabled,
+        subtitles,
+        subtitle_offset,
+        source_max_downloads,
+        delete_explicit_content,
+        include_shorts,
+        include_livestreams,
+    ) in source_rows:
         payload = {
             "id": int(row_id),
             "name": name,
@@ -595,30 +634,82 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "playlist_end": _coerce_int(defaults["playlist_end"], 3),
             "processing_workers": _coerce_int(defaults.get("processing_workers"), 2),
             "auto_update_minutes": _coerce_int(defaults.get("auto_update_minutes"), 20),
-            "auto_delete_content_days": max(0, _coerce_int(defaults.get("auto_delete_content_days"), 0)),
+            "auto_delete_content_days": max(
+                0, _coerce_int(defaults.get("auto_delete_content_days"), 0)
+            ),
             "summary_model": str(defaults.get("summary_model") or "qwen2.5:0.5b"),
             "ollama_path": str(defaults.get("ollama_path") or "ollama"),
             "js_runtime_path": str(defaults.get("js_runtime_path") or "qjs"),
-            "android_sync_enabled": str(defaults.get("android_sync_enabled") or "0").strip().lower() in {"1", "true", "yes", "on"},
-            "android_sync_target": str(defaults.get("android_sync_target") or "android"),
-            "android_sync_directory": os.path.expanduser(str(defaults.get("android_sync_directory") or "./offline-sync")),
-            "android_sync_adb_path": str(defaults.get("android_sync_adb_path") or "adb"),
-            "android_sync_connection_mode": str(defaults.get("android_sync_connection_mode") or "usb"),
-            "android_sync_wifi_address": str(defaults.get("android_sync_wifi_address") or ""),
-            "android_sync_destination": str(defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"),
-            "android_sync_max_items": _coerce_int(defaults.get("android_sync_max_items"), 10),
-            "android_sync_include_subtitles": str(defaults.get("android_sync_include_subtitles") or "1").strip().lower() in {"1", "true", "yes", "on"},
-            "android_sync_include_unplayed": str(defaults.get("android_sync_include_unplayed") or "1").strip().lower() in {"1", "true", "yes", "on"},
-            "android_sync_include_started": str(defaults.get("android_sync_include_started") or "1").strip().lower() in {"1", "true", "yes", "on"},
-            "android_sync_include_played": str(defaults.get("android_sync_include_played") or "0").strip().lower() in {"1", "true", "yes", "on"},
-            "android_sync_exclude_regex": str(defaults.get("android_sync_exclude_regex") or ""),
-            "subtitle_transcription_mode": str(defaults.get("subtitle_transcription_mode") or "in_process"),
+            "android_sync_enabled": str(defaults.get("android_sync_enabled") or "0")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            "android_sync_target": str(
+                defaults.get("android_sync_target") or "android"
+            ),
+            "android_sync_directory": os.path.expanduser(
+                str(defaults.get("android_sync_directory") or "./offline-sync")
+            ),
+            "android_sync_adb_path": str(
+                defaults.get("android_sync_adb_path") or "adb"
+            ),
+            "android_sync_connection_mode": str(
+                defaults.get("android_sync_connection_mode") or "usb"
+            ),
+            "android_sync_wifi_address": str(
+                defaults.get("android_sync_wifi_address") or ""
+            ),
+            "android_sync_destination": str(
+                defaults.get("android_sync_destination") or "/sdcard/Movies/GetOffline"
+            ),
+            "android_sync_max_items": _coerce_int(
+                defaults.get("android_sync_max_items"), 10
+            ),
+            "android_sync_include_subtitles": str(
+                defaults.get("android_sync_include_subtitles") or "1"
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            "android_sync_include_unplayed": str(
+                defaults.get("android_sync_include_unplayed") or "1"
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            "android_sync_include_started": str(
+                defaults.get("android_sync_include_started") or "1"
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            "android_sync_include_played": str(
+                defaults.get("android_sync_include_played") or "0"
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            "android_sync_exclude_regex": str(
+                defaults.get("android_sync_exclude_regex") or ""
+            ),
+            "subtitle_transcription_mode": str(
+                defaults.get("subtitle_transcription_mode") or "in_process"
+            ),
             "manual_upload_delete_explicit_content": str(
                 defaults.get("manual_upload_delete_explicit_content") or "0"
-            ).strip().lower() in {"1", "true", "yes", "on"},
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
             "telemetry_dumps_enabled": str(
-                defaults.get("telemetry_dumps_enabled", defaults.get("heapdump_enabled", "0")) or "0"
-            ).strip().lower() in {"1", "true", "yes", "on"},
+                defaults.get(
+                    "telemetry_dumps_enabled", defaults.get("heapdump_enabled", "0")
+                )
+                or "0"
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
             "database_path": db_path,
         },
         "download_settings": {
@@ -681,7 +772,9 @@ def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -
         raise
 
 
-def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = None) -> Optional[str]:
+def materialize_youtube_cookie_file(
+    db_path: str, cookie_path: Optional[str] = None
+) -> Optional[str]:
     stored = get_stored_config(db_path)
     cookie_text = stored["download_settings"].get("youtube_cookie_text")
     if not cookie_text:
@@ -690,13 +783,18 @@ def materialize_youtube_cookie_file(db_path: str, cookie_path: Optional[str] = N
     if cookie_path:
         target_path = Path(str(cookie_path)).expanduser()
     else:
-        target_path = Path(tempfile.gettempdir()) / f"getoffline-yt-dlp-cookies-{Path(db_path).name}.txt"
+        target_path = (
+            Path(tempfile.gettempdir())
+            / f"getoffline-yt-dlp-cookies-{Path(db_path).name}.txt"
+        )
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(cookie_text, encoding="utf-8")
     return str(target_path)
 
 
-def replace_sources(db_path: str, youtube: List[Dict[str, Any]], podcasts: List[Dict[str, Any]]) -> None:
+def replace_sources(
+    db_path: str, youtube: List[Dict[str, Any]], podcasts: List[Dict[str, Any]]
+) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
     Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
@@ -801,7 +899,11 @@ def add_source_config(
                     int(current_position or 0),
                     str(name or "").strip(),
                     str(url or "").strip(),
-                    (str(media_type).strip().lower() if media_type is not None else None),
+                    (
+                        str(media_type).strip().lower()
+                        if media_type is not None
+                        else None
+                    ),
                     1 if enabled else 0,
                     1 if subtitles else 0,
                     subtitle_offset_seconds,
@@ -823,7 +925,9 @@ def delete_source_config(db_path: str, row_id: int) -> bool:
     Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
-            cur = conn.execute("DELETE FROM source_configs WHERE id = ?", (int(row_id),))
+            cur = conn.execute(
+                "DELETE FROM source_configs WHERE id = ?", (int(row_id),)
+            )
             conn.commit()
             return (cur.rowcount or 0) > 0
     except sqlite3.OperationalError as exc:
@@ -860,7 +964,9 @@ def update_source_config(
     delete_explicit_content: bool = False,
 ) -> bool:
     ensure_config_seeded(db_path)
-    normalized_media_type = (str(media_type).strip().lower() if media_type is not None else None)
+    normalized_media_type = (
+        str(media_type).strip().lower() if media_type is not None else None
+    )
     Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(db_path) as conn:
@@ -907,7 +1013,9 @@ def _ensure_downloads_columns_sqlite(db_path: str) -> None:
     _migration_0007_add_relative_media_paths(db_path)
 
 
-def _compute_relative_storage_paths(payload: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+def _compute_relative_storage_paths(
+    payload: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[str]]:
     storage_root = payload.get("storage_root")
     if not storage_root:
         return None, None
@@ -923,10 +1031,14 @@ def _compute_relative_storage_paths(payload: Dict[str, Any]) -> Tuple[Optional[s
         except ValueError:
             return None
 
-    return _relativize(payload.get("file_path")), _relativize(payload.get("subtitle_path"))
+    return _relativize(payload.get("file_path")), _relativize(
+        payload.get("subtitle_path")
+    )
 
 
-def resolve_download_artifact_path(output_root: str, stored_path: Optional[str], relative_path: Optional[str]) -> Optional[str]:
+def resolve_download_artifact_path(
+    output_root: str, stored_path: Optional[str], relative_path: Optional[str]
+) -> Optional[str]:
     root = Path(str(output_root)).expanduser().resolve()
     if relative_path:
         return str((root / str(relative_path)).resolve())
@@ -935,7 +1047,9 @@ def resolve_download_artifact_path(output_root: str, stored_path: Optional[str],
     return None
 
 
-def _is_downloaded_sqlite(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
+def _is_downloaded_sqlite(
+    db_path: str, source_type: str, source_name: str, item_uid: str
+) -> bool:
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             """
@@ -989,12 +1103,16 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
         "raw_metadata_json": _coerce_json(payload.get("raw_metadata")),
         "first_seen_at": now,
         "last_seen_at": now,
-        "completed_at": now if payload.get("download_status", "downloaded") == "downloaded" else None,
+        "completed_at": now
+        if payload.get("download_status", "downloaded") == "downloaded"
+        else None,
         "played": 1 if payload.get("played", False) else 0,
         "favorite": 1 if payload.get("favorite", False) else 0,
         "played_at": payload.get("played_at"),
     }
-    file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(payload)
+    file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(
+        payload
+    )
     values["file_path_relative"] = file_path_relative
     values["subtitle_path_relative"] = subtitle_path_relative
 
@@ -1002,7 +1120,7 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute(
-            """
+                """
             INSERT INTO downloads (
                 source_type, source_name, source_url, item_uid, item_id, item_url, media_url,
                 title, description, uploader, channel, extractor, playlist_id, playlist_title,
@@ -1064,13 +1182,17 @@ def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]):
 
 
 if HAS_SQLALCHEMY:
+
     class Base(DeclarativeBase):
         pass
 
-
     class DownloadRecord(Base):
         __tablename__ = "downloads"
-        __table_args__ = (UniqueConstraint("source_type", "source_name", "item_uid", name="uq_download_source_item"),)
+        __table_args__ = (
+            UniqueConstraint(
+                "source_type", "source_name", "item_uid", name="uq_download_source_item"
+            ),
+        )
 
         id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
         source_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -1100,44 +1222,64 @@ if HAS_SQLALCHEMY:
         video_codec: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
         resolution: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
         fps: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-        subtitle_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+        subtitle_enabled: Mapped[bool] = mapped_column(
+            Boolean, nullable=False, default=True
+        )
         subtitle_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-        subtitle_path_relative: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-        download_status: Mapped[str] = mapped_column(String(32), nullable=False, default="downloaded")
+        subtitle_path_relative: Mapped[Optional[str]] = mapped_column(
+            Text, nullable=True
+        )
+        download_status: Mapped[str] = mapped_column(
+            String(32), nullable=False, default="downloaded"
+        )
         error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
         raw_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-        first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-        last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-        completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+        first_seen_at: Mapped[datetime] = mapped_column(
+            DateTime(timezone=True), nullable=False, default=_utcnow
+        )
+        last_seen_at: Mapped[datetime] = mapped_column(
+            DateTime(timezone=True), nullable=False, default=_utcnow
+        )
+        completed_at: Mapped[Optional[datetime]] = mapped_column(
+            DateTime(timezone=True), nullable=True
+        )
         played: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
         favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-        played_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-        last_position_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-        total_listened_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-        last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+        played_at: Mapped[Optional[datetime]] = mapped_column(
+            DateTime(timezone=True), nullable=True
+        )
+        last_position_seconds: Mapped[float] = mapped_column(
+            Float, nullable=False, default=0.0
+        )
+        total_listened_seconds: Mapped[float] = mapped_column(
+            Float, nullable=False, default=0.0
+        )
+        last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(
+            DateTime(timezone=True), nullable=True
+        )
 
-
-    _UPDATE_PROGRESS_STMT = update(DownloadRecord).where(
-        DownloadRecord.id == bindparam("row_id_param")
-    ).values(
-        last_position_seconds=bindparam("safe_position_param"),
-        total_listened_seconds=func.max(
-            0.0,
-            func.coalesce(DownloadRecord.total_listened_seconds, 0.0)
-            + func.max(
+    _UPDATE_PROGRESS_STMT = (
+        update(DownloadRecord)
+        .where(DownloadRecord.id == bindparam("row_id_param"))
+        .values(
+            last_position_seconds=bindparam("safe_position_param"),
+            total_listened_seconds=func.max(
                 0.0,
-                bindparam("safe_position_param") - func.coalesce(DownloadRecord.last_position_seconds, 0.0),
+                func.coalesce(DownloadRecord.total_listened_seconds, 0.0)
+                + func.max(
+                    0.0,
+                    bindparam("safe_position_param")
+                    - func.coalesce(DownloadRecord.last_position_seconds, 0.0),
+                ),
             ),
-        ),
-        last_position_updated_at=bindparam("updated_at_param"),
-        last_seen_at=bindparam("updated_at_param"),
+            last_position_updated_at=bindparam("updated_at_param"),
+            last_seen_at=bindparam("updated_at_param"),
+        )
     )
-
 
     _ENGINE_LOCK = threading.Lock()
     _ENGINE_REGISTRY: Dict[str, Any] = {}
     _INITIALIZED_PATHS: set[str] = set()
-
 
     def _normalize_db_path(db_path: str) -> str:
         return str(Path(db_path).expanduser().resolve())
@@ -1174,7 +1316,6 @@ if HAS_SQLALCHEMY:
                 pass
         return count
 
-
     def init_database(db_path: str) -> None:
         normalized_db_path = _normalize_db_path(db_path)
         apply_migrations(normalized_db_path)
@@ -1183,7 +1324,9 @@ if HAS_SQLALCHEMY:
         with _ENGINE_LOCK:
             already_initialized = normalized_db_path in _INITIALIZED_PATHS
         if already_initialized:
-            log.debug("Skipping create_all; already initialized db=%s", normalized_db_path)
+            log.debug(
+                "Skipping create_all; already initialized db=%s", normalized_db_path
+            )
             return
 
         Base.metadata.create_all(engine)
@@ -1192,8 +1335,9 @@ if HAS_SQLALCHEMY:
             _INITIALIZED_PATHS.add(normalized_db_path)
         log.info("Ran create_all for db=%s", normalized_db_path)
 
-
-    def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
+    def is_downloaded(
+        db_path: str, source_type: str, source_name: str, item_uid: str
+    ) -> bool:
         with Session(_engine_for(db_path)) as session:
             stmt = select(DownloadRecord.id).where(
                 DownloadRecord.source_type == source_type,
@@ -1203,10 +1347,10 @@ if HAS_SQLALCHEMY:
             )
             row_id = session.execute(stmt).scalar_one_or_none()
             return row_id is not None
-        
 
-
-    def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
+    def has_episode_title_for_source(
+        db_path: str, source_type: str, source_name: str, title: Optional[str]
+    ) -> bool:
         normalized = str(title or "").strip().casefold()
         if not normalized:
             return False
@@ -1220,12 +1364,15 @@ if HAS_SQLALCHEMY:
                     DownloadRecord.title.is_not(None),
                 )
             ).all()
-            return any(str(row.title or "").strip().casefold() == normalized for row in rows)
-
+            return any(
+                str(row.title or "").strip().casefold() == normalized for row in rows
+            )
 
     def upsert_download(db_path: str, payload: Dict[str, Any]):
         now = _utcnow()
-        file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(payload)
+        file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(
+            payload
+        )
         try:
             with Session(_engine_for(db_path)) as session:
                 stmt = select(DownloadRecord).where(
@@ -1245,10 +1392,33 @@ if HAS_SQLALCHEMY:
                     session.add(existing)
 
                 for key in [
-                    "item_id", "item_url", "media_url", "title", "description", "uploader", "channel", "extractor",
-                    "playlist_id", "playlist_title", "upload_date", "duration_seconds", "file_path", "file_path_relative", "file_ext",
-                    "file_size_bytes", "expected_bytes", "format_id", "format_note", "audio_codec", "video_codec",
-                    "resolution", "fps", "subtitle_path", "subtitle_path_relative", "download_status", "error_message",
+                    "item_id",
+                    "item_url",
+                    "media_url",
+                    "title",
+                    "description",
+                    "uploader",
+                    "channel",
+                    "extractor",
+                    "playlist_id",
+                    "playlist_title",
+                    "upload_date",
+                    "duration_seconds",
+                    "file_path",
+                    "file_path_relative",
+                    "file_ext",
+                    "file_size_bytes",
+                    "expected_bytes",
+                    "format_id",
+                    "format_note",
+                    "audio_codec",
+                    "video_codec",
+                    "resolution",
+                    "fps",
+                    "subtitle_path",
+                    "subtitle_path_relative",
+                    "download_status",
+                    "error_message",
                 ]:
                     setattr(existing, key, payload.get(key))
                 existing.file_path_relative = file_path_relative
@@ -1301,13 +1471,17 @@ if HAS_SQLALCHEMY:
         now = _utcnow()
         try:
             with Session(_engine_for(db_path)) as session:
-                updated = session.query(DownloadRecord).filter(DownloadRecord.played.is_(False)).update(
-                    {
-                        DownloadRecord.played: True,
-                        DownloadRecord.played_at: now,
-                        DownloadRecord.last_seen_at: now,
-                    },
-                    synchronize_session=False,
+                updated = (
+                    session.query(DownloadRecord)
+                    .filter(DownloadRecord.played.is_(False))
+                    .update(
+                        {
+                            DownloadRecord.played: True,
+                            DownloadRecord.played_at: now,
+                            DownloadRecord.last_seen_at: now,
+                        },
+                        synchronize_session=False,
+                    )
                 )
                 session.commit()
                 return int(updated or 0)
@@ -1315,7 +1489,9 @@ if HAS_SQLALCHEMY:
             _log_sqlite_lock_if_needed(db_path, "marking all downloads played", exc)
             raise
 
-    def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
+    def mark_download_favorite(
+        db_path: str, row_id: int, favorite: bool = True
+    ) -> bool:
         try:
             with Session(_engine_for(db_path)) as session:
                 record = session.get(DownloadRecord, int(row_id))
@@ -1350,12 +1526,16 @@ if HAS_SQLALCHEMY:
                     return 0.0
                 return float(record.last_position_seconds or 0)
         except Exception as exc:
-            _log_sqlite_lock_if_needed(db_path, "reading download playback position", exc)
+            _log_sqlite_lock_if_needed(
+                db_path, "reading download playback position", exc
+            )
             if _is_sqlite_lock_error_message(str(exc)):
                 return 0.0
             raise
 
-    def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
+    def update_download_position_seconds(
+        db_path: str, row_id: int, position_seconds: float
+    ) -> bool:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow()
         try:
@@ -1366,13 +1546,18 @@ if HAS_SQLALCHEMY:
                 previous = max(0.0, float(record.last_position_seconds or 0.0))
                 listened_delta = max(0.0, safe_position - previous)
                 record.last_position_seconds = safe_position
-                record.total_listened_seconds = max(0.0, float(record.total_listened_seconds or 0.0)) + listened_delta
+                record.total_listened_seconds = (
+                    max(0.0, float(record.total_listened_seconds or 0.0))
+                    + listened_delta
+                )
                 record.last_position_updated_at = now
                 record.last_seen_at = now
                 session.commit()
                 return True
         except Exception as exc:
-            _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+            _log_sqlite_lock_if_needed(
+                db_path, "updating download playback position", exc
+            )
             if _is_sqlite_lock_error_message(str(exc)):
                 return False
             raise
@@ -1395,7 +1580,9 @@ if HAS_SQLALCHEMY:
                 result = conn.execute(_UPDATE_PROGRESS_STMT, payload)
                 return int(result.rowcount or 0)
         except Exception as exc:
-            _log_sqlite_lock_if_needed(db_path, "batch updating download playback positions", exc)
+            _log_sqlite_lock_if_needed(
+                db_path, "batch updating download playback positions", exc
+            )
             if _is_sqlite_lock_error_message(str(exc)):
                 return 0
             raise
@@ -1408,6 +1595,7 @@ if HAS_SQLALCHEMY:
 
 
 else:
+
     def init_database(db_path: str) -> None:
         _init_database_sqlite(db_path)
 
@@ -1421,11 +1609,14 @@ else:
                 updated += 1
         return updated
 
-
-    def is_downloaded(db_path: str, source_type: str, source_name: str, item_uid: str) -> bool:
+    def is_downloaded(
+        db_path: str, source_type: str, source_name: str, item_uid: str
+    ) -> bool:
         return _is_downloaded_sqlite(db_path, source_type, source_name, item_uid)
 
-    def has_episode_title_for_source(db_path: str, source_type: str, source_name: str, title: Optional[str]) -> bool:
+    def has_episode_title_for_source(
+        db_path: str, source_type: str, source_name: str, title: Optional[str]
+    ) -> bool:
         normalized = str(title or "").strip().casefold()
         if not normalized:
             return False
@@ -1443,7 +1634,9 @@ else:
                     """,
                     (source_type, source_name, *PROCESSED_DOWNLOAD_STATUSES),
                 ).fetchall()
-                return any(str(row[0] or "").strip().casefold() == normalized for row in rows)
+                return any(
+                    str(row[0] or "").strip().casefold() == normalized for row in rows
+                )
         except sqlite3.OperationalError as exc:
             _log_sqlite_lock_if_needed(db_path, "checking existing download title", exc)
             raise
@@ -1498,7 +1691,9 @@ else:
             _log_sqlite_lock_if_needed(db_path, "marking all downloads played", exc)
             raise
 
-    def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
+    def mark_download_favorite(
+        db_path: str, row_id: int, favorite: bool = True
+    ) -> bool:
         try:
             with sqlite3.connect(db_path) as conn:
                 cur = conn.execute(
@@ -1532,12 +1727,16 @@ else:
                     return 0.0
                 return float(row[0] or 0.0)
         except sqlite3.OperationalError as exc:
-            _log_sqlite_lock_if_needed(db_path, "reading download playback position", exc)
+            _log_sqlite_lock_if_needed(
+                db_path, "reading download playback position", exc
+            )
             if _is_sqlite_lock_error_message(str(exc)):
                 return 0.0
             raise
 
-    def update_download_position_seconds(db_path: str, row_id: int, position_seconds: float) -> bool:
+    def update_download_position_seconds(
+        db_path: str, row_id: int, position_seconds: float
+    ) -> bool:
         safe_position = max(0.0, float(position_seconds or 0.0))
         now = _utcnow().isoformat()
         try:
@@ -1558,7 +1757,9 @@ else:
                 conn.commit()
                 return cur.rowcount > 0
         except sqlite3.OperationalError as exc:
-            _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+            _log_sqlite_lock_if_needed(
+                db_path, "updating download playback position", exc
+            )
             if _is_sqlite_lock_error_message(str(exc)):
                 return False
             raise

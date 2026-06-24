@@ -4,12 +4,20 @@ from django.contrib.auth import views as auth_views
 from . import views
 
 urlpatterns = [
-    path("login/", auth_views.LoginView.as_view(template_name="registration/login.html"), name="login"),
+    path(
+        "login/",
+        auth_views.LoginView.as_view(template_name="registration/login.html"),
+        name="login",
+    ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
     path("jobs/enqueue/", views.enqueue_job, name="enqueue_job"),
-    path("worker-messages/status/", views.worker_message_status, name="worker_message_status"),
+    path(
+        "worker-messages/status/",
+        views.worker_message_status,
+        name="worker_message_status",
+    ),
     path("batch-update/", views.batch_update, name="batch_update"),
     path("transcript-search/", views.transcript_search, name="transcript_search"),
     path("manual-upload/", views.manual_upload, name="manual_upload"),
@@ -25,9 +33,23 @@ urlpatterns = [
     path("sources/<int:source_id>/toggle/", views.toggle_source, name="toggle_source"),
     path("sources/<int:source_id>/delete/", views.delete_source, name="delete_source"),
     path("downloads/<int:download_id>/played/", views.mark_played, name="mark_played"),
-    path("downloads/<int:download_id>/unplayed/", views.mark_unplayed, name="mark_unplayed"),
+    path(
+        "downloads/<int:download_id>/unplayed/",
+        views.mark_unplayed,
+        name="mark_unplayed",
+    ),
     path("downloads/<int:download_id>/favorite/", views.favorite, name="favorite"),
-    path("downloads/<int:download_id>/unfavorite/", views.unfavorite, name="unfavorite"),
-    path("downloads/<int:download_id>/position/", views.save_position, name="save_position"),
-    path("downloads/<int:download_id>/delete-file/", views.delete_file, name="delete_file"),
+    path(
+        "downloads/<int:download_id>/unfavorite/", views.unfavorite, name="unfavorite"
+    ),
+    path(
+        "downloads/<int:download_id>/position/",
+        views.save_position,
+        name="save_position",
+    ),
+    path(
+        "downloads/<int:download_id>/delete-file/",
+        views.delete_file,
+        name="delete_file",
+    ),
 ]

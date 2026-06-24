@@ -57,15 +57,21 @@ def _load_yaml_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 def _build_bootstrap_defaults(config_path: Optional[Path] = None):
     defaults = dict(DEFAULT_APP_CONFIG)
     file_config = _load_yaml_config(config_path)
-    config_dir = file_config.get("path", Path.cwd()).parent if file_config else Path.cwd()
+    config_dir = (
+        file_config.get("path", Path.cwd()).parent if file_config else Path.cwd()
+    )
 
     for key in ("output_root", "database_path"):
         configured_value = file_config.get("defaults", {}).get(key)
         if configured_value is not None:
             defaults[key] = configured_value
 
-    defaults["output_root"] = _resolve_path(defaults["output_root"], base_dir=config_dir)
-    defaults["database_path"] = resolve_database_path(defaults, base_dir=str(config_dir))
+    defaults["output_root"] = _resolve_path(
+        defaults["output_root"], base_dir=config_dir
+    )
+    defaults["database_path"] = resolve_database_path(
+        defaults, base_dir=str(config_dir)
+    )
     return defaults
 
 

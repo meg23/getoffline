@@ -20,7 +20,10 @@ class ConfigTests(unittest.TestCase):
                 os.chdir(previous_cwd)
 
         self.assertEqual(defaults["output_root"], os.path.join(tmpdir, "downloads"))
-        self.assertEqual(defaults["database_path"], os.path.join(tmpdir, "downloads", "downloads.sqlite3"))
+        self.assertEqual(
+            defaults["database_path"],
+            os.path.join(tmpdir, "downloads", "downloads.sqlite3"),
+        )
 
     def test_load_config_reads_paths_from_config_yml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -37,8 +40,13 @@ defaults:
 
             config = load_config(config_path)
 
-        self.assertEqual(config["defaults"]["output_root"], os.path.join(tmpdir, "media"))
-        self.assertEqual(config["defaults"]["database_path"], os.path.join(tmpdir, "state", "library.sqlite3"))
+        self.assertEqual(
+            config["defaults"]["output_root"], os.path.join(tmpdir, "media")
+        )
+        self.assertEqual(
+            config["defaults"]["database_path"],
+            os.path.join(tmpdir, "state", "library.sqlite3"),
+        )
 
     def test_load_bootstrap_config_does_not_create_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:

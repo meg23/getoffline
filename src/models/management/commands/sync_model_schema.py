@@ -19,7 +19,10 @@ class Command(BaseCommand):
                     continue
 
                 existing_columns = {
-                    column.name for column in connection.introspection.get_table_description(connection.cursor(), table_name)
+                    column.name
+                    for column in connection.introspection.get_table_description(
+                        connection.cursor(), table_name
+                    )
                 }
                 for field in model._meta.local_fields:
                     column_name = field.column
@@ -27,4 +30,6 @@ class Command(BaseCommand):
                         continue
                     schema_editor.add_field(model, field)
                     existing_columns.add(column_name)
-                    self.stdout.write(self.style.SUCCESS(f"Added column {table_name}.{column_name}"))
+                    self.stdout.write(
+                        self.style.SUCCESS(f"Added column {table_name}.{column_name}")
+                    )

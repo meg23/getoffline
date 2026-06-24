@@ -20,7 +20,9 @@ def job_priority(message: Dict[str, Any]) -> int:
     payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
 
     if job_type == "download_single":
-        if _as_bool(payload.get("manual_enqueue")) or _as_bool(payload.get("redownload")):
+        if _as_bool(payload.get("manual_enqueue")) or _as_bool(
+            payload.get("redownload")
+        ):
             return 10
         return 9
     if job_type == "download_episode":
@@ -30,7 +32,11 @@ def job_priority(message: Dict[str, Any]) -> int:
     if job_type == "generate_transcript":
         if _as_bool(payload.get("startup_missing_subtitle")):
             return 2
-        source_type = str(payload.get("source_type") or payload.get("media_source_type") or "").strip().lower()
+        source_type = (
+            str(payload.get("source_type") or payload.get("media_source_type") or "")
+            .strip()
+            .lower()
+        )
         media_type = str(payload.get("media_type") or "").strip().lower()
         if source_type == "podcast" or media_type == "audio":
             return 8
@@ -49,7 +55,9 @@ def _message_with_payload(message: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from models.models import Job
 
-        payload = Job.objects.filter(pk=int(job_id)).values_list("payload", flat=True).first()
+        payload = (
+            Job.objects.filter(pk=int(job_id)).values_list("payload", flat=True).first()
+        )
     except Exception:
         return message
     if not isinstance(payload, dict):
@@ -65,19 +73,34 @@ def publish_job(message: Dict[str, Any]) -> None:
 
     message = _message_with_payload(message)
     job_type = str(message["job_type"])
-    queue = queue_name(job_type, message.get("payload") if isinstance(message.get("payload"), dict) else None)
-    priority = max(0, min(MAX_QUEUE_PRIORITY, int(message.get("priority", job_priority(message)))))
+    queue = queue_name(
+        job_type,
+        message.get("payload") if isinstance(message.get("payload"), dict) else None,
+    )
+    priority = max(
+        0, min(MAX_QUEUE_PRIORITY, int(message.get("priority", job_priority(message))))
+    )
     connection = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     try:
         channel = connection.channel()
-        channel.exchange_declare(exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True)
-        channel.queue_declare(queue=queue, durable=True, arguments=queue_arguments(queue) or None)
-        channel.queue_bind(queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue)
+        channel.exchange_declare(
+            exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True
+        )
+        channel.queue_declare(
+            queue=queue, durable=True, arguments=queue_arguments(queue) or None
+        )
+        channel.queue_bind(
+            queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue
+        )
         channel.basic_publish(
             exchange=settings.RABBITMQ_EXCHANGE,
             routing_key=queue,
-            body=json.dumps({k: v for k, v in message.items() if k != "payload"}, sort_keys=True).encode("utf-8"),
-            properties=pika.BasicProperties(content_type="application/json", delivery_mode=2, priority=priority),
+            body=json.dumps(
+                {k: v for k, v in message.items() if k != "payload"}, sort_keys=True
+            ).encode("utf-8"),
+            properties=pika.BasicProperties(
+                content_type="application/json", delivery_mode=2, priority=priority
+            ),
             mandatory=True,
         )
     finally:

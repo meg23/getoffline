@@ -119,9 +119,16 @@ class Command(BaseCommand):
             self._write_progress(f"Importing into destination profile: {profile_id}")
             with transaction.atomic():
                 if options["replace_profile"]:
-                    self._write_progress(f"Clearing existing rows for destination profile: {profile_id}")
+                    self._write_progress(
+                        f"Clearing existing rows for destination profile: {profile_id}"
+                    )
                     self._delete_profile(profile_id)
-                counts = self._import_all(legacy, profile_id, skip_config=options["skip_config"], media_root=media_root)
+                counts = self._import_all(
+                    legacy,
+                    profile_id,
+                    skip_config=options["skip_config"],
+                    media_root=media_root,
+                )
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -135,7 +142,9 @@ class Command(BaseCommand):
 
     def _validate_tables(self, legacy: sqlite3.Connection) -> None:
         tables = set()
-        for row in legacy.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall():
+        for row in legacy.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall():
             tables.add(row[0])
         if "downloads" not in tables:
             raise CommandError("Legacy database does not contain a downloads table.")
@@ -154,11 +163,18 @@ class Command(BaseCommand):
         skip_config: bool,
         media_root: Path,
     ) -> dict[str, int]:
-        counts = {"downloads": 0, "transcript_segments": 0, "media_summaries": 0, "source_configs": 0}
+        counts = {
+            "downloads": 0,
+            "transcript_segments": 0,
+            "media_summaries": 0,
+            "source_configs": 0,
+        }
         if not skip_config:
             self._write_progress("Importing settings and sources...")
             counts["source_configs"] = self._import_config(legacy, profile_id)
-            self._write_progress(f"Imported {counts['source_configs']} sources/settings rows.")
+            self._write_progress(
+                f"Imported {counts['source_configs']} sources/settings rows."
+            )
         else:
             self._write_progress("Skipping settings and sources.")
         self._write_progress(f"Setting profile media root to: {media_root}")
@@ -169,7 +185,9 @@ class Command(BaseCommand):
         self._write_progress(f"Imported {counts['downloads']} downloads.")
         self._write_progress("Importing transcript segments...")
         counts["transcript_segments"] = self._import_transcript_segments(legacy, id_map)
-        self._write_progress(f"Imported {counts['transcript_segments']} transcript segments.")
+        self._write_progress(
+            f"Imported {counts['transcript_segments']} transcript segments."
+        )
         self._write_progress("Importing media summaries...")
         counts["media_summaries"] = self._import_media_summaries(legacy, id_map)
         self._write_progress(f"Imported {counts['media_summaries']} media summaries.")
@@ -182,22 +200,32 @@ class Command(BaseCommand):
                 ProfileConfigValue.objects.update_or_create(
                     profile_id=profile_id,
                     key=row["key"],
-                    defaults={"value": row["value"], "updated_at": self._datetime(row["updated_at"], now)},
+                    defaults={
+                        "value": row["value"],
+                        "updated_at": self._datetime(row["updated_at"], now),
+                    },
                 )
                 if profile_id == "default":
                     AppConfigValue.objects.update_or_create(
                         key=row["key"],
-                        defaults={"value": row["value"], "updated_at": self._datetime(row["updated_at"], now)},
+                        defaults={
+                            "value": row["value"],
+                            "updated_at": self._datetime(row["updated_at"], now),
+                        },
                     )
 
         if self._has_table(legacy, "download_settings"):
-            row = legacy.execute("SELECT youtube_cookie_text, cookie_updated_at, updated_at FROM download_settings WHERE id = 1").fetchone()
+            row = legacy.execute(
+                "SELECT youtube_cookie_text, cookie_updated_at, updated_at FROM download_settings WHERE id = 1"
+            ).fetchone()
             if row:
                 ProfileDownloadSettings.objects.update_or_create(
                     profile_id=profile_id,
                     defaults={
                         "youtube_cookie_text": row["youtube_cookie_text"],
-                        "cookie_updated_at": self._datetime(row["cookie_updated_at"], None),
+                        "cookie_updated_at": self._datetime(
+                            row["cookie_updated_at"], None
+                        ),
                         "updated_at": self._datetime(row["updated_at"], now),
                     },
                 )
@@ -206,16 +234,24 @@ class Command(BaseCommand):
                         id=1,
                         defaults={
                             "youtube_cookie_text": row["youtube_cookie_text"],
-                            "cookie_updated_at": self._datetime(row["cookie_updated_at"], None),
+                            "cookie_updated_at": self._datetime(
+                                row["cookie_updated_at"], None
+                            ),
                             "updated_at": self._datetime(row["updated_at"], now),
                         },
                     )
 
-        source_table = "source_configs" if self._has_table(legacy, "source_configs") else "config_downloads"
+        source_table = (
+            "source_configs"
+            if self._has_table(legacy, "source_configs")
+            else "config_downloads"
+        )
         if not self._has_table(legacy, source_table):
             return 0
         count = 0
-        for row in legacy.execute(f"SELECT * FROM {source_table} ORDER BY source_type, position, id"):
+        for row in legacy.execute(
+            f"SELECT * FROM {source_table} ORDER BY source_type, position, id"
+        ):
             payload = self._source_payload(row, now)
             SourceConfig.objects.update_or_create(
                 profile_id=profile_id,
@@ -226,7 +262,9 @@ class Command(BaseCommand):
             count += 1
         return count
 
-    def _import_downloads(self, legacy: sqlite3.Connection, profile_id: str, media_root: Path) -> dict[int, int]:
+    def _import_downloads(
+        self, legacy: sqlite3.Connection, profile_id: str, media_root: Path
+    ) -> dict[int, int]:
         id_map = {}
         count = 0
         for row in legacy.execute("SELECT * FROM downloads ORDER BY id"):
@@ -237,7 +275,9 @@ class Command(BaseCommand):
             self._write_row_progress("downloads", count)
         return id_map
 
-    def _import_transcript_segments(self, legacy: sqlite3.Connection, id_map: dict[int, int]) -> int:
+    def _import_transcript_segments(
+        self, legacy: sqlite3.Connection, id_map: dict[int, int]
+    ) -> int:
         if not self._has_table(legacy, "transcript_segments"):
             return 0
         count = 0
@@ -256,7 +296,9 @@ class Command(BaseCommand):
             self._write_row_progress("transcript segments", count)
         return count
 
-    def _import_media_summaries(self, legacy: sqlite3.Connection, id_map: dict[int, int]) -> int:
+    def _import_media_summaries(
+        self, legacy: sqlite3.Connection, id_map: dict[int, int]
+    ) -> int:
         if not self._has_table(legacy, "media_summaries"):
             return 0
         count = 0
@@ -292,7 +334,9 @@ class Command(BaseCommand):
         existing.save()
         return existing
 
-    def _download_payload(self, row: sqlite3.Row, profile_id: str, media_root: Path) -> dict[str, Any]:
+    def _download_payload(
+        self, row: sqlite3.Row, profile_id: str, media_root: Path
+    ) -> dict[str, Any]:
         now = timezone.now()
         payload = {"profile_id": profile_id}
         columns = self._row_columns(row)
@@ -307,7 +351,13 @@ class Command(BaseCommand):
             elif field == "download_status":
                 value = value or "downloaded"
             elif field == "item_uid":
-                value = value or row["item_id"] or row["item_url"] or row["media_url"] or f"legacy:{row['id']}"
+                value = (
+                    value
+                    or row["item_id"]
+                    or row["item_url"]
+                    or row["media_url"]
+                    or f"legacy:{row['id']}"
+                )
             elif field in {"source_type", "source_name"}:
                 value = value or "legacy"
             elif field in {"last_position_seconds", "total_listened_seconds"}:
@@ -329,8 +379,12 @@ class Command(BaseCommand):
         )
 
     def _rewrite_media_paths(self, payload: dict[str, Any], media_root: Path) -> None:
-        self._rewrite_payload_path(payload, "file_path", "file_path_relative", media_root)
-        self._rewrite_payload_path(payload, "subtitle_path", "subtitle_path_relative", media_root)
+        self._rewrite_payload_path(
+            payload, "file_path", "file_path_relative", media_root
+        )
+        self._rewrite_payload_path(
+            payload, "subtitle_path", "subtitle_path_relative", media_root
+        )
 
     def _rewrite_payload_path(
         self,
@@ -393,7 +447,13 @@ class Command(BaseCommand):
         }
 
     def _has_table(self, legacy: sqlite3.Connection, table_name: str) -> bool:
-        return legacy.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)).fetchone() is not None
+        return (
+            legacy.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+            is not None
+        )
 
     def _source_defaults(self, payload: dict[str, Any]) -> dict[str, Any]:
         defaults = {}

@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from workers.download_store import ensure_config_seeded, get_stored_config, init_database, update_stored_defaults
+from workers.download_store import (
+    ensure_config_seeded,
+    get_stored_config,
+    init_database,
+    update_stored_defaults,
+)
 
 
 @dataclass(frozen=True)
@@ -26,7 +31,12 @@ class Profile:
 
 
 class ProfileManager:
-    def __init__(self, registry_path: Path, default_output_root: Path, default_database_path: Path) -> None:
+    def __init__(
+        self,
+        registry_path: Path,
+        default_output_root: Path,
+        default_database_path: Path,
+    ) -> None:
         self.registry_path = registry_path.expanduser().resolve()
         self.lock = threading.RLock()
         self.profiles: Dict[str, Profile] = {}
@@ -51,7 +61,12 @@ class ProfileManager:
             output_root=(
                 existing_default.output_root
                 if existing_default
-                and existing_default.output_root in {default_output_root, default_profile_root, default_profile_root / "downloads"}
+                and existing_default.output_root
+                in {
+                    default_output_root,
+                    default_profile_root,
+                    default_profile_root / "downloads",
+                }
                 else self._output_root_for_profile(default_profile_root, "default")
             ),
             database_path=default_profile_root / "downloads.sqlite3",
@@ -97,7 +112,9 @@ class ProfileManager:
         if not profile_root.is_dir():
             return download_output_root
         ignored_names = {"downloads", "downloads.sqlite3", "cookies.txt"}
-        has_content_at_profile_root = any(child.name not in ignored_names for child in profile_root.iterdir())
+        has_content_at_profile_root = any(
+            child.name not in ignored_names for child in profile_root.iterdir()
+        )
         if has_content_at_profile_root:
             return profile_root
         return download_output_root
@@ -138,11 +155,17 @@ class ProfileManager:
             init_database(str(profile.database_path))
             ensure_config_seeded(
                 str(profile.database_path),
-                {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
+                {
+                    "output_root": str(profile.output_root),
+                    "database_path": str(profile.database_path),
+                },
             )
             update_stored_defaults(
                 str(profile.database_path),
-                {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
+                {
+                    "output_root": str(profile.output_root),
+                    "database_path": str(profile.database_path),
+                },
             )
 
     def _write_registry(self) -> None:
@@ -160,8 +183,12 @@ class ProfileManager:
             )
         payload = {"active_profile_id": self.active_profile_id, "profiles": entries}
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path = self.registry_path.with_suffix(self.registry_path.suffix + ".tmp")
-        temporary_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        temporary_path = self.registry_path.with_suffix(
+            self.registry_path.suffix + ".tmp"
+        )
+        temporary_path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
         temporary_path.replace(self.registry_path)
 
     def _profile_sort_key(self, profile: Profile) -> Tuple[bool, str]:
@@ -203,7 +230,10 @@ class ProfileManager:
             init_database(str(profile.database_path))
             ensure_config_seeded(
                 str(profile.database_path),
-                {"output_root": str(profile.output_root), "database_path": str(profile.database_path)},
+                {
+                    "output_root": str(profile.output_root),
+                    "database_path": str(profile.database_path),
+                },
             )
             self.active_profile_id = profile_id
             self._write_registry()
@@ -230,7 +260,9 @@ class ProfileManager:
 
     def set_pin(self, profile_id: str, pin: str) -> Profile:
         clean_pin = str(pin or "").strip()
-        if clean_pin and (not clean_pin.isdigit() or len(clean_pin) < 4 or len(clean_pin) > 12):
+        if clean_pin and (
+            not clean_pin.isdigit() or len(clean_pin) < 4 or len(clean_pin) > 12
+        ):
             raise ValueError("PIN must be 4 to 12 digits")
         with self.lock:
             if profile_id not in self.profiles:

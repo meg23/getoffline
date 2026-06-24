@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from workers.content_filter import delete_media_artifacts, log_filtered_deletion, screen_transcript
+from workers.content_filter import (
+    delete_media_artifacts,
+    log_filtered_deletion,
+    screen_transcript,
+)
 from workers.logger import get_logger
 from workers.profiles import ProfileManager
 from workers.subtitles import create_subtitles
@@ -83,7 +87,9 @@ class AppState:
 
 def _normalize_stem(value: str) -> str:
     normalized = re.sub(r"\.{2,}", ".", str(value or "")).rstrip(". ")
-    normalized = re.sub(r"^(?:manual-\d{8}-\d{6}(?:-\d+)?-)+", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"^(?:manual-\d{8}-\d{6}(?:-\d+)?-)+", "", normalized, flags=re.IGNORECASE
+    )
     return normalized or "item"
 
 
@@ -148,7 +154,9 @@ def _manual_import_metadata(
         "item_url": None,
         "media_url": None,
         "title": stem,
-        "description": "Imported via browser drag-and-drop" if drag_drop else "Imported from local directory",
+        "description": "Imported via browser drag-and-drop"
+        if drag_drop
+        else "Imported from local directory",
         "uploader": "local",
         "channel": "Manual Uploads",
         "extractor": "browser-drop" if drag_drop else "directory-import",
@@ -269,7 +277,10 @@ def _filter_imported_media(
     defaults: Dict,
 ) -> Optional[str]:
     if not _manual_upload_filter_enabled(defaults):
-        log.info("Manual upload profanity check skipped item_uid=%s reason=disabled", item_uid)
+        log.info(
+            "Manual upload profanity check skipped item_uid=%s reason=disabled",
+            item_uid,
+        )
         return None
     if subtitle_path is None or not Path(subtitle_path).exists():
         log.warning(
@@ -332,24 +343,37 @@ def _download_id_for_item_uid(db_path: Path, item_uid: str) -> Optional[int]:
     return int(row[0]) if row else None
 
 
-def _index_and_summarize_imported_media(state: AppState, item_uid: str, subtitle_path: Path, defaults: Dict) -> None:
+def _index_and_summarize_imported_media(
+    state: AppState, item_uid: str, subtitle_path: Path, defaults: Dict
+) -> None:
     download_id = _download_id_for_item_uid(state.database_path, item_uid)
     if download_id is None:
-        log.warning("Post-import transcript indexing skipped item_uid=%s reason=download-row-missing", item_uid)
+        log.warning(
+            "Post-import transcript indexing skipped item_uid=%s reason=download-row-missing",
+            item_uid,
+        )
         return
 
     segments = _subtitle_segments_from_path(subtitle_path)
     if not segments:
-        log.warning("Post-import transcript indexing skipped item_uid=%s reason=no-segments", item_uid)
+        log.warning(
+            "Post-import transcript indexing skipped item_uid=%s reason=no-segments",
+            item_uid,
+        )
         return
 
-    with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+    with sqlite3.connect(
+        str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS
+    ) as conn:
         conn.executemany(
             """
             INSERT OR IGNORE INTO transcript_segments (download_id, subtitle_path, start_seconds, end_seconds, text)
             VALUES (?, ?, ?, ?, ?)
             """,
-            [(download_id, str(subtitle_path), start, end, text) for start, end, text in segments],
+            [
+                (download_id, str(subtitle_path), start, end, text)
+                for start, end, text in segments
+            ],
         )
         conn.commit()
 
@@ -361,15 +385,21 @@ def _index_and_summarize_imported_media(state: AppState, item_uid: str, subtitle
             timeout_seconds=max(1, int(defaults.get("summary_timeout_seconds") or 90)),
         )
     except Exception as exc:
-        log.warning("Post-import summary generation failed item_uid=%s error=%s", item_uid, exc)
+        log.warning(
+            "Post-import summary generation failed item_uid=%s error=%s", item_uid, exc
+        )
         return
 
     summary_text = str(result.get("summary_text") or "").strip()
     if not summary_text:
-        log.warning("Post-import summary generation returned empty output item_uid=%s", item_uid)
+        log.warning(
+            "Post-import summary generation returned empty output item_uid=%s", item_uid
+        )
         return
 
-    with sqlite3.connect(str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
+    with sqlite3.connect(
+        str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS
+    ) as conn:
         conn.execute(
             """
             INSERT INTO media_summaries (download_id, summary_text, model_name, source_segment_count, updated_at)
@@ -397,7 +427,9 @@ def _index_and_summarize_imported_media(state: AppState, item_uid: str, subtitle
     )
 
 
-def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Path) -> None:
+def _postprocess_imported_media(
+    state: AppState, metadata: Dict, media_path: Path
+) -> None:
     defaults = (state.config or {}).get("defaults") or {}
     item_uid = str(metadata["item_uid"])
     subtitle_mode = str(defaults.get("subtitle_transcription_mode") or "in_process")
@@ -413,10 +445,14 @@ def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Pat
             subtitle_transcription_mode=subtitle_mode,
         )
     except Exception as exc:
-        log.warning("Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc)
+        log.warning(
+            "Post-import subtitle generation failed item_uid=%s error=%s", item_uid, exc
+        )
         subtitle_path = None
 
-    filtered_category = _filter_imported_media(item_uid, Path(media_path), subtitle_path, defaults)
+    filtered_category = _filter_imported_media(
+        item_uid, Path(media_path), subtitle_path, defaults
+    )
     if filtered_category is not None:
         metadata["file_path"] = None
         metadata["file_size_bytes"] = None
@@ -425,7 +461,10 @@ def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Pat
         metadata["download_status"] = "filtered"
         metadata["error_message"] = f"Deleted by transcript filter: {filtered_category}"
         upsert_download(str(state.database_path), metadata)
-        log.info("Manual upload added to database after profanity check item_uid=%s status=filtered", item_uid)
+        log.info(
+            "Manual upload added to database after profanity check item_uid=%s status=filtered",
+            item_uid,
+        )
         return
 
     if subtitle_path:
@@ -438,7 +477,9 @@ def _postprocess_imported_media(state: AppState, metadata: Dict, media_path: Pat
         metadata["download_status"],
     )
     if subtitle_path:
-        _index_and_summarize_imported_media(state, item_uid, Path(subtitle_path), defaults)
+        _index_and_summarize_imported_media(
+            state, item_uid, Path(subtitle_path), defaults
+        )
 
 
 def _format_vtt_timestamp(value: float) -> str:
@@ -524,7 +565,9 @@ def _srt_to_vtt(content: str) -> str:
         end = _parse_srt_timestamp(end_raw)
         if start is None or end is None:
             continue
-        out_lines.append(f"{_format_vtt_timestamp(start)} --> {_format_vtt_timestamp(end)}{tail}")
+        out_lines.append(
+            f"{_format_vtt_timestamp(start)} --> {_format_vtt_timestamp(end)}{tail}"
+        )
 
     return "\n".join(out_lines).strip() + "\n"
 
@@ -552,7 +595,9 @@ def _subtitle_segments_from_path(subtitle_path: Path) -> List[Tuple[float, float
         while i < len(lines) and lines[i].strip():
             cue_lines.append(lines[i].strip())
             i += 1
-        cue_text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", " ".join(cue_lines)))).strip()
+        cue_text = re.sub(
+            r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", " ".join(cue_lines)))
+        ).strip()
         if cue_text and start is not None and end is not None:
             segments.append((start, end, cue_text))
     return segments
