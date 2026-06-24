@@ -235,10 +235,9 @@ table {
   background: #2f62f2;
   border-color: #2f62f2;
 }
-.icon-button.is-spinning {
+.icon-button.is-pulsing {
   cursor: progress;
-  opacity: 0.85;
-  animation: transfer-spin 0.8s linear infinite;
+  animation: transfer-pulse 1.8s ease-in-out infinite;
 }
 .toolbar-icon {
   display: block;
@@ -251,9 +250,15 @@ table {
   stroke-linejoin: round;
   stroke-width: 2.25;
 }
-@keyframes transfer-spin {
-  to {
-    transform: rotate(360deg);
+@keyframes transfer-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 rgba(77, 121, 255, 0);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 18px rgba(77, 121, 255, 0.55);
   }
 }
 .library-filter-wrap {
