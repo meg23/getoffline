@@ -243,6 +243,22 @@ def _resolve_subtitle_path(item: Download) -> Path | None:
     return None
 
 
+def _supersede_active_transcript_job(profile_id: str, download_id: int) -> None:
+    """Clear active transcript jobs before an explicit manual regeneration."""
+    now = timezone.now()
+    Job.objects.filter(
+        profile_id=profile_id,
+        job_type="generate_transcript",
+        idempotency_key=f"generate_transcript:{profile_id}:{download_id}",
+        status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+    ).update(
+        status=Job.STATUS_FAILED,
+        error_message="Superseded by a manual transcript regeneration request.",
+        finished_at=now,
+        updated_at=now,
+    )
+
+
 def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
     """Queue one batch summary fanout job when downloaded subtitle-backed rows lack summaries."""
     has_missing_summary = (
@@ -1353,6 +1369,7 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
     elif action == "transcript-summary":
         profile_id = _profile_id(request)
         for item in rows:
+            _supersede_active_transcript_job(profile_id, item.pk)
             MediaSummary.objects.filter(download=item).delete()
             media_type = (
                 "audio"
