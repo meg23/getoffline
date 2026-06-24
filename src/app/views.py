@@ -36,6 +36,7 @@ from models.models import (
     ScheduledJob,
     SourceConfig,
     TranscriptSegment,
+    MediaSummary,
 )
 
 from .queue import publish_job
@@ -48,7 +49,6 @@ from .routing import (
     YOUTUBE_DOWNLOAD_QUEUE,
     queue_name,
 )
-
 
 ALLOWED_JOB_TYPES = {
     "update_downloads",
@@ -297,8 +297,9 @@ def library(request: HttpRequest) -> HttpResponse:
 
     setup_start = time.perf_counter()
     downloads_qs = (
-        Download.objects.select_related("summary")
-        .filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES)
+        Download.objects.select_related("summary").filter(
+            profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES
+        )
         # Keep the library query narrow. Avoid pulling raw yt-dlp metadata JSON.
         # Keep description + summary_text because app/library.html currently uses
         # them for the mini-player/summary tooltip fallback.
@@ -1117,9 +1118,11 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         position=position,
         name=str(request.POST.get("name") or "").strip(),
         url=str(request.POST.get("url") or "").strip(),
-        media_type=str(request.POST.get("media_type") or "audio").strip().lower()
-        if source_type == SourceConfig.SOURCE_YOUTUBE
-        else None,
+        media_type=(
+            str(request.POST.get("media_type") or "audio").strip().lower()
+            if source_type == SourceConfig.SOURCE_YOUTUBE
+            else None
+        ),
         enabled=True,
         subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
         subtitle_offset_seconds=_optional_float(
@@ -1338,6 +1341,59 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
                     "redownload": True,
                 },
                 idempotency_key=f"download_single:{profile_id}:{item.pk}",
+            )
+            publish_job(
+                {
+                    "job_id": job.id,
+                    "job_type": job.job_type,
+                    "profile_id": job.profile_id,
+                    "attempt": 1,
+                }
+            )
+    elif action == "transcript-summary":
+        profile_id = _profile_id(request)
+        for item in rows:
+            MediaSummary.objects.filter(download=item).delete()
+            media_type = (
+                "audio"
+                if item.source_type == "podcast"
+                or str(item.file_ext or "").lower() not in {"mp4", "mkv", "webm", "mov"}
+                else "video"
+            )
+            job = create_job(
+                profile_id=profile_id,
+                job_type="generate_transcript",
+                payload={
+                    "download_id": item.pk,
+                    "subtitles": True,
+                    "source_type": item.source_type,
+                    "source_name": item.source_name,
+                    "media_type": media_type,
+                    "manual_refresh": True,
+                    "replace_existing": True,
+                },
+                idempotency_key=f"generate_transcript:{profile_id}:{item.pk}",
+            )
+            publish_job(
+                {
+                    "job_id": job.id,
+                    "job_type": job.job_type,
+                    "profile_id": job.profile_id,
+                    "attempt": 1,
+                }
+            )
+    elif action == "summary":
+        profile_id = _profile_id(request)
+        for item in rows:
+            job = create_job(
+                profile_id=profile_id,
+                job_type="generate_summary",
+                payload={
+                    "download_id": item.pk,
+                    "manual_refresh": True,
+                    "replace_existing": True,
+                },
+                idempotency_key=f"generate_summary:{profile_id}:{item.pk}",
             )
             publish_job(
                 {

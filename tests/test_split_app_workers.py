@@ -691,6 +691,85 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_batch_update_queues_transcript_summary_refresh(self):
+        client = Client()
+        from django.contrib.auth.models import User
+
+        User.objects.create_user(username="default", password="pass")
+        self.assertTrue(client.login(username="default", password="pass"))
+        download = Download.objects.create(
+            profile_id="default",
+            source_type="youtube",
+            source_name="Test Channel",
+            item_uid="video-refresh",
+            title="Refresh Me",
+            file_path="/tmp/refresh-me.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+        )
+        MediaSummary.objects.create(download=download, summary_text="old summary")
+
+        with patch("app.views.publish_job") as publish:
+            response = client.post(
+                "/batch-update/",
+                {"ids": [str(download.id)], "batch_action": "transcript-summary"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(MediaSummary.objects.filter(download=download).exists())
+        job = Job.objects.get(
+            job_type="generate_transcript", payload__download_id=download.id
+        )
+        self.assertTrue(job.payload["replace_existing"])
+        self.assertEqual(job.payload["media_type"], "video")
+        publish.assert_called_once_with(
+            {
+                "job_id": job.id,
+                "job_type": "generate_transcript",
+                "profile_id": "default",
+                "attempt": 1,
+            }
+        )
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_batch_update_queues_summary_refresh(self):
+        client = Client()
+        from django.contrib.auth.models import User
+
+        User.objects.create_user(username="default", password="pass")
+        self.assertTrue(client.login(username="default", password="pass"))
+        download = Download.objects.create(
+            profile_id="default",
+            source_type="podcast",
+            source_name="Test Feed",
+            item_uid="episode-refresh",
+            title="Refresh Summary",
+            file_path="/tmp/refresh-summary.mp3",
+            file_ext="mp3",
+            download_status="downloaded",
+        )
+
+        with patch("app.views.publish_job") as publish:
+            response = client.post(
+                "/batch-update/",
+                {"ids": [str(download.id)], "batch_action": "summary"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get(
+            job_type="generate_summary", payload__download_id=download.id
+        )
+        self.assertTrue(job.payload["replace_existing"])
+        publish.assert_called_once_with(
+            {
+                "job_id": job.id,
+                "job_type": "generate_summary",
+                "profile_id": "default",
+                "attempt": 1,
+            }
+        )
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(
             profile_id="default",
