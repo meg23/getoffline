@@ -184,7 +184,7 @@
 
   function setLoading(loading) {
     if (!button) return;
-    button.classList.toggle("is-spinning", loading);
+    button.classList.toggle("is-pulsing", loading);
     button.disabled = loading;
     button.setAttribute("aria-busy", loading ? "true" : "false");
   }
