@@ -173,93 +173,93 @@ def _source_subtitle_settings(download: Download) -> tuple[bool, float | None]:
     return bool(source.subtitles), source.subtitle_offset_seconds
 
 
-def enqueue_missing_transcript_jobs(channel, *, limit: int = 500) -> int:
-    rows = list(
-        Download.objects.filter(download_status="downloaded")
-        .exclude(file_path__isnull=True)
-        .exclude(file_path="")
-        .filter(subtitle_path__isnull=True)
-        .order_by("-last_seen_at", "id")[:limit]
-    )
-    blank_rows = list(
-        Download.objects.filter(download_status="downloaded", subtitle_path="")
-        .exclude(file_path__isnull=True)
-        .exclude(file_path="")
-        .order_by("-last_seen_at", "id")[: max(0, limit - len(rows))]
-    )
-    rows.extend(blank_rows)
-    enqueued = 0
-    skipped_disabled = 0
-    for download in rows:
-        subtitles_enabled, subtitle_offset = _source_subtitle_settings(download)
-        if not subtitles_enabled:
-            skipped_disabled += 1
-            log.info(
-                "Startup missing transcript skipped because subtitles disabled download_id=%s profile_id=%s source_type=%s source_name=%s title=%s",
-                download.id,
-                download.profile_id,
-                download.source_type,
-                download.source_name,
-                download.title,
-            )
-            continue
-        job = create_job(
-            profile_id=download.profile_id,
-            job_type="generate_transcript",
-            payload={
-                "download_id": download.id,
-                "subtitles": True,
-                "subtitle_offset_seconds": subtitle_offset,
-                "startup_missing_subtitle": True,
-            },
-            idempotency_key=f"generate_transcript:{download.profile_id}:{download.id}",
-        )
-        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
-        enqueued += 1
-        log.info(
-            "Startup missing transcript enqueued download_id=%s profile_id=%s job_id=%s title=%s file_path=%s",
-            download.id,
-            download.profile_id,
-            job.id,
-            download.title,
-            download.file_path,
-        )
-    log.info("Startup missing transcript scan finished candidates=%s enqueued=%s skipped_disabled=%s", len(rows), enqueued, skipped_disabled)
-    return enqueued
-
-
-def enqueue_missing_summary_jobs(*, limit: int = 500) -> int:
-    """Publish summary jobs for downloaded transcript-backed rows with missing or blank summaries."""
-    rows = list(
-        Download.objects.filter(download_status="downloaded")
-        .filter(Q(summary__isnull=True) | Q(summary__summary_text=""))
-        .filter(
-            Q(transcript_segments__isnull=False)
-            | (Q(subtitle_path__isnull=False) & ~Q(subtitle_path=""))
-        )
-        .distinct()
-        .order_by("-last_seen_at", "id")[:limit]
-    )
-    enqueued = 0
-    for download in rows:
-        job = create_job(
-            profile_id=download.profile_id,
-            job_type="generate_summary",
-            payload={"download_id": download.id, "startup_missing_summary": True},
-            idempotency_key=f"generate_summary:{download.profile_id}:{download.id}",
-        )
-        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
-        enqueued += 1
-        log.info(
-            "Startup missing summary enqueued download_id=%s profile_id=%s job_id=%s title=%s subtitle_path=%s",
-            download.id,
-            download.profile_id,
-            job.id,
-            download.title,
-            download.subtitle_path,
-        )
-    log.info("Startup missing summary scan finished candidates=%s enqueued=%s", len(rows), enqueued)
-    return enqueued
+#def enqueue_missing_transcript_jobs(channel, *, limit: int = 500) -> int:
+#    rows = list(
+#        Download.objects.filter(download_status="downloaded")
+#        .exclude(file_path__isnull=True)
+#        .exclude(file_path="")
+#        .filter(subtitle_path__isnull=True)
+#        .order_by("-last_seen_at", "id")[:limit]
+#    )
+#    blank_rows = list(
+#        Download.objects.filter(download_status="downloaded", subtitle_path="")
+#        .exclude(file_path__isnull=True)
+#        .exclude(file_path="")
+#        .order_by("-last_seen_at", "id")[: max(0, limit - len(rows))]
+#    )
+#    rows.extend(blank_rows)
+#    enqueued = 0
+#    skipped_disabled = 0
+#    for download in rows:
+#        subtitles_enabled, subtitle_offset = _source_subtitle_settings(download)
+#        if not subtitles_enabled:
+#            skipped_disabled += 1
+#            log.info(
+#                "Startup missing transcript skipped because subtitles disabled download_id=%s profile_id=%s source_type=%s source_name=%s title=%s",
+#                download.id,
+#                download.profile_id,
+#                download.source_type,
+#                download.source_name,
+#                download.title,
+#            )
+#            continue
+#        job = create_job(
+#            profile_id=download.profile_id,
+#            job_type="generate_transcript",
+#            payload={
+#                "download_id": download.id,
+#                "subtitles": True,
+#                "subtitle_offset_seconds": subtitle_offset,
+#                "startup_missing_subtitle": True,
+#            },
+#            idempotency_key=f"generate_transcript:{download.profile_id}:{download.id}",
+#        )
+#        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+#        enqueued += 1
+#        log.info(
+#            "Startup missing transcript enqueued download_id=%s profile_id=%s job_id=%s title=%s file_path=%s",
+#            download.id,
+#            download.profile_id,
+#            job.id,
+#            download.title,
+#            download.file_path,
+#        )
+#    log.info("Startup missing transcript scan finished candidates=%s enqueued=%s skipped_disabled=%s", len(rows), enqueued, skipped_disabled)
+#    return enqueued
+#
+#
+#def enqueue_missing_summary_jobs(*, limit: int = 500) -> int:
+#    """Publish summary jobs for downloaded transcript-backed rows with missing or blank summaries."""
+#    rows = list(
+#        Download.objects.filter(download_status="downloaded")
+#        .filter(Q(summary__isnull=True) | Q(summary__summary_text=""))
+#        .filter(
+#            Q(transcript_segments__isnull=False)
+#            | (Q(subtitle_path__isnull=False) & ~Q(subtitle_path=""))
+#        )
+#        .distinct()
+#        .order_by("-last_seen_at", "id")[:limit]
+#    )
+#    enqueued = 0
+#    for download in rows:
+#        job = create_job(
+#            profile_id=download.profile_id,
+#            job_type="generate_summary",
+#            payload={"download_id": download.id, "startup_missing_summary": True},
+#            idempotency_key=f"generate_summary:{download.profile_id}:{download.id}",
+#        )
+#        publish_job({"job_id": job.id, "job_type": job.job_type, "profile_id": job.profile_id, "attempt": 1})
+#        enqueued += 1
+#        log.info(
+#            "Startup missing summary enqueued download_id=%s profile_id=%s job_id=%s title=%s subtitle_path=%s",
+#            download.id,
+#            download.profile_id,
+#            job.id,
+#            download.title,
+#            download.subtitle_path,
+#        )
+#    log.info("Startup missing summary scan finished candidates=%s enqueued=%s", len(rows), enqueued)
+#    return enqueued
 
 def requeue_existing_jobs_enabled() -> bool:
     return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {"1", "true", "yes", "on"}
@@ -279,19 +279,19 @@ def run_worker(worker_type: str, *, prefetch_count: int | None = None, max_messa
         channel.queue_declare(queue=queue, durable=True, arguments=queue_arguments(queue) or None)
         channel.queue_bind(queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue)
         channel.basic_qos(prefetch_count=safe_prefetch)
-        should_requeue_existing = requeue_existing_jobs_enabled() or worker_type in {"downloader-youtube", "downloader-podcast"}
-        if should_requeue_existing:
-            requeued = requeue_existing_jobs(channel, worker_type)
-            if requeued:
-                log.info("Worker requeued existing DB jobs worker_type=%s queue=%s count=%s", worker_type, queue, requeued)
-            else:
-                log.info("Worker requeue existing DB jobs found no queued rows worker_type=%s queue=%s", worker_type, queue)
-        else:
-            log.info("Worker skipped existing DB job requeue worker_type=%s queue=%s enable_with=GETOFFLINE_REQUEUE_EXISTING_JOBS=1", worker_type, queue)
-        if worker_type == "transcripts":
-            enqueue_missing_transcript_jobs(channel)
-        if worker_type == "summaries":
-            enqueue_missing_summary_jobs()
+        #should_requeue_existing = requeue_existing_jobs_enabled() or worker_type in {"downloader-youtube", "downloader-podcast"}
+        #if should_requeue_existing:
+        #    requeued = requeue_existing_jobs(channel, worker_type)
+        #    if requeued:
+        #        log.info("Worker requeued existing DB jobs worker_type=%s queue=%s count=%s", worker_type, queue, requeued)
+        #    else:
+        #        log.info("Worker requeue existing DB jobs found no queued rows worker_type=%s queue=%s", worker_type, queue)
+        #else:
+        #    log.info("Worker skipped existing DB job requeue worker_type=%s queue=%s enable_with=GETOFFLINE_REQUEUE_EXISTING_JOBS=1", worker_type, queue)
+        #if worker_type == "transcripts":
+        #    enqueue_missing_transcript_jobs(channel)
+        #if worker_type == "summaries":
+        #    enqueue_missing_summary_jobs()
         log.info("Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s", worker_type, queue, settings.RABBITMQ_EXCHANGE, safe_prefetch)
         for method_frame, _properties, body in channel.consume(queue, inactivity_timeout=1):
             if _STOP:

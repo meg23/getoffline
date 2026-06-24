@@ -423,6 +423,32 @@ def _resolve_subtitle_worker_count(configured_workers: int) -> int:
     return 1
 
 
+def _coerce_positive_int(value: object, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(fallback)
+    return max(1, parsed)
+
+
+def _resolve_scan_limit(entry: Dict, defaults: Dict, source_max_downloads: int) -> int:
+    """Return how many recent playlist entries to inspect.
+
+    max_downloads is the cap on NEW downloads. scan_limit is intentionally
+    larger so already-downloaded items at the top of a feed do not prevent
+    the downloader from finding older, still-new entries.
+    """
+    configured = (
+        entry.get("scan_limit")
+        or entry.get("playlist_scan_limit")
+        or defaults.get("scan_limit")
+        or defaults.get("playlist_scan_limit")
+    )
+    if configured:
+        return max(source_max_downloads, _coerce_positive_int(configured, source_max_downloads))
+    return max(source_max_downloads, source_max_downloads * 10, 50)
+
+
 def _build_youtube_payload(
     *,
     source_name: str,
@@ -563,8 +589,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
             entry_subtitles_enabled = entry.get("subtitles", True)
             delete_explicit_content = bool(entry.get("delete_explicit_content", False))
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
-            source_max_downloads = int(entry.get("max_downloads") or defaults.get("max_downloads") or defaults.get("playlist_end") or 3)
-            source_max_downloads = max(1, source_max_downloads)
+            source_max_downloads = _coerce_positive_int(
+                entry.get("max_downloads") or defaults.get("max_downloads") or defaults.get("playlist_end") or 3,
+                3,
+            )
+            playlist_scan_limit = _resolve_scan_limit(entry, defaults, source_max_downloads)
             should_generate_subtitles = entry_subtitles_enabled
             subtitle_transcription_mode = str(defaults.get("subtitle_transcription_mode", "in_process"))
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
@@ -665,6 +694,10 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 _ = incomplete
                 entry_key = _entry_key(info_dict)
                 candidate_entries_seen_keys.add(entry_key)
+                if len(completed_download_ids) >= source_max_downloads:
+                    reason = "Skipping because source max new downloads reached"
+                    _record_skip(reason, info_dict)
+                    return reason
                 live_reason = None if allow_live_streams else skip_live_streams(info_dict, incomplete=incomplete)
                 if live_reason:
                     _record_skip(live_reason, info_dict)
@@ -842,7 +875,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             youtube_extractor_args = {} if include_shorts else {"skip": ["shorts"]}
 
             ydl_opts = {
-                "playlistend": source_max_downloads,
+                "playlistend": playlist_scan_limit,
                 "restrictfilenames": True,
                 "outtmpl_na_placeholder": "NA",
                 "outtmpl": f"{folder}/%(upload_date)s-%(title)s.%(ext)s",
@@ -905,6 +938,12 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 )
 
             log.info(f"Downloading YouTube ({download_type}): {name}")
+            log.info(
+                "YouTube download limits for %s: max_new_downloads=%d playlist_scan_limit=%d",
+                name,
+                source_max_downloads,
+                playlist_scan_limit,
+            )
             log.info("YouTube download mode for %s: full entry extraction enabled", name)
             if is_forced_redownload:
                 log.info("YouTube download mode for %s: forced redownload (duplicate skip disabled)", name)

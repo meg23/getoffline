@@ -1004,8 +1004,8 @@ def download_episode(job: Job) -> None:
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
     if not download_id:
-        if _source_download_limit_reached(job.profile_id, payload):
-            return
+        #if _source_download_limit_reached(job.profile_id, payload):
+        #    return
         downloaded_result = _download_with_yt_dlp(job, payload)
         if downloaded_result is None:
             log.warning("Download worker did not create a download row job_id=%s", job.id)

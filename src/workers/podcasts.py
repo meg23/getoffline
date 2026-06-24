@@ -36,6 +36,27 @@ def _http_retry_backoff(retry_count: int) -> int:
     return min(2 ** int(retry_count), 10)
 
 
+def _coerce_positive_int(value: object, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(fallback)
+    return max(1, parsed)
+
+
+def _resolve_scan_limit(entry: dict, defaults: dict, source_max_downloads: int) -> int:
+    """Return how many recent RSS entries to inspect for new episodes."""
+    configured = (
+        entry.get("scan_limit")
+        or entry.get("podcast_scan_limit")
+        or defaults.get("scan_limit")
+        or defaults.get("podcast_scan_limit")
+    )
+    if configured:
+        return max(source_max_downloads, _coerce_positive_int(configured, source_max_downloads))
+    return max(source_max_downloads, source_max_downloads * 10, 50)
+
+
 def _download_episode_media(episode_job: dict):
     ydl_opts = episode_job["ydl_opts"]
     mp3_url = episode_job["mp3_url"]
@@ -254,8 +275,8 @@ def _download_podcasts_in_process(config, downloaded_items):
             if str(os.getenv("GETOFFLINE_ENABLE_SUBTITLE_EXTRACTION", "1")).strip().lower() not in {"1", "true", "yes", "on"}:
                 entry_subtitles_enabled = False
             subtitle_offset_seconds = entry.get("subtitle_offset_seconds")
-            source_max_downloads = int(entry.get("max_downloads") or defaults.get("max_downloads") or 3)
-            source_max_downloads = max(1, source_max_downloads)
+            source_max_downloads = _coerce_positive_int(entry.get("max_downloads") or defaults.get("max_downloads") or 3, 3)
+            podcast_scan_limit = _resolve_scan_limit(entry, defaults, source_max_downloads)
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)
 
@@ -273,7 +294,7 @@ def _download_podcasts_in_process(config, downloaded_items):
             else:
                 feed = feedparser.parse(url)
                 episode_candidates = []
-                for ep in feed.entries[:source_max_downloads]:
+                for ep in feed.entries[:podcast_scan_limit]:
                     if not ep.enclosures:
                         continue
                     episode_candidates.append(
@@ -284,6 +305,13 @@ def _download_podcasts_in_process(config, downloaded_items):
                             "artwork_url": _podcast_artwork_url(feed, ep),
                         }
                     )
+
+            log.info(
+                "Podcast download limits for %s: max_new_downloads=%d feed_scan_limit=%d",
+                name,
+                source_max_downloads,
+                podcast_scan_limit,
+            )
 
             episode_jobs = []
             for candidate in episode_candidates:
@@ -296,6 +324,9 @@ def _download_podcasts_in_process(config, downloaded_items):
                     media_url=mp3_url,
                     title=episode_title,
                 )
+
+                if len(episode_jobs) >= source_max_downloads:
+                    break
 
                 if not forced_redownload and is_downloaded(db_path, "podcast", name, item_uid):
                     continue
