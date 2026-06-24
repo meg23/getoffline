@@ -59,6 +59,7 @@ if django is not None:
         retention_cleanup,
         transcode_media,
         _idempotency_key,
+        _is_expected_ytdlp_download_error,
         _youtube_candidates,
     )  # noqa: E402
     from workers.runner import enqueue_missing_summary_jobs  # noqa: E402
@@ -73,6 +74,33 @@ if django is not None:
     }
 )
 class SharedDjangoModelTests(TestCase):
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_expected_ytdlp_unavailable_errors_are_nonfatal(self):
+        class DownloadError(Exception):
+            pass
+
+        self.assertTrue(
+            _is_expected_ytdlp_download_error(
+                DownloadError(
+                    "ERROR: [youtube] HiQ3UtXDgGE: Video unavailable. "
+                    "This video has been removed by the uploader"
+                )
+            )
+        )
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_unexpected_ytdlp_errors_are_not_suppressed(self):
+        class DownloadError(Exception):
+            pass
+
+        self.assertFalse(
+            _is_expected_ytdlp_download_error(DownloadError("network fail"))
+        )
+        self.assertFalse(
+            _is_expected_ytdlp_download_error(TypeError("video unavailable"))
+        )
+
     @unittest.skipIf(django is None, "Django is not installed")
     def test_create_claim_and_finish_job(self):
         job = create_job(
