@@ -26,7 +26,7 @@ from app.routing import (  # noqa: E402
     queue_name,
 )
 from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-from models.models import Job, SourceConfig  # noqa: E402
+from models.models import Download, Job, SourceConfig  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
 from app.queue import job_priority, publish_job  # noqa: E402
 
