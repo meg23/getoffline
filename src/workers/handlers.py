@@ -699,14 +699,16 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         info_dict = (
             event.get("info_dict") if isinstance(event.get("info_dict"), dict) else {}
         )
-        _touch_active_job(
-            job,
-            stage="downloading",
-            title=str(
-                info_dict.get("title") or payload.get("title") or download_url
-            ).strip(),
-        )
-        if event.get("status") != "finished":
+        status = event.get("status")
+        if status == "downloading":
+            _touch_active_job(
+                job,
+                stage="downloading",
+                title=str(
+                    info_dict.get("title") or payload.get("title") or download_url
+                ).strip(),
+            )
+        if status != "finished":
             return
         candidate = event.get("filename") or event.get("tmpfilename")
         if candidate and Path(candidate).exists():
@@ -1543,11 +1545,6 @@ def download_episode(job: Job) -> None:
         job.payload,
     )
     payload = job.payload if isinstance(job.payload, dict) else {}
-    _touch_active_job(
-        job,
-        stage="downloading",
-        title=str(payload.get("title") or payload.get("url") or "").strip(),
-    )
     download_id = payload.get("download_id")
     if not download_id:
         downloaded_result = _download_with_yt_dlp(job, payload)
