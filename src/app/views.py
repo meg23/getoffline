@@ -431,6 +431,32 @@ def _job_stage(job: Job) -> tuple[str, str]:
     return "queued", job.job_type.replace("_", " ").title()
 
 
+def _job_still_needs_work(job: Job) -> bool:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = _optional_int(payload.get("download_id"))
+    if not download_id:
+        return True
+
+    download = Download.objects.filter(
+        pk=download_id, profile_id=job.profile_id
+    ).first()
+    if download is None:
+        return job.job_type in {"download_episode", "download_single"}
+    if job.job_type == "generate_summary":
+        return not MediaSummary.objects.filter(download_id=download_id).exists()
+    if job.job_type in {"generate_transcript", "transcode_media"}:
+        has_transcript = TranscriptSegment.objects.filter(
+            download_id=download_id
+        ).exists()
+        has_subtitle_file = bool(
+            download.subtitle_path or download.subtitle_path_relative
+        )
+        return not (has_transcript or has_subtitle_file)
+    if job.job_type in {"download_episode", "download_single"}:
+        return download.download_status != "downloaded"
+    return True
+
+
 def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
     jobs = list(
         Job.objects.filter(
@@ -442,9 +468,10 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
                 "transcode_media",
                 "generate_summary",
             ],
-            status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
-        ).order_by("created_at", "id")[:20]
+            status=Job.STATUS_RUNNING,
+        ).order_by("started_at", "created_at", "id")[:40]
     )
+    active_jobs = [job for job in jobs if _job_still_needs_work(job)][:20]
     return [
         {
             "id": job.id,
@@ -454,7 +481,7 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
             "stage_label": _job_stage(job)[1],
             "updated_at": job.updated_at.isoformat() if job.updated_at else "",
         }
-        for job in jobs
+        for job in active_jobs
     ]
 
 
