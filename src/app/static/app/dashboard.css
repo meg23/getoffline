@@ -953,3 +953,6 @@ tbody tr:nth-child(even) td {
   from { transform: translateX(0); }
   to { transform: translateX(calc(-50% - 1.5rem)); }
 }
+.active-pipeline-panel[hidden] {
+  display: none;
+}
