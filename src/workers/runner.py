@@ -10,7 +10,6 @@ import pika
 from pika import exceptions as pika_exceptions
 from django.conf import settings
 from django.db import close_old_connections
-from django.db.models import Q
 from workers.logger import get_logger
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
@@ -20,7 +19,6 @@ from app.routing import (  # noqa: E402
     YOUTUBE_DOWNLOAD_QUEUE,
     PODCAST_DOWNLOAD_QUEUE,
     SERIAL_EPISODE_CHECK_QUEUE,
-    SUMMARY_QUEUE,
     TRANSFER_QUEUE,
     TRANSCRIPT_QUEUE,
     CLEANUP_QUEUE,
@@ -41,7 +39,6 @@ QUEUE_BY_WORKER = {
     "downloader-youtube": YOUTUBE_DOWNLOAD_QUEUE,
     "downloader-podcast": PODCAST_DOWNLOAD_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
-    "summaries": SUMMARY_QUEUE,
     "transfer": TRANSFER_QUEUE,
     "cleanup": CLEANUP_QUEUE,
 }
@@ -51,7 +48,6 @@ JOB_TYPES_BY_WORKER = {
     "downloader-youtube": {"download_episode", "download_single", "transcode_media"},
     "downloader-podcast": {"download_episode", "download_single", "transcode_media"},
     "transcripts": {"generate_transcript"},
-    "summaries": {"generate_summary", "summarize_missing"},
     "transfer": {"transfer_media"},
     "cleanup": {"retention_cleanup"},
 }
@@ -242,50 +238,6 @@ def _source_subtitle_settings(download: Download) -> tuple[bool, float | None]:
     return bool(source.subtitles), source.subtitle_offset_seconds
 
 
-def enqueue_missing_summary_jobs(*, limit: int = 500) -> int:
-    rows = list(
-        Download.objects.filter(download_status="downloaded")
-        .filter(Q(summary__isnull=True) | Q(summary__summary_text=""))
-        .filter(
-            Q(transcript_segments__isnull=False)
-            | (Q(subtitle_path__isnull=False) & ~Q(subtitle_path=""))
-        )
-        .distinct()
-        .order_by("-last_seen_at", "id")[:limit]
-    )
-    enqueued = 0
-    for download in rows:
-        job = create_job(
-            profile_id=download.profile_id,
-            job_type="generate_summary",
-            payload={"download_id": download.id, "startup_missing_summary": True},
-            idempotency_key=f"generate_summary:{download.profile_id}:{download.id}",
-        )
-        publish_job(
-            {
-                "job_id": job.id,
-                "job_type": job.job_type,
-                "profile_id": job.profile_id,
-                "attempt": 1,
-            }
-        )
-        enqueued += 1
-        log.info(
-            "Startup missing summary enqueued download_id=%s profile_id=%s job_id=%s title=%s subtitle_path=%s",
-            download.id,
-            download.profile_id,
-            job.id,
-            download.title,
-            download.subtitle_path,
-        )
-    log.info(
-        "Startup missing summary scan finished candidates=%s enqueued=%s",
-        len(rows),
-        enqueued,
-    )
-    return enqueued
-
-
 def requeue_existing_jobs_enabled() -> bool:
     return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {
         "1",
@@ -336,6 +288,14 @@ def run_worker(
             queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue
         )
         channel.basic_qos(prefetch_count=safe_prefetch)
+        if requeue_existing_jobs_enabled():
+            requeued = requeue_existing_jobs(channel, worker_type)
+            log.info(
+                "Worker requeued existing jobs worker_type=%s queue=%s count=%s",
+                worker_type,
+                queue,
+                requeued,
+            )
         log.info(
             "Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s",
             worker_type,

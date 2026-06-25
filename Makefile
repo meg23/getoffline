@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-summaries run-worker-cleanup run-scheduler
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -87,10 +87,6 @@ run-worker-transcripts: venv
 run-worker-transfer: venv
 	@echo "Running transfer worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transfer
-
-run-worker-summaries: venv
-	@echo "Running summaries worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers summaries --prefetch $${PREFETCH:-4}
 
 run-worker-cleanup: venv
 	@echo "Running cleanup worker..."

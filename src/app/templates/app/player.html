@@ -19,7 +19,6 @@
         <form method="post" action="{% url 'mark_unplayed' item.id %}">{% csrf_token %}<button type="submit">Mark unplayed</button></form>
         {% if item.favorite %}<form method="post" action="{% url 'unfavorite' item.id %}">{% csrf_token %}<button type="submit">Unfavorite</button></form>{% else %}<form method="post" action="{% url 'favorite' item.id %}">{% csrf_token %}<button type="submit">Favorite</button></form>{% endif %}
       </div>
-      {% if item.summary.summary_text %}<section class="transcript-wrap"><h2>Summary</h2><div class="transcript">{{ item.summary.summary_text }}</div></section>{% endif %}
       <form id="position-form" method="post" action="{% url 'save_position' item.id %}">{% csrf_token %}<input type="hidden" name="position_seconds" id="position-seconds"></form>
     </div>
     <script>

@@ -12,7 +12,6 @@ from models.models import (
     AppConfigValue,
     Download,
     DownloadSettings,
-    MediaSummary,
     ProfileConfigValue,
     ProfileDownloadSettings,
     SourceConfig,
@@ -88,7 +87,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--skip-config",
             action="store_true",
-            help="Only import library metadata, transcripts, and summaries; skip settings/source tables.",
+            help="Only import library metadata and transcripts; skip settings/source tables.",
         )
         parser.add_argument(
             "--progress-interval",
@@ -135,7 +134,6 @@ class Command(BaseCommand):
                 "Imported legacy SQLite database for profile "
                 f"{profile_id!r}: {counts['downloads']} downloads, "
                 f"{counts['transcript_segments']} transcript segments, "
-                f"{counts['media_summaries']} summaries, "
                 f"{counts['source_configs']} sources."
             )
         )
@@ -166,7 +164,6 @@ class Command(BaseCommand):
         counts = {
             "downloads": 0,
             "transcript_segments": 0,
-            "media_summaries": 0,
             "source_configs": 0,
         }
         if not skip_config:
@@ -188,9 +185,6 @@ class Command(BaseCommand):
         self._write_progress(
             f"Imported {counts['transcript_segments']} transcript segments."
         )
-        self._write_progress("Importing media summaries...")
-        counts["media_summaries"] = self._import_media_summaries(legacy, id_map)
-        self._write_progress(f"Imported {counts['media_summaries']} media summaries.")
         return counts
 
     def _import_config(self, legacy: sqlite3.Connection, profile_id: str) -> int:
@@ -296,28 +290,6 @@ class Command(BaseCommand):
             self._write_row_progress("transcript segments", count)
         return count
 
-    def _import_media_summaries(
-        self, legacy: sqlite3.Connection, id_map: dict[int, int]
-    ) -> int:
-        if not self._has_table(legacy, "media_summaries"):
-            return 0
-        count = 0
-        for row in legacy.execute("SELECT * FROM media_summaries"):
-            new_download_id = id_map.get(int(row["download_id"]))
-            if not new_download_id:
-                continue
-            MediaSummary.objects.update_or_create(
-                download_id=new_download_id,
-                defaults={
-                    "summary_text": row["summary_text"],
-                    "model_name": row["model_name"],
-                    "source_segment_count": row["source_segment_count"],
-                    "updated_at": self._datetime(row["updated_at"], timezone.now()),
-                },
-            )
-            count += 1
-            self._write_row_progress("media summaries", count)
-        return count
 
     def _upsert_download(self, payload: dict[str, Any]) -> Download:
         lookup = {

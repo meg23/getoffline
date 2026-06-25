@@ -13,7 +13,6 @@ from models.jobs import create_job
 from models.models import (
     Download,
     Job,
-    MediaSummary,
     ProfileConfigValue,
     SourceConfig,
     TranscriptSegment,
@@ -24,8 +23,6 @@ from workers.youtube import (
     _enable_youtube_quickjs_remote_component,
 )
 from workers.subtitles import create_subtitles
-from workers.summary_tasks import _load_segments_from_subtitle
-from workers.summarization import summarize_segments
 
 log = get_logger("workers.handlers")
 
@@ -1703,8 +1700,28 @@ def _subtitle_offset_for_download(download: Download, payload: dict) -> float | 
     )
 
 
+def _load_segments_from_subtitle(path: Path) -> list[str]:
+    if not path.exists() or path.suffix.lower() != ".srt":
+        return []
+    import re
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    segments: list[str] = []
+    for block in re.split(r"\n\s*\n", text.strip()):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 2:
+            continue
+        ts_index = 1 if len(lines) > 1 and "-->" in lines[1] else 0
+        if "-->" not in lines[ts_index]:
+            continue
+        body = " ".join(lines[ts_index + 1 :]).strip()
+        if body:
+            segments.append(body)
+    return segments
+
+
 def generate_transcript(job: Job) -> None:
-    """Generate Whisper subtitles/transcript segments, then enqueue summary work."""
+    """Generate Whisper subtitles/transcript segments."""
     started_at = time.monotonic()
     log.info(
         "Transcript worker started job_id=%s profile_id=%s payload=%s",
@@ -1846,163 +1863,6 @@ def generate_transcript(job: Job) -> None:
                 enabled,
                 media_path,
             )
-    child = create_job(
-        profile_id=job.profile_id,
-        job_type="generate_summary",
-        payload={
-            "download_id": download_id,
-            "original_file_path": payload.get("original_file_path") or "",
-        },
-        idempotency_key=f"generate_summary:{job.profile_id}:{download_id}",
-    )
-    _publish_created_job(child)
-    log.info(
-        "Transcript worker queued summary job parent_job_id=%s download_id=%s child_job_id=%s elapsed_seconds=%.2f",
-        job.id,
-        download_id,
-        child.id,
-        time.monotonic() - started_at,
-    )
-
-
-def generate_summary(job: Job) -> None:
-    log.info(
-        "Summary worker started job_id=%s profile_id=%s payload=%s",
-        job.id,
-        job.profile_id,
-        job.payload,
-    )
-    payload = job.payload if isinstance(job.payload, dict) else {}
-    download_id = payload.get("download_id")
-    download = (
-        Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
-        if download_id
-        else None
-    )
-    if download is None:
-        log.warning(
-            "Summary worker skipped missing download job_id=%s download_id=%s",
-            job.id,
-            download_id,
-        )
-        return
-    _touch_active_job(
-        job,
-        stage="finalizing_summary",
-        title=str(download.title or "").strip(),
-    )
-    segments = list(
-        download.transcript_segments.order_by("start_seconds", "id").values_list(
-            "text", flat=True
-        )
-    )
-    if not segments and download.subtitle_path:
-        segments = _load_segments_from_subtitle(Path(download.subtitle_path))
-    if segments:
-        model_name = _profile_setting(job.profile_id, "summary_model", "qwen2.5:0.5b")
-        timeout_seconds = int(
-            _profile_setting(job.profile_id, "summary_timeout_seconds", "90")
-        )
-        result = summarize_segments(
-            segments,
-            model_name=model_name,
-            mode="in_process",
-            timeout_seconds=timeout_seconds,
-        )
-        summary = str(result.get("summary_text") or "").strip()
-        if summary:
-            MediaSummary.objects.update_or_create(
-                download=download,
-                defaults={
-                    "summary_text": summary,
-                    "model_name": str(result.get("model_name") or model_name),
-                    "source_segment_count": len(segments),
-                    "updated_at": timezone.now(),
-                },
-            )
-            log.info(
-                "Summary worker generated summary job_id=%s download_id=%s segments=%s chars=%s",
-                job.id,
-                download_id,
-                len(segments),
-                len(summary),
-            )
-        else:
-            log.warning(
-                "Summary worker got empty summary job_id=%s download_id=%s",
-                job.id,
-                download_id,
-            )
-    else:
-        log.warning(
-            "Summary worker skipped generation with no transcript segments job_id=%s download_id=%s subtitle_path=%s",
-            job.id,
-            download_id,
-            download.subtitle_path,
-        )
-    original_file_path = str(payload.get("original_file_path") or "").strip()
-    if download is not None and original_file_path:
-        original_path = Path(original_file_path).expanduser().resolve()
-        current_path = (
-            Path(str(download.file_path or "")).expanduser().resolve()
-            if download.file_path
-            else None
-        )
-        if current_path is not None and original_path != current_path:
-            original_path.unlink(missing_ok=True)
-            log.info(
-                "Summary worker deleted pre-transcode original media job_id=%s download_id=%s original=%s current=%s",
-                job.id,
-                download.id,
-                original_path,
-                current_path,
-            )
-        else:
-            log.info(
-                "Summary worker kept original media because it matches current file job_id=%s download_id=%s path=%s",
-                job.id,
-                download.id,
-                original_path,
-            )
-    if download is not None:
-        log.info(
-            "Summary worker finalized media row job_id=%s download_id=%s file_path=%s file_ext=%s",
-            job.id,
-            download.id,
-            download.file_path,
-            download.file_ext,
-        )
-    return None
-
-
-def summarize_missing(job: Job) -> None:
-    downloads = list(
-        Download.objects.filter(
-            profile_id=job.profile_id, summary__isnull=True
-        ).order_by("-last_seen_at")[:100]
-    )
-    log.info(
-        "Summarize-missing fanout started job_id=%s profile_id=%s candidates=%s",
-        job.id,
-        job.profile_id,
-        len(downloads),
-    )
-    enqueued = 0
-    for download in downloads:
-        child = create_job(
-            profile_id=job.profile_id,
-            job_type="generate_summary",
-            payload={"download_id": download.id},
-            idempotency_key=f"generate_summary:{job.profile_id}:{download.id}",
-        )
-        _publish_created_job(child)
-        enqueued += 1
-    log.info(
-        "Summarize-missing fanout finished job_id=%s profile_id=%s enqueued_summary_jobs=%s",
-        job.id,
-        job.profile_id,
-        enqueued,
-    )
 
 
 def retention_cleanup(job: Job) -> None:
@@ -2099,8 +1959,6 @@ HANDLERS = {
     "download_single": download_single,
     "transcode_media": transcode_media,
     "generate_transcript": generate_transcript,
-    "generate_summary": generate_summary,
-    "summarize_missing": summarize_missing,
     "transfer_media": transfer_media,
     "retention_cleanup": retention_cleanup,
 }

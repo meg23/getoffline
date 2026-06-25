@@ -17,7 +17,6 @@ from workers.content_filter import (
 from workers.logger import get_logger
 from workers.profiles import ProfileManager
 from workers.subtitles import create_subtitles
-from workers.summarization import summarize_segments
 from workers.download_store import upsert_download
 
 MEDIA_EXTENSIONS = {
@@ -355,7 +354,7 @@ def _download_id_for_item_uid(db_path: Path, item_uid: str) -> Optional[int]:
     return int(row[0]) if row else None
 
 
-def _index_and_summarize_imported_media(
+def _index_imported_media_transcript(
     state: AppState, item_uid: str, subtitle_path: Path, defaults: Dict
 ) -> None:
     download_id = _download_id_for_item_uid(state.database_path, item_uid)
@@ -389,50 +388,8 @@ def _index_and_summarize_imported_media(
         )
         conn.commit()
 
-    try:
-        result = summarize_segments(
-            [text for _, _, text in segments],
-            model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
-            mode="in_process",
-            timeout_seconds=max(1, int(defaults.get("summary_timeout_seconds") or 90)),
-        )
-    except Exception as exc:
-        log.warning(
-            "Post-import summary generation failed item_uid=%s error=%s", item_uid, exc
-        )
-        return
-
-    summary_text = str(result.get("summary_text") or "").strip()
-    if not summary_text:
-        log.warning(
-            "Post-import summary generation returned empty output item_uid=%s", item_uid
-        )
-        return
-
-    with sqlite3.connect(
-        str(state.database_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS
-    ) as conn:
-        conn.execute(
-            """
-            INSERT INTO media_summaries (download_id, summary_text, model_name, source_segment_count, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(download_id) DO UPDATE SET
-              summary_text = excluded.summary_text,
-              model_name = excluded.model_name,
-              source_segment_count = excluded.source_segment_count,
-              updated_at = excluded.updated_at
-            """,
-            (
-                download_id,
-                summary_text,
-                str(result.get("model_name") or "unknown"),
-                len(segments),
-                str(result.get("updated_at") or datetime.now(timezone.utc).isoformat()),
-            ),
-        )
-        conn.commit()
     log.info(
-        "Post-import transcript indexed and summary generated item_uid=%s download_id=%s segments=%s",
+        "Post-import transcript indexed item_uid=%s download_id=%s segments=%s",
         item_uid,
         download_id,
         len(segments),
@@ -491,7 +448,7 @@ def _postprocess_imported_media(
         metadata["download_status"],
     )
     if subtitle_path:
-        _index_and_summarize_imported_media(
+        _index_imported_media_transcript(
             state, item_uid, Path(subtitle_path), defaults
         )
 

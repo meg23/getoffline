@@ -101,7 +101,6 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0006_add_favorite_column",
                     "0007_add_relative_media_paths",
                     "0008_add_transcript_search_tables",
-                    "0009_add_media_summaries_table",
                     "0010_add_source_max_downloads",
                     "0011_add_source_explicit_content_filter",
                     "0012_add_youtube_include_flags",
@@ -130,7 +129,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM schema_migrations"
                 ).fetchone()[0]
 
-            self.assertEqual(count, 12)
+            self.assertEqual(count, 11)
 
     def test_download_artifact_path_prefers_relative_reference(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,11 +151,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "audio_format": "m4a",
                     "max_downloads": "7",
                     "playlist_end": "9",
-                    "summary_model": "qwen2.5:0.5b",
-                    "ollama_path": "/opt/bin/ollama",
                     "js_runtime_path": "/usr/bin/qjs",
-                    "android_sync_target": "directory",
-                    "android_sync_directory": "/mnt/offline",
                     "manual_upload_delete_explicit_content": "1",
                 },
             )
@@ -169,13 +164,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertEqual(config["defaults"]["audio_format"], "m4a")
             self.assertEqual(config["defaults"]["max_downloads"], 7)
             self.assertEqual(config["defaults"]["playlist_end"], 9)
-            self.assertEqual(config["defaults"]["summary_model"], "qwen2.5:0.5b")
-            self.assertEqual(config["defaults"]["ollama_path"], "/opt/bin/ollama")
             self.assertEqual(config["defaults"]["js_runtime_path"], "/usr/bin/qjs")
-            self.assertEqual(config["defaults"]["android_sync_target"], "directory")
-            self.assertEqual(
-                config["defaults"]["android_sync_directory"], "/mnt/offline"
-            )
             self.assertTrue(config["defaults"]["manual_upload_delete_explicit_content"])
             self.assertIn("SID", config["download_settings"]["youtube_cookie_text"])
 

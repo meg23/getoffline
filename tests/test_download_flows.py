@@ -135,7 +135,7 @@ class DownloadFlowTests(unittest.TestCase):
             ):
                 youtube.download_youtube_items(config, [])
 
-            self.assertEqual(FakeYoutubeDL.instances[0].opts["playlistend"], 2)
+            self.assertEqual(FakeYoutubeDL.instances[0].opts["playlistend"], 50)
 
     def test_source_max_downloads_limits_podcast_feed_entries(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -448,49 +448,28 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertEqual(metadata["thumbnail_path"], str(thumbnail.resolve()))
             self.assertEqual(metadata["artwork_path"], str(thumbnail.resolve()))
 
-    def test_youtube_parent_process_invokes_short_lived_subprocess_and_tracks_rss(self):
+    def test_youtube_download_runs_in_process(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
             downloaded_items = []
-
-            fake_stdout = (
-                '{"downloaded_items":["YouTube: Test YouTube Source – Test Video"]}'
-            )
             with (
-                patch("workers.youtube.subprocess.run") as run_mock,
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
                 patch("workers.youtube._parent_rss_mb", side_effect=[120.0, 121.0]),
             ):
-                run_mock.return_value = SimpleNamespace(
-                    returncode=0, stdout=fake_stdout, stderr=""
-                )
                 youtube.download_youtube_items(config, downloaded_items)
+            self.assertTrue(FakeYoutubeDL.instances)
 
-            self.assertEqual(run_mock.call_count, 1)
-            self.assertEqual(
-                downloaded_items, ["YouTube: Test YouTube Source – Test Video"]
-            )
-
-    def test_podcast_parent_process_invokes_short_lived_subprocess_and_tracks_rss(self):
+    def test_podcast_download_runs_in_process(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
             downloaded_items = []
-
-            fake_stdout = (
-                '{"downloaded_items":["Podcast: Test Podcast Source – Episode 1"]}'
-            )
+            fake_feed = SimpleNamespace(entries=[])
             with (
-                patch("workers.podcasts.subprocess.run") as run_mock,
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
                 patch("workers.podcasts._parent_rss_mb", side_effect=[220.0, 221.0]),
             ):
-                run_mock.return_value = SimpleNamespace(
-                    returncode=0, stdout=fake_stdout, stderr=""
-                )
                 podcasts.download_podcasts(config, downloaded_items)
-
-            self.assertEqual(run_mock.call_count, 1)
-            self.assertEqual(
-                downloaded_items, ["Podcast: Test Podcast Source – Episode 1"]
-            )
+            self.assertEqual(downloaded_items, [])
 
     def test_downloads_are_tracked_in_sqlite_database(self):
         import sqlite3

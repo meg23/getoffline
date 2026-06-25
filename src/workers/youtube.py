@@ -27,7 +27,6 @@ from workers.download_store import (
 )
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from workers.summary_tasks import generate_missing_summaries
 from workers.utils import ensure_dir, normalize_media_filename, sanitize_channel_name
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
@@ -431,8 +430,6 @@ def _process_media_file(
     subtitle_offset_seconds,
     subtitle_transcription_mode: str,
 ):
-    downloaded_summary_items = []
-
     create_subtitles(
         media_file=media_file,
         subtitle_offset_seconds=subtitle_offset_seconds,
@@ -442,8 +439,7 @@ def _process_media_file(
         context_name=name,
         context_label="YouTube",
     )
-
-    return downloaded_summary_items
+    return []
 
 
 def _resolve_subtitle_worker_count(_configured_workers: int) -> int:
@@ -1424,12 +1420,6 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 record.clear()
                 del info
             finished_download_info.clear()
-            generate_missing_summaries(
-                db_path,
-                limit=10,
-                model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
-                timeout_seconds=int(defaults.get("summary_timeout_seconds") or 90),
-            )
 
             cleanup_subtitle_sidecars_for_folder(Path(folder))
 

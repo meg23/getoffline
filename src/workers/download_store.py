@@ -230,6 +230,60 @@ def _migration_0002_add_playback_columns(db_path: str) -> None:
         conn.commit()
 
 
+def _migration_0003_add_config_tables(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS download_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                youtube_cookie_text TEXT,
+                cookie_updated_at TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+def _migration_0004_add_source_configs(db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                media_type TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                subtitles INTEGER NOT NULL DEFAULT 1,
+                subtitle_offset_seconds REAL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+def _migration_0005_add_source_enabled(db_path: str) -> None:
+    columns = _table_columns_sqlite(db_path, "source_configs")
+    if "enabled" in columns:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
+
+
 def _migration_0006_add_favorite_column(db_path: str) -> None:
     columns = _table_columns_sqlite(db_path, "downloads")
     if "favorite" in columns:
@@ -279,205 +333,6 @@ def _migration_0008_add_transcript_search_tables(db_path: str) -> None:
         conn.commit()
 
 
-def _migration_0009_add_media_summaries_table(db_path: str) -> None:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS media_summaries (
-                download_id INTEGER PRIMARY KEY,
-                summary_text TEXT NOT NULL,
-                model_name TEXT NOT NULL,
-                source_segment_count INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_media_summaries_updated_at
-            ON media_summaries(updated_at)
-            """
-        )
-        conn.commit()
-
-
-def _run_migration_0003(db_path: str) -> None:
-    _migration_0003_add_config_tables(db_path)
-
-
-def _run_migration_0004(db_path: str) -> None:
-    _migration_0004_add_source_configs(db_path)
-
-
-def _run_migration_0005(db_path: str) -> None:
-    _migration_0005_add_source_enabled(db_path)
-
-
-def _run_migration_0006(db_path: str) -> None:
-    _migration_0006_add_favorite_column(db_path)
-
-
-def _run_migration_0007(db_path: str) -> None:
-    _migration_0007_add_relative_media_paths(db_path)
-
-
-def _run_migration_0008(db_path: str) -> None:
-    _migration_0008_add_transcript_search_tables(db_path)
-
-
-def _run_migration_0009(db_path: str) -> None:
-    _migration_0009_add_media_summaries_table(db_path)
-
-
-def _run_migration_0010(db_path: str) -> None:
-    _migration_0010_add_source_max_downloads(db_path)
-
-
-def _run_migration_0011(db_path: str) -> None:
-    _migration_0011_add_source_explicit_content_filter(db_path)
-
-
-def _run_migration_0012(db_path: str) -> None:
-    _migration_0012_add_youtube_include_flags(db_path)
-
-
-MIGRATIONS = [
-    ("0001_create_downloads", _migration_0001_create_downloads),
-    ("0002_add_playback_columns", _migration_0002_add_playback_columns),
-    (
-        "0003_add_config_tables",
-        _run_migration_0003,
-    ),
-    (
-        "0004_add_source_configs",
-        _run_migration_0004,
-    ),
-    (
-        "0005_add_source_enabled",
-        _run_migration_0005,
-    ),
-    (
-        "0006_add_favorite_column",
-        _run_migration_0006,
-    ),
-    (
-        "0007_add_relative_media_paths",
-        _run_migration_0007,
-    ),
-    (
-        "0008_add_transcript_search_tables",
-        _run_migration_0008,
-    ),
-    (
-        "0009_add_media_summaries_table",
-        _run_migration_0009,
-    ),
-    (
-        "0010_add_source_max_downloads",
-        _run_migration_0010,
-    ),
-    (
-        "0011_add_source_explicit_content_filter",
-        _run_migration_0011,
-    ),
-    (
-        "0012_add_youtube_include_flags",
-        _run_migration_0012,
-    ),
-]
-
-
-DEFAULT_APP_CONFIG = {
-    "output_root": "./downloads",
-    "audio_format": "mp3",
-    "audio_quality": "0",
-    "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
-    "max_downloads": "3",
-    "playlist_end": "3",
-    "processing_workers": "2",
-    "auto_update_minutes": "20",
-    "auto_delete_content_days": "0",
-    "subtitle_transcription_mode": "in_process",
-    "manual_upload_delete_explicit_content": "0",
-    "telemetry_dumps_enabled": "0",
-    "summary_model": "qwen2.5:0.5b",
-    "ollama_path": "ollama",
-    "js_runtime_path": "qjs",
-    "android_sync_enabled": "0",
-    "android_sync_target": "android",
-    "android_sync_directory": "./offline-sync",
-    "android_sync_adb_path": "adb",
-    "android_sync_connection_mode": "usb",
-    "android_sync_wifi_address": "",
-    "android_sync_destination": "/sdcard/Movies/GetOffline",
-    "android_sync_max_items": "10",
-    "android_sync_include_subtitles": "1",
-    "android_sync_include_unplayed": "1",
-    "android_sync_include_started": "1",
-    "android_sync_include_played": "0",
-    "android_sync_exclude_regex": "",
-}
-
-
-def _migration_0003_add_config_tables(db_path: str) -> None:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS app_config (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS download_settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                youtube_cookie_text TEXT,
-                cookie_updated_at TEXT,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.commit()
-
-
-def _migration_0004_add_source_configs(db_path: str) -> None:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS source_configs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_type TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                url TEXT NOT NULL,
-                media_type TEXT,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                subtitles INTEGER NOT NULL DEFAULT 1,
-                subtitle_offset_seconds REAL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.commit()
-
-
-def _migration_0005_add_source_enabled(db_path: str) -> None:
-    columns = _table_columns_sqlite(db_path, "source_configs")
-    if "enabled" in columns:
-        return
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
-        )
-        conn.commit()
-
-
 def _migration_0010_add_source_max_downloads(db_path: str) -> None:
     columns = _table_columns_sqlite(db_path, "source_configs")
     if "max_downloads" in columns:
@@ -513,6 +368,78 @@ def _migration_0012_add_youtube_include_flags(db_path: str) -> None:
                 f"ALTER TABLE source_configs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
             )
         conn.commit()
+
+
+def _run_migration_0003(db_path: str) -> None:
+    _migration_0003_add_config_tables(db_path)
+
+def _run_migration_0004(db_path: str) -> None:
+    _migration_0004_add_source_configs(db_path)
+
+def _run_migration_0005(db_path: str) -> None:
+    _migration_0005_add_source_enabled(db_path)
+
+def _run_migration_0006(db_path: str) -> None:
+    _migration_0006_add_favorite_column(db_path)
+
+def _run_migration_0007(db_path: str) -> None:
+    _migration_0007_add_relative_media_paths(db_path)
+
+def _run_migration_0008(db_path: str) -> None:
+    _migration_0008_add_transcript_search_tables(db_path)
+
+
+def _run_migration_0010(db_path: str) -> None:
+    _migration_0010_add_source_max_downloads(db_path)
+
+def _run_migration_0011(db_path: str) -> None:
+    _migration_0011_add_source_explicit_content_filter(db_path)
+
+def _run_migration_0012(db_path: str) -> None:
+    _migration_0012_add_youtube_include_flags(db_path)
+
+
+MIGRATIONS = [
+    ("0001_create_downloads", _migration_0001_create_downloads),
+    ("0002_add_playback_columns", _migration_0002_add_playback_columns),
+    ("0003_add_config_tables", _run_migration_0003),
+    ("0004_add_source_configs", _run_migration_0004),
+    ("0005_add_source_enabled", _run_migration_0005),
+    ("0006_add_favorite_column", _run_migration_0006),
+    ("0007_add_relative_media_paths", _run_migration_0007),
+    ("0008_add_transcript_search_tables", _run_migration_0008),
+    ("0010_add_source_max_downloads", _run_migration_0010),
+    ("0011_add_source_explicit_content_filter", _run_migration_0011),
+    ("0012_add_youtube_include_flags", _run_migration_0012),
+]
+
+
+DEFAULT_APP_CONFIG = {
+    "output_root": "./downloads",
+    "audio_format": "mp3",
+    "audio_quality": "0",
+    "ffmpeg_audio_filter": "loudnorm=I=-14:TP=-1.5:LRA=11",
+    "max_downloads": "3",
+    "playlist_end": "3",
+    "processing_workers": "2",
+    "auto_update_minutes": "20",
+    "auto_delete_content_days": "0",
+    "subtitle_transcription_mode": "in_process",
+    "manual_upload_delete_explicit_content": "0",
+    "telemetry_dumps_enabled": "0",
+    "js_runtime_path": "qjs",
+    "android_sync_enabled": "0",
+    "android_sync_adb_path": "adb",
+    "android_sync_connection_mode": "usb",
+    "android_sync_wifi_address": "",
+    "android_sync_destination": "/sdcard/Movies/GetOffline",
+    "android_sync_max_items": "10",
+    "android_sync_include_subtitles": "1",
+    "android_sync_include_unplayed": "1",
+    "android_sync_include_started": "1",
+    "android_sync_include_played": "0",
+    "android_sync_exclude_regex": "",
+}
 
 
 def apply_migrations(db_path: str) -> None:
@@ -637,19 +564,11 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
             "auto_delete_content_days": max(
                 0, _coerce_int(defaults.get("auto_delete_content_days"), 0)
             ),
-            "summary_model": str(defaults.get("summary_model") or "qwen2.5:0.5b"),
-            "ollama_path": str(defaults.get("ollama_path") or "ollama"),
             "js_runtime_path": str(defaults.get("js_runtime_path") or "qjs"),
             "android_sync_enabled": str(defaults.get("android_sync_enabled") or "0")
             .strip()
             .lower()
             in {"1", "true", "yes", "on"},
-            "android_sync_target": str(
-                defaults.get("android_sync_target") or "android"
-            ),
-            "android_sync_directory": os.path.expanduser(
-                str(defaults.get("android_sync_directory") or "./offline-sync")
-            ),
             "android_sync_adb_path": str(
                 defaults.get("android_sync_adb_path") or "adb"
             ),

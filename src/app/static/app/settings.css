@@ -267,14 +267,6 @@ button {
 .row-actions form {
   margin: 0;
 }
-#directory-transfer-fields,
-#android-transfer-fields {
-  margin-top: 1rem;
-}
-#directory-transfer-fields.is-hidden,
-#android-transfer-fields.is-hidden {
-  display: none;
-}
 @media (max-width: 800px) {
   body {
     padding: 0;

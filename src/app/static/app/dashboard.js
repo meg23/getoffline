@@ -11,64 +11,8 @@
   const selectors = () =>
     rows.map((row) => row.querySelector(".row-selector")).filter(Boolean);
 
-  const summaryTooltip = document.getElementById("summary-tooltip");
-
-  function bindSummaryTooltips() {
-    const hideSummaryTooltip = () => {
-      if (!summaryTooltip) return;
-      summaryTooltip.classList.remove("is-visible");
-      summaryTooltip.setAttribute("aria-hidden", "true");
-    };
-    const placeSummaryTooltip = (event) => {
-      if (!summaryTooltip) return;
-      const pad = 12;
-      const rect = summaryTooltip.getBoundingClientRect();
-      let x = event.clientX + 14;
-      let y = event.clientY + 14;
-      if (x + rect.width > window.innerWidth - pad)
-        x = Math.max(pad, event.clientX - rect.width - 14);
-      if (y + rect.height > window.innerHeight - pad)
-        y = Math.max(pad, event.clientY - rect.height - 14);
-      summaryTooltip.style.left = `${x}px`;
-      summaryTooltip.style.top = `${y}px`;
-    };
-    document.querySelectorAll('a[data-play-link="1"]').forEach((link) => {
-      if (link.dataset.summaryBound === "1") return;
-      link.dataset.summaryBound = "1";
-      link.addEventListener("mouseenter", (event) => {
-        if (!summaryTooltip) return;
-        const summaryText = String(
-          link.dataset.summary || link.dataset.title || "",
-        ).trim();
-        if (!summaryText) return;
-        summaryTooltip.textContent = summaryText;
-        summaryTooltip.classList.add("is-visible");
-        summaryTooltip.setAttribute("aria-hidden", "false");
-        placeSummaryTooltip(event);
-      });
-      link.addEventListener("mousemove", placeSummaryTooltip);
-      link.addEventListener("mouseleave", hideSummaryTooltip);
-      link.addEventListener("blur", hideSummaryTooltip);
-    });
-  }
-
   const visibleRows = () => rows.filter((row) => row.style.display !== "none");
 
-  function updateSummary() {
-    const visible = visibleRows();
-    const played = visible.filter((row) => row.dataset.played === "1").length;
-    const favorites = visible.filter(
-      (row) => row.dataset.favorite === "1",
-    ).length;
-    const setText = (id, value) => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = String(value);
-    };
-    setText("summary-visible-items", visible.length);
-    setText("summary-played-items", played);
-    setText("summary-new-items", Math.max(visible.length - played, 0));
-    setText("summary-favorite-items", favorites);
-  }
 
   function applyFilters() {
     const term = (filterInput?.value || "").trim().toLowerCase();
@@ -86,7 +30,6 @@
         (mode === "unplayed" && !played);
       row.style.display = matchesText && matchesMode ? "" : "none";
     });
-    updateSummary();
     updateBatchState();
   }
 
@@ -158,7 +101,6 @@
     if (event.key === "Escape") closeModals();
   });
 
-  bindSummaryTooltips();
   applyFilters();
 })();
 
