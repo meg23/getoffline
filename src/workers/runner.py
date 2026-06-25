@@ -238,6 +238,135 @@ def _source_subtitle_settings(download: Download) -> tuple[bool, float | None]:
     return bool(source.subtitles), source.subtitle_offset_seconds
 
 
+def requeue_existing_jobs_enabled() -> bool:
+    return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def run_worker(
+    worker_type: str,
+    *,
+    prefetch_count: int | None = None,
+    max_messages: int | None = None,
+) -> None:
+    queue = QUEUE_BY_WORKER[worker_type]
+    safe_prefetch = (
+        1 if worker_type in SERIAL_WORKERS else max(1, int(prefetch_count or 4))
+    )
+    safe_max_messages = max(
+        1,
+        int(
+            max_messages
+            if max_messages is not None
+            else os.getenv("GETOFFLINE_WORKER_MAX_MESSAGES", "1")
+        ),
+    )
+    processed_messages = 0
+    log.info(
+        "Worker starting worker_type=%s queue=%s prefetch=%s serial=%s max_messages=%s",
+        worker_type,
+        queue,
+        safe_prefetch,
+        worker_type in SERIAL_WORKERS,
+        safe_max_messages,
+    )
+    connection = pika.BlockingConnection(worker_rabbitmq_parameters())
+    log.info("RabbitMQ connected worker_type=%s queue=%s", worker_type, queue)
+    try:
+        channel = connection.channel()
+        channel.exchange_declare(
+            exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True
+        )
+        channel.queue_declare(
+            queue=queue, durable=True, arguments=queue_arguments(queue) or None
+        )
+        channel.queue_bind(
+            queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue
+        )
+        channel.basic_qos(prefetch_count=safe_prefetch)
+        if requeue_existing_jobs_enabled():
+            requeued = requeue_existing_jobs(channel, worker_type)
+            log.info(
+                "Worker requeued existing jobs worker_type=%s queue=%s count=%s",
+                worker_type,
+                queue,
+                requeued,
+            )
+        log.info(
+            "Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s",
+            worker_type,
+            queue,
+            settings.RABBITMQ_EXCHANGE,
+            safe_prefetch,
+        )
+        for method_frame, _properties, body in channel.consume(
+            queue, inactivity_timeout=1
+        ):
+            if _STOP:
+                log.info(
+                    "Worker stop requested worker_type=%s queue=%s", worker_type, queue
+                )
+                break
+            if method_frame is None:
+                continue
+            message = json.loads(body.decode("utf-8"))
+            job_id = int(message.get("job_id", 0))
+            if not _worker_accepts_job(worker_type, job_id):
+                channel.basic_nack(method_frame.delivery_tag, requeue=True)
+                log.info(
+                    "Message requeued for matching downloader worker worker_type=%s queue=%s job_id=%s",
+                    worker_type,
+                    queue,
+                    job_id,
+                )
+                time.sleep(0.25)
+                continue
+            try:
+                process_message(message)
+            except Exception:
+                channel.basic_nack(method_frame.delivery_tag, requeue=False)
+                processed_messages += 1
+                log.warning(
+                    "Message nacked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s",
+                    worker_type,
+                    queue,
+                    method_frame.delivery_tag,
+                    processed_messages,
+                )
+            else:
+                channel.basic_ack(method_frame.delivery_tag)
+                processed_messages += 1
+                log.info(
+                    "Message acked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s",
+                    worker_type,
+                    queue,
+                    method_frame.delivery_tag,
+                    processed_messages,
+                )
+            if processed_messages >= safe_max_messages:
+                log.info(
+                    "Worker processed max messages; exiting for container restart worker_type=%s queue=%s processed_messages=%s max_messages=%s",
+                    worker_type,
+                    queue,
+                    processed_messages,
+                    safe_max_messages,
+                )
+                break
+        channel.cancel()
+        log.info(
+            "Worker consumer cancelled worker_type=%s queue=%s", worker_type, queue
+        )
+    finally:
+        close_connection_if_open(connection)
+        log.info(
+            "RabbitMQ connection closed worker_type=%s queue=%s", worker_type, queue
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a GetOffline worker")
     parser.add_argument(
