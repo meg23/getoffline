@@ -1074,8 +1074,25 @@ def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
 
 
 def _delete_download_media_file(item: Download) -> None:
-    if item.file_path:
-        Path(item.file_path).expanduser().unlink(missing_ok=True)
+    if not item.file_path:
+        return
+    media_path = Path(item.file_path).expanduser()
+    try:
+        if media_path.is_dir() and not media_path.is_symlink():
+            log.warning(
+                "Refusing to delete directory for download_id=%s path=%s",
+                item.pk,
+                media_path,
+            )
+            return
+        media_path.unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning(
+            "Could not delete media file for download_id=%s path=%s error=%s",
+            item.pk,
+            media_path,
+            exc,
+        )
 
 
 @login_required

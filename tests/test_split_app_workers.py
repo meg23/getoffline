@@ -607,6 +607,18 @@ class SharedDjangoModelTests(TestCase):
                 file_ext="mp3",
                 download_status="downloaded",
             )
+            directory_path = Path(tmpdir) / "directory-media"
+            directory_path.mkdir()
+            directory_download = Download.objects.create(
+                profile_id="default",
+                source_type="youtube",
+                source_name="Test Channel",
+                item_uid="directory-purge",
+                title="Directory Purge",
+                file_path=str(directory_path),
+                file_ext="",
+                download_status="downloaded",
+            )
             TranscriptSegment.objects.create(
                 download=download,
                 subtitle_path=str(media_path.with_suffix(".srt")),
@@ -617,12 +629,19 @@ class SharedDjangoModelTests(TestCase):
 
             response = client.post(
                 "/batch-update/",
-                {"ids": [str(download.id)], "batch_action": "purge"},
+                {
+                    "ids": [str(download.id), str(directory_download.id)],
+                    "batch_action": "purge",
+                },
             )
 
             self.assertEqual(response.status_code, 302)
             self.assertFalse(media_path.exists())
+            self.assertTrue(directory_path.exists())
             self.assertFalse(Download.objects.filter(pk=download.pk).exists())
+            self.assertFalse(
+                Download.objects.filter(pk=directory_download.pk).exists()
+            )
             self.assertFalse(
                 TranscriptSegment.objects.filter(download_id=download.pk).exists()
             )
