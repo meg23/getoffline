@@ -14,26 +14,26 @@ _PROFANITY_MODEL_ERROR: Optional[Exception] = None
 
 
 def _predict_profanity(texts):
-    """Return profanity-check predictions for text values."""
+    """Return better-profanity predictions for text values."""
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
-            from profanity_check import predict
+            from better_profanity import profanity
 
-            _PROFANITY_MODEL = predict
+            _PROFANITY_MODEL = profanity.contains_profanity
         except (
             Exception
         ) as exc:  # pragma: no cover - depends on optional package availability
             _PROFANITY_MODEL_ERROR = exc
             log.error(
-                "profanity-check is required for transcript profanity screening: %s",
+                "better-profanity is required for transcript profanity screening: %s",
                 exc,
             )
     if _PROFANITY_MODEL is None:
         raise RuntimeError(
-            "profanity-check is required for transcript profanity screening"
+            "better-profanity is required for transcript profanity screening"
         ) from _PROFANITY_MODEL_ERROR
-    return _PROFANITY_MODEL(list(texts))
+    return [_PROFANITY_MODEL(text) for text in texts]
 
 
 _SRT_METADATA_RE = re.compile(
@@ -64,7 +64,7 @@ def transcript_text(subtitle_path: Path) -> str:
 
 
 def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
-    """Find profanity in transcript text using the profanity-check model."""
+    """Find profanity in transcript text using the better-profanity model."""
     transcript = str(text or "").strip()
     if not transcript:
         return None
@@ -86,7 +86,7 @@ def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
         if is_profane:
             return ExplicitContentMatch(
                 category="profanity",
-                term="profanity-check",
+                term="better-profanity",
                 sentence=sentence,
             )
     return None
