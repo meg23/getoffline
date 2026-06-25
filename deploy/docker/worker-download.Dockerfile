@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY deploy/requirements/worker-download.txt /tmp/requirements.txt
+RUN apk add --no-cache build-base
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt
 

@@ -13,4 +13,4 @@ packaging>=24.0
 protobuf>=5.26
 sympy>=1.12
 
-better-profanity>=0.7.0
+profanity-check>=1.0.3

@@ -18,13 +18,13 @@ from workers.content_filter import (  # noqa: E402
 
 
 class ContentFilterTests(unittest.TestCase):
-    def test_detects_profanity_with_better_profanity_model(self):
+    def test_detects_profanity_with_profanity_check_model(self):
         with patch("workers.content_filter._predict_profanity", return_value=[1]):
             match = find_explicit_content("That was fucking ridiculous.")
 
         self.assertIsNotNone(match)
         self.assertEqual(match.category, "profanity")
-        self.assertEqual(match.term, "better-profanity")
+        self.assertEqual(match.term, "profanity-check")
         self.assertEqual(match.sentence, "That was fucking ridiculous.")
 
         with patch("workers.content_filter._predict_profanity", return_value=[0]):
@@ -39,7 +39,7 @@ class ContentFilterTests(unittest.TestCase):
             )
 
         self.assertIsNotNone(match)
-        self.assertEqual(match.term, "better-profanity")
+        self.assertEqual(match.term, "profanity-check")
         self.assertEqual(match.sentence, "The next sentence contains bullshit!")
 
     def test_reads_srt_without_timestamps_or_sequence_numbers(self):
