@@ -249,7 +249,7 @@ class DownloadFlowTests(unittest.TestCase):
                 any(item.startswith("Subtitles: Podcast") for item in downloaded_items)
             )
 
-    def test_explicit_filter_deletes_youtube_download_and_records_filtered_status(self):
+    def test_explicit_filter_deletes_youtube_download_without_database_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
             config["youtube"][0]["subtitles"] = False
@@ -262,6 +262,7 @@ class DownloadFlowTests(unittest.TestCase):
                     "workers.subtitles.generate_whisper_subtitles",
                     side_effect=_fake_explicit_subtitle_generator,
                 ),
+                patch("workers.content_filter._predict_profanity", return_value=[1]),
                 patch("workers.youtube.log_filtered_deletion") as deletion_log,
             ):
                 youtube.download_youtube_items(config, downloaded_items)
@@ -275,11 +276,9 @@ class DownloadFlowTests(unittest.TestCase):
                 any(item.startswith("Filtered YouTube:") for item in downloaded_items)
             )
             with sqlite3.connect(Path(tmpdir) / "downloads.sqlite3") as conn:
-                status = conn.execute(
-                    "SELECT download_status FROM downloads"
-                ).fetchone()[0]
-            self.assertEqual(status, "filtered")
-            self.assertTrue(
+                row_count = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
+            self.assertEqual(row_count, 0)
+            self.assertFalse(
                 is_downloaded(
                     str(Path(tmpdir) / "downloads.sqlite3"),
                     "youtube",
@@ -293,7 +292,7 @@ class DownloadFlowTests(unittest.TestCase):
                 deletion_log.call_args.kwargs["match"].category, "profanity"
             )
 
-    def test_explicit_filter_deletes_podcast_download_and_records_filtered_status(self):
+    def test_explicit_filter_deletes_podcast_download_without_database_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
             config["podcasts"][0]["subtitles"] = False
@@ -319,6 +318,7 @@ class DownloadFlowTests(unittest.TestCase):
                     "workers.subtitles.generate_whisper_subtitles",
                     side_effect=_fake_explicit_subtitle_generator,
                 ),
+                patch("workers.content_filter._predict_profanity", return_value=[1]),
                 patch("workers.podcasts.log_filtered_deletion") as deletion_log,
             ):
                 podcasts.download_podcasts(config, downloaded_items)
@@ -332,11 +332,9 @@ class DownloadFlowTests(unittest.TestCase):
                 any(item.startswith("Filtered podcast:") for item in downloaded_items)
             )
             with sqlite3.connect(Path(tmpdir) / "downloads.sqlite3") as conn:
-                status = conn.execute(
-                    "SELECT download_status FROM downloads"
-                ).fetchone()[0]
-            self.assertEqual(status, "filtered")
-            self.assertTrue(
+                row_count = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
+            self.assertEqual(row_count, 0)
+            self.assertFalse(
                 is_downloaded(
                     str(Path(tmpdir) / "downloads.sqlite3"),
                     "podcast",

@@ -25,7 +25,6 @@ from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subti
 from workers.summary_tasks import generate_missing_summaries
 from workers.utils import ensure_dir, sanitize, sanitize_channel_name
 
-
 PODCAST_DOWNLOAD_RETRIES = 3
 
 
@@ -155,9 +154,9 @@ def _episode_payload(
         "resolution": "audio-only",
         "fps": None,
         "subtitle_enabled": subtitle_enabled,
-        "subtitle_path": str(Path(subtitle_path).expanduser().resolve())
-        if subtitle_path
-        else None,
+        "subtitle_path": (
+            str(Path(subtitle_path).expanduser().resolve()) if subtitle_path else None
+        ),
         "download_status": download_status,
         "error_message": error_message,
         "raw_metadata": {
@@ -466,11 +465,38 @@ def _download_podcasts_in_process(config, downloaded_items):
                         context_name=f"podcast {job['name']}",
                         context_label="podcast",
                     )
-                    explicit_match = (
-                        screen_transcript(subtitle_path)
-                        if job["delete_explicit_content"]
-                        else None
-                    )
+                    if job["delete_explicit_content"] and not subtitle_path:
+                        deleted_paths = delete_media_artifacts(job["final_audio"])
+                        log.warning(
+                            "Deleted podcast download because transcript generation failed before profanity screening: %s – %s deleted_artifacts=%s",
+                            job["name"],
+                            job["episode_title"],
+                            ", ".join(str(path) for path in deleted_paths) or "none",
+                        )
+                        downloaded_items.append(
+                            f"Skipped podcast after transcript failure: {job['name']} – {job['episode_title']}"
+                        )
+                        continue
+
+                    try:
+                        explicit_match = (
+                            screen_transcript(subtitle_path)
+                            if job["delete_explicit_content"]
+                            else None
+                        )
+                    except Exception as screening_exc:
+                        deleted_paths = delete_media_artifacts(job["final_audio"])
+                        log.warning(
+                            "Deleted podcast download because profanity screening failed before database insert: %s – %s error=%s deleted_artifacts=%s",
+                            job["name"],
+                            job["episode_title"],
+                            screening_exc,
+                            ", ".join(str(path) for path in deleted_paths) or "none",
+                        )
+                        downloaded_items.append(
+                            f"Skipped podcast after profanity screening failure: {job['name']} – {job['episode_title']}"
+                        )
+                        continue
                     if explicit_match is not None:
                         deleted_paths = delete_media_artifacts(job["final_audio"])
                         log_filtered_deletion(
@@ -480,24 +506,6 @@ def _download_podcasts_in_process(config, downloaded_items):
                             media_path=job["final_audio"],
                             match=explicit_match,
                             deleted_paths=deleted_paths,
-                        )
-                        upsert_download(
-                            db_path,
-                            _episode_payload(
-                                db_path=db_path,
-                                source_name=job["name"],
-                                source_url=job["source_url"],
-                                storage_root=defaults["output_root"],
-                                media_url=job["mp3_url"],
-                                title=job["episode_title"],
-                                description=job["description"],
-                                file_path=None,
-                                subtitle_enabled=job["entry_subtitles_enabled"],
-                                subtitle_path=None,
-                                download_status="filtered",
-                                error_message=f"Deleted by transcript filter: {explicit_match.category}",
-                                artwork_url=job.get("artwork_url"),
-                            ),
                         )
                         downloaded_items.append(
                             f"Filtered podcast: {job['name']} – {job['episode_title']}"

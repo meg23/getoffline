@@ -18,28 +18,29 @@ from workers.content_filter import (  # noqa: E402
 
 
 class ContentFilterTests(unittest.TestCase):
-    def test_detects_profanity_as_a_whole_word(self):
-        match = find_explicit_content("That was fucking ridiculous.")
+    def test_detects_profanity_with_profanity_check_model(self):
+        with patch("workers.content_filter._predict_profanity", return_value=[1]):
+            match = find_explicit_content("That was fucking ridiculous.")
+
         self.assertIsNotNone(match)
         self.assertEqual(match.category, "profanity")
+        self.assertEqual(match.term, "profanity-check")
         self.assertEqual(match.sentence, "That was fucking ridiculous.")
-        self.assertIsNone(
-            find_explicit_content("The shiitake mushrooms were delicious.")
-        )
+
+        with patch("workers.content_filter._predict_profanity", return_value=[0]):
+            self.assertIsNone(
+                find_explicit_content("The shiitake mushrooms were delicious.")
+            )
 
     def test_returns_only_the_sentence_containing_the_match(self):
-        match = find_explicit_content(
-            "This sentence is clean. The next sentence contains bullshit! This is also clean."
-        )
+        with patch("workers.content_filter._predict_profanity", return_value=[0, 1, 0]):
+            match = find_explicit_content(
+                "This sentence is clean. The next sentence contains bullshit! This is also clean."
+            )
 
         self.assertIsNotNone(match)
-        self.assertEqual(match.term, "bullshit")
+        self.assertEqual(match.term, "profanity-check")
         self.assertEqual(match.sentence, "The next sentence contains bullshit!")
-
-    def test_detects_sexual_phrase(self):
-        match = find_explicit_content("The discussion included oral sex and consent.")
-        self.assertIsNotNone(match)
-        self.assertEqual(match.category, "sexual content")
 
     def test_reads_srt_without_timestamps_or_sequence_numbers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -49,7 +50,8 @@ class ContentFilterTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(transcript_text(subtitle), "Clean spoken words.")
-            self.assertIsNone(screen_transcript(subtitle))
+            with patch("workers.content_filter._predict_profanity", return_value=[0]):
+                self.assertIsNone(screen_transcript(subtitle))
 
     def test_delete_media_artifacts_removes_same_stem_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:

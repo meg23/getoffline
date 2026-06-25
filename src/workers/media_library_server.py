@@ -154,9 +154,11 @@ def _manual_import_metadata(
         "item_url": None,
         "media_url": None,
         "title": stem,
-        "description": "Imported via browser drag-and-drop"
-        if drag_drop
-        else "Imported from local directory",
+        "description": (
+            "Imported via browser drag-and-drop"
+            if drag_drop
+            else "Imported from local directory"
+        ),
         "uploader": "local",
         "channel": "Manual Uploads",
         "extractor": "browser-drop" if drag_drop else "directory-import",
@@ -284,11 +286,11 @@ def _filter_imported_media(
         return None
     if subtitle_path is None or not Path(subtitle_path).exists():
         log.warning(
-            "Manual upload profanity check skipped item_uid=%s reason=transcript-unavailable media_path=%s",
+            "Manual upload profanity check cannot run item_uid=%s reason=transcript-unavailable media_path=%s",
             item_uid,
             media_path,
         )
-        return None
+        return "transcript-unavailable"
     started_at = time.perf_counter()
     log.info(
         "Manual upload profanity check started item_uid=%s transcript_path=%s media_path=%s",
@@ -296,7 +298,17 @@ def _filter_imported_media(
         subtitle_path,
         media_path,
     )
-    explicit_match = screen_transcript(subtitle_path)
+    try:
+        explicit_match = screen_transcript(subtitle_path)
+    except Exception as exc:
+        elapsed_seconds = time.perf_counter() - started_at
+        log.warning(
+            "Manual upload profanity check failed item_uid=%s error=%s elapsed_seconds=%.3f",
+            item_uid,
+            exc,
+            elapsed_seconds,
+        )
+        return "screening-failed"
     elapsed_seconds = time.perf_counter() - started_at
     if explicit_match is None:
         log.info(
@@ -454,16 +466,18 @@ def _postprocess_imported_media(
         item_uid, Path(media_path), subtitle_path, defaults
     )
     if filtered_category is not None:
-        metadata["file_path"] = None
-        metadata["file_size_bytes"] = None
-        metadata["subtitle_enabled"] = False
-        metadata["subtitle_path"] = None
-        metadata["download_status"] = "filtered"
-        metadata["error_message"] = f"Deleted by transcript filter: {filtered_category}"
-        upsert_download(str(state.database_path), metadata)
+        if Path(media_path).exists():
+            deleted_paths = delete_media_artifacts(Path(media_path))
+            log.warning(
+                "Deleted manual upload before database insert because transcript screening did not pass item_uid=%s reason=%s deleted_artifacts=%s",
+                item_uid,
+                filtered_category,
+                ", ".join(str(path) for path in deleted_paths) or "none",
+            )
         log.info(
-            "Manual upload added to database after profanity check item_uid=%s status=filtered",
+            "Manual upload not added to database after profanity check item_uid=%s status=%s",
             item_uid,
+            filtered_category,
         )
         return
 
