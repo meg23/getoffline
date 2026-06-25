@@ -781,36 +781,33 @@
 (() => {
   const panel = document.getElementById("active-pipeline-panel");
   const list = document.getElementById("active-pipeline-list");
-  const count = document.getElementById("active-pipeline-count");
   if (!panel || !list) return;
   const statusUrl = panel.dataset.statusUrl;
   if (!statusUrl) return;
 
+  function formatItem(item) {
+    const title = item.title || "Untitled download";
+    const stage = item.stage_label || "Working";
+    const status = item.status || "queued";
+    return `${stage}: ${title} (${status})`;
+  }
+
   function render(items) {
     panel.hidden = items.length === 0;
-    if (count) count.textContent = String(items.length);
-    list.replaceChildren(
-      ...items.map((item) => {
-        const row = document.createElement("article");
-        row.className = "active-pipeline-item";
-        row.dataset.stage = item.stage || "queued";
+    if (!items.length) {
+      list.replaceChildren();
+      return;
+    }
 
-        const details = document.createElement("div");
-        const title = document.createElement("div");
-        title.className = "active-pipeline-title";
-        title.textContent = item.title || "Untitled download";
-        const stage = document.createElement("div");
-        stage.className = "active-pipeline-stage";
-        stage.textContent = item.stage_label || "Working";
-        details.append(title, stage);
-
-        const status = document.createElement("span");
-        status.className = "active-pipeline-status";
-        status.textContent = item.status || "queued";
-        row.append(details, status);
-        return row;
-      }),
-    );
+    const text = items.map(formatItem).join("   •   ");
+    const repeats = [text, text].map((value) => {
+      const span = document.createElement("span");
+      span.className = "active-pipeline-marquee-text";
+      span.textContent = value;
+      return span;
+    });
+    list.replaceChildren(...repeats);
+    list.style.animationDuration = `${Math.max(18, text.length / 4)}s`;
   }
 
   async function refresh() {

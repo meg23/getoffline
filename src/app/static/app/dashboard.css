@@ -894,64 +894,62 @@ tbody tr:nth-child(even) td {
 }
 
 .active-pipeline-panel {
-  border-radius: 18px;
-  margin-bottom: 1rem;
-  padding: 1rem;
-}
-.active-pipeline-heading {
   align-items: center;
-  color: var(--muted);
+  border-radius: 999px;
   display: flex;
-  font-size: 0.82rem;
-  font-weight: 800;
-  gap: 0.5rem;
-  justify-content: space-between;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  gap: 0.75rem;
+  margin-bottom: 0.7rem;
+  overflow: hidden;
+  padding: 0.42rem 0.7rem;
 }
-.active-pipeline-count {
-  background: #edf1f8;
+.active-pipeline-label {
+  background: #e1e5ec;
   border-radius: 999px;
   color: #4c5873;
-  padding: 0.15rem 0.5rem;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 0.24rem 0.55rem;
+  text-transform: uppercase;
 }
-.active-pipeline-list {
-  display: grid;
-  gap: 0.55rem;
-  margin-top: 0.75rem;
-}
-.active-pipeline-item {
-  align-items: center;
-  animation: active-pipeline-flash 1.4s ease-in-out infinite;
-  background: #eef1f5;
-  border: 1px solid #d4dae5;
-  border-radius: 14px;
-  display: grid;
-  gap: 0.25rem;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 0.7rem 0.85rem;
-}
-.active-pipeline-title {
-  font-weight: 800;
+.active-pipeline-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  position: relative;
+}
+.active-pipeline-viewport::before,
+.active-pipeline-viewport::after {
+  bottom: 0;
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 2rem;
+  z-index: 1;
+}
+.active-pipeline-viewport::before {
+  background: linear-gradient(90deg, var(--surface), transparent);
+  left: 0;
+}
+.active-pipeline-viewport::after {
+  background: linear-gradient(90deg, transparent, var(--surface));
+  right: 0;
+}
+.active-pipeline-track {
+  animation: active-pipeline-marquee 24s linear infinite;
+  display: inline-flex;
+  gap: 3rem;
+  min-width: max-content;
   white-space: nowrap;
 }
-.active-pipeline-stage {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-.active-pipeline-status {
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 999px;
-  color: #4c5873;
-  font-size: 0.72rem;
+.active-pipeline-marquee-text {
+  color: #17213a;
+  font-size: 0.92rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 0.22rem 0.55rem;
-  text-transform: uppercase;
 }
-@keyframes active-pipeline-flash {
-  0%, 100% { background-color: #f4f6f9; }
-  50% { background-color: #d9dee7; }
+@keyframes active-pipeline-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-50% - 1.5rem)); }
 }
