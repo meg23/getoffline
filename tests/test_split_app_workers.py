@@ -1012,6 +1012,60 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_youtube_candidates_skip_live_titled_flat_entries_by_default(self):
+        source = SourceConfig(
+            id=5,
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            name="streamer",
+            url="https://www.youtube.com/playlist?list=uploads",
+            enabled=True,
+            max_downloads=2,
+            include_livestreams=False,
+        )
+        live_entry = {
+            "id": "MbEO1g8_COs",
+            "title": "Birthday Hangs & Talkin' VIDEO GAMES... | LIVE GAMING NEWS 🔴",
+            "url": "MbEO1g8_COs",
+        }
+        upload_entry = {
+            "id": "abcdefghijk",
+            "title": "Actual newest upload",
+            "url": "abcdefghijk",
+        }
+        with patch(
+            "workers.handlers._youtube_entries_from_url",
+            return_value=[live_entry, upload_entry],
+        ):
+            candidates = list(_youtube_candidates(source))
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["item_uid"], "abcdefghijk")
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_youtube_candidates_allow_live_titled_flat_entries_when_enabled(self):
+        source = SourceConfig(
+            id=6,
+            profile_id="default",
+            source_type=SourceConfig.SOURCE_YOUTUBE,
+            name="streamer",
+            url="https://www.youtube.com/playlist?list=uploads",
+            enabled=True,
+            max_downloads=1,
+            include_livestreams=True,
+        )
+        live_entry = {
+            "id": "MbEO1g8_COs",
+            "title": "Birthday Hangs & Talkin' VIDEO GAMES... | LIVE GAMING NEWS 🔴",
+            "url": "MbEO1g8_COs",
+        }
+        with patch(
+            "workers.handlers._youtube_entries_from_url", return_value=[live_entry]
+        ):
+            candidates = list(_youtube_candidates(source))
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["item_uid"], "MbEO1g8_COs")
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_transcode_media_updates_row_defers_original_deletion_and_queues_transcript(
         self,
     ):
