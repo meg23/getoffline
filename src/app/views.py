@@ -1073,12 +1073,16 @@ def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     return HttpResponse(status=204)
 
 
+def _delete_download_media_file(item: Download) -> None:
+    if item.file_path:
+        Path(item.file_path).expanduser().unlink(missing_ok=True)
+
+
 @login_required
 @require_POST
 def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
-    if item.file_path:
-        Path(item.file_path).expanduser().unlink(missing_ok=True)
+    _delete_download_media_file(item)
     item.download_status = "missing"
     item.last_seen_at = timezone.now()
     item.save(update_fields=["download_status", "last_seen_at"])
@@ -1407,9 +1411,17 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
         rows.update(favorite=False, last_seen_at=now)
     elif action == "delete":
         for item in rows:
-            if item.file_path:
-                Path(item.file_path).expanduser().unlink(missing_ok=True)
+            _delete_download_media_file(item)
         rows.update(download_status="missing", last_seen_at=now)
+    elif action == "purge":
+        row_ids = []
+        for item in rows:
+            _delete_download_media_file(item)
+            row_ids.append(item.pk)
+        if row_ids:
+            Download.objects.filter(
+                pk__in=row_ids, profile_id=_profile_id(request)
+            ).delete()
     elif action == "edit-metadata":
         return _redirect_back(request)
     elif action == "download":

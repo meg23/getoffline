@@ -588,7 +588,46 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_batch_update_purge_deletes_media_and_database_record(self):
+        client = Client()
+        from django.contrib.auth.models import User
 
+        User.objects.create_user(username="default", password="pass")
+        self.assertTrue(client.login(username="default", password="pass"))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_path = Path(tmpdir) / "purge-me.mp3"
+            media_path.write_text("audio", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type="youtube",
+                source_name="Test Channel",
+                item_uid="video-purge",
+                title="Purge Me",
+                file_path=str(media_path),
+                file_ext="mp3",
+                download_status="downloaded",
+            )
+            TranscriptSegment.objects.create(
+                download=download,
+                subtitle_path=str(media_path.with_suffix(".srt")),
+                start_seconds=0.0,
+                end_seconds=1.0,
+                text="hello",
+            )
+
+            response = client.post(
+                "/batch-update/",
+                {"ids": [str(download.id)], "batch_action": "purge"},
+            )
+
+            self.assertEqual(response.status_code, 302)
+            self.assertFalse(media_path.exists())
+            self.assertFalse(Download.objects.filter(pk=download.pk).exists())
+            self.assertFalse(
+                TranscriptSegment.objects.filter(download_id=download.pk).exists()
+            )
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_transcript_refresh_supersedes_active_job(self):
         client = Client()
         from django.contrib.auth.models import User
