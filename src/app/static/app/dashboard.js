@@ -777,3 +777,58 @@
     });
   });
 })();
+
+(() => {
+  const panel = document.getElementById("active-pipeline-panel");
+  const list = document.getElementById("active-pipeline-list");
+  const count = document.getElementById("active-pipeline-count");
+  if (!panel || !list) return;
+  const statusUrl = panel.dataset.statusUrl;
+  if (!statusUrl) return;
+
+  function render(items) {
+    panel.hidden = items.length === 0;
+    if (count) count.textContent = String(items.length);
+    list.replaceChildren(
+      ...items.map((item) => {
+        const row = document.createElement("article");
+        row.className = "active-pipeline-item";
+        row.dataset.stage = item.stage || "queued";
+
+        const details = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "active-pipeline-title";
+        title.textContent = item.title || "Untitled download";
+        const stage = document.createElement("div");
+        stage.className = "active-pipeline-stage";
+        stage.textContent = item.stage_label || "Working";
+        details.append(title, stage);
+
+        const status = document.createElement("span");
+        status.className = "active-pipeline-status";
+        status.textContent = item.status || "queued";
+        row.append(details, status);
+        return row;
+      }),
+    );
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch(statusUrl, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Unable to fetch active jobs.");
+      const payload = await response.json();
+      render(Array.isArray(payload.items) ? payload.items : []);
+    } catch (_) {
+      // Keep the last known state visible; polling will retry shortly.
+    } finally {
+      window.setTimeout(refresh, panel.hidden ? 5000 : 1500);
+    }
+  }
+
+  refresh();
+})();

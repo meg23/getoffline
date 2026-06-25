@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GetOffline Media Library</title>
     <link rel="stylesheet" href="{% static 'app/dashboard.css' %}" />
-    <script src="{% static 'app/dashboard.js' %}?v=light-library-rows-1" defer></script>
+    <script src="{% static 'app/dashboard.js' %}?v=active-pipeline-1" defer></script>
   </head>
   <body>
     <div class="container">
@@ -112,6 +112,21 @@
             <button id="batch-apply" class="batch-apply" type="submit" disabled>Apply</button>
           </form>
         </div>
+      </section>
+
+
+      <section
+        id="active-pipeline-panel"
+        class="panel active-pipeline-panel"
+        data-status-url="{% url 'active_pipeline_status' %}"
+        aria-live="polite"
+        hidden
+      >
+        <div class="active-pipeline-heading">
+          <span>Processing now</span>
+          <span id="active-pipeline-count" class="active-pipeline-count">0</span>
+        </div>
+        <div id="active-pipeline-list" class="active-pipeline-list"></div>
       </section>
 
       <main class="table-card" aria-label="Media library">

@@ -403,6 +403,67 @@ def library(request: HttpRequest) -> HttpResponse:
     return response
 
 
+def _job_display_title(job: Job) -> str:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
+    if download_id:
+        title = (
+            Download.objects.filter(pk=download_id, profile_id=job.profile_id)
+            .values_list("title", flat=True)
+            .first()
+        )
+        if title:
+            return str(title)
+    for key in ("title", "episode_title", "item_title", "url"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return job.job_type.replace("_", " ").title()
+
+
+def _job_stage(job: Job) -> tuple[str, str]:
+    if job.job_type in {"download_episode", "download_single"}:
+        return "downloading", "Downloading"
+    if job.job_type in {"generate_transcript", "transcode_media"}:
+        return "transcript_generation", "Transcript generation"
+    if job.job_type == "generate_summary":
+        return "finalizing_summary", "Finalizing summary"
+    return "queued", job.job_type.replace("_", " ").title()
+
+
+def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
+    jobs = list(
+        Job.objects.filter(
+            profile_id=profile_id,
+            job_type__in=[
+                "download_episode",
+                "download_single",
+                "generate_transcript",
+                "transcode_media",
+                "generate_summary",
+            ],
+            status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+        ).order_by("created_at", "id")[:20]
+    )
+    return [
+        {
+            "id": job.id,
+            "title": _job_display_title(job),
+            "status": job.status,
+            "stage": _job_stage(job)[0],
+            "stage_label": _job_stage(job)[1],
+            "updated_at": job.updated_at.isoformat() if job.updated_at else "",
+        }
+        for job in jobs
+    ]
+
+
+@login_required
+def active_pipeline_status(request: HttpRequest) -> JsonResponse:
+    items = _active_pipeline_items(_profile_id(request))
+    return JsonResponse({"ok": True, "items": items, "active": bool(items)})
+
+
 @login_required
 def jobs(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
