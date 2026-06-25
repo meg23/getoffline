@@ -1341,11 +1341,42 @@ def _download_youtube_items_in_process(config, downloaded_items):
 
                 resolved_media_path = Path(resolved_file).expanduser().resolve()
                 subtitle_path = resolved_media_path.with_suffix(".srt")
-                explicit_match = (
-                    screen_transcript(subtitle_path)
-                    if delete_explicit_content
-                    else None
-                )
+                if delete_explicit_content and not subtitle_path.exists():
+                    deleted_paths = delete_media_artifacts(resolved_media_path)
+                    log.warning(
+                        "Deleted YouTube download because transcript generation failed before profanity screening: %s – %s deleted_artifacts=%s",
+                        name,
+                        info.get("title") or resolved_media_path.name,
+                        ", ".join(str(path) for path in deleted_paths) or "none",
+                    )
+                    downloaded_items.append(
+                        f"Skipped YouTube after transcript failure: {name} – {info.get('title') or resolved_media_path.stem}"
+                    )
+                    record.clear()
+                    del info
+                    continue
+
+                try:
+                    explicit_match = (
+                        screen_transcript(subtitle_path)
+                        if delete_explicit_content
+                        else None
+                    )
+                except Exception as screening_exc:
+                    deleted_paths = delete_media_artifacts(resolved_media_path)
+                    log.warning(
+                        "Deleted YouTube download because profanity screening failed before database insert: %s – %s error=%s deleted_artifacts=%s",
+                        name,
+                        info.get("title") or resolved_media_path.name,
+                        screening_exc,
+                        ", ".join(str(path) for path in deleted_paths) or "none",
+                    )
+                    downloaded_items.append(
+                        f"Skipped YouTube after profanity screening failure: {name} – {info.get('title') or resolved_media_path.stem}"
+                    )
+                    record.clear()
+                    del info
+                    continue
                 if explicit_match is not None:
                     deleted_paths = delete_media_artifacts(resolved_media_path)
                     log_filtered_deletion(
@@ -1355,19 +1386,6 @@ def _download_youtube_items_in_process(config, downloaded_items):
                         media_path=resolved_media_path,
                         match=explicit_match,
                         deleted_paths=deleted_paths,
-                    )
-                    upsert_download(
-                        db_path,
-                        _build_youtube_payload(
-                            source_name=name,
-                            source_url=url,
-                            info=info,
-                            output_file=None,
-                            storage_root=defaults["output_root"],
-                            subtitle_enabled=should_generate_subtitles,
-                            download_status="filtered",
-                            error_message=f"Deleted by transcript filter: {explicit_match.category}",
-                        ),
                     )
                     downloaded_items.append(
                         f"Filtered YouTube: {name} – {info.get('title') or resolved_media_path.stem}"

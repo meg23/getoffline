@@ -9,48 +9,36 @@ from workers.logger import get_logger
 
 log = get_logger("content_filter")
 
-# Deliberately conservative whole-word matches to limit accidental deletions. This
-# filter is a local heuristic, not a substitute for a contextual moderation model.
-_PROFANITY_TERMS = {
-    "asshole",
-    "bastard",
-    "bitch",
-    "bullshit",
-    "cocksucker",
-    "fuck",
-    "fucked",
-    "fucker",
-    "fucking",
-    "motherfucker",
-    "shit",
-    "shitty",
-    "ass",
-    "piss",
-    "damn",
-    "dick",
-}
+_PROFANITY_MODEL = None
+_PROFANITY_MODEL_ERROR: Optional[Exception] = None
 
-_SEXUAL_TERMS = {
-    "blowjob",
-    "handjob",
-    "hardcore porn",
-    "intercourse",
-    "masturbate",
-    "masturbating",
-    "masturbation",
-    "naked sex",
-    "oral sex",
-    "porn",
-    "pornographic",
-    "sexual intercourse",
-    "sex",
-    "sexual",
-}
+
+def _predict_profanity(texts):
+    """Return profanity-check predictions for text values."""
+    global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
+    if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
+        try:
+            from profanity_check import predict
+
+            _PROFANITY_MODEL = predict
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - depends on optional package availability
+            _PROFANITY_MODEL_ERROR = exc
+            log.error(
+                "profanity-check is required for transcript profanity screening: %s",
+                exc,
+            )
+    if _PROFANITY_MODEL is None:
+        raise RuntimeError(
+            "profanity-check is required for transcript profanity screening"
+        ) from _PROFANITY_MODEL_ERROR
+    return _PROFANITY_MODEL(list(texts))
+
 
 _SRT_METADATA_RE = re.compile(
     r"^(?:\d+|\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}.*)$"
 )
-_NON_WORD_RE = re.compile(r"[^a-z0-9']+")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -76,22 +64,31 @@ def transcript_text(subtitle_path: Path) -> str:
 
 
 def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
-    """Find a conservative profanity or sexual-content term in transcript text."""
+    """Find profanity in transcript text using the profanity-check model."""
     transcript = str(text or "").strip()
-    sentences = _SENTENCE_BOUNDARY_RE.split(transcript)
-    for category, terms in (
-        ("profanity", _PROFANITY_TERMS),
-        ("sexual content", _SEXUAL_TERMS),
-    ):
-        for term in sorted(terms, key=len, reverse=True):
-            for sentence in sentences:
-                normalized = " " + _NON_WORD_RE.sub(" ", sentence.lower()).strip() + " "
-                if f" {term} " in normalized:
-                    return ExplicitContentMatch(
-                        category=category,
-                        term=term,
-                        sentence=sentence.strip(),
-                    )
+    if not transcript:
+        return None
+
+    sentences = [
+        sentence.strip()
+        for sentence in _SENTENCE_BOUNDARY_RE.split(transcript)
+        if sentence.strip()
+    ]
+    if not sentences:
+        sentences = [transcript]
+
+    predictions = _predict_profanity(sentences)
+    for sentence, prediction in zip(sentences, predictions):
+        try:
+            is_profane = int(prediction) == 1
+        except (TypeError, ValueError):
+            is_profane = bool(prediction)
+        if is_profane:
+            return ExplicitContentMatch(
+                category="profanity",
+                term="profanity-check",
+                sentence=sentence,
+            )
     return None
 
 
