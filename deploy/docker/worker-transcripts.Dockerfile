@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels faster-whisper==${FASTER_WHISPER_VERSION}
