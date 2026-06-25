@@ -87,7 +87,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--skip-config",
             action="store_true",
-            help="Only import library metadata, transcripts, and summaries; skip settings/source tables.",
+            help="Only import library metadata and transcripts; skip settings/source tables.",
         )
         parser.add_argument(
             "--progress-interval",
