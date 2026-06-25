@@ -420,6 +420,71 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_media_endpoint_limits_open_ended_range_for_fast_video_start(self):
+        client = Client()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=str(root)
+            )
+            media = root / "video.mp4"
+            media.write_bytes(b"a" * (2 * 1024 * 1024))
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                item_uid="range-video-1",
+                title="Range Video",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status="downloaded",
+            )
+
+            response = client.get(
+                f"/media/{download.id}/", HTTP_RANGE="bytes=0-"
+            )
+            body = b"".join(response.streaming_content)
+
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response["Content-Length"], str(1024 * 1024))
+        self.assertEqual(
+            response["Content-Range"],
+            f"bytes 0-{1024 * 1024 - 1}/{2 * 1024 * 1024}",
+        )
+        self.assertEqual(len(body), 1024 * 1024)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_media_endpoint_honors_explicit_range_end(self):
+        client = Client()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=str(root)
+            )
+            media = root / "clip.mp4"
+            media.write_bytes(b"0123456789")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                item_uid="range-video-2",
+                title="Range Video",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status="downloaded",
+            )
+
+            response = client.get(
+                f"/media/{download.id}/", HTTP_RANGE="bytes=2-5"
+            )
+            body = b"".join(response.streaming_content)
+
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response["Content-Length"], "4")
+        self.assertEqual(response["Content-Range"], "bytes 2-5/10")
+        self.assertEqual(body, b"2345")
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_video_player_omits_subtitle_track_by_default(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
