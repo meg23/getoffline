@@ -17,6 +17,7 @@ from django.http import (
     HttpResponseBadRequest,
     HttpResponseRedirect,
     JsonResponse,
+    StreamingHttpResponse,
 )
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -69,6 +70,8 @@ MEDIA_UPLOAD_EXTENSIONS = {
 }
 VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
 log = logging.getLogger(__name__)
+MEDIA_RANGE_CHUNK_SIZE = 64 * 1024
+MEDIA_INITIAL_RANGE_SIZE = 1024 * 1024
 
 
 def _optional_int(value: object) -> int | None:
@@ -504,6 +507,18 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
     )
 
 
+def _file_range_iterator(path: Path, start: int, length: int):
+    with path.open("rb") as handle:
+        handle.seek(start)
+        remaining = length
+        while remaining > 0:
+            chunk = handle.read(min(MEDIA_RANGE_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+
+
 @login_required
 def media(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
@@ -514,17 +529,26 @@ def media(request: HttpRequest, download_id: int) -> HttpResponse:
     if range_header.startswith("bytes="):
         start_text, _, end_text = range_header.removeprefix("bytes=").partition("-")
         try:
-            start = int(start_text) if start_text else 0
-            end = int(end_text) if end_text else file_size - 1
+            if start_text:
+                start = int(start_text)
+                requested_end = int(end_text) if end_text else None
+            else:
+                suffix_length = int(end_text) if end_text else file_size
+                start = max(file_size - suffix_length, 0)
+                requested_end = file_size - 1
         except ValueError:
-            start, end = 0, file_size - 1
+            start, requested_end = 0, None
         start = max(0, min(start, file_size - 1))
-        end = max(start, min(end, file_size - 1))
+        if requested_end is None:
+            end = min(start + MEDIA_INITIAL_RANGE_SIZE - 1, file_size - 1)
+        else:
+            end = max(start, min(requested_end, file_size - 1))
         length = end - start + 1
-        with path.open("rb") as handle:
-            handle.seek(start)
-            data = handle.read(length)
-        response = HttpResponse(data, status=206, content_type=content_type)
+        response = StreamingHttpResponse(
+            _file_range_iterator(path, start, length),
+            status=206,
+            content_type=content_type,
+        )
         response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
         response["Content-Length"] = str(length)
     else:
