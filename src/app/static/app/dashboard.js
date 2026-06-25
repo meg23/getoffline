@@ -777,3 +777,55 @@
     });
   });
 })();
+
+(() => {
+  const panel = document.getElementById("active-pipeline-panel");
+  const list = document.getElementById("active-pipeline-list");
+  if (!panel || !list) return;
+  const statusUrl = panel.dataset.statusUrl;
+  if (!statusUrl) return;
+
+  function formatItem(item) {
+    const title = item.title || "Untitled download";
+    const stage = item.stage_label || "Working";
+    const status = item.status || "queued";
+    return `${stage}: ${title} (${status})`;
+  }
+
+  function render(items) {
+    panel.hidden = items.length === 0;
+    if (!items.length) {
+      list.replaceChildren();
+      return;
+    }
+
+    const text = items.map(formatItem).join("   •   ");
+    const repeats = [text, text].map((value) => {
+      const span = document.createElement("span");
+      span.className = "active-pipeline-marquee-text";
+      span.textContent = value;
+      return span;
+    });
+    list.replaceChildren(...repeats);
+    list.style.animationDuration = `${Math.max(18, text.length / 4)}s`;
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch(statusUrl, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Unable to fetch active jobs.");
+      const payload = await response.json();
+      render(Array.isArray(payload.items) ? payload.items : []);
+    } catch (_) {
+      // Keep the last known state visible; polling will retry shortly.
+    } finally {
+      window.setTimeout(refresh, panel.hidden ? 5000 : 1500);
+    }
+  }
+
+  refresh();
+})();

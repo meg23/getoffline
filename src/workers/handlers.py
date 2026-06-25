@@ -27,8 +27,21 @@ from workers.subtitles import create_subtitles
 from workers.summary_tasks import _load_segments_from_subtitle
 from workers.summarization import summarize_segments
 
-
 log = get_logger("workers.handlers")
+
+
+def _touch_active_job(job: Job, *, stage: str, title: str = "") -> None:
+    """Refresh a running job heartbeat used by the library active marquee."""
+    now = timezone.now()
+    if job.updated_at and (now - job.updated_at).total_seconds() < 10:
+        return
+    payload = dict(job.payload) if isinstance(job.payload, dict) else {}
+    payload["active_stage"] = stage
+    if title:
+        payload["active_title"] = title
+    job.payload = payload
+    job.updated_at = now
+    job.save(update_fields=["payload", "updated_at"])
 
 
 class _WorkerYtDlpLogger:
@@ -328,19 +341,27 @@ def _postprocess_download_with_ffmpeg(
         parent_job_id,
         download.id if download is not None else "deferred",
         download.title if download is not None else deferred_defaults.get("title"),
-        download.source_type
-        if download is not None
-        else deferred_lookup.get("source_type"),
-        download.source_name
-        if download is not None
-        else deferred_lookup.get("source_name"),
+        (
+            download.source_type
+            if download is not None
+            else deferred_lookup.get("source_type")
+        ),
+        (
+            download.source_name
+            if download is not None
+            else deferred_lookup.get("source_name")
+        ),
         download.file_path if download is not None else payload.get("source_file_path"),
-        download.file_ext
-        if download is not None
-        else Path(str(payload.get("source_file_path"))).suffix.lstrip("."),
-        download.file_size_bytes
-        if download is not None
-        else deferred_defaults.get("file_size_bytes"),
+        (
+            download.file_ext
+            if download is not None
+            else Path(str(payload.get("source_file_path"))).suffix.lstrip(".")
+        ),
+        (
+            download.file_size_bytes
+            if download is not None
+            else deferred_defaults.get("file_size_bytes")
+        ),
         download.download_status if download is not None else "deferred_insert",
     )
     missing_paths = [path for path in source_paths if not path.exists()]
@@ -443,9 +464,11 @@ def _postprocess_download_with_ffmpeg(
         final_defaults.update(
             {
                 "file_path": str(target_path),
-                "file_path_relative": str(target_path.relative_to(output_root))
-                if target_path.is_relative_to(output_root)
-                else None,
+                "file_path_relative": (
+                    str(target_path.relative_to(output_root))
+                    if target_path.is_relative_to(output_root)
+                    else None
+                ),
                 "file_ext": target_path.suffix.lstrip("."),
                 "file_size_bytes": output_size,
                 "download_status": "downloaded",
@@ -496,6 +519,7 @@ def _postprocess_download_with_ffmpeg(
 def transcode_media(job: Job) -> None:
     """Legacy compatibility: convert a queued FFmpeg job, then enqueue transcript work."""
     payload = job.payload if isinstance(job.payload, dict) else {}
+    _touch_active_job(job, stage="transcript_generation")
     log.info(
         "Legacy FFmpeg job received job_id=%s profile_id=%s payload=%s",
         job.id,
@@ -672,7 +696,19 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
 
     def remember_finished_download(event: dict) -> None:
         _yt_dlp_progress_hook(event)
-        if event.get("status") != "finished":
+        info_dict = (
+            event.get("info_dict") if isinstance(event.get("info_dict"), dict) else {}
+        )
+        status = event.get("status")
+        if status == "downloading":
+            _touch_active_job(
+                job,
+                stage="downloading",
+                title=str(
+                    info_dict.get("title") or payload.get("title") or download_url
+                ).strip(),
+            )
+        if status != "finished":
             return
         candidate = event.get("filename") or event.get("tmpfilename")
         if candidate and Path(candidate).exists():
@@ -801,13 +837,15 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         "upload_date": str(payload.get("published") or info.get("upload_date") or ""),
         "duration_seconds": int(info.get("duration")) if info.get("duration") else None,
         "file_path": str(downloaded_file),
-        "file_path_relative": str(downloaded_file.relative_to(output_root))
-        if downloaded_file.is_relative_to(output_root)
-        else None,
+        "file_path_relative": (
+            str(downloaded_file.relative_to(output_root))
+            if downloaded_file.is_relative_to(output_root)
+            else None
+        ),
         "file_ext": downloaded_file.suffix.lstrip("."),
-        "file_size_bytes": downloaded_file.stat().st_size
-        if downloaded_file.exists()
-        else None,
+        "file_size_bytes": (
+            downloaded_file.stat().st_size if downloaded_file.exists() else None
+        ),
         "download_status": "downloaded",
         "last_seen_at": now,
         "completed_at": now,
@@ -1678,6 +1716,11 @@ def generate_transcript(job: Job) -> None:
             job.profile_id,
         )
         return
+    _touch_active_job(
+        job,
+        stage="transcript_generation",
+        title=str(download.title or "").strip(),
+    )
     media_path = Path(str(download.file_path or "")).expanduser().resolve()
     log.info(
         "Transcript worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s subtitle_path=%s status=%s size_bytes=%s last_seen_at=%s",
@@ -1767,9 +1810,11 @@ def generate_transcript(job: Job) -> None:
                 len(segments),
                 deleted_count,
                 len(created_segments),
-                Path(subtitle_path).stat().st_size
-                if Path(subtitle_path).exists()
-                else None,
+                (
+                    Path(subtitle_path).stat().st_size
+                    if Path(subtitle_path).exists()
+                    else None
+                ),
             )
         else:
             log.warning(
@@ -1819,6 +1864,11 @@ def generate_summary(job: Job) -> None:
             download_id,
         )
         return
+    _touch_active_job(
+        job,
+        stage="finalizing_summary",
+        title=str(download.title or "").strip(),
+    )
     segments = list(
         download.transcript_segments.order_by("start_seconds", "id").values_list(
             "text", flat=True

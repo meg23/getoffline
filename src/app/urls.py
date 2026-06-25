@@ -12,6 +12,11 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
+    path(
+        "jobs/active-status/",
+        views.active_pipeline_status,
+        name="active_pipeline_status",
+    ),
     path("jobs/enqueue/", views.enqueue_job, name="enqueue_job"),
     path(
         "worker-messages/status/",

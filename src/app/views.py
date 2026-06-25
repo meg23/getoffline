@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 import time
 import mimetypes
 import uuid
@@ -401,6 +402,124 @@ def library(request: HttpRequest) -> HttpResponse:
     )
 
     return response
+
+
+def _job_display_title(job: Job) -> str:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
+    if download_id:
+        title = (
+            Download.objects.filter(pk=download_id, profile_id=job.profile_id)
+            .values_list("title", flat=True)
+            .first()
+        )
+        if title:
+            return str(title)
+    for key in ("active_title", "title", "episode_title", "item_title", "url"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return job.job_type.replace("_", " ").title()
+
+
+def _job_stage(job: Job) -> tuple[str, str]:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    active_stage = str(payload.get("active_stage") or "").strip()
+    if active_stage == "downloading":
+        return "downloading", "Downloading"
+    if active_stage == "transcript_generation":
+        return "transcript_generation", "Transcript generation"
+    if active_stage == "finalizing_summary":
+        return "finalizing_summary", "Finalizing summary"
+    if job.job_type in {"download_episode", "download_single"}:
+        return "downloading", "Downloading"
+    if job.job_type in {"generate_transcript", "transcode_media"}:
+        return "transcript_generation", "Transcript generation"
+    if job.job_type == "generate_summary":
+        return "finalizing_summary", "Finalizing summary"
+    return "queued", job.job_type.replace("_", " ").title()
+
+
+def _active_pipeline_cutoff():
+    raw_timeout = str(
+        os.getenv("GETOFFLINE_ACTIVE_PIPELINE_STALE_SECONDS", "3600")
+    ).strip()
+    if not raw_timeout.isdigit():
+        return None
+    timeout_seconds = int(raw_timeout)
+    if timeout_seconds <= 0:
+        return None
+    return timezone.now() - timedelta(seconds=timeout_seconds)
+
+
+def _job_is_fresh(job: Job) -> bool:
+    cutoff = _active_pipeline_cutoff()
+    if cutoff is None:
+        return True
+    heartbeat_at = job.updated_at or job.started_at or job.created_at
+    return bool(heartbeat_at and heartbeat_at >= cutoff)
+
+
+def _job_still_needs_work(job: Job) -> bool:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = _optional_int(payload.get("download_id"))
+    if not download_id:
+        return True
+
+    download = Download.objects.filter(
+        pk=download_id, profile_id=job.profile_id
+    ).first()
+    if download is None:
+        return job.job_type in {"download_episode", "download_single"}
+    if job.job_type == "generate_summary":
+        return not MediaSummary.objects.filter(download_id=download_id).exists()
+    if job.job_type in {"generate_transcript", "transcode_media"}:
+        has_transcript = TranscriptSegment.objects.filter(
+            download_id=download_id
+        ).exists()
+        has_subtitle_file = bool(
+            download.subtitle_path or download.subtitle_path_relative
+        )
+        return not (has_transcript or has_subtitle_file)
+    if job.job_type in {"download_episode", "download_single"}:
+        return download.download_status != "downloaded"
+    return True
+
+
+def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
+    jobs = list(
+        Job.objects.filter(
+            profile_id=profile_id,
+            job_type__in=[
+                "download_episode",
+                "download_single",
+                "generate_transcript",
+                "transcode_media",
+                "generate_summary",
+            ],
+            status=Job.STATUS_RUNNING,
+        ).order_by("started_at", "created_at", "id")[:40]
+    )
+    active_jobs = [
+        job for job in jobs if _job_is_fresh(job) and _job_still_needs_work(job)
+    ][:20]
+    return [
+        {
+            "id": job.id,
+            "title": _job_display_title(job),
+            "status": job.status,
+            "stage": _job_stage(job)[0],
+            "stage_label": _job_stage(job)[1],
+            "updated_at": job.updated_at.isoformat() if job.updated_at else "",
+        }
+        for job in active_jobs
+    ]
+
+
+@login_required
+def active_pipeline_status(request: HttpRequest) -> JsonResponse:
+    items = _active_pipeline_items(_profile_id(request))
+    return JsonResponse({"ok": True, "items": items, "active": bool(items)})
 
 
 @login_required
