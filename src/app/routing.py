@@ -2,7 +2,6 @@ SERIAL_EPISODE_CHECK_QUEUE = "getoffline.jobs.updates"
 YOUTUBE_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.youtube"
 PODCAST_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.podcast"
 TRANSCRIPT_QUEUE = "getoffline.jobs.transcripts"
-SUMMARY_QUEUE = "getoffline.jobs.summaries"
 TRANSFER_QUEUE = "getoffline.jobs.transfer"
 CLEANUP_QUEUE = "getoffline.jobs.cleanup"
 MAX_QUEUE_PRIORITY = 10
@@ -40,8 +39,6 @@ def queue_name(job_type: str, payload: dict | None = None) -> str:
         return _download_queue_name(payload)
     if job_type == "generate_transcript":
         return TRANSCRIPT_QUEUE
-    if job_type in {"generate_summary", "summarize_missing"}:
-        return SUMMARY_QUEUE
     if job_type == "transfer_media":
         return TRANSFER_QUEUE
     if job_type == "retention_cleanup":

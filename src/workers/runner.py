@@ -10,7 +10,6 @@ import pika
 from pika import exceptions as pika_exceptions
 from django.conf import settings
 from django.db import close_old_connections
-from django.db.models import Q
 from workers.logger import get_logger
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
@@ -20,7 +19,6 @@ from app.routing import (  # noqa: E402
     YOUTUBE_DOWNLOAD_QUEUE,
     PODCAST_DOWNLOAD_QUEUE,
     SERIAL_EPISODE_CHECK_QUEUE,
-    SUMMARY_QUEUE,
     TRANSFER_QUEUE,
     TRANSCRIPT_QUEUE,
     CLEANUP_QUEUE,
@@ -28,7 +26,7 @@ from app.routing import (  # noqa: E402
     queue_name,
 )
 from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-from models.models import Download, Job, SourceConfig  # noqa: E402
+from models.models import Job, SourceConfig  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
 from app.queue import job_priority, publish_job  # noqa: E402
 
@@ -41,7 +39,6 @@ QUEUE_BY_WORKER = {
     "downloader-youtube": YOUTUBE_DOWNLOAD_QUEUE,
     "downloader-podcast": PODCAST_DOWNLOAD_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
-    "summaries": SUMMARY_QUEUE,
     "transfer": TRANSFER_QUEUE,
     "cleanup": CLEANUP_QUEUE,
 }
@@ -51,7 +48,6 @@ JOB_TYPES_BY_WORKER = {
     "downloader-youtube": {"download_episode", "download_single", "transcode_media"},
     "downloader-podcast": {"download_episode", "download_single", "transcode_media"},
     "transcripts": {"generate_transcript"},
-    "summaries": {"generate_summary", "summarize_missing"},
     "transfer": {"transfer_media"},
     "cleanup": {"retention_cleanup"},
 }
@@ -240,171 +236,6 @@ def _source_subtitle_settings(download: Download) -> tuple[bool, float | None]:
     if source is None:
         return True, None
     return bool(source.subtitles), source.subtitle_offset_seconds
-
-
-def enqueue_missing_summary_jobs(*, limit: int = 500) -> int:
-    rows = list(
-        Download.objects.filter(download_status="downloaded")
-        .filter(Q(summary__isnull=True) | Q(summary__summary_text=""))
-        .filter(
-            Q(transcript_segments__isnull=False)
-            | (Q(subtitle_path__isnull=False) & ~Q(subtitle_path=""))
-        )
-        .distinct()
-        .order_by("-last_seen_at", "id")[:limit]
-    )
-    enqueued = 0
-    for download in rows:
-        job = create_job(
-            profile_id=download.profile_id,
-            job_type="generate_summary",
-            payload={"download_id": download.id, "startup_missing_summary": True},
-            idempotency_key=f"generate_summary:{download.profile_id}:{download.id}",
-        )
-        publish_job(
-            {
-                "job_id": job.id,
-                "job_type": job.job_type,
-                "profile_id": job.profile_id,
-                "attempt": 1,
-            }
-        )
-        enqueued += 1
-        log.info(
-            "Startup missing summary enqueued download_id=%s profile_id=%s job_id=%s title=%s subtitle_path=%s",
-            download.id,
-            download.profile_id,
-            job.id,
-            download.title,
-            download.subtitle_path,
-        )
-    log.info(
-        "Startup missing summary scan finished candidates=%s enqueued=%s",
-        len(rows),
-        enqueued,
-    )
-    return enqueued
-
-
-def requeue_existing_jobs_enabled() -> bool:
-    return str(os.getenv("GETOFFLINE_REQUEUE_EXISTING_JOBS", "0")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def run_worker(
-    worker_type: str,
-    *,
-    prefetch_count: int | None = None,
-    max_messages: int | None = None,
-) -> None:
-    queue = QUEUE_BY_WORKER[worker_type]
-    safe_prefetch = (
-        1 if worker_type in SERIAL_WORKERS else max(1, int(prefetch_count or 4))
-    )
-    safe_max_messages = max(
-        1,
-        int(
-            max_messages
-            if max_messages is not None
-            else os.getenv("GETOFFLINE_WORKER_MAX_MESSAGES", "1")
-        ),
-    )
-    processed_messages = 0
-    log.info(
-        "Worker starting worker_type=%s queue=%s prefetch=%s serial=%s max_messages=%s",
-        worker_type,
-        queue,
-        safe_prefetch,
-        worker_type in SERIAL_WORKERS,
-        safe_max_messages,
-    )
-    connection = pika.BlockingConnection(worker_rabbitmq_parameters())
-    log.info("RabbitMQ connected worker_type=%s queue=%s", worker_type, queue)
-    try:
-        channel = connection.channel()
-        channel.exchange_declare(
-            exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True
-        )
-        channel.queue_declare(
-            queue=queue, durable=True, arguments=queue_arguments(queue) or None
-        )
-        channel.queue_bind(
-            queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue
-        )
-        channel.basic_qos(prefetch_count=safe_prefetch)
-        log.info(
-            "Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s",
-            worker_type,
-            queue,
-            settings.RABBITMQ_EXCHANGE,
-            safe_prefetch,
-        )
-        for method_frame, _properties, body in channel.consume(
-            queue, inactivity_timeout=1
-        ):
-            if _STOP:
-                log.info(
-                    "Worker stop requested worker_type=%s queue=%s", worker_type, queue
-                )
-                break
-            if method_frame is None:
-                continue
-            message = json.loads(body.decode("utf-8"))
-            job_id = int(message.get("job_id", 0))
-            if not _worker_accepts_job(worker_type, job_id):
-                channel.basic_nack(method_frame.delivery_tag, requeue=True)
-                log.info(
-                    "Message requeued for matching downloader worker worker_type=%s queue=%s job_id=%s",
-                    worker_type,
-                    queue,
-                    job_id,
-                )
-                time.sleep(0.25)
-                continue
-            try:
-                process_message(message)
-            except Exception:
-                channel.basic_nack(method_frame.delivery_tag, requeue=False)
-                processed_messages += 1
-                log.warning(
-                    "Message nacked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s",
-                    worker_type,
-                    queue,
-                    method_frame.delivery_tag,
-                    processed_messages,
-                )
-            else:
-                channel.basic_ack(method_frame.delivery_tag)
-                processed_messages += 1
-                log.info(
-                    "Message acked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s",
-                    worker_type,
-                    queue,
-                    method_frame.delivery_tag,
-                    processed_messages,
-                )
-            if processed_messages >= safe_max_messages:
-                log.info(
-                    "Worker processed max messages; exiting for container restart worker_type=%s queue=%s processed_messages=%s max_messages=%s",
-                    worker_type,
-                    queue,
-                    processed_messages,
-                    safe_max_messages,
-                )
-                break
-        channel.cancel()
-        log.info(
-            "Worker consumer cancelled worker_type=%s queue=%s", worker_type, queue
-        )
-    finally:
-        close_connection_if_open(connection)
-        log.info(
-            "RabbitMQ connection closed worker_type=%s queue=%s", worker_type, queue
-        )
 
 
 def main() -> None:

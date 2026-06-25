@@ -74,7 +74,6 @@ It can queue:
 - `update_downloads` / `check_for_episodes` to discover new work
 - `download_single` / `download_episode` to download one item at a time
 - `generate_transcript` for parallel transcript generation
-- `summarize_missing` / `generate_summary` for parallel summary generation
 - `transfer_media`
 - `retention_cleanup` for automatic old-content deletion
 
@@ -90,23 +89,18 @@ make run-worker-downloader-youtube
 make run-worker-downloader-podcast
 ```
 
-Transcript and summary work can be split and run concurrently by starting
-multiple worker processes for the same queue, or by setting `PREFETCH` for each
-process:
+Transcript work can run concurrently by starting multiple worker processes for the same queue, or by setting `PREFETCH` for each process:
 
 ```bash
 PREFETCH=4 make run-worker-transcripts
-PREFETCH=4 make run-worker-summaries
 ```
 
-Summary generation runs inside the summaries container by default with `GETOFFLINE_SUMMARY_BACKEND=internal`, using `llama-cpp-python` and a cached Qwen2.5 0.5B GGUF model. Set `GETOFFLINE_SUMMARY_BACKEND=ollama` and `GETOFFLINE_OLLAMA_URL` only if you explicitly want to use an external Ollama server instead. Set `GETOFFLINE_SUMMARY_BACKEND=extractive` for the deterministic no-LLM fallback.
-
-FFmpeg post-processing now runs inline in the YouTube and podcast downloader workers before transcript and summary jobs are queued. If downloads stall, inspect the relevant downloader logs for `Downloader FFmpeg conversion starting` and `Download worker queued next stage`.
+FFmpeg post-processing now runs inline in the YouTube and podcast downloader workers before transcript jobs are queued. If downloads stall, inspect the relevant downloader logs for `Downloader FFmpeg conversion starting` and `Download worker queued next stage`.
 
 The normal media workflow is: updates discover items, downloads fetch one item,
 the downloader skips FFmpeg when the file already matches the profile's target
 format or runs inline FFmpeg conversion when needed, transcripts run on
-the final media file, summaries run after transcripts, and the summary stage
+the final media file and transcripts run after downloads.
 removes any pre-transcode original media once downstream work has completed.
 When conversion is needed, the downloader defers creating the library `Download`
 row until inline FFmpeg post-processing has produced the final MP4/MP3 output,
@@ -128,7 +122,7 @@ Recurring work is created by the scheduler from `scheduled_jobs` rows. Start it 
 make run-scheduler
 ```
 
-Use `python -m django run_scheduler --install-defaults` to insert the default update, summary, transfer, and retention schedules. Edit the `scheduled_jobs` table to change `enabled`, `interval_seconds`, `payload`, or `next_run_at`.
+Use `python -m django run_scheduler --install-defaults` to insert the default update, transfer, and retention schedules. Edit the `scheduled_jobs` table to change `enabled`, `interval_seconds`, `payload`, or `next_run_at`.
 
 Transfer work remains isolated on its own queue:
 
@@ -142,7 +136,6 @@ make run-worker-transfer
 - `getoffline.jobs.downloads.youtube`: YouTube and manual URL `download_single` / `download_episode`
 - `getoffline.jobs.downloads.podcast`: podcast `download_episode`
 - `getoffline.jobs.transcripts`: `generate_transcript`
-- `getoffline.jobs.summaries`: `summarize_missing`, `generate_summary`
 - `getoffline.jobs.transfer`: `transfer_media`
 - `getoffline.jobs.cleanup`: `retention_cleanup`
 
@@ -155,7 +148,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 
 - `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, an Alpine image with Django, Gunicorn, and nginx for web/database/queue dependencies.
 - updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
-- summary, transfer, and cleanup workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies.
+- transfer and cleanup workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies.
 - transcript workers build from `deploy/docker/worker-transcripts.Dockerfile`, a Debian slim image that installs faster-whisper and CTranslate2 from normal Python wheels to avoid Alpine/native-wheel compatibility issues.
 - `frontend` publishes host port `8080`, serves static files with bundled nginx, and proxies dynamic requests to the Django app running under Gunicorn WSGI in the same container.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
@@ -164,7 +157,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 - `worker-updates` discovers new episodes and publishes download jobs.
 - `worker-downloader-youtube` consumes YouTube/manual URL download jobs one at a time, and `worker-downloader-podcast` consumes podcast download jobs.
 - YouTube and podcast downloader workers run FFmpeg post-processing inline before publishing transcript work.
-- `worker-transcripts`, `worker-summaries`, `worker-transfer`, and `worker-cleanup` run the parallel/background processing queues.
+- `worker-transcripts`, `worker-transfer`, and `worker-cleanup` run the parallel/background processing queues.
 - `scheduler` polls the database for due `scheduled_jobs` rows and publishes durable RabbitMQ jobs.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
 
@@ -183,8 +176,8 @@ export GETOFFLINE_CSRF_TRUSTED_ORIGINS='http://localhost:8080'
 docker compose up --build -d
 ```
 
-On startup, `frontend` and every worker wait for the one-shot `migrate` service to finish successfully, so tables such as `downloads` are created before the web UI serves requests. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript and summary workers can be scaled independently:
+On startup, `frontend` and every worker wait for the one-shot `migrate` service to finish successfully, so tables such as `downloads` are created before the web UI serves requests. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript workers can be scaled independently:
 
 ```bash
-docker compose up -d --scale worker-transcripts=4 --scale worker-summaries=4
+docker compose up -d --scale worker-transcripts=4
 ```

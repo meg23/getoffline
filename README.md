@@ -66,7 +66,7 @@ YouTube live streams are skipped automatically for configured playlist and chann
 
 ## Split app/workers deployment
 
-For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, keep the FFmpeg worker running so downloaded files are converted after download, and run multiple transfer or summary workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
+For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, keep the FFmpeg worker running so downloaded files are converted after download, and run multiple transfer workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
 
 To migrate an older standalone SQLite library into the split Django/MySQL database, first run `make migrate-db`, create the destination user if needed, and then run:
 
@@ -95,7 +95,7 @@ PYTHONPATH=src python -m workers.main
 
 To import every supported video in a local directory through the same workflow
 as browser drag-and-drop (copy to `manual`, database registration, Whisper
-transcription, optional explicit-content filtering, audit logging, and summary
+transcription, optional explicit-content filtering, audit logging
 generation), run:
 
 ```bash

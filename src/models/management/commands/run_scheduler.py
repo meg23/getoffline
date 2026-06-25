@@ -19,13 +19,6 @@ DEFAULT_SCHEDULES = [
     },
     {
         "profile_id": "default",
-        "job_type": "summarize_missing",
-        "interval_seconds": 21600,
-        "payload": {"source": "scheduler"},
-        "idempotency_key_template": "scheduled:summarize_missing:${profile_id}:${due_date}",
-    },
-    {
-        "profile_id": "default",
         "job_type": "transfer_media",
         "interval_seconds": 3600,
         "payload": {"source": "scheduler"},

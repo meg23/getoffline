@@ -37,14 +37,12 @@ from models.models import (
     ScheduledJob,
     SourceConfig,
     TranscriptSegment,
-    MediaSummary,
 )
 
 from .queue import publish_job
 from .routing import (
     PODCAST_DOWNLOAD_QUEUE,
     SERIAL_EPISODE_CHECK_QUEUE,
-    SUMMARY_QUEUE,
     TRANSFER_QUEUE,
     TRANSCRIPT_QUEUE,
     YOUTUBE_DOWNLOAD_QUEUE,
@@ -55,7 +53,6 @@ ALLOWED_JOB_TYPES = {
     "update_downloads",
     "download_single",
     "transfer_media",
-    "summarize_missing",
 }
 DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
 MEDIA_UPLOAD_EXTENSIONS = {
@@ -260,66 +257,17 @@ def _supersede_active_transcript_job(profile_id: str, download_id: int) -> None:
     )
 
 
-def _queue_missing_summary_batch(profile_id: str, *, reason: str) -> bool:
-    """Queue one batch summary fanout job when downloaded subtitle-backed rows lack summaries."""
-    has_missing_summary = (
-        Download.objects.filter(profile_id=profile_id, download_status="downloaded")
-        .exclude(Q(subtitle_path__isnull=True) | Q(subtitle_path=""))
-        .filter(summary__isnull=True)
-        .exists()
-    )
-    if not has_missing_summary:
-        return False
-
-    idempotency_key = f"summarize_missing:{profile_id}:auto"
-    active_job = Job.objects.filter(
-        idempotency_key=idempotency_key,
-        status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
-    ).first()
-    if active_job is not None:
-        return False
-
-    job = create_job(
-        profile_id=profile_id,
-        job_type="summarize_missing",
-        payload={"source": "django_app", "auto_enqueue": True, "reason": reason},
-        idempotency_key=idempotency_key,
-    )
-    try:
-        publish_job(
-            {
-                "job_id": job.id,
-                "job_type": job.job_type,
-                "profile_id": job.profile_id,
-                "attempt": 1,
-            }
-        )
-    except Exception:
-        job.status = Job.STATUS_FAILED
-        job.error_message = "Failed to publish automatic summarize_missing job"
-        job.finished_at = timezone.now()
-        job.updated_at = job.finished_at
-        job.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
-        return False
-    return True
-
-
 @login_required
 def library(request: HttpRequest) -> HttpResponse:
     total_start = time.perf_counter()
     profile_id = _profile_id(request)
 
-    # Performance: do not scan/queue missing summaries on every library page load.
-    # Run summarize_missing from an explicit action or when downloads/transcripts finish instead.
-
     setup_start = time.perf_counter()
     downloads_qs = (
-        Download.objects.select_related("summary").filter(
+        Download.objects.filter(
             profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES
         )
         # Keep the library query narrow. Avoid pulling raw yt-dlp metadata JSON.
-        # Keep description + summary_text because app/library.html currently uses
-        # them for the mini-player/summary tooltip fallback.
         .only(
             "id",
             "profile_id",
@@ -339,8 +287,6 @@ def library(request: HttpRequest) -> HttpResponse:
             "favorite",
             "last_position_seconds",
             "total_listened_seconds",
-            "summary__download_id",
-            "summary__summary_text",
         )
     )
     setup_elapsed = time.perf_counter() - setup_start
@@ -429,14 +375,10 @@ def _job_stage(job: Job) -> tuple[str, str]:
         return "downloading", "Downloading"
     if active_stage == "transcript_generation":
         return "transcript_generation", "Transcript generation"
-    if active_stage == "finalizing_summary":
-        return "finalizing_summary", "Finalizing summary"
     if job.job_type in {"download_episode", "download_single"}:
         return "downloading", "Downloading"
     if job.job_type in {"generate_transcript", "transcode_media"}:
         return "transcript_generation", "Transcript generation"
-    if job.job_type == "generate_summary":
-        return "finalizing_summary", "Finalizing summary"
     return "queued", job.job_type.replace("_", " ").title()
 
 
@@ -471,8 +413,6 @@ def _job_still_needs_work(job: Job) -> bool:
     ).first()
     if download is None:
         return job.job_type in {"download_episode", "download_single"}
-    if job.job_type == "generate_summary":
-        return not MediaSummary.objects.filter(download_id=download_id).exists()
     if job.job_type in {"generate_transcript", "transcode_media"}:
         has_transcript = TranscriptSegment.objects.filter(
             download_id=download_id
@@ -495,7 +435,6 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
                 "download_single",
                 "generate_transcript",
                 "transcode_media",
-                "generate_summary",
             ],
             status=Job.STATUS_RUNNING,
         ).order_by("started_at", "created_at", "id")[:40]
@@ -538,12 +477,6 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
         _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
     )
     item.has_subtitles = item.resolved_subtitle_path is not None
-    if (
-        not hasattr(item, "summary")
-        and item.download_status == "downloaded"
-        and item.has_subtitles
-    ):
-        _queue_missing_summary_batch(item.profile_id, reason="player_missing_summary")
     try:
         requested_seek = float(request.GET.get("t") or 0.0)
     except (TypeError, ValueError):
@@ -630,12 +563,8 @@ PROFILE_DEFAULTS = {
     "ytdlp_video_max_height": "720",
     "max_downloads": "3",
     "js_runtime_path": "qjs",
-    "summary_model": "qwen2.5:0.5b",
-    "ollama_path": "ollama",
-    "android_sync_target": "android",
     "android_sync_enabled": "0",
     "android_sync_max_items": "10",
-    "android_sync_directory": "./offline-sync",
     "android_sync_destination": "/sdcard/Movies/GetOffline",
     "android_sync_adb_path": "adb",
     "android_sync_connection_mode": "usb",
@@ -732,7 +661,6 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
         YOUTUBE_DOWNLOAD_QUEUE: "YouTube downloads",
         PODCAST_DOWNLOAD_QUEUE: "Podcast downloads",
         TRANSCRIPT_QUEUE: "Transcripts",
-        SUMMARY_QUEUE: "Summaries",
         TRANSFER_QUEUE: "Transfer",
     }
     counts = {
@@ -1476,60 +1404,6 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
                     "redownload": True,
                 },
                 idempotency_key=f"download_single:{profile_id}:{item.pk}",
-            )
-            publish_job(
-                {
-                    "job_id": job.id,
-                    "job_type": job.job_type,
-                    "profile_id": job.profile_id,
-                    "attempt": 1,
-                }
-            )
-    elif action == "transcript-summary":
-        profile_id = _profile_id(request)
-        for item in rows:
-            _supersede_active_transcript_job(profile_id, item.pk)
-            MediaSummary.objects.filter(download=item).delete()
-            media_type = (
-                "audio"
-                if item.source_type == "podcast"
-                or str(item.file_ext or "").lower() not in {"mp4", "mkv", "webm", "mov"}
-                else "video"
-            )
-            job = create_job(
-                profile_id=profile_id,
-                job_type="generate_transcript",
-                payload={
-                    "download_id": item.pk,
-                    "subtitles": True,
-                    "source_type": item.source_type,
-                    "source_name": item.source_name,
-                    "media_type": media_type,
-                    "manual_refresh": True,
-                    "replace_existing": True,
-                },
-                idempotency_key=f"generate_transcript:{profile_id}:{item.pk}",
-            )
-            publish_job(
-                {
-                    "job_id": job.id,
-                    "job_type": job.job_type,
-                    "profile_id": job.profile_id,
-                    "attempt": 1,
-                }
-            )
-    elif action == "summary":
-        profile_id = _profile_id(request)
-        for item in rows:
-            job = create_job(
-                profile_id=profile_id,
-                job_type="generate_summary",
-                payload={
-                    "download_id": item.pk,
-                    "manual_refresh": True,
-                    "replace_existing": True,
-                },
-                idempotency_key=f"generate_summary:{profile_id}:{item.pk}",
             )
             publish_job(
                 {

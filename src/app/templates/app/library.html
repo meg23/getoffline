@@ -25,28 +25,6 @@
           </div>
         </div>
 
-        <section class="summary-grid" aria-label="Library summary">
-          <article class="summary-card">
-            <div class="summary-label">Visible Items</div>
-            <div id="summary-visible-items" class="summary-value">{{ stats.visible }}</div>
-          </article>
-          <article class="summary-card">
-            <div class="summary-label">Played</div>
-            <div id="summary-played-items" class="summary-value">{{ stats.played }}</div>
-          </article>
-          <article class="summary-card">
-            <div class="summary-label">New</div>
-            <div id="summary-new-items" class="summary-value">{{ stats.new }}</div>
-          </article>
-          <article class="summary-card">
-            <div class="summary-label">Favorites</div>
-            <div id="summary-favorite-items" class="summary-value">{{ stats.favorites }}</div>
-          </article>
-          <article class="summary-card">
-            <div class="summary-label">Listened</div>
-            <div id="summary-listened-items" class="summary-value">{{ stats.listened }}</div>
-          </article>
-        </section>
       </header>
 
       <section class="panel toolbar-panel" aria-label="Dashboard controls">
@@ -105,8 +83,6 @@
               <option value="unfavorite">unfavorite</option>
               <option value="edit-metadata">edit</option>
               <option value="download">download</option>
-              <option value="transcript-summary">transcript</option>
-              <option value="summary">summary</option>
               <option value="delete">delete</option>
             </select>
             <button id="batch-apply" class="batch-apply" type="submit" disabled>Apply</button>
@@ -219,7 +195,6 @@
         </table>
       </main>
 
-      <div id="summary-tooltip" class="summary-tooltip" role="tooltip" aria-hidden="true"></div>
     </div>
 
     <div id="quick-add-backdrop" class="modal-backdrop" aria-hidden="true">

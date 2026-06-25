@@ -123,23 +123,6 @@ class Download(models.Model):
         return self.title or f"Download {self.pk}"
 
 
-class MediaSummary(models.Model):
-    download = models.OneToOneField(
-        Download,
-        primary_key=True,
-        db_column="download_id",
-        on_delete=models.CASCADE,
-        related_name="summary",
-    )
-    summary_text = models.TextField()
-    model_name = models.CharField(max_length=255)
-    source_segment_count = models.IntegerField(default=0)
-    updated_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = "media_summaries"
-
-
 class TranscriptSegment(models.Model):
     download = models.ForeignKey(
         Download,

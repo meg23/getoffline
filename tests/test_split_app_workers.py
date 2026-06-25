@@ -41,7 +41,6 @@ if django is not None:
     from models.models import (
         Download,
         Job,
-        MediaSummary,
         ScheduledJob,
         SourceConfig,
         ProfileConfigValue,
@@ -49,7 +48,6 @@ if django is not None:
     )  # noqa: E402
     from app.views import (
         _queue_counts,
-        _queue_missing_summary_batch,
         _sync_update_downloads_schedule,
         _write_manual_upload,
     )  # noqa: E402
@@ -62,7 +60,6 @@ if django is not None:
         _is_expected_ytdlp_download_error,
         _youtube_candidates,
     )  # noqa: E402
-    from workers.runner import enqueue_missing_summary_jobs  # noqa: E402
 
 
 @override_settings(
@@ -121,13 +118,13 @@ class SharedDjangoModelTests(TestCase):
     def test_idempotency_reuses_queued_job(self):
         first = create_job(
             profile_id="default",
-            job_type="summarize_missing",
-            idempotency_key="summary:default",
+            job_type="update_downloads",
+            idempotency_key="update:default",
         )
         second = create_job(
             profile_id="default",
-            job_type="summarize_missing",
-            idempotency_key="summary:default",
+            job_type="update_downloads",
+            idempotency_key="update:default",
         )
         self.assertEqual(first.id, second.id)
 
@@ -328,167 +325,7 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(favorite_download.download_status, "downloaded")
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_missing_summary_batch_is_queued_once_for_downloaded_subtitle_rows(self):
-        Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="missing-summary",
-            title="Missing Summary",
-            file_path="/tmp/media.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="/tmp/media.srt",
-        )
 
-        with patch("app.views.publish_job") as publish:
-            queued = _queue_missing_summary_batch(
-                "default", reason="test_missing_summary"
-            )
-            queued_again = _queue_missing_summary_batch(
-                "default", reason="test_missing_summary"
-            )
-
-        self.assertTrue(queued)
-        self.assertFalse(queued_again)
-        job = Job.objects.get(
-            job_type="summarize_missing",
-            idempotency_key="summarize_missing:default:auto",
-        )
-        self.assertEqual(job.payload["reason"], "test_missing_summary")
-        self.assertTrue(job.payload["auto_enqueue"])
-        publish.assert_called_once_with(
-            {
-                "job_id": job.id,
-                "job_type": "summarize_missing",
-                "profile_id": "default",
-                "attempt": 1,
-            }
-        )
-
-    @unittest.skipIf(django is None, "Django is not installed")
-    def test_startup_missing_summary_scan_enqueues_transcript_backed_missing_and_blank_summaries(
-        self,
-    ):
-        missing = Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="startup-missing-summary",
-            title="Startup Missing Summary",
-            file_path="/tmp/startup-missing.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="/tmp/startup-missing.srt",
-        )
-        blank = Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="startup-blank-summary",
-            title="Startup Blank Summary",
-            file_path="/tmp/startup-blank.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="",
-        )
-        TranscriptSegment.objects.create(
-            download=blank,
-            subtitle_path="/tmp/startup-blank.srt",
-            start_seconds=0.0,
-            text="Transcript text",
-        )
-        MediaSummary.objects.create(download=blank, summary_text="", model_name="test")
-        no_transcript = Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="startup-no-transcript",
-            title="Startup No Transcript",
-            file_path="/tmp/startup-no-transcript.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="",
-        )
-        with_summary = Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="startup-with-summary",
-            title="Startup With Summary",
-            file_path="/tmp/startup-with-summary.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="/tmp/startup-with-summary.srt",
-        )
-        MediaSummary.objects.create(
-            download=with_summary, summary_text="Already summarized", model_name="test"
-        )
-
-        with patch("workers.runner.publish_job") as publish:
-            enqueued = enqueue_missing_summary_jobs()
-
-        self.assertEqual(enqueued, 2)
-        self.assertTrue(
-            Job.objects.filter(
-                job_type="generate_summary", payload__download_id=missing.id
-            ).exists()
-        )
-        self.assertTrue(
-            Job.objects.filter(
-                job_type="generate_summary", payload__download_id=blank.id
-            ).exists()
-        )
-        self.assertFalse(
-            Job.objects.filter(
-                job_type="generate_summary", payload__download_id=no_transcript.id
-            ).exists()
-        )
-        self.assertFalse(
-            Job.objects.filter(
-                job_type="generate_summary", payload__download_id=with_summary.id
-            ).exists()
-        )
-        self.assertEqual(publish.call_count, 2)
-
-    @unittest.skipIf(django is None, "Django is not installed")
-    def test_missing_summary_batch_skips_rows_without_subtitles_or_with_summary(self):
-        Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="no-subtitles",
-            title="No Subtitles",
-            file_path="/tmp/no-subtitles.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="",
-        )
-        with_summary = Download.objects.create(
-            profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
-            source_name="Channel",
-            item_uid="with-summary",
-            title="With Summary",
-            file_path="/tmp/with-summary.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-            subtitle_path="/tmp/with-summary.srt",
-        )
-        MediaSummary.objects.create(
-            download=with_summary, summary_text="Already summarized", model_name="test"
-        )
-
-        with patch("app.views.publish_job") as publish:
-            queued = _queue_missing_summary_batch(
-                "default", reason="test_no_candidates"
-            )
-
-        self.assertFalse(queued)
-        self.assertFalse(Job.objects.filter(job_type="summarize_missing").exists())
-        publish.assert_not_called()
-
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_queue_counts_groups_active_jobs_by_worker_queue(self):
         Job.objects.create(
             profile_id="default", job_type="update_downloads", status=Job.STATUS_QUEUED
@@ -500,11 +337,6 @@ class SharedDjangoModelTests(TestCase):
         )
         Job.objects.create(
             profile_id="default", job_type="download_episode", status=Job.STATUS_QUEUED
-        )
-        Job.objects.create(
-            profile_id="default",
-            job_type="generate_summary",
-            status=Job.STATUS_SUCCEEDED,
         )
         Job.objects.create(
             profile_id="other", job_type="download_episode", status=Job.STATUS_QUEUED
@@ -691,47 +523,7 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_batch_update_queues_transcript_summary_refresh(self):
-        client = Client()
-        from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
-        self.assertTrue(client.login(username="default", password="pass"))
-        download = Download.objects.create(
-            profile_id="default",
-            source_type="youtube",
-            source_name="Test Channel",
-            item_uid="video-refresh",
-            title="Refresh Me",
-            file_path="/tmp/refresh-me.mp4",
-            file_ext="mp4",
-            download_status="downloaded",
-        )
-        MediaSummary.objects.create(download=download, summary_text="old summary")
-
-        with patch("app.views.publish_job") as publish:
-            response = client.post(
-                "/batch-update/",
-                {"ids": [str(download.id)], "batch_action": "transcript-summary"},
-            )
-
-        self.assertEqual(response.status_code, 302)
-        self.assertFalse(MediaSummary.objects.filter(download=download).exists())
-        job = Job.objects.get(
-            job_type="generate_transcript", payload__download_id=download.id
-        )
-        self.assertTrue(job.payload["replace_existing"])
-        self.assertEqual(job.payload["media_type"], "video")
-        publish.assert_called_once_with(
-            {
-                "job_id": job.id,
-                "job_type": "generate_transcript",
-                "profile_id": "default",
-                "attempt": 1,
-            }
-        )
-
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_transcript_refresh_supersedes_active_job(self):
         client = Client()
         from django.contrib.auth.models import User
@@ -759,7 +551,7 @@ class SharedDjangoModelTests(TestCase):
         with patch("app.views.publish_job") as publish:
             response = client.post(
                 "/batch-update/",
-                {"ids": [str(download.id)], "batch_action": "transcript-summary"},
+                {"ids": [str(download.id)], "batch_action": "download"},
             )
 
         self.assertEqual(response.status_code, 302)
@@ -782,44 +574,7 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_batch_update_queues_summary_refresh(self):
-        client = Client()
-        from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
-        self.assertTrue(client.login(username="default", password="pass"))
-        download = Download.objects.create(
-            profile_id="default",
-            source_type="podcast",
-            source_name="Test Feed",
-            item_uid="episode-refresh",
-            title="Refresh Summary",
-            file_path="/tmp/refresh-summary.mp3",
-            file_ext="mp3",
-            download_status="downloaded",
-        )
-
-        with patch("app.views.publish_job") as publish:
-            response = client.post(
-                "/batch-update/",
-                {"ids": [str(download.id)], "batch_action": "summary"},
-            )
-
-        self.assertEqual(response.status_code, 302)
-        job = Job.objects.get(
-            job_type="generate_summary", payload__download_id=download.id
-        )
-        self.assertTrue(job.payload["replace_existing"])
-        publish.assert_called_once_with(
-            {
-                "job_id": job.id,
-                "job_type": "generate_summary",
-                "profile_id": "default",
-                "attempt": 1,
-            }
-        )
-
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(
             profile_id="default",
@@ -1203,8 +958,6 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(
             queue_name("generate_transcript"), "getoffline.jobs.transcripts"
         )
-        self.assertEqual(queue_name("summarize_missing"), "getoffline.jobs.summaries")
-        self.assertEqual(queue_name("generate_summary"), "getoffline.jobs.summaries")
 
 
 @unittest.skipIf(django is None, "Django is not installed")

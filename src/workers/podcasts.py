@@ -1,5 +1,6 @@
 import os
 import resource
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -22,7 +23,6 @@ from workers.content_filter import (
 )
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from workers.summary_tasks import generate_missing_summaries
 from workers.utils import ensure_dir, sanitize, sanitize_channel_name
 
 PODCAST_DOWNLOAD_RETRIES = 3
@@ -540,14 +540,6 @@ def _download_podcasts_in_process(config, downloaded_items):
                             subtitle_path=subtitle_path,
                             download_status="downloaded",
                             artwork_url=job.get("artwork_url"),
-                        ),
-                    )
-                    generate_missing_summaries(
-                        db_path,
-                        limit=5,
-                        model_name=str(defaults.get("summary_model") or "qwen2.5:0.5b"),
-                        timeout_seconds=int(
-                            defaults.get("summary_timeout_seconds") or 90
                         ),
                     )
 

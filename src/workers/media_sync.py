@@ -83,12 +83,8 @@ def config_from_defaults(defaults: dict) -> AndroidSyncConfig:
         max_items = 10
     return AndroidSyncConfig(
         enabled=_coerce_bool(defaults.get("android_sync_enabled")),
-        target=str(defaults.get("android_sync_target") or "android").strip().lower()
-        or "android",
-        directory=str(
-            defaults.get("android_sync_directory") or "./offline-sync"
-        ).strip()
-        or "./offline-sync",
+        target="android",
+        directory="",
         adb_path=str(defaults.get("android_sync_adb_path") or "adb").strip() or "adb",
         connection_mode=str(defaults.get("android_sync_connection_mode") or "usb")
         .strip()
@@ -1173,157 +1169,9 @@ def _write_directory_playlist(
         _append_error(result, f"VLC playlist write failed: {exc}", "Directory transfer")
 
 
-def _prepare_sync_directory(
-    config: AndroidSyncConfig, item_count: int, result: AndroidSyncResult
-) -> Optional[Path]:
-    destination = Path(config.directory).expanduser().resolve()
-    try:
-        destination.mkdir(parents=True, exist_ok=True)
-        return destination
-    except OSError as exc:
-        result.failed = item_count
-        result.message = f"unable to prepare transfer directory: {exc}"
-        _append_error(result, result.message, "Directory transfer")
-        return None
-
-
-def _read_directory_syncdb(destination: Path, result: AndroidSyncResult) -> set[str]:
-    syncdb_path = destination / "transferdb.txt"
-    if not syncdb_path.is_file():
-        return set()
-    try:
-        lines = syncdb_path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        _append_error(
-            result,
-            f"transfer history read failed; continuing with empty history: {exc}",
-            "Directory transfer",
-        )
-        return set()
-    synced_paths: set[str] = set()
-    for line in lines:
-        synced_path = line.strip()
-        if synced_path:
-            synced_paths.add(synced_path)
-    return synced_paths
-
-
-def _write_directory_syncdb(
-    destination: Path, synced_paths: Iterable[str], result: AndroidSyncResult
-) -> None:
-    syncdb_path = destination / "transferdb.txt"
-    normalized_paths: set[str] = set()
-    for path in synced_paths:
-        normalized_path = str(path).strip()
-        if normalized_path:
-            normalized_paths.add(normalized_path)
-    payload = ""
-    for normalized_path in sorted(normalized_paths):
-        payload += normalized_path + "\n"
-    try:
-        syncdb_path.write_text(payload, encoding="utf-8")
-        log.info(
-            "Directory transfer history written: path=%s entries=%s",
-            syncdb_path,
-            len(normalized_paths),
-        )
-    except OSError as exc:
-        _append_error(
-            result, f"transfer history write failed: {exc}", "Directory transfer"
-        )
-
-
-def _set_sync_result_message(result: AndroidSyncResult) -> None:
-    if result.failed:
-        result.message = (
-            f"copied {result.copied}, skipped {result.skipped}, failed {result.failed}"
-        )
-    else:
-        result.message = f"copied {result.copied}, skipped {result.skipped}"
-
-
-def _sync_item_to_directory(
-    item: AndroidSyncItem,
-    destination: Path,
-    synced_paths: set[str],
-    playlist_entries: List[Tuple[AndroidSyncItem, str]],
-    config: AndroidSyncConfig,
-    result: AndroidSyncResult,
-    runner: Callable[..., subprocess.CompletedProcess],
-) -> bool:
-    destination_path = destination / Path(build_remote_media_path("", item)).name
-    destination_path_text = str(destination_path)
-    if destination_path_text in synced_paths:
-        result.skipped += 1
-        playlist_entries.append((item, destination_path_text))
-        log.info(
-            "Directory transfer item skipped: row_id=%s path already recorded in transferdb.txt",
-            item.row_id,
-        )
-        return False
-    if not _copy_item_to_directory(item, destination_path, result, runner):
-        return False
-    synced_paths.add(destination_path_text)
-    playlist_entries.append((item, destination_path_text))
-    log.info(
-        "Directory transfer item completed: row_id=%s path=%s",
-        item.row_id,
-        destination_path,
-    )
-    if config.include_subtitles:
-        _copy_subtitle_to_directory(item, destination_path, result)
-    return True
-
-
-def sync_items_to_directory(
-    items: Iterable[AndroidSyncItem],
-    config: AndroidSyncConfig,
-    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-) -> AndroidSyncResult:
-    result = AndroidSyncResult(message="disabled")
-    if not config.enabled:
-        return result
-    sync_items = list(items)[: config.max_items]
-    if not sync_items:
-        result.message = "no media to transfer"
-        return result
-    destination = _prepare_sync_directory(config, len(sync_items), result)
-    if destination is None:
-        return result
-    log.info(
-        "Directory transfer starting: items=%s destination=%s",
-        len(sync_items),
-        destination,
-    )
-    playlist_entries: List[Tuple[AndroidSyncItem, str]] = []
-    syncdb_path = destination / "transferdb.txt"
-    syncdb_paths = _read_directory_syncdb(destination, result)
-    syncdb_changed = False
-    for item in sync_items:
-        result.attempted += 1
-        item_changed = _sync_item_to_directory(
-            item, destination, syncdb_paths, playlist_entries, config, result, runner
-        )
-        syncdb_changed = syncdb_changed or item_changed
-    if syncdb_changed or not syncdb_path.exists():
-        _write_directory_syncdb(destination, syncdb_paths, result)
-    _write_directory_playlist(destination, playlist_entries, result)
-    _set_sync_result_message(result)
-    log.info(
-        "Directory transfer finished: attempted=%s copied=%s skipped=%s failed=%s",
-        result.attempted,
-        result.copied,
-        result.skipped,
-        result.failed,
-    )
-    return result
-
-
 def sync_items(
     items: Iterable[AndroidSyncItem],
     config: AndroidSyncConfig,
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> AndroidSyncResult:
-    if config.target == "directory":
-        return sync_items_to_directory(items, config, runner)
     return sync_items_to_android(items, config, runner)
