@@ -1183,14 +1183,36 @@ def _is_youtube_short_entry(entry: dict) -> bool:
     return any("/shorts/" in value for value in urls)
 
 
+_YOUTUBE_LIVE_TITLE_MARKERS = (
+    "🔴",
+    " live stream",
+    " livestream",
+    "| live",
+    "- live",
+    "[live]",
+    "(live)",
+)
+
+
+def _youtube_title_looks_live(title: object) -> bool:
+    normalized = f" {str(title or '').strip().lower()} "
+    if not normalized.strip():
+        return False
+    if any(marker in normalized for marker in _YOUTUBE_LIVE_TITLE_MARKERS):
+        return True
+    return normalized.strip() == "live" or normalized.startswith("live ")
+
+
 def _is_youtube_livestream_entry(entry: dict) -> bool:
     live_status = str(entry.get("live_status") or "").strip().lower()
-    return bool(entry.get("is_live")) or live_status in {
+    if bool(entry.get("is_live")) or live_status in {
         "is_live",
         "is_upcoming",
         "was_live",
         "post_live",
-    }
+    }:
+        return True
+    return _youtube_title_looks_live(entry.get("title"))
 
 
 def _youtube_source_skip_reason(source: SourceConfig, entry: dict) -> str | None:
