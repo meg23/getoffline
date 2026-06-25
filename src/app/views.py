@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 import time
 import mimetypes
 import uuid
@@ -414,7 +415,7 @@ def _job_display_title(job: Job) -> str:
         )
         if title:
             return str(title)
-    for key in ("title", "episode_title", "item_title", "url"):
+    for key in ("active_title", "title", "episode_title", "item_title", "url"):
         value = str(payload.get(key) or "").strip()
         if value:
             return value
@@ -422,6 +423,14 @@ def _job_display_title(job: Job) -> str:
 
 
 def _job_stage(job: Job) -> tuple[str, str]:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    active_stage = str(payload.get("active_stage") or "").strip()
+    if active_stage == "downloading":
+        return "downloading", "Downloading"
+    if active_stage == "transcript_generation":
+        return "transcript_generation", "Transcript generation"
+    if active_stage == "finalizing_summary":
+        return "finalizing_summary", "Finalizing summary"
     if job.job_type in {"download_episode", "download_single"}:
         return "downloading", "Downloading"
     if job.job_type in {"generate_transcript", "transcode_media"}:
@@ -429,6 +438,26 @@ def _job_stage(job: Job) -> tuple[str, str]:
     if job.job_type == "generate_summary":
         return "finalizing_summary", "Finalizing summary"
     return "queued", job.job_type.replace("_", " ").title()
+
+
+def _active_pipeline_cutoff():
+    raw_timeout = str(
+        os.getenv("GETOFFLINE_ACTIVE_PIPELINE_STALE_SECONDS", "3600")
+    ).strip()
+    if not raw_timeout.isdigit():
+        return None
+    timeout_seconds = int(raw_timeout)
+    if timeout_seconds <= 0:
+        return None
+    return timezone.now() - timedelta(seconds=timeout_seconds)
+
+
+def _job_is_fresh(job: Job) -> bool:
+    cutoff = _active_pipeline_cutoff()
+    if cutoff is None:
+        return True
+    heartbeat_at = job.updated_at or job.started_at or job.created_at
+    return bool(heartbeat_at and heartbeat_at >= cutoff)
 
 
 def _job_still_needs_work(job: Job) -> bool:
@@ -471,7 +500,9 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
             status=Job.STATUS_RUNNING,
         ).order_by("started_at", "created_at", "id")[:40]
     )
-    active_jobs = [job for job in jobs if _job_still_needs_work(job)][:20]
+    active_jobs = [
+        job for job in jobs if _job_is_fresh(job) and _job_still_needs_work(job)
+    ][:20]
     return [
         {
             "id": job.id,
