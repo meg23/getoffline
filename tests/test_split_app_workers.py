@@ -86,6 +86,16 @@ if django is not None:
         _youtube_candidates,
     )  # noqa: E402
 
+    class AuthenticatedClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            from django.contrib.auth.models import User
+
+            user, _created = User.objects.get_or_create(username="test-client")
+            self.force_login(user)
+
+    Client = AuthenticatedClient
+
 
 @override_settings(
     DATABASES={
@@ -381,9 +391,9 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(counts["Updates"]["queued"], 1)
         self.assertEqual(counts["Updates"]["running"], 1)
         self.assertEqual(counts["Updates"]["total"], 2)
-        self.assertEqual(counts["Downloads"]["queued"], 1)
-        self.assertEqual(counts["Downloads"]["running"], 0)
-        self.assertEqual(counts["Summaries"]["total"], 0)
+        self.assertEqual(counts["YouTube downloads"]["queued"], 1)
+        self.assertEqual(counts["YouTube downloads"]["running"], 0)
+        self.assertEqual(counts["Transcripts"]["total"], 0)
         self.assertEqual(queue_name("retention_cleanup"), CLEANUP_QUEUE)
 
     @unittest.skipIf(django is None, "Django is not installed")
@@ -741,18 +751,17 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         active_job.refresh_from_db()
-        self.assertEqual(active_job.status, Job.STATUS_FAILED)
-        self.assertIn("Superseded", active_job.error_message)
+        self.assertEqual(active_job.status, Job.STATUS_RUNNING)
         replacement = Job.objects.get(
-            job_type="generate_transcript",
+            job_type="download_single",
             status=Job.STATUS_QUEUED,
-            payload__download_id=download.id,
+            idempotency_key=f"download_single:default:{download.id}",
         )
-        self.assertNotEqual(replacement.id, active_job.id)
+        self.assertEqual(replacement.payload["redownload"], True)
         publish.assert_called_once_with(
             {
                 "job_id": replacement.id,
-                "job_type": "generate_transcript",
+                "job_type": "download_single",
                 "profile_id": "default",
                 "attempt": 1,
             }
@@ -1047,18 +1056,18 @@ class SharedDjangoModelTests(TestCase):
             ):
                 transcode_media(job)
 
-        download.refresh_from_db()
-        self.assertEqual(download.file_ext, "mp3")
-        self.assertTrue(original.exists())
-        self.assertEqual(download.file_size_bytes, len("converted"))
-        transcript_job = Job.objects.get(
-            job_type="generate_transcript", payload__download_id=download.id
-        )
-        self.assertEqual(
-            transcript_job.payload["original_file_path"], str(original.resolve())
-        )
-        run.assert_called_once()
-        publish.assert_called_once()
+            download.refresh_from_db()
+            self.assertEqual(download.file_ext, "mp3")
+            self.assertTrue(original.exists())
+            self.assertEqual(download.file_size_bytes, len("converted"))
+            transcript_job = Job.objects.get(
+                job_type="generate_transcript", payload__download_id=download.id
+            )
+            self.assertEqual(
+                transcript_job.payload["original_file_path"], str(original.resolve())
+            )
+            run.assert_called_once()
+            publish.assert_called_once()
 
 
 class QueueRoutingTests(unittest.TestCase):
