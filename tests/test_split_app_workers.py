@@ -594,6 +594,17 @@ class SharedDjangoModelTests(TestCase):
 
         User.objects.create_user(username="default", password="pass")
         self.assertTrue(client.login(username="default", password="pass"))
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS media_summaries")
+            cursor.execute(
+                "CREATE TABLE media_summaries ("
+                "id integer primary key, "
+                "download_id integer not null references downloads(id), "
+                "summary text)"
+            )
+        self.addCleanup(self._drop_media_summaries_test_table)
         with tempfile.TemporaryDirectory() as tmpdir:
             media_path = Path(tmpdir) / "purge-me.mp3"
             media_path.write_text("audio", encoding="utf-8")
@@ -626,6 +637,11 @@ class SharedDjangoModelTests(TestCase):
                 end_seconds=1.0,
                 text="hello",
             )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO media_summaries (download_id, summary) VALUES (%s, %s)",
+                    [download.id, "legacy summary"],
+                )
 
             response = client.post(
                 "/batch-update/",
@@ -645,6 +661,18 @@ class SharedDjangoModelTests(TestCase):
             self.assertFalse(
                 TranscriptSegment.objects.filter(download_id=download.pk).exists()
             )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM media_summaries WHERE download_id = %s",
+                    [download.pk],
+                )
+                self.assertEqual(cursor.fetchone()[0], 0)
+
+    def _drop_media_summaries_test_table(self):
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS media_summaries")
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_transcript_refresh_supersedes_active_job(self):

@@ -22,6 +22,7 @@ from django.http import (
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
+from django.db import connection
 from django.db.models import Count, Q, Sum
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -1111,6 +1112,34 @@ def _delete_download_media_file(item: Download) -> None:
         )
 
 
+def _delete_external_download_dependents(row_ids: list[int]) -> None:
+    if not row_ids:
+        return
+    existing_tables = set(connection.introspection.table_names())
+    dependent_tables = ["media_summaries"]
+    placeholders = ", ".join(["%s"] * len(row_ids))
+    with connection.cursor() as cursor:
+        for table_name in dependent_tables:
+            if table_name not in existing_tables:
+                log.info(
+                    "Purge dependency cleanup skipped missing table=%s row_ids=%s",
+                    table_name,
+                    row_ids,
+                )
+                continue
+            quoted_table = connection.ops.quote_name(table_name)
+            deleted = cursor.execute(
+                f"DELETE FROM {quoted_table} WHERE download_id IN ({placeholders})",
+                row_ids,
+            )
+            log.info(
+                "Purge dependency cleanup deleted table=%s row_ids=%s deleted_count=%s",
+                table_name,
+                row_ids,
+                deleted,
+            )
+
+
 @login_required
 @require_POST
 def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
@@ -1475,6 +1504,7 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
             _delete_download_media_file(item)
         if row_ids:
             try:
+                _delete_external_download_dependents(row_ids)
                 deleted_count, deleted_by_model = Download.objects.filter(
                     pk__in=row_ids, profile_id=profile_id
                 ).delete()
