@@ -138,6 +138,7 @@
                 data-channel="{{ item.source_name|default:'' }}"
                 data-title="{{ item.title|default:'' }}"
                 data-kind="{{ item.display_kind }}"
+                data-download-status="{{ item.download_status }}"
                 data-media-url="{% url 'media' item.id %}"
                 data-subtitle-url="{% if item.has_subtitles %}{% url 'subtitle' item.id %}{% endif %}"
                 data-resume-seconds="{{ item.last_position_seconds|default:0 }}"
