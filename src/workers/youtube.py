@@ -27,7 +27,13 @@ from workers.download_store import (
 )
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from workers.utils import ensure_dir, normalize_media_filename, sanitize_channel_name
+from workers.utils import (
+    ensure_dir,
+    normalize_media_filename,
+    sanitize_channel_name,
+    split_title_filter_terms,
+    title_matches_filter,
+)
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
@@ -650,6 +656,7 @@ def _download_youtube_items_in_process(config, downloaded_items):
             should_transcribe = should_generate_subtitles or delete_explicit_content
             is_forced_redownload = bool(entry.get("redownload", False))
             allow_live_streams = bool(entry.get("allow_live_streams", False))
+            title_exclude_terms = split_title_filter_terms(entry.get("title_exclude"))
 
             extracted_audio_files: List[Path] = []
             postprocessed_file_by_key: Dict[str, Path] = {}
@@ -825,6 +832,11 @@ def _download_youtube_items_in_process(config, downloaded_items):
                         item_url
                     ) or _extract_youtube_video_id(media_url)
                 title = str(info_dict.get("title") or "").strip() or None
+                title_filter_match = title_matches_filter(title, title_exclude_terms)
+                if title_filter_match:
+                    reason = f"Skipping title matching exclude filter: {title_filter_match}"
+                    _record_skip(reason, info_dict)
+                    return f"{reason}: {_clean_log_title(title)}"
                 item_uid = build_item_uid(
                     item_id=item_id, item_url=item_url, media_url=media_url, title=title
                 )

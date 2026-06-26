@@ -66,6 +66,7 @@ class SourceConfig(models.Model):
     delete_explicit_content = models.BooleanField(default=False)
     include_shorts = models.BooleanField(default=False)
     include_livestreams = models.BooleanField(default=False)
+    title_exclude = models.TextField(blank=True, null=True)
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

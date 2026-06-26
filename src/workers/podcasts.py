@@ -23,7 +23,13 @@ from workers.content_filter import (
 )
 from workers.logger import get_logger
 from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from workers.utils import ensure_dir, sanitize, sanitize_channel_name
+from workers.utils import (
+    ensure_dir,
+    sanitize,
+    sanitize_channel_name,
+    split_title_filter_terms,
+    title_matches_filter,
+)
 
 PODCAST_DOWNLOAD_RETRIES = 3
 
@@ -309,6 +315,7 @@ def _download_podcasts_in_process(config, downloaded_items):
             podcast_scan_limit = _resolve_scan_limit(
                 entry, defaults, source_max_downloads
             )
+            title_exclude_terms = split_title_filter_terms(entry.get("title_exclude"))
             folder = os.path.join(defaults["output_root"], name)
             ensure_dir(folder)
 
@@ -349,6 +356,17 @@ def _download_podcasts_in_process(config, downloaded_items):
             for candidate in episode_candidates:
                 mp3_url = candidate["mp3_url"]
                 episode_title = candidate["title"]
+                title_filter_match = title_matches_filter(
+                    episode_title, title_exclude_terms
+                )
+                if title_filter_match:
+                    log.info(
+                        "Skipping podcast episode for %s because title matches exclude filter %r: %s",
+                        name,
+                        title_filter_match,
+                        episode_title,
+                    )
+                    continue
                 safe_episode_title = sanitize(episode_title)
                 item_uid = build_item_uid(
                     item_id=None,

@@ -189,6 +189,62 @@ class DownloadFlowTests(DatabaseCleanupTestCase):
                 2,
             )
 
+
+    def test_title_exclude_skips_podcast_episode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["podcasts"][0]["title_exclude"] = "MMA"
+            fake_feed = SimpleNamespace(
+                entries=[
+                    SimpleNamespace(
+                        title="Episode about MMA",
+                        enclosures=[SimpleNamespace(href="https://cdn.example.com/mma.mp3")],
+                    ),
+                    SimpleNamespace(
+                        title="Episode about comedy",
+                        enclosures=[SimpleNamespace(href="https://cdn.example.com/comedy.mp3")],
+                    ),
+                ]
+            )
+
+            downloaded_items = []
+            with (
+                patch("workers.podcasts.YoutubeDL", FakeYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
+                podcasts.download_podcasts(config, downloaded_items)
+
+            self.assertEqual(len(FakeYoutubeDL.instances), 1)
+            self.assertEqual(FakeYoutubeDL.instances[0].urls, ["https://cdn.example.com/comedy.mp3"])
+            self.assertTrue(any("Episode about comedy" in item for item in downloaded_items))
+            self.assertFalse(any("Episode about MMA" in item for item in downloaded_items))
+
+    def test_title_exclude_is_applied_to_youtube_match_filter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["youtube"][0]["title_exclude"] = "MMA"
+            config["youtube"][0]["max_downloads"] = 3
+
+            with (
+                patch("workers.youtube.YoutubeDL", FakeYoutubeDL),
+                patch(
+                    "workers.subtitles.generate_whisper_subtitles",
+                    side_effect=_fake_subtitle_generator,
+                ),
+            ):
+                youtube.download_youtube_items(config, [])
+
+            match_filter = FakeYoutubeDL.instances[0].opts["match_filter"]
+            self.assertIsNone(match_filter({"title": "Comedy episode", "id": "ok"}))
+            self.assertIn(
+                "exclude filter",
+                match_filter({"title": "MMA discussion", "id": "skip"}),
+            )
+
     def test_sample_config_single_youtube_and_podcast_with_subtitles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
