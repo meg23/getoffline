@@ -423,7 +423,7 @@ class SharedDjangoModelTests(TestCase):
                 file_path=str(media),
                 file_ext="mp3",
                 download_status="downloaded",
-                subtitle_path="",
+                subtitle_path=str(media.with_suffix(".srt")),
             )
 
             with patch("app.views.publish_job"):
@@ -561,7 +561,7 @@ class SharedDjangoModelTests(TestCase):
             )
 
             with patch("app.views.publish_job"):
-                response = client.get(f"/player/{download.id}/")
+                response = client.get(f"/play/{download.id}/")
 
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
