@@ -23,11 +23,14 @@
       const matchesText = !term || text.includes(term);
       const played = row.dataset.played === "1";
       const favorite = row.dataset.favorite === "1";
+      const unavailable = ["missing", "retention_deleted"].includes(
+        row.dataset.downloadStatus || "",
+      );
       const matchesMode =
         mode === "all" ||
-        (mode === "played" && played) ||
-        (mode === "favorites" && favorite) ||
-        (mode === "unplayed" && !played);
+        (!unavailable && mode === "played" && played) ||
+        (!unavailable && mode === "favorites" && favorite) ||
+        (!unavailable && mode === "unplayed" && !played);
       row.style.display = matchesText && matchesMode ? "" : "none";
     });
     updateBatchState();
