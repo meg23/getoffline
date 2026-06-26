@@ -91,7 +91,10 @@ if django is not None:
             super().__init__(*args, **kwargs)
             from django.contrib.auth.models import User
 
-            user, _created = User.objects.get_or_create(username="test-client")
+            user, created = User.objects.get_or_create(username="default")
+            if created:
+                user.set_password("pass")
+                user.save(update_fields=["password"])
             self.force_login(user)
 
     Client = AuthenticatedClient
@@ -198,7 +201,9 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
         with (
             tempfile.TemporaryDirectory() as tmpdir,
@@ -636,7 +641,9 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
         from django.db import connection
 
@@ -723,7 +730,9 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
         download = Download.objects.create(
             profile_id="default",
