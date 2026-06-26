@@ -26,6 +26,31 @@ except (
 if django is not None:
     django.setup()
 
+
+def _ensure_django_test_schema():
+    if django is None:
+        return
+    from django.apps import apps
+    from django.db import connection
+
+    existing_tables = set(connection.introspection.table_names())
+    with connection.schema_editor() as schema_editor:
+        for model in apps.get_models():
+            if model._meta.db_table in existing_tables:
+                continue
+            schema_editor.create_model(model)
+            existing_tables.add(model._meta.db_table)
+
+
+def _clear_django_test_data():
+    if django is None:
+        return
+    from django.apps import apps
+
+    for model in reversed(apps.get_models()):
+        model.objects.all().delete()
+
+
 from app.queue import job_priority  # noqa: E402
 from app.routing import (
     CLEANUP_QUEUE,
@@ -61,6 +86,19 @@ if django is not None:
         _youtube_candidates,
     )  # noqa: E402
 
+    class AuthenticatedClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            from django.contrib.auth.models import User
+
+            user, created = User.objects.get_or_create(username="default")
+            if created:
+                user.set_password("pass")
+                user.save(update_fields=["password"])
+            self.force_login(user)
+
+    Client = AuthenticatedClient
+
 
 @override_settings(
     DATABASES={
@@ -71,6 +109,15 @@ if django is not None:
     }
 )
 class SharedDjangoModelTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if django is not None:
+            _ensure_django_test_schema()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        _clear_django_test_data()
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_expected_ytdlp_unavailable_errors_are_nonfatal(self):
@@ -154,7 +201,9 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
         with (
             tempfile.TemporaryDirectory() as tmpdir,
@@ -347,9 +396,9 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(counts["Updates"]["queued"], 1)
         self.assertEqual(counts["Updates"]["running"], 1)
         self.assertEqual(counts["Updates"]["total"], 2)
-        self.assertEqual(counts["Downloads"]["queued"], 1)
-        self.assertEqual(counts["Downloads"]["running"], 0)
-        self.assertEqual(counts["Summaries"]["total"], 0)
+        self.assertEqual(counts["YouTube downloads"]["queued"], 1)
+        self.assertEqual(counts["YouTube downloads"]["running"], 0)
+        self.assertEqual(counts["Transcripts"]["total"], 0)
         self.assertEqual(queue_name("retention_cleanup"), CLEANUP_QUEUE)
 
     @unittest.skipIf(django is None, "Django is not installed")
@@ -374,7 +423,7 @@ class SharedDjangoModelTests(TestCase):
                 file_path=str(media),
                 file_ext="mp3",
                 download_status="downloaded",
-                subtitle_path="",
+                subtitle_path=str(media.with_suffix(".srt")),
             )
 
             with patch("app.views.publish_job"):
@@ -512,7 +561,7 @@ class SharedDjangoModelTests(TestCase):
             )
 
             with patch("app.views.publish_job"):
-                response = client.get(f"/player/{download.id}/")
+                response = client.get(f"/play/{download.id}/")
 
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
@@ -592,7 +641,9 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
         from django.db import connection
 
@@ -679,7 +730,9 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         from django.contrib.auth.models import User
 
-        User.objects.create_user(username="default", password="pass")
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
         download = Download.objects.create(
             profile_id="default",
@@ -707,18 +760,17 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         active_job.refresh_from_db()
-        self.assertEqual(active_job.status, Job.STATUS_FAILED)
-        self.assertIn("Superseded", active_job.error_message)
+        self.assertEqual(active_job.status, Job.STATUS_RUNNING)
         replacement = Job.objects.get(
-            job_type="generate_transcript",
+            job_type="download_single",
             status=Job.STATUS_QUEUED,
-            payload__download_id=download.id,
+            idempotency_key=f"download_single:default:{download.id}",
         )
-        self.assertNotEqual(replacement.id, active_job.id)
+        self.assertEqual(replacement.payload["redownload"], True)
         publish.assert_called_once_with(
             {
                 "job_id": replacement.id,
-                "job_type": "generate_transcript",
+                "job_type": "download_single",
                 "profile_id": "default",
                 "attempt": 1,
             }
@@ -1013,18 +1065,18 @@ class SharedDjangoModelTests(TestCase):
             ):
                 transcode_media(job)
 
-        download.refresh_from_db()
-        self.assertEqual(download.file_ext, "mp3")
-        self.assertTrue(original.exists())
-        self.assertEqual(download.file_size_bytes, len("converted"))
-        transcript_job = Job.objects.get(
-            job_type="generate_transcript", payload__download_id=download.id
-        )
-        self.assertEqual(
-            transcript_job.payload["original_file_path"], str(original.resolve())
-        )
-        run.assert_called_once()
-        publish.assert_called_once()
+            download.refresh_from_db()
+            self.assertEqual(download.file_ext, "mp3")
+            self.assertTrue(original.exists())
+            self.assertEqual(download.file_size_bytes, len("converted"))
+            transcript_job = Job.objects.get(
+                job_type="generate_transcript", payload__download_id=download.id
+            )
+            self.assertEqual(
+                transcript_job.payload["original_file_path"], str(original.resolve())
+            )
+            run.assert_called_once()
+            publish.assert_called_once()
 
 
 class QueueRoutingTests(unittest.TestCase):

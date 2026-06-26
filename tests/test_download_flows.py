@@ -19,6 +19,7 @@ from workers.download_store import (
     upsert_download,
     init_database,
 )  # noqa: E402
+from support import DatabaseCleanupTestCase  # noqa: E402
 
 
 class FakeYoutubeDL:
@@ -115,7 +116,7 @@ def _build_sample_config(output_root):
     }
 
 
-class DownloadFlowTests(unittest.TestCase):
+class DownloadFlowTests(DatabaseCleanupTestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
@@ -518,7 +519,7 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertIn("title", rows[1][4])
 
 
-class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
+class SubtitleDefaultsAndYoutubeWhisperTests(DatabaseCleanupTestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
@@ -1413,7 +1414,7 @@ class SubtitleDefaultsAndYoutubeWhisperTests(unittest.TestCase):
             self.assertTrue(mp4_file.with_suffix(".srt").exists())
 
 
-class SubtitleSidecarCleanupTests(unittest.TestCase):
+class SubtitleSidecarCleanupTests(DatabaseCleanupTestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
         import workers.subtitles as subtitles
 
@@ -1468,7 +1469,7 @@ class SubtitleSidecarCleanupTests(unittest.TestCase):
             self.assertFalse(en_srt.exists())
 
 
-class SubtitleFailureCachingTests(unittest.TestCase):
+class SubtitleFailureCachingTests(DatabaseCleanupTestCase):
     def test_known_empty_audio_transcription_failure_is_cached(self):
         import workers.subtitles as subtitles
 
@@ -1524,7 +1525,7 @@ class SubtitleFailureCachingTests(unittest.TestCase):
             self.assertTrue(marker.exists())
 
 
-class YoutubeSourceResolverTests(unittest.TestCase):
+class YoutubeSourceResolverTests(DatabaseCleanupTestCase):
     def test_resolve_youtube_source_name_prefers_channel(self):
         class FakeYoutubeDLForMetadata(FakeYoutubeDL):
             def extract_info(self, url, download=False):
@@ -1598,7 +1599,7 @@ class YoutubeSourceResolverTests(unittest.TestCase):
         self.assertEqual(results, [])
 
 
-class PodcastRetryTests(unittest.TestCase):
+class PodcastRetryTests(DatabaseCleanupTestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
@@ -1662,7 +1663,7 @@ class PodcastRetryTests(unittest.TestCase):
             self.assertEqual(opts["socket_timeout"], 30)
 
 
-class YoutubeFilteringAndDuplicateTests(unittest.TestCase):
+class YoutubeFilteringAndDuplicateTests(DatabaseCleanupTestCase):
     def setUp(self):
         FakeYoutubeDL.instances = []
 
