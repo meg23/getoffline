@@ -28,4 +28,7 @@ jobs:
       - name: Run unit tests
         env:
           PYTHONPATH: src
+          GETOFFLINE_DB_ENGINE: sqlite
+          GETOFFLINE_DB_NAME: ":memory:"
+          GETOFFLINE_MODEL_CACHE_DIR: ${{ runner.temp }}/getoffline-model-cache
         run: python -m unittest discover -s tests -p 'test_*.py' -v

@@ -70,17 +70,25 @@ TEMPLATES = [
         },
     }
 ]
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": os.getenv("GETOFFLINE_DB_NAME", "getoffline"),
-        "USER": os.getenv("GETOFFLINE_DB_USER", "getoffline"),
-        "PASSWORD": os.getenv("GETOFFLINE_DB_PASSWORD", ""),
-        "HOST": os.getenv("GETOFFLINE_DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("GETOFFLINE_DB_PORT", "3306"),
-        "OPTIONS": {"charset": "utf8mb4"},
+if os.getenv("GETOFFLINE_DB_ENGINE", "mysql").strip().lower() == "sqlite":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.getenv("GETOFFLINE_DB_NAME", ":memory:"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.getenv("GETOFFLINE_DB_NAME", "getoffline"),
+            "USER": os.getenv("GETOFFLINE_DB_USER", "getoffline"),
+            "PASSWORD": os.getenv("GETOFFLINE_DB_PASSWORD", ""),
+            "HOST": os.getenv("GETOFFLINE_DB_HOST", "127.0.0.1"),
+            "PORT": os.getenv("GETOFFLINE_DB_PORT", "3306"),
+            "OPTIONS": {"charset": "utf8mb4"},
+        }
+    }
 RABBITMQ_URL = os.getenv(
     "GETOFFLINE_RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672/%2F"
 )
