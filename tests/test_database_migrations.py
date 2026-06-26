@@ -104,6 +104,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "0010_add_source_max_downloads",
                     "0011_add_source_explicit_content_filter",
                     "0012_add_youtube_include_flags",
+                    "0013_add_source_title_exclude_filter",
                 ],
             )
             self.assertIn("played", columns)
@@ -116,6 +117,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertIn("delete_explicit_content", source_columns)
             self.assertIn("include_shorts", source_columns)
             self.assertIn("include_livestreams", source_columns)
+            self.assertIn("title_exclude", source_columns)
 
     def test_apply_migrations_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -129,7 +131,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM schema_migrations"
                 ).fetchone()[0]
 
-            self.assertEqual(count, 11)
+            self.assertEqual(count, 12)
 
     def test_download_artifact_path_prefers_relative_reference(self):
         with tempfile.TemporaryDirectory() as tmpdir:

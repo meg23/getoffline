@@ -36,3 +36,24 @@ def normalize_media_filename(path: Path) -> Path:
 
     path.rename(candidate)
     return candidate
+
+
+def split_title_filter_terms(value: object) -> list[str]:
+    """Return normalized title exclusion terms split on commas or newlines."""
+    raw = str(value or "")
+    return [
+        term.strip().casefold()
+        for term in re.split(r"[,\n\r]+", raw)
+        if term.strip()
+    ]
+
+
+def title_matches_filter(title: object, terms: list[str]) -> str:
+    """Return the matching exclusion term for a title, or an empty string."""
+    normalized_title = str(title or "").casefold()
+    if not normalized_title:
+        return ""
+    for term in terms:
+        if term and term in normalized_title:
+            return term
+    return ""

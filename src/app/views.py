@@ -1288,6 +1288,7 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         and request.POST.get("include_shorts") in {"1", "true", "yes", "on"},
         include_livestreams=source_type == SourceConfig.SOURCE_YOUTUBE
         and request.POST.get("include_livestreams") in {"1", "true", "yes", "on"},
+        title_exclude=str(request.POST.get("title_exclude") or "").strip(),
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings"))
@@ -1312,6 +1313,7 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
         request.POST.get("subtitle_offset_seconds")
     )
     source.max_downloads = _optional_int(request.POST.get("max_downloads"))
+    source.title_exclude = str(request.POST.get("title_exclude") or "").strip()
     source.delete_explicit_content = request.POST.get("delete_explicit_content") in {
         "1",
         "true",
@@ -1341,6 +1343,7 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
             "subtitle_offset_seconds",
             "max_downloads",
             "delete_explicit_content",
+            "title_exclude",
             "include_shorts",
             "include_livestreams",
             "updated_at",
@@ -1402,6 +1405,7 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
             request.POST.get(prefix + "subtitle_offset_seconds")
         )
         source.max_downloads = _optional_int(request.POST.get(prefix + "max_downloads"))
+        source.title_exclude = str(request.POST.get(prefix + "title_exclude") or "").strip()
         source.delete_explicit_content = request.POST.get(
             prefix + "delete_explicit_content"
         ) in {"1", "true", "yes", "on"}
@@ -1426,6 +1430,7 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
                 "subtitle_offset_seconds",
                 "max_downloads",
                 "delete_explicit_content",
+                "title_exclude",
                 "include_shorts",
                 "include_livestreams",
                 "updated_at",
