@@ -1,15 +1,15 @@
 import os
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.config import _build_bootstrap_defaults, load_bootstrap_config, load_config  # noqa: E402
+from support import DatabaseCleanupTestCase  # noqa: E402
 
 
-class ConfigTests(unittest.TestCase):
+class ConfigTests(DatabaseCleanupTestCase):
     def test_bootstrap_defaults_use_cwd_downloads_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             previous_cwd = os.getcwd()
