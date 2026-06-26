@@ -22,6 +22,7 @@ from django.http import (
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
+from django.db import connection
 from django.db.models import Count, Q, Sum
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -1073,12 +1074,77 @@ def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
     return HttpResponse(status=204)
 
 
+def _delete_download_media_file(item: Download) -> None:
+    if not item.file_path:
+        log.info("No media file path to delete for download_id=%s", item.pk)
+        return
+    media_path = Path(item.file_path).expanduser()
+    try:
+        exists_before = media_path.exists() or media_path.is_symlink()
+        log.info(
+            "Deleting media file for download_id=%s path=%s exists=%s is_dir=%s is_symlink=%s",
+            item.pk,
+            media_path,
+            exists_before,
+            media_path.is_dir(),
+            media_path.is_symlink(),
+        )
+        if media_path.is_dir() and not media_path.is_symlink():
+            log.warning(
+                "Refusing to delete directory for download_id=%s path=%s",
+                item.pk,
+                media_path,
+            )
+            return
+        media_path.unlink(missing_ok=True)
+        log.info(
+            "Deleted media file for download_id=%s path=%s existed_before=%s exists_after=%s",
+            item.pk,
+            media_path,
+            exists_before,
+            media_path.exists() or media_path.is_symlink(),
+        )
+    except OSError:
+        log.exception(
+            "Could not delete media file for download_id=%s path=%s",
+            item.pk,
+            media_path,
+        )
+
+
+def _delete_external_download_dependents(row_ids: list[int]) -> None:
+    if not row_ids:
+        return
+    existing_tables = set(connection.introspection.table_names())
+    dependent_tables = ["media_summaries"]
+    placeholders = ", ".join(["%s"] * len(row_ids))
+    with connection.cursor() as cursor:
+        for table_name in dependent_tables:
+            if table_name not in existing_tables:
+                log.info(
+                    "Purge dependency cleanup skipped missing table=%s row_ids=%s",
+                    table_name,
+                    row_ids,
+                )
+                continue
+            quoted_table = connection.ops.quote_name(table_name)
+            deleted = cursor.execute(
+                f"DELETE FROM {quoted_table} WHERE download_id IN ({placeholders})",
+                row_ids,
+            )
+            log.info(
+                "Purge dependency cleanup deleted table=%s row_ids=%s deleted_count=%s",
+                table_name,
+                row_ids,
+                deleted,
+            )
+
+
 @login_required
 @require_POST
 def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
-    if item.file_path:
-        Path(item.file_path).expanduser().unlink(missing_ok=True)
+    _delete_download_media_file(item)
     item.download_status = "missing"
     item.last_seen_at = timezone.now()
     item.save(update_fields=["download_status", "last_seen_at"])
@@ -1395,8 +1461,16 @@ def delete_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
 def batch_update(request: HttpRequest) -> HttpResponseRedirect:
     ids = [int(value) for value in request.POST.getlist("ids") if str(value).isdigit()]
     action = str(request.POST.get("batch_action") or "").strip()
+    profile_id = _profile_id(request)
     now = timezone.now()
-    rows = Download.objects.filter(pk__in=ids, profile_id=_profile_id(request))
+    rows = Download.objects.filter(pk__in=ids, profile_id=profile_id)
+    log.info(
+        "Batch update requested profile_id=%s action=%s requested_ids=%s matched_count=%s",
+        profile_id,
+        action or "<empty>",
+        ids,
+        rows.count(),
+    )
     if action == "played":
         rows.update(played=True, played_at=now, last_seen_at=now)
     elif action == "unplayed":
@@ -1407,13 +1481,52 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
         rows.update(favorite=False, last_seen_at=now)
     elif action == "delete":
         for item in rows:
-            if item.file_path:
-                Path(item.file_path).expanduser().unlink(missing_ok=True)
+            _delete_download_media_file(item)
         rows.update(download_status="missing", last_seen_at=now)
+    elif action == "purge":
+        selected_rows = list(rows)
+        row_ids = [item.pk for item in selected_rows]
+        log.info(
+            "Purge batch action starting profile_id=%s requested_ids=%s matched_ids=%s",
+            profile_id,
+            ids,
+            row_ids,
+        )
+        for item in selected_rows:
+            log.info(
+                "Purging download_id=%s profile_id=%s title=%r status=%s file_path=%r",
+                item.pk,
+                item.profile_id,
+                item.title,
+                item.download_status,
+                item.file_path,
+            )
+            _delete_download_media_file(item)
+        if row_ids:
+            try:
+                _delete_external_download_dependents(row_ids)
+                deleted_count, deleted_by_model = Download.objects.filter(
+                    pk__in=row_ids, profile_id=profile_id
+                ).delete()
+            except Exception:
+                log.exception(
+                    "Purge database delete failed profile_id=%s row_ids=%s",
+                    profile_id,
+                    row_ids,
+                )
+                raise
+            log.info(
+                "Purge database delete finished profile_id=%s row_ids=%s deleted_count=%s deleted_by_model=%s",
+                profile_id,
+                row_ids,
+                deleted_count,
+                deleted_by_model,
+            )
+        else:
+            log.info("Purge batch action matched no downloads profile_id=%s", profile_id)
     elif action == "edit-metadata":
         return _redirect_back(request)
     elif action == "download":
-        profile_id = _profile_id(request)
         for item in rows:
             job = create_job(
                 profile_id=profile_id,

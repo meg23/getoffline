@@ -588,7 +588,93 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_batch_update_purge_deletes_media_and_database_record(self):
+        client = Client()
+        from django.contrib.auth.models import User
 
+        User.objects.create_user(username="default", password="pass")
+        self.assertTrue(client.login(username="default", password="pass"))
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS media_summaries")
+            cursor.execute(
+                "CREATE TABLE media_summaries ("
+                "id integer primary key, "
+                "download_id integer not null references downloads(id), "
+                "summary text)"
+            )
+        self.addCleanup(self._drop_media_summaries_test_table)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_path = Path(tmpdir) / "purge-me.mp3"
+            media_path.write_text("audio", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type="youtube",
+                source_name="Test Channel",
+                item_uid="video-purge",
+                title="Purge Me",
+                file_path=str(media_path),
+                file_ext="mp3",
+                download_status="downloaded",
+            )
+            directory_path = Path(tmpdir) / "directory-media"
+            directory_path.mkdir()
+            directory_download = Download.objects.create(
+                profile_id="default",
+                source_type="youtube",
+                source_name="Test Channel",
+                item_uid="directory-purge",
+                title="Directory Purge",
+                file_path=str(directory_path),
+                file_ext="",
+                download_status="downloaded",
+            )
+            TranscriptSegment.objects.create(
+                download=download,
+                subtitle_path=str(media_path.with_suffix(".srt")),
+                start_seconds=0.0,
+                end_seconds=1.0,
+                text="hello",
+            )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO media_summaries (download_id, summary) VALUES (%s, %s)",
+                    [download.id, "legacy summary"],
+                )
+
+            response = client.post(
+                "/batch-update/",
+                {
+                    "ids": [str(download.id), str(directory_download.id)],
+                    "batch_action": "purge",
+                },
+            )
+
+            self.assertEqual(response.status_code, 302)
+            self.assertFalse(media_path.exists())
+            self.assertTrue(directory_path.exists())
+            self.assertFalse(Download.objects.filter(pk=download.pk).exists())
+            self.assertFalse(
+                Download.objects.filter(pk=directory_download.pk).exists()
+            )
+            self.assertFalse(
+                TranscriptSegment.objects.filter(download_id=download.pk).exists()
+            )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM media_summaries WHERE download_id = %s",
+                    [download.pk],
+                )
+                self.assertEqual(cursor.fetchone()[0], 0)
+
+    def _drop_media_summaries_test_table(self):
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS media_summaries")
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_transcript_refresh_supersedes_active_job(self):
         client = Client()
         from django.contrib.auth.models import User
