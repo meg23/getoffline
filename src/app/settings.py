@@ -16,7 +16,7 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(
-        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost"
+        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
     ).split(",")
     if host.strip()
 ]

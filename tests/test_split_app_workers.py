@@ -26,6 +26,31 @@ except (
 if django is not None:
     django.setup()
 
+
+def _ensure_django_test_schema():
+    if django is None:
+        return
+    from django.apps import apps
+    from django.db import connection
+
+    existing_tables = set(connection.introspection.table_names())
+    with connection.schema_editor() as schema_editor:
+        for model in apps.get_models():
+            if model._meta.db_table in existing_tables:
+                continue
+            schema_editor.create_model(model)
+            existing_tables.add(model._meta.db_table)
+
+
+def _clear_django_test_data():
+    if django is None:
+        return
+    from django.apps import apps
+
+    for model in reversed(apps.get_models()):
+        model.objects.all().delete()
+
+
 from app.queue import job_priority  # noqa: E402
 from app.routing import (
     CLEANUP_QUEUE,
@@ -71,6 +96,15 @@ if django is not None:
     }
 )
 class SharedDjangoModelTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if django is not None:
+            _ensure_django_test_schema()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        _clear_django_test_data()
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_expected_ytdlp_unavailable_errors_are_nonfatal(self):

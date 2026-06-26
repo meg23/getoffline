@@ -45,6 +45,8 @@ class TranscriptionChunkingTests(unittest.TestCase):
                 WhisperModel=lambda *args, **kwargs: FakeModel()
             )
             with patch.dict(sys.modules, {"faster_whisper": fake_module}), patch.object(
+                transcription, "_WHISPER_MODEL_CACHE", {}
+            ), patch.object(
                 transcription, "_probe_audio_duration", return_value=25.0
             ), patch.object(
                 transcription,
