@@ -16,6 +16,9 @@ Examples:
 Environment:
   DRY_RUN=1        Print planned copies without writing files.
   VERBOSE=1        Print skipped up-to-date files.
+
+Ownership:
+  Every destination file is chown'ed recursively as <owner[:group]> after each run.
 USAGE
 }
 
@@ -50,7 +53,7 @@ mkdir -p "$SYNC_DIR"
 # Validate the requested owner before doing copy work. chown accepts either
 # user, user:group, or :group; keep that flexibility for cron deployments.
 if [[ $DRY_RUN != "1" ]]; then
-  chown "$OWNER" "$SYNC_DIR"
+  chown -R "$OWNER" "$SYNC_DIR"
 fi
 
 sanitize_component() {
@@ -107,7 +110,7 @@ while IFS= read -r -d '' source_path; do
   fi
 
   temp_path=$(mktemp --tmpdir="$SYNC_DIR" ".sync-media.XXXXXX")
-  if rsync -a -- "$source_path" "$temp_path" && mv -f -- "$temp_path" "$dest_path" && chown "$OWNER" "$dest_path"; then
+  if rsync -a -- "$source_path" "$temp_path" && mv -f -- "$temp_path" "$dest_path" && chown -R "$OWNER" "$dest_path"; then
     ((copied += 1))
   else
     rm -f -- "$temp_path"
@@ -115,6 +118,10 @@ while IFS= read -r -d '' source_path; do
     echo "failed: $source_path" >&2
   fi
 done < <(find "$DOWNLOADS_DIR" -type f -print0)
+
+if [[ $DRY_RUN != "1" ]]; then
+  chown -R "$OWNER" "$SYNC_DIR"
+fi
 
 echo "sync complete: copied=$copied skipped=$skipped failed=$failed destination=$SYNC_DIR"
 

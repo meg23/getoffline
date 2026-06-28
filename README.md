@@ -140,7 +140,7 @@ For a filesystem-only cron sync that does not use the database transfer queue, u
 */15 * * * * /path/to/getoffline/scripts/sync-media-downloads.sh /srv/getoffline/downloads /mnt/offline-media getoffline:getoffline >> /var/log/getoffline-media-sync.log 2>&1
 ```
 
-Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped.
+Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped. After each non-dry-run sync, the script runs `chown -R <owner[:group]>` on the destination so all synced files are owned by the requested user, such as `jellyfin:jellyfin`.
 
 Android transfer uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
 
