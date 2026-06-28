@@ -134,6 +134,14 @@ The web app requires username/password login. Create users from the command line
 
 GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory transfer writes media, optional subtitles, `GetOffline.xspf`, and a `transferdb.txt` history file directly to the selected folder. Paths recorded in `transferdb.txt` are skipped on later runs so tagged media is not copied repeatedly.
 
+For a filesystem-only cron sync that does not use the database transfer queue, use `scripts/sync-media-downloads.sh`. It accepts the downloads directory, the destination directory, and the owner to apply to copied files. Each copied audio/video file is flattened into the destination as `<artist> - <original filename>`, where `<artist>` is the source file's parent folder name. Existing destination files are skipped unless the source file is newer. Example cron entry to run every 15 minutes:
+
+```cron
+*/15 * * * * /path/to/getoffline/scripts/sync-media-downloads.sh /srv/getoffline/downloads /mnt/offline-media getoffline:getoffline >> /var/log/getoffline-media-sync.log 2>&1
+```
+
+Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped.
+
 Android transfer uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
 
 To configure Android transfer:
