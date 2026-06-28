@@ -1,0 +1,187 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${GETOFFLINE_DB_NAME:-getoffline}
+      MYSQL_USER: ${GETOFFLINE_DB_USER:-getoffline}
+      MYSQL_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
+      MYSQL_ROOT_PASSWORD: ${GETOFFLINE_DB_ROOT_PASSWORD:-getoffline-root}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+    restart: unless-stopped
+    environment: &getoffline-env
+      GETOFFLINE_DJANGO_DEBUG: "0"
+      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,frontend}
+      GETOFFLINE_CSRF_TRUSTED_ORIGINS: ${GETOFFLINE_CSRF_TRUSTED_ORIGINS:-http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080}
+      GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
+      GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:-mysql}
+      GETOFFLINE_DB_PORT: ${GETOFFLINE_DB_PORT:-3306}
+      GETOFFLINE_DB_NAME: ${GETOFFLINE_DB_NAME:-getoffline}
+      GETOFFLINE_DB_USER: ${GETOFFLINE_DB_USER:-getoffline}
+      GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
+      GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker-updates:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers updates
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  worker-downloader-youtube:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers downloader-youtube
+    deploy:
+      replicas: 2
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  worker-downloader-podcast:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers downloader-podcast
+    deploy:
+      replicas: 2
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  worker-transcripts:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-transcripts.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-1}"
+    deploy:
+      replicas: 1
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  worker-transfer:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-base.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers transfer
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m django run_scheduler --loop --install-defaults
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  worker-cleanup:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-base.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: python -m workers cleanup
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  rabbitmq-data:

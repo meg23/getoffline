@@ -1,15 +1,15 @@
 import os
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from config import _build_bootstrap_defaults, load_bootstrap_config, load_config  # noqa: E402
+from workers.config import _build_bootstrap_defaults, load_bootstrap_config, load_config  # noqa: E402
+from support import DatabaseCleanupTestCase  # noqa: E402
 
 
-class ConfigTests(unittest.TestCase):
+class ConfigTests(DatabaseCleanupTestCase):
     def test_bootstrap_defaults_use_cwd_downloads_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             previous_cwd = os.getcwd()
@@ -20,7 +20,10 @@ class ConfigTests(unittest.TestCase):
                 os.chdir(previous_cwd)
 
         self.assertEqual(defaults["output_root"], os.path.join(tmpdir, "downloads"))
-        self.assertEqual(defaults["database_path"], os.path.join(tmpdir, "downloads", "downloads.sqlite3"))
+        self.assertEqual(
+            defaults["database_path"],
+            os.path.join(tmpdir, "downloads", "downloads.sqlite3"),
+        )
 
     def test_load_config_reads_paths_from_config_yml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -37,8 +40,13 @@ defaults:
 
             config = load_config(config_path)
 
-        self.assertEqual(config["defaults"]["output_root"], os.path.join(tmpdir, "media"))
-        self.assertEqual(config["defaults"]["database_path"], os.path.join(tmpdir, "state", "library.sqlite3"))
+        self.assertEqual(
+            config["defaults"]["output_root"], os.path.join(tmpdir, "media")
+        )
+        self.assertEqual(
+            config["defaults"]["database_path"],
+            os.path.join(tmpdir, "state", "library.sqlite3"),
+        )
 
     def test_load_bootstrap_config_does_not_create_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:

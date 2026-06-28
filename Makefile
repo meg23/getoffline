@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test clean check-system-deps venv
+.PHONY: build run run-no-pex test clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -32,7 +32,7 @@ build: venv check-system-deps
 	$(PEX) --sources-directory=$(SRC_DIR) \
 	    -r $(REQ_FILE) \
 	    -o $(BUILD_OUTPUT) \
-	    -m main \
+	    -m workers.main \
 	    --venv append \
 	    -v
 
@@ -42,7 +42,7 @@ run: build
 
 run-no-pex: venv check-system-deps
 	@echo "Running $(APP_NAME) directly with Python (no pex)..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m main
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers.main
 
 test: clean build
 	@echo "Running unit tests in virtual environment..."
@@ -53,3 +53,45 @@ clean:
 	rm -rf $(BUILD_DIR) $(VENV_DIR)
 	find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
+migrate-db: venv
+	@echo "Migrating split Django/MySQL database..."
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django migrate --run-syncdb
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django sync_model_schema
+
+run-app: venv
+	@echo "Running Django frontend app..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m app
+
+run-app-debug: venv
+	@echo "Running Django frontend app in debug mode..."
+	PYTHONPATH=$(SRC_DIR) GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
+
+run-worker-updates: venv
+	@echo "Running single-concurrency updates worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers updates
+
+run-worker-downloader-youtube: venv
+	@echo "Running single-concurrency YouTube downloader worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader-youtube
+
+run-worker-downloader-podcast: venv
+	@echo "Running podcast downloader worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers downloader-podcast
+
+
+run-worker-transcripts: venv
+	@echo "Running parallel transcript worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transcripts --prefetch $${PREFETCH:-4}
+
+run-worker-transfer: venv
+	@echo "Running transfer worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transfer
+
+run-worker-cleanup: venv
+	@echo "Running cleanup worker..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers cleanup
+
+run-scheduler: venv
+	@echo "Running scheduler..."
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django run_scheduler --loop --install-defaults

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import main  # noqa: E402
+import workers.main as main  # noqa: E402
 
 
 class MainCliTests(unittest.TestCase):
@@ -20,27 +20,29 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(args.port, 8080)
 
     def test_main_without_args_runs_server(self):
-        with patch.object(sys, "argv", ["getoffline"]), patch("main.run_server") as run_server, patch(
-            "main.run_downloads"
-        ) as run_downloads:
+        with (
+            patch.object(sys, "argv", ["getoffline"]),
+            patch("workers.main.run_server") as run_server,
+            patch("workers.main.run_downloads") as run_downloads,
+        ):
             main.main()
 
         run_server.assert_called_once_with(host="127.0.0.1", port=8080)
         run_downloads.assert_not_called()
 
-    def test_run_server_uses_bootstrap_config_without_loading_database(self):
-        bootstrap_config = {"defaults": {"output_root": "/tmp/downloads", "database_path": "/tmp/downloads.sqlite3"}}
-        with patch("main.load_bootstrap_config", return_value=bootstrap_config) as load_bootstrap_config, patch(
-            "main.load_config"
-        ) as load_config, patch("main.run_webapp") as run_webapp:
+    def test_run_server_delegates_to_django_app(self):
+        with patch("workers.main._execute_django_runserver") as execute:
             main.run_server(host="127.0.0.1", port=8080)
 
-        load_bootstrap_config.assert_called_once_with()
-        load_config.assert_not_called()
-        run_webapp.assert_called_once_with(config=bootstrap_config, host="127.0.0.1", port=8080)
+        self.assertEqual(os.environ["GETOFFLINE_APP_ADDR"], "127.0.0.1:8080")
+        execute.assert_called_once_with("127.0.0.1:8080")
 
     def test_parse_import_directory_arguments(self):
-        with patch.object(sys, "argv", ["getoffline", "import-directory", "/media/incoming", "--recursive"]):
+        with patch.object(
+            sys,
+            "argv",
+            ["getoffline", "import-directory", "/media/incoming", "--recursive"],
+        ):
             args = main.parse_args()
 
         self.assertEqual(args.command, "import-directory")
@@ -48,9 +50,14 @@ class MainCliTests(unittest.TestCase):
         self.assertTrue(args.recursive)
 
     def test_main_runs_directory_import_and_returns_its_status(self):
-        with patch.object(sys, "argv", ["getoffline", "import-directory", "/media/incoming"]), patch(
-            "main.run_directory_import", return_value=3
-        ) as run_directory_import:
+        with (
+            patch.object(
+                sys, "argv", ["getoffline", "import-directory", "/media/incoming"]
+            ),
+            patch(
+                "workers.main.run_directory_import", return_value=3
+            ) as run_directory_import,
+        ):
             with self.assertRaises(SystemExit) as exit_context:
                 main.main()
 
@@ -69,11 +76,18 @@ class MainCliTests(unittest.TestCase):
             destination.mkdir()
             (destination / "already.webm").write_bytes(b"existing")
 
-            shallow = main._directory_video_files(root, recursive=False, excluded_root=destination)
-            recursive = main._directory_video_files(root, recursive=True, excluded_root=destination)
+            shallow = main._directory_video_files(
+                root, recursive=False, excluded_root=destination
+            )
+            recursive = main._directory_video_files(
+                root, recursive=True, excluded_root=destination
+            )
 
             self.assertEqual(shallow, [(root / "one.mp4").resolve()])
-            self.assertEqual(recursive, [(nested / "two.mkv").resolve(), (root / "one.mp4").resolve()])
+            self.assertEqual(
+                recursive,
+                [(nested / "two.mkv").resolve(), (root / "one.mp4").resolve()],
+            )
 
     def test_run_directory_import_uses_manual_import_workflow(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -92,9 +106,12 @@ class MainCliTests(unittest.TestCase):
             }
             destination = output_root / "manual" / "movie.mp4"
 
-            with patch("main.load_config", return_value=config), patch(
-                "main.import_local_media_file", return_value=destination
-            ) as import_local_media_file:
+            with (
+                patch("workers.main.load_config", return_value=config),
+                patch(
+                    "workers.main.import_local_media_file", return_value=destination
+                ) as import_local_media_file,
+            ):
                 result = main.run_directory_import(str(source))
 
             self.assertEqual(result, 0)

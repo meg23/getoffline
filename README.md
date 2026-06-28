@@ -17,8 +17,8 @@
 - Browser cookie support for private or age-restricted YouTube videos
 - Database-backed runtime configuration with optional `config.yml` bootstrap paths
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
-- Separate profiles with isolated databases, settings, source feeds, playback history, and download folders
-- Optional offline sync that copies selected media to a directory on disk or to a connected Android phone with `adb push`
+- Username/password login with per-user settings, source feeds, playback history, and download folders
+- Optional offline transfer that copies selected media to a directory on disk or to a connected Android phone with `adb push`
 
 ## Requirements
 
@@ -26,12 +26,12 @@ Install the following system tools first:
 
 - `make`
 - `ffmpeg` (includes `ffprobe`)
-- `deno` (used by yt-dlp's YouTube challenge solver runtime)
+- `quickjs` / `qjs` (used by yt-dlp's YouTube challenge solver runtime)
 - Python 3.8+
 
 Python dependencies are installed automatically by the Makefile.
 
-If `deno` is available on `PATH`, GetOffline enables yt-dlp's recommended YouTube remote component (`ejs:github`) for challenge solving.
+If `qjs` (QuickJS) is available on `PATH`, GetOffline configures yt-dlp to use the `quickjs` JavaScript runtime and enables the YouTube remote component (`ejs:github`) for challenge solving.
 
 GetOffline applies the yt-dlp `youtube:player_js_variant=main` workaround for known challenge-solver instability (see yt-dlp issue #16256).
 
@@ -41,7 +41,7 @@ When upgrading yt-dlp from PyPI/pip, install with the default extra so EJS suppo
 pip install -U "yt-dlp[default]"
 ```
 
-GetOffline sets `--remote-components ejs:github` automatically when `deno` is available, matching yt-dlp guidance for non-GitHub-release installs.
+GetOffline sets `js_runtimes={"quickjs": {"path": "qjs"}}` and `--remote-components ejs:github` automatically when QuickJS is available, matching yt-dlp's external JavaScript runtime support while keeping the download image small.
 
 
 ## Configuration
@@ -64,6 +64,19 @@ Environment variables still override the file when needed:
 
 YouTube live streams are skipped automatically for configured playlist and channel sources. To download a specific live video, paste its URL into the web app's **+** dialog. The download remains active until the stream ends or the application stops.
 
+## Split app/workers deployment
+
+For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, keep the FFmpeg worker running so downloaded files are converted after download, and run multiple transfer workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
+
+To migrate an older standalone SQLite library into the split Django/MySQL database, first run `make migrate-db`, create the destination user if needed, and then run:
+
+```bash
+PYTHONPATH=src DJANGO_SETTINGS_MODULE=app.settings python -m django import_legacy_sqlite /path/to/downloads.sqlite3 --profile-id <username>
+```
+
+Use `--replace-profile` to clear the destination user's existing imported library/settings before loading the SQLite data again. Imported media and subtitle paths are rewritten from their relative path columns under `/app/downloads/<profile-id>` by default, and the destination profile's `output_root` is set to that same container-visible folder. Pass `--media-root /app/downloads/custom-folder` only when the files are mounted somewhere else. The importer prints progress as each major table starts and every 500 imported rows by default; pass `--progress-interval 50` (or another positive number) for more frequent updates. It copies downloads, source settings, playback flags, and transcripts; legacy youtube-dl format columns that are no longer represented by the Django models are ignored.
+
+
 ## Usage
 
 Build and run the app:
@@ -77,22 +90,22 @@ This command creates a virtual environment, installs Python dependencies, valida
 You can still run the Python entrypoint directly if needed:
 
 ```bash
-python src/main.py
+PYTHONPATH=src python -m workers.main
 ```
 
 To import every supported video in a local directory through the same workflow
 as browser drag-and-drop (copy to `manual`, database registration, Whisper
-transcription, optional explicit-content filtering, audit logging, and summary
+transcription, optional explicit-content filtering, audit logging
 generation), run:
 
 ```bash
-python src/main.py import-directory /path/to/videos
+PYTHONPATH=src python -m workers.main import-directory /path/to/videos
 ```
 
 Add `--recursive` to include videos in subdirectories:
 
 ```bash
-python src/main.py import-directory /path/to/videos --recursive
+PYTHONPATH=src python -m workers.main import-directory /path/to/videos --recursive
 ```
 
 Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The command
@@ -113,26 +126,26 @@ Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`,
 
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
-Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20). Automatic checks continue for every profile, not only the profile currently visible in the web app.
+Downloads are also checked automatically on the interval configured in **Settings → Auto update interval (minutes)** (default: 20).
 
-Use the profile menu in the top-right corner of the library or Settings page to switch profiles, create a profile, or rename the current profile. Every profile, including the initial `default` profile, stores its database and downloads under `profiles/<profile-id>/`. Existing default-profile data must be moved there manually before upgrading. Each profile has its own settings, source lists, playback history, and download directory.
+The web app requires username/password login. Create users from the command line after migrations with `python -m django create_user <username> --password <password>`. The old profile switcher has been removed; each signed-in user gets one implicit library/settings partition keyed by their username.
 
-## Directory sync
+## Directory transfer
 
-GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory sync writes media, optional subtitles, `GetOffline.xspf`, and a `syncdb.txt` history file directly to the selected folder. Paths recorded in `syncdb.txt` are skipped on later runs so tagged media is not copied repeatedly.
+GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory transfer writes media, optional subtitles, `GetOffline.xspf`, and a `transferdb.txt` history file directly to the selected folder. Paths recorded in `transferdb.txt` are skipped on later runs so tagged media is not copied repeatedly.
 
-Android sync uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
+Android transfer uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
 
-To configure Android sync:
+To configure Android transfer:
 
 1. Install Android platform tools so `adb` is available on the computer running GetOffline.
 2. Enable Developer options and USB debugging on the phone, then authorize the computer when Android prompts you.
-3. Open `http://127.0.0.1:8080/settings`, choose **Android device**, and optionally enable automatic sync after downloads.
-4. Choose the phone folder, for example `/sdcard/Movies/GetOffline`, and the maximum number of unplayed items to copy each sync.
+3. Open `http://127.0.0.1:8080/settings`, choose **Android device**, and optionally enable automatic transfer after downloads.
+4. Choose the phone folder, for example `/sdcard/Movies/GetOffline`, and the maximum number of unplayed items to copy each transfer.
 
-To sync over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each sync/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
+To transfer over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each transfer/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
 
-When enabled, GetOffline periodically syncs the selected destination using the same interval as automatic download checks, and it also attempts a sync after new downloads finish. The **Save and sync** button in Settings persists the configuration and starts a sync immediately. Completed destination paths are recorded in `syncdb.txt` and skipped on later runs. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android sync also asks the device's media scanner to rescan pushed files. Each sync writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
+When enabled, GetOffline periodically transfers to the selected destination using the same interval as automatic download checks, and it also attempts a transfer after new downloads finish. The **Save and transfer** button in Settings persists the configuration and starts a transfer immediately. Completed destination paths are recorded in `transferdb.txt` and skipped on later runs. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android transfer also asks the device's media scanner to rescan pushed files. Each transfer writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
 To build a standalone executable with Pex:
 
@@ -180,3 +193,7 @@ can be reviewed with:
 ```bash
 grep 'CONTENT_FILTER_DELETION' ~/youtube/youtube_batch_dl.log
 ```
+
+### Docker Compose split deployment
+
+A Docker Compose deployment is available for the Django frontend with bundled nginx, RabbitMQ, MySQL, and all worker types. The Compose build uses separate multi-stage images for the frontend/migration path, lightweight workers, download workers, and a Debian slim transcript worker so each runtime image keeps only its runtime OS packages, prebuilt Python wheels, and application files; FFmpeg is installed in the download worker image for inline media post-processing and in the transcript worker image so long audio can be probed and split into bounded transcription chunks. The transcript image preinstalls the default faster-whisper model at build time (override with `--build-arg WHISPER_MODEL=<model>` if needed) so first transcription jobs do not download Hugging Face model files into a runtime volume. MySQL data is persisted in the named `mysql-data` volume, RabbitMQ data is persisted in `rabbitmq-data`, and downloaded media is bind-mounted from `GETOFFLINE_DOWNLOADS_DIR` (default `./downloads`). Set `GETOFFLINE_DJANGO_SECRET_KEY` and optionally override `GETOFFLINE_DB_NAME`, `GETOFFLINE_DB_USER`, `GETOFFLINE_DB_PASSWORD`, and `GETOFFLINE_DB_ROOT_PASSWORD`, then run `docker compose up --build -d`. Downloader logs should show inline FFmpeg conversion before transcript jobs are queued when conversion is needed. Video conversion defaults to fast H.264/AAC MP4 for Jellyfin-friendly playback. The frontend container serves bundled nginx on `http://localhost:8080`, while RabbitMQ management is exposed on `http://localhost:15672`; set `GETOFFLINE_CSRF_TRUSTED_ORIGINS` if you expose the app on another host or scheme. The `migrate` service runs automatically before the frontend and workers start; rerun it manually with `docker compose run --rm migrate` after pulling model changes if needed.

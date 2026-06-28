@@ -3,3 +3,11 @@ feedparser>=6.0.10
 browser-cookie3>=0.19.1
 faster-whisper>=1.1.0
 SQLAlchemy>=2.0.36
+
+Django>=5.0
+
+PyMySQL>=1.1.1
+
+pika>=1.3.2
+
+profanity-check>=1.0.3

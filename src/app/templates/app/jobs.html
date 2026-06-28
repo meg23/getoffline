@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>GetOffline Jobs</title></head>
+  <body>
+    <h1>Jobs</h1>
+    <p><a href="{% url 'library' %}">Back</a></p>
+    <ul>{% for job in jobs %}<li>#{{ job.id }} {{ job.job_type }} — {{ job.status }} {{ job.error_message|default:"" }}</li>{% empty %}<li>No jobs.</li>{% endfor %}</ul>
+  </body>
+</html>
