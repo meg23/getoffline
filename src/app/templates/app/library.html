@@ -215,11 +215,23 @@
     </div>
 
     <div id="transcript-search-backdrop" class="modal-backdrop" aria-hidden="true">
-      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="search-title">
-        <h2 id="search-title">Search transcripts</h2>
-        <input id="transcript-search-input" type="search" placeholder="Search words in transcripts..." />
-        <div id="transcript-search-results" class="quick-add-results" aria-live="polite"></div>
-        <div class="modal-actions">
+      <section class="modal transcript-search-modal" role="dialog" aria-modal="true" aria-labelledby="search-title">
+        <div class="transcript-search-header">
+          <div>
+            <p class="modal-eyebrow">Transcript search</p>
+            <h2 id="search-title">Find the exact moment</h2>
+          </div>
+          <button class="modal-close-icon" type="button" data-modal-close aria-label="Close transcript search">×</button>
+        </div>
+        <label class="transcript-search-box" for="transcript-search-input">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="6" />
+            <path d="m16 16 4 4" />
+          </svg>
+          <input id="transcript-search-input" type="search" placeholder="Search words in transcripts..." autocomplete="off" />
+        </label>
+        <div id="transcript-search-results" class="quick-add-results transcript-search-results" aria-live="polite"></div>
+        <div class="modal-actions transcript-search-actions">
           <button type="button" data-modal-close>Close</button>
         </div>
       </section>

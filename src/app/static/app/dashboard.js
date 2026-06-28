@@ -269,7 +269,7 @@
     searchResults.innerHTML = results
       .map(
         (item) =>
-          `<a class="quick-add-result" href="${item.url}"><div class="quick-add-meta-title">${escapeHtml(item.title)}</div><div class="quick-add-meta-sub">${escapeHtml(item.source_name)} · ${formatTime(item.start_seconds)}</div><div>${escapeHtml(item.text)}</div></a>`,
+          `<a class="quick-add-result transcript-result" href="${item.url}"><div class="transcript-result-content"><div class="quick-add-meta-title">${escapeHtml(item.title)}</div><div class="quick-add-meta-sub"><span>${escapeHtml(item.source_name)}</span><span>${formatTime(item.start_seconds)}</span></div><p class="transcript-result-snippet">${escapeHtml(item.text)}</p></div><span class="transcript-result-arrow" aria-hidden="true">›</span></a>`,
       )
       .join("");
   }
