@@ -1080,7 +1080,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(candidates[0]["item_uid"], "MbEO1g8_COs")
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_transcode_media_updates_row_defers_original_deletion_and_queues_transcript(
+    def test_transcode_media_updates_row_deletes_original_and_queues_transcript(
         self,
     ):
         source = SourceConfig.objects.create(
@@ -1123,14 +1123,13 @@ class SharedDjangoModelTests(TestCase):
 
             download.refresh_from_db()
             self.assertEqual(download.file_ext, "mp3")
-            self.assertTrue(original.exists())
+            self.assertFalse(original.exists())
+            self.assertEqual(download.file_path, str(output.resolve()))
             self.assertEqual(download.file_size_bytes, len("converted"))
             transcript_job = Job.objects.get(
                 job_type="generate_transcript", payload__download_id=download.id
             )
-            self.assertEqual(
-                transcript_job.payload["original_file_path"], str(original.resolve())
-            )
+            self.assertNotIn("original_file_path", transcript_job.payload)
             run.assert_called_once()
             publish.assert_called_once()
 

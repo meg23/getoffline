@@ -164,6 +164,34 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
     )
 
 
+
+def _delete_ffmpeg_source_files(
+    source_paths: Iterable[Path], target_path: Path
+) -> list[Path]:
+    """Delete original FFmpeg input files once the converted output is ready."""
+    resolved_target = Path(target_path).expanduser().resolve()
+    deleted: list[Path] = []
+    for source_path in source_paths:
+        candidate = Path(source_path).expanduser().resolve()
+        if (
+            candidate == resolved_target
+            or not candidate.exists()
+            or not candidate.is_file()
+        ):
+            continue
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning(
+                "FFmpeg post-processing could not delete original source file path=%s target=%s error=%s",
+                candidate,
+                resolved_target,
+                exc,
+            )
+            continue
+        deleted.append(candidate)
+    return deleted
+
 def _target_path(source_path: Path, target_ext: str) -> Path:
     clean_ext = target_ext.lower().lstrip(".") or source_path.suffix.lstrip(".")
     candidate = source_path.with_name(f"{source_path.stem}.converted.{clean_ext}")
@@ -530,17 +558,16 @@ def _postprocess_download_with_ffmpeg(
                 "last_seen_at",
             ]
         )
+    deleted_sources = _delete_ffmpeg_source_files(source_paths, target_path)
     log.info(
-        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s original_deferred_delete=%s",
+        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s deleted_original_files=%s",
         parent_job_id,
         download.id,
         target_path,
         output_size,
-        old_path != target_path,
+        [str(path) for path in deleted_sources],
     )
-    download._ffmpeg_original_file_path = (
-        str(old_path) if old_path != target_path else ""
-    )
+    download._ffmpeg_original_file_path = ""
     return download
 
 
@@ -567,7 +594,6 @@ def transcode_media(job: Job) -> None:
         job_type="generate_transcript",
         payload={
             "download_id": download.id,
-            "original_file_path": getattr(download, "_ffmpeg_original_file_path", ""),
             "subtitles": payload.get("subtitles", True),
             "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
             "source_type": download.source_type,
@@ -1657,7 +1683,6 @@ def download_episode(job: Job) -> None:
     next_job_type = "generate_transcript"
     next_payload = {
         "download_id": download_id,
-        "original_file_path": getattr(download, "_ffmpeg_original_file_path", ""),
         "subtitles": payload.get("subtitles", True),
         "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
         "source_type": download.source_type,
