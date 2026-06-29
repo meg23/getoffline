@@ -176,6 +176,46 @@ def _episode_payload(
     }
 
 
+def _delete_original_media_candidates(
+    final_path: Path, expected_suffix: str
+) -> list[Path]:
+    final_path = Path(final_path).expanduser().resolve()
+    expected_suffix = expected_suffix.lower()
+    deleted = []
+    if not final_path.exists() or final_path.suffix.lower() != expected_suffix:
+        return deleted
+    for candidate in final_path.parent.glob(f"{final_path.stem}.*"):
+        candidate = candidate.expanduser().resolve()
+        if candidate == final_path or candidate.suffix.lower() == expected_suffix:
+            continue
+        if candidate.suffix.lower() in {
+            ".srt",
+            ".vtt",
+            ".ass",
+            ".ssa",
+            ".lrc",
+            ".ttml",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+        }:
+            continue
+        if candidate.is_file():
+            candidate.unlink(missing_ok=True)
+            deleted.append(candidate)
+    return deleted
+
+
+def _converted_media_ready(final_path: Path, expected_suffix: str) -> bool:
+    final_path = Path(final_path).expanduser().resolve()
+    return (
+        final_path.exists()
+        and final_path.is_file()
+        and final_path.suffix.lower() == expected_suffix.lower()
+    )
+
+
 def _image_href(value: object) -> str:
     if isinstance(value, dict):
         return str(value.get("href") or value.get("url") or "").strip()
@@ -389,6 +429,13 @@ def _download_podcasts_in_process(config, downloaded_items):
                     "extract_audio": True,
                     "audio_format": defaults["audio_format"],
                     "audio_quality": str(defaults["audio_quality"]),
+                    "postprocessors": [
+                        {
+                            "key": "FFmpegExtractAudio",
+                            "preferredcodec": defaults["audio_format"],
+                            "preferredquality": defaults["audio_quality"],
+                        }
+                    ],
                     "restrictfilenames": True,
                     "outtmpl_na_placeholder": "NA",
                     "outtmpl": out_path,
@@ -468,6 +515,32 @@ def _download_podcasts_in_process(config, downloaded_items):
                             last_download_error,
                         )
                         continue
+
+                    expected_audio_suffix = f".{defaults['audio_format']}"
+                    if not _converted_media_ready(
+                        job["final_audio"], expected_audio_suffix
+                    ):
+                        _delete_original_media_candidates(
+                            job["final_audio"], expected_audio_suffix
+                        )
+                        log.warning(
+                            "Skipping podcast database insert because converted media is missing or not in the expected format: %s – %s expected=%s",
+                            job["name"],
+                            job["episode_title"],
+                            job["final_audio"],
+                        )
+                        downloaded_items.append(
+                            f"Skipped podcast after conversion failure: {job['name']} – {job['episode_title']}"
+                        )
+                        continue
+                    deleted_originals = _delete_original_media_candidates(
+                        job["final_audio"], expected_audio_suffix
+                    )
+                    if deleted_originals:
+                        log.info(
+                            "Deleted original podcast media after conversion: %s",
+                            ", ".join(str(path) for path in deleted_originals),
+                        )
 
                     subtitle_path = create_subtitles(
                         media_file=job["final_audio"],
