@@ -81,6 +81,7 @@ if django is not None:
         check_for_episodes,
         retention_cleanup,
         transcode_media,
+        _downloaded_media_requires_ffmpeg,
         _idempotency_key,
         _is_expected_ytdlp_download_error,
         _youtube_candidates,
@@ -1080,6 +1081,56 @@ class SharedDjangoModelTests(TestCase):
 
 
 class QueueRoutingTests(unittest.TestCase):
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_jellyfin_h264_setting_transcodes_single_file_videos(self):
+        def fake_profile_setting(_profile_id, key, default):
+            values = {"video_format": "mp4", "video_codec": "h264"}
+            return values.get(key, default)
+
+        with patch("workers.handlers._profile_setting", side_effect=fake_profile_setting):
+            webm_requires, webm_target = _downloaded_media_requires_ffmpeg(
+                profile_id="default",
+                media_kind="video",
+                current_ext="webm",
+                input_count=1,
+            )
+            mp4_requires, mp4_target = _downloaded_media_requires_ffmpeg(
+                profile_id="default",
+                media_kind="video",
+                current_ext="mp4",
+                input_count=1,
+            )
+
+        self.assertTrue(webm_requires)
+        self.assertEqual(webm_target, "mp4")
+        self.assertTrue(mp4_requires)
+        self.assertEqual(mp4_target, "mp4")
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_copy_video_setting_only_remuxes_when_container_differs(self):
+        def fake_profile_setting(_profile_id, key, default):
+            values = {"video_format": "mp4", "video_codec": "copy"}
+            return values.get(key, default)
+
+        with patch("workers.handlers._profile_setting", side_effect=fake_profile_setting):
+            webm_requires, webm_target = _downloaded_media_requires_ffmpeg(
+                profile_id="default",
+                media_kind="video",
+                current_ext="webm",
+                input_count=1,
+            )
+            mp4_requires, mp4_target = _downloaded_media_requires_ffmpeg(
+                profile_id="default",
+                media_kind="video",
+                current_ext="mp4",
+                input_count=1,
+            )
+
+        self.assertTrue(webm_requires)
+        self.assertEqual(webm_target, "mp4")
+        self.assertFalse(mp4_requires)
+        self.assertEqual(mp4_target, "mp4")
+
     def test_priority_rules_match_user_initiated_and_fresh_work(self):
         self.assertEqual(
             job_priority(

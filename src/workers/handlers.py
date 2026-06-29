@@ -198,7 +198,38 @@ def _download_requires_ffmpeg(
         .strip()
         .lower()
     )
-    return current_ext != target_ext, media_kind, target_ext
+    if media_kind == "video":
+        codec = (
+            _profile_setting(download.profile_id, "video_codec", "h264").strip().lower()
+        )
+        requires_ffmpeg = current_ext != target_ext or codec not in {"copy", ""}
+    else:
+        requires_ffmpeg = current_ext != target_ext
+    return requires_ffmpeg, media_kind, target_ext
+
+
+def _downloaded_media_requires_ffmpeg(
+    *, profile_id: str, media_kind: str, current_ext: str, input_count: int
+) -> tuple[bool, str]:
+    target_ext = (
+        "mp3"
+        if media_kind == "audio"
+        else _preferred_target_ext(profile_id, media_kind)
+    )
+    normalized_ext = str(current_ext or "").strip().lower().lstrip(".")
+    if media_kind == "video":
+        codec = _profile_setting(profile_id, "video_codec", "h264").strip().lower()
+        return (
+            input_count > 1
+            or normalized_ext != target_ext
+            or codec
+            not in {
+                "copy",
+                "",
+            },
+            target_ext,
+        )
+    return normalized_ext != target_ext, target_ext
 
 
 def _ffmpeg_audio_args(profile_id: str, target_ext: str) -> list[str]:
@@ -855,10 +886,6 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         .strip()
         .lower()
     )
-    target_ext = (
-        "mp3" if media_kind == "audio" else downloaded_file.suffix.lstrip(".").lower()
-    )
-
     # yt-dlp can report both the final merged/downloaded file and the temporary
     # elementary stream files that were used to create it. After yt-dlp finishes,
     # those temporary .fXXX files may already be removed, so do not pass them to
@@ -875,18 +902,21 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             else [downloaded_file]
         )
 
-    if (
-        media_kind == "audio"
-        and downloaded_file.suffix.lstrip(".").lower() != target_ext
-    ) or len(ffmpeg_input_files) > 1:
-        final_ext = (
-            target_ext
-            if media_kind == "audio"
-            else _preferred_target_ext(job.profile_id, media_kind)
-        )
+    requires_ffmpeg, final_ext = _downloaded_media_requires_ffmpeg(
+        profile_id=job.profile_id,
+        media_kind=media_kind,
+        current_ext=downloaded_file.suffix.lstrip("."),
+        input_count=len(ffmpeg_input_files),
+    )
+
+    if requires_ffmpeg:
         target_file_path = (
             str(output_dir / f"{downloaded_file.stem.split('.f')[0]}.{final_ext}")
-            if len(ffmpeg_input_files) > 1
+            if media_kind == "video"
+            and (
+                len(ffmpeg_input_files) > 1
+                or downloaded_file.suffix.lstrip(".").lower() != final_ext
+            )
             else ""
         )
         log.info(
@@ -1600,10 +1630,8 @@ def download_episode(job: Job) -> None:
             download_id,
         )
         return
-    media_kind = _preferred_media_kind(download, payload)
-    target_ext = "mp3" if media_kind == "audio" else (download.file_ext or "")
-    requires_ffmpeg = (
-        media_kind == "audio" and (download.file_ext or "").lower() != "mp3"
+    requires_ffmpeg, media_kind, target_ext = _download_requires_ffmpeg(
+        download, payload
     )
     if requires_ffmpeg:
         log.info(
