@@ -164,6 +164,97 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
     )
 
 
+def _delete_ffmpeg_source_files(
+    source_paths: Iterable[Path], target_path: Path
+) -> list[Path]:
+    """Delete original FFmpeg input files once the converted output is ready."""
+    resolved_target = Path(target_path).expanduser().resolve()
+    source_path_list = list(source_paths)
+    log.info(
+        "FFmpeg source cleanup starting target=%s source_count=%s sources=%s",
+        resolved_target,
+        len(source_path_list),
+        [str(path) for path in source_path_list],
+    )
+    deleted: list[Path] = []
+    skipped: list[dict[str, str]] = []
+    for source_path in source_path_list:
+        candidate = Path(source_path).expanduser().resolve()
+        exists = candidate.exists()
+        is_file = candidate.is_file() if exists else False
+        same_as_target = candidate == resolved_target
+        size_bytes = candidate.stat().st_size if exists and is_file else None
+        log.info(
+            "FFmpeg source cleanup inspecting source=%s resolved=%s target=%s exists=%s is_file=%s same_as_target=%s size_bytes=%s",
+            source_path,
+            candidate,
+            resolved_target,
+            exists,
+            is_file,
+            same_as_target,
+            size_bytes,
+        )
+        if same_as_target:
+            skipped.append({"path": str(candidate), "reason": "matches-target"})
+            log.info(
+                "FFmpeg source cleanup skipped source=%s reason=matches-target",
+                candidate,
+            )
+            continue
+        if not exists:
+            skipped.append({"path": str(candidate), "reason": "missing"})
+            log.warning(
+                "FFmpeg source cleanup skipped source=%s reason=missing",
+                candidate,
+            )
+            continue
+        if not is_file:
+            skipped.append({"path": str(candidate), "reason": "not-file"})
+            log.warning(
+                "FFmpeg source cleanup skipped source=%s reason=not-file",
+                candidate,
+            )
+            continue
+        try:
+            log.info(
+                "FFmpeg source cleanup deleting source=%s size_bytes=%s target=%s",
+                candidate,
+                size_bytes,
+                resolved_target,
+            )
+            candidate.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning(
+                "FFmpeg source cleanup failed source=%s target=%s error=%s",
+                candidate,
+                resolved_target,
+                exc,
+                exc_info=True,
+            )
+            continue
+        exists_after = candidate.exists()
+        if exists_after:
+            log.warning(
+                "FFmpeg source cleanup delete returned but source still exists source=%s target=%s",
+                candidate,
+                resolved_target,
+            )
+            continue
+        deleted.append(candidate)
+        log.info(
+            "FFmpeg source cleanup deleted source=%s target=%s",
+            candidate,
+            resolved_target,
+        )
+    log.info(
+        "FFmpeg source cleanup finished target=%s deleted=%s skipped=%s",
+        resolved_target,
+        [str(path) for path in deleted],
+        skipped,
+    )
+    return deleted
+
+
 def _target_path(source_path: Path, target_ext: str) -> Path:
     clean_ext = target_ext.lower().lstrip(".") or source_path.suffix.lstrip(".")
     candidate = source_path.with_name(f"{source_path.stem}.converted.{clean_ext}")
@@ -530,17 +621,16 @@ def _postprocess_download_with_ffmpeg(
                 "last_seen_at",
             ]
         )
+    deleted_sources = _delete_ffmpeg_source_files(source_paths, target_path)
     log.info(
-        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s original_deferred_delete=%s",
+        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s deleted_original_files=%s",
         parent_job_id,
         download.id,
         target_path,
         output_size,
-        old_path != target_path,
+        [str(path) for path in deleted_sources],
     )
-    download._ffmpeg_original_file_path = (
-        str(old_path) if old_path != target_path else ""
-    )
+    download._ffmpeg_original_file_path = ""
     return download
 
 
@@ -567,7 +657,6 @@ def transcode_media(job: Job) -> None:
         job_type="generate_transcript",
         payload={
             "download_id": download.id,
-            "original_file_path": getattr(download, "_ffmpeg_original_file_path", ""),
             "subtitles": payload.get("subtitles", True),
             "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
             "source_type": download.source_type,
@@ -1657,7 +1746,6 @@ def download_episode(job: Job) -> None:
     next_job_type = "generate_transcript"
     next_payload = {
         "download_id": download_id,
-        "original_file_path": getattr(download, "_ffmpeg_original_file_path", ""),
         "subtitles": payload.get("subtitles", True),
         "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
         "source_type": download.source_type,

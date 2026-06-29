@@ -81,6 +81,7 @@ if django is not None:
         check_for_episodes,
         retention_cleanup,
         transcode_media,
+        _delete_ffmpeg_source_files,
         _downloaded_media_requires_ffmpeg,
         _ffmpeg_video_args,
         _idempotency_key,
@@ -1080,7 +1081,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(candidates[0]["item_uid"], "MbEO1g8_COs")
 
     @unittest.skipIf(django is None, "Django is not installed")
-    def test_transcode_media_updates_row_defers_original_deletion_and_queues_transcript(
+    def test_transcode_media_updates_row_deletes_original_and_queues_transcript(
         self,
     ):
         source = SourceConfig.objects.create(
@@ -1123,19 +1124,41 @@ class SharedDjangoModelTests(TestCase):
 
             download.refresh_from_db()
             self.assertEqual(download.file_ext, "mp3")
-            self.assertTrue(original.exists())
+            self.assertFalse(original.exists())
+            self.assertEqual(download.file_path, str(output.resolve()))
             self.assertEqual(download.file_size_bytes, len("converted"))
             transcript_job = Job.objects.get(
                 job_type="generate_transcript", payload__download_id=download.id
             )
-            self.assertEqual(
-                transcript_job.payload["original_file_path"], str(original.resolve())
-            )
+            self.assertNotIn("original_file_path", transcript_job.payload)
             run.assert_called_once()
             publish.assert_called_once()
 
 
 class QueueRoutingTests(unittest.TestCase):
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_ffmpeg_source_cleanup_logs_and_deletes_only_original_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original = Path(tmpdir) / "episode.webm"
+            target = Path(tmpdir) / "episode.converted.mp4"
+            missing = Path(tmpdir) / "already-removed.webm"
+            original.write_text("original", encoding="utf-8")
+            target.write_text("converted", encoding="utf-8")
+
+            with self.assertLogs("getoffline", level="INFO") as logs:
+                deleted = _delete_ffmpeg_source_files(
+                    [original, target, missing], target
+                )
+
+            self.assertEqual(deleted, [original.resolve()])
+            self.assertFalse(original.exists())
+            self.assertTrue(target.exists())
+            log_output = "\n".join(logs.output)
+            self.assertIn("FFmpeg source cleanup starting", log_output)
+            self.assertIn("reason=matches-target", log_output)
+            self.assertIn("reason=missing", log_output)
+            self.assertIn("FFmpeg source cleanup finished", log_output)
+
     @unittest.skipIf(django is None, "Django is not installed")
     def test_h264_video_args_use_smaller_jellyfin_friendly_crf_profile(self):
         def fake_profile_setting(_profile_id, key, default):
