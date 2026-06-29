@@ -51,12 +51,31 @@
     }
   }
 
+  function syncServerFilterMode() {
+    if (!filterMode) return false;
+    const serverMode = filterMode.dataset.serverMode || "unplayed";
+    const selectedMode = filterMode.value || "unplayed";
+    if (selectedMode !== "all" && serverMode !== "all") return false;
+    if (selectedMode === serverMode) return false;
+
+    const url = new URL(window.location.href);
+    if (selectedMode === "all") {
+      url.searchParams.set("filter", "all");
+    } else {
+      url.searchParams.delete("filter");
+    }
+    window.location.href = url.toString();
+    return true;
+  }
+
   filterInput?.addEventListener("input", applyFilters);
-  filterMode?.addEventListener("change", applyFilters);
+  filterMode?.addEventListener("change", () => {
+    if (!syncServerFilterMode()) applyFilters();
+  });
   clearButton?.addEventListener("click", () => {
     if (filterInput) filterInput.value = "";
     if (filterMode) filterMode.value = "unplayed";
-    applyFilters();
+    if (!syncServerFilterMode()) applyFilters();
   });
   selectors().forEach((input) =>
     input.addEventListener("change", updateBatchState),

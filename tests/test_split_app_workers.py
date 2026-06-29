@@ -240,6 +240,60 @@ class SharedDjangoModelTests(TestCase):
                 }
             )
 
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_library_preview_keeps_default_limit(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        base_seen_at = timezone.now()
+        for index in range(105):
+            Download.objects.create(
+                profile_id="default",
+                source_type="manual",
+                source_name="Manual Uploads",
+                title=f"Library Item {index:03d}",
+                file_ext="mp3",
+                download_status="downloaded",
+                last_seen_at=base_seen_at - timedelta(seconds=index),
+            )
+
+        response = Client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Library Item 000")
+        self.assertNotContains(response, "Library Item 104")
+        self.assertEqual(len(response.context["downloads"]), 100)
+        self.assertEqual(response.context["stats"]["visible"], 100)
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_library_all_filter_renders_every_database_download(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        base_seen_at = timezone.now()
+        for index in range(105):
+            Download.objects.create(
+                profile_id="default",
+                source_type="manual",
+                source_name="Manual Uploads",
+                title=f"Library Item {index:03d}",
+                file_ext="mp3",
+                download_status="downloaded",
+                last_seen_at=base_seen_at - timedelta(seconds=index),
+            )
+
+        response = Client().get("/?filter=all")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Library Item 000")
+        self.assertContains(response, "Library Item 104")
+        self.assertEqual(len(response.context["downloads"]), 105)
+        self.assertEqual(response.context["stats"]["visible"], 105)
+        self.assertEqual(response.context["library_filter_mode"], "all")
+
     @unittest.skipIf(django is None, "Django is not installed")
     def test_scheduler_enqueues_due_database_configured_job(self):
         from datetime import timedelta

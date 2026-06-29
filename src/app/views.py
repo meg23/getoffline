@@ -57,6 +57,7 @@ ALLOWED_JOB_TYPES = {
     "transfer_media",
 }
 DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
+LIBRARY_PREVIEW_LIMIT = 100
 MEDIA_UPLOAD_EXTENSIONS = {
     ".mp3",
     ".m4a",
@@ -295,11 +296,13 @@ def library(request: HttpRequest) -> HttpResponse:
     )
     setup_elapsed = time.perf_counter() - setup_start
 
+    show_all_downloads = request.GET.get("filter") == "all"
+
     rows_start = time.perf_counter()
-    downloads = [
-        _decorate_download(item)
-        for item in downloads_qs.order_by("-last_seen_at", "-id")[:100]
-    ]
+    ordered_downloads = downloads_qs.order_by("-last_seen_at", "-id")
+    if not show_all_downloads:
+        ordered_downloads = ordered_downloads[:LIBRARY_PREVIEW_LIMIT]
+    downloads = [_decorate_download(item) for item in ordered_downloads]
     rows_elapsed = time.perf_counter() - rows_start
 
     stats_start = time.perf_counter()
@@ -328,6 +331,7 @@ def library(request: HttpRequest) -> HttpResponse:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "profile_initial": (profile_name[:1] or "U").upper(),
+            "library_filter_mode": "all" if show_all_downloads else "unplayed",
             "stats": {
                 "visible": len(downloads),
                 "played": played_count,
