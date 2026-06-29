@@ -82,6 +82,7 @@ if django is not None:
         retention_cleanup,
         transcode_media,
         _downloaded_media_requires_ffmpeg,
+        _ffmpeg_video_args,
         _idempotency_key,
         _is_expected_ytdlp_download_error,
         _youtube_candidates,
@@ -1081,6 +1082,26 @@ class SharedDjangoModelTests(TestCase):
 
 
 class QueueRoutingTests(unittest.TestCase):
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_h264_video_args_use_smaller_jellyfin_friendly_crf_profile(self):
+        def fake_profile_setting(_profile_id, key, default):
+            values = {"video_codec": "h264"}
+            return values.get(key, default)
+
+        with patch("workers.handlers._profile_setting", side_effect=fake_profile_setting):
+            args = _ffmpeg_video_args("default", "mp4")
+
+        self.assertIn("-c:v", args)
+        self.assertEqual(args[args.index("-c:v") + 1], "libx264")
+        self.assertEqual(args[args.index("-preset") + 1], "fast")
+        self.assertEqual(args[args.index("-crf") + 1], "25")
+        self.assertEqual(args[args.index("-pix_fmt") + 1], "yuv420p")
+        self.assertEqual(args[args.index("-c:a") + 1], "aac")
+        self.assertEqual(args[args.index("-b:a") + 1], "128k")
+        self.assertEqual(args[args.index("-ac") + 1], "2")
+        self.assertEqual(args[args.index("-ar") + 1], "48000")
+        self.assertIn("+faststart", args)
+
     @unittest.skipIf(django is None, "Django is not installed")
     def test_jellyfin_h264_setting_transcodes_single_file_videos(self):
         def fake_profile_setting(_profile_id, key, default):

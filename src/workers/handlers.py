@@ -280,10 +280,10 @@ def _ffmpeg_video_args(
             [
                 "-c:v",
                 "libx264",
-                "-crf",
-                "23",
                 "-preset",
-                "ultrafast",
+                "fast",
+                "-crf",
+                "25",
                 "-pix_fmt",
                 "yuv420p",
             ]
@@ -292,7 +292,7 @@ def _ffmpeg_video_args(
         args.extend(
             ["-c:v", "libx265", "-tag:v", "hvc1", "-crf", "28", "-preset", "medium"]
         )
-    args.extend(["-c:a", "aac", "-b:a", "192k"])
+    args.extend(["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"])
     if target_ext == "mp4":
         args.extend(["-movflags", "+faststart"])
     return args
