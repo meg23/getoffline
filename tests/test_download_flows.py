@@ -189,7 +189,6 @@ class DownloadFlowTests(DatabaseCleanupTestCase):
                 2,
             )
 
-
     def test_title_exclude_skips_podcast_episode(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
@@ -198,11 +197,15 @@ class DownloadFlowTests(DatabaseCleanupTestCase):
                 entries=[
                     SimpleNamespace(
                         title="Episode about MMA",
-                        enclosures=[SimpleNamespace(href="https://cdn.example.com/mma.mp3")],
+                        enclosures=[
+                            SimpleNamespace(href="https://cdn.example.com/mma.mp3")
+                        ],
                     ),
                     SimpleNamespace(
                         title="Episode about comedy",
-                        enclosures=[SimpleNamespace(href="https://cdn.example.com/comedy.mp3")],
+                        enclosures=[
+                            SimpleNamespace(href="https://cdn.example.com/comedy.mp3")
+                        ],
                     ),
                 ]
             )
@@ -219,9 +222,15 @@ class DownloadFlowTests(DatabaseCleanupTestCase):
                 podcasts.download_podcasts(config, downloaded_items)
 
             self.assertEqual(len(FakeYoutubeDL.instances), 1)
-            self.assertEqual(FakeYoutubeDL.instances[0].urls, ["https://cdn.example.com/comedy.mp3"])
-            self.assertTrue(any("Episode about comedy" in item for item in downloaded_items))
-            self.assertFalse(any("Episode about MMA" in item for item in downloaded_items))
+            self.assertEqual(
+                FakeYoutubeDL.instances[0].urls, ["https://cdn.example.com/comedy.mp3"]
+            )
+            self.assertTrue(
+                any("Episode about comedy" in item for item in downloaded_items)
+            )
+            self.assertFalse(
+                any("Episode about MMA" in item for item in downloaded_items)
+            )
 
     def test_title_exclude_is_applied_to_youtube_match_filter(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -573,6 +582,160 @@ class DownloadFlowTests(DatabaseCleanupTestCase):
             self.assertIn(podcasts.sanitize(podcast_title), rows[0][3])
             self.assertIn("title", rows[0][4])
             self.assertIn("title", rows[1][4])
+
+    def test_youtube_audio_waits_for_conversion_and_deletes_original(self):
+        class FakeYoutubeDLLeavesOriginal(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                outtmpl = self.opts.get("outtmpl")
+                webm_path = (
+                    outtmpl.replace("%(upload_date)s", "20260312")
+                    .replace("%(title)s", "Converted Audio")
+                    .replace("%(ext)s", "webm")
+                )
+                mp3_path = webm_path.replace(".webm", ".mp3")
+                os.makedirs(os.path.dirname(webm_path), exist_ok=True)
+                Path(webm_path).write_text("original", encoding="utf-8")
+                Path(mp3_path).write_text("converted", encoding="utf-8")
+                info_dict = {
+                    "id": "converted-audio",
+                    "title": "Converted Audio",
+                    "webpage_url": "https://youtube.com/watch?v=converted-audio",
+                    "_filename": webm_path,
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": webm_path,
+                            "total_bytes": 1024,
+                        }
+                    )
+                for hook in self.opts.get("postprocessor_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "postprocessor": "FFmpegExtractAudio",
+                            "info_dict": info_dict,
+                            "filepath": webm_path,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["defaults"]["database_path"] = os.path.join(
+                tmpdir, "downloads.sqlite3"
+            )
+            config["youtube"][0]["subtitles"] = False
+            config["podcasts"] = []
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLLeavesOriginal):
+                youtube.download_youtube_items(config, [])
+
+            with sqlite3.connect(config["defaults"]["database_path"]) as conn:
+                stored_path = conn.execute(
+                    "SELECT file_path FROM downloads WHERE source_type='youtube' LIMIT 1"
+                ).fetchone()[0]
+
+            self.assertTrue(stored_path.endswith(".mp3"))
+            self.assertTrue(Path(stored_path).exists())
+            self.assertFalse(Path(stored_path).with_suffix(".webm").exists())
+
+    def test_youtube_audio_skips_database_when_conversion_missing(self):
+        class FakeYoutubeDLMissingConversion(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                outtmpl = self.opts.get("outtmpl")
+                webm_path = (
+                    outtmpl.replace("%(upload_date)s", "20260312")
+                    .replace("%(title)s", "Missing Conversion")
+                    .replace("%(ext)s", "webm")
+                )
+                os.makedirs(os.path.dirname(webm_path), exist_ok=True)
+                Path(webm_path).write_text("original", encoding="utf-8")
+                info_dict = {
+                    "id": "missing-conversion",
+                    "title": "Missing Conversion",
+                    "webpage_url": "https://youtube.com/watch?v=missing-conversion",
+                    "_filename": webm_path,
+                }
+                for hook in self.opts.get("progress_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "info_dict": info_dict,
+                            "filename": webm_path,
+                            "total_bytes": 1024,
+                        }
+                    )
+                for hook in self.opts.get("postprocessor_hooks", []):
+                    hook(
+                        {
+                            "status": "finished",
+                            "postprocessor": "FFmpegExtractAudio",
+                            "info_dict": info_dict,
+                            "filepath": webm_path,
+                        }
+                    )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["defaults"]["database_path"] = os.path.join(
+                tmpdir, "downloads.sqlite3"
+            )
+            config["youtube"][0]["subtitles"] = False
+            config["podcasts"] = []
+            with patch("workers.youtube.YoutubeDL", FakeYoutubeDLMissingConversion):
+                youtube.download_youtube_items(config, [])
+
+            with sqlite3.connect(config["defaults"]["database_path"]) as conn:
+                row_count = conn.execute(
+                    "SELECT COUNT(*) FROM downloads WHERE source_type='youtube'"
+                ).fetchone()[0]
+            self.assertEqual(row_count, 0)
+            self.assertFalse(any(Path(tmpdir).rglob("*.webm")))
+
+    def test_podcast_waits_for_conversion_and_deletes_original(self):
+        class FakePodcastYoutubeDL(FakeYoutubeDL):
+            def download(self, urls):
+                self.urls.extend(urls)
+                outtmpl = self.opts.get("outtmpl")
+                m4a_path = outtmpl.replace("%(ext)s", "m4a")
+                mp3_path = outtmpl.replace("%(ext)s", "mp3")
+                os.makedirs(os.path.dirname(m4a_path), exist_ok=True)
+                Path(m4a_path).write_text("original", encoding="utf-8")
+                Path(mp3_path).write_text("converted", encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _build_sample_config(tmpdir)
+            config["defaults"]["database_path"] = os.path.join(
+                tmpdir, "downloads.sqlite3"
+            )
+            config["youtube"] = []
+            config["podcasts"][0]["subtitles"] = False
+            fake_feed = SimpleNamespace(
+                entries=[
+                    SimpleNamespace(
+                        title="Converted Podcast",
+                        enclosures=[
+                            SimpleNamespace(href="https://cdn.example.com/episode.m4a")
+                        ],
+                    )
+                ]
+            )
+            with (
+                patch("workers.podcasts.YoutubeDL", FakePodcastYoutubeDL),
+                patch("workers.podcasts.feedparser.parse", return_value=fake_feed),
+            ):
+                podcasts.download_podcasts(config, [])
+
+            with sqlite3.connect(config["defaults"]["database_path"]) as conn:
+                stored_path = conn.execute(
+                    "SELECT file_path FROM downloads WHERE source_type='podcast' LIMIT 1"
+                ).fetchone()[0]
+            self.assertTrue(stored_path.endswith(".mp3"))
+            self.assertTrue(Path(stored_path).exists())
+            self.assertFalse(Path(stored_path).with_suffix(".m4a").exists())
 
 
 class SubtitleDefaultsAndYoutubeWhisperTests(DatabaseCleanupTestCase):

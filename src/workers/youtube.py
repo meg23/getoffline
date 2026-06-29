@@ -44,6 +44,28 @@ _YTDLP_REMOTE_COMPONENT = "ejs:github"
 _THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
 
+def _delete_original_media_file(original_path: Path, final_path: Path) -> bool:
+    original_path = Path(original_path).expanduser().resolve()
+    final_path = Path(final_path).expanduser().resolve()
+    if (
+        original_path == final_path
+        or not original_path.exists()
+        or not original_path.is_file()
+    ):
+        return False
+    original_path.unlink(missing_ok=True)
+    return True
+
+
+def _converted_media_ready(media_path: Path, expected_suffix: str) -> bool:
+    media_path = Path(media_path).expanduser().resolve()
+    return (
+        media_path.exists()
+        and media_path.is_file()
+        and media_path.suffix.lower() == expected_suffix.lower()
+    )
+
+
 def _thumbnail_dimension(value: object, key: str) -> int:
     if not isinstance(value, dict):
         return 0
@@ -834,7 +856,9 @@ def _download_youtube_items_in_process(config, downloaded_items):
                 title = str(info_dict.get("title") or "").strip() or None
                 title_filter_match = title_matches_filter(title, title_exclude_terms)
                 if title_filter_match:
-                    reason = f"Skipping title matching exclude filter: {title_filter_match}"
+                    reason = (
+                        f"Skipping title matching exclude filter: {title_filter_match}"
+                    )
                     _record_skip(reason, info_dict)
                     return f"{reason}: {_clean_log_title(title)}"
                 item_uid = build_item_uid(
@@ -1348,6 +1372,35 @@ def _download_youtube_items_in_process(config, downloaded_items):
                     resolved_file = str(remapped_path)
 
                 resolved_media_path = Path(resolved_file).expanduser().resolve()
+                expected_media_suffix = (
+                    ".mp4"
+                    if download_type == "video"
+                    else f".{defaults['audio_format']}"
+                )
+                if not _converted_media_ready(
+                    resolved_media_path, expected_media_suffix
+                ):
+                    if out_candidate.exists():
+                        delete_media_artifacts(out_candidate)
+                    log.warning(
+                        "Skipping YouTube database insert because converted media is missing or not in the expected format: source=%s title=%s expected_suffix=%s resolved_file=%s",
+                        name,
+                        info.get("title") or resolved_media_path.name,
+                        expected_media_suffix,
+                        resolved_media_path,
+                    )
+                    downloaded_items.append(
+                        f"Skipped YouTube after conversion failure: {name} – {info.get('title') or resolved_media_path.stem}"
+                    )
+                    record.clear()
+                    del info
+                    continue
+                if _delete_original_media_file(out_candidate, resolved_media_path):
+                    log.info(
+                        "Deleted original YouTube media after conversion: %s",
+                        out_candidate,
+                    )
+
                 subtitle_path = resolved_media_path.with_suffix(".srt")
                 if delete_explicit_content and not subtitle_path.exists():
                     deleted_paths = delete_media_artifacts(resolved_media_path)
