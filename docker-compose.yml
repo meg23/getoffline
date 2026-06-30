@@ -83,6 +83,7 @@ services:
       context: .
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
+    cpus: 1.5
     environment: *getoffline-env
     command: python -m workers downloader-youtube
     deploy:
@@ -121,6 +122,7 @@ services:
       context: .
       dockerfile: deploy/docker/worker-transcripts.Dockerfile
     restart: unless-stopped
+    cpus: 1.0
     environment: *getoffline-env
     command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-1}"
     deploy:
