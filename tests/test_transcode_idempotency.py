@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - import guard matches existing tests
     django = None
 
 if django is not None:
-    from workers.handlers import _transcode_idempotency_key
+    from workers.handlers import _transcode_idempotency_key, _transcode_lock_key
 
 
 @unittest.skipIf(django is None, "Django is not installed")
@@ -47,6 +47,18 @@ class TranscodeIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertTrue(first.startswith("transcode_media:default:file:"))
+
+    def test_lock_key_is_stable_for_duplicate_file_payloads(self):
+        payload = {
+            "source_file_path": "/tmp/video.webm",
+            "target_file_path": "/tmp/video.mp4",
+            "item_uid": "same-video",
+        }
+
+        self.assertEqual(
+            _transcode_lock_key("default", payload),
+            _transcode_lock_key("default", dict(payload)),
+        )
 
 
 if __name__ == "__main__":

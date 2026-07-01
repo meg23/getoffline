@@ -1,16 +1,20 @@
 import hashlib
 import os
 import subprocess
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
 from app.queue import publish_job
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from workers.logger import get_logger
 from models.jobs import create_job
 from models.models import (
+    AppConfigValue,
     Download,
     Job,
     ProfileConfigValue,
@@ -419,6 +423,108 @@ def _tail_text(value: str | None, *, limit: int = 4000) -> str:
     return f"...{text[-limit:]}"
 
 
+def _transcode_lock_key(profile_id: str, payload: dict) -> str:
+    digest = hashlib.sha1(
+        _transcode_idempotency_key(profile_id, payload).encode("utf-8")
+    ).hexdigest()
+    return f"transcode_lock:{digest}"
+
+
+def _transcode_lock_expires_at(lease_seconds: float):
+    return timezone.now() + timezone.timedelta(seconds=float(lease_seconds))
+
+
+def _ensure_app_config_row(key: str) -> None:
+    try:
+        AppConfigValue.objects.get_or_create(
+            key=key, defaults={"value": "", "updated_at": timezone.now()}
+        )
+    except IntegrityError:
+        pass
+
+
+@contextmanager
+def _transcode_execution_lock(
+    *, profile_id: str, payload: dict, job_id: int | str, lease_seconds: float = 300.0
+):
+    """Lease a per-target FFmpeg lock so duplicate jobs cannot run together."""
+    key = _transcode_lock_key(profile_id, payload)
+    owner = str(job_id)
+    while True:
+        _ensure_app_config_row(key)
+        with transaction.atomic():
+            row = AppConfigValue.objects.select_for_update().get(key=key)
+            current_owner, _, expires_at_text = str(row.value or "").partition("|")
+            try:
+                expires_at = (
+                    datetime.fromisoformat(expires_at_text)
+                    if expires_at_text
+                    else timezone.now() - timezone.timedelta(seconds=1)
+                )
+                if timezone.is_naive(expires_at):
+                    expires_at = timezone.make_aware(
+                        expires_at, timezone.get_current_timezone()
+                    )
+            except ValueError:
+                expires_at = timezone.now() - timezone.timedelta(seconds=1)
+            if (
+                not current_owner
+                or current_owner == owner
+                or expires_at <= timezone.now()
+            ):
+                row.value = (
+                    f"{owner}|{_transcode_lock_expires_at(lease_seconds).isoformat()}"
+                )
+                row.updated_at = timezone.now()
+                row.save(update_fields=["value", "updated_at"])
+                log.info(
+                    "FFmpeg target lock acquired job_id=%s lock_key=%s previous_owner=%s",
+                    owner,
+                    key,
+                    current_owner or "none",
+                )
+                break
+            log.info(
+                "FFmpeg target lock waiting job_id=%s lock_key=%s owner=%s expires_at=%s",
+                owner,
+                key,
+                current_owner,
+                expires_at,
+            )
+        time.sleep(1.0)
+    stop = False
+
+    def heartbeat() -> None:
+        while not stop:
+            time.sleep(max(1.0, lease_seconds / 3.0))
+            if stop:
+                return
+            with transaction.atomic():
+                row = AppConfigValue.objects.select_for_update().get(key=key)
+                current_owner, _, _expires_at_text = str(row.value or "").partition("|")
+                if current_owner == owner:
+                    row.value = f"{owner}|{_transcode_lock_expires_at(lease_seconds).isoformat()}"
+                    row.updated_at = timezone.now()
+                    row.save(update_fields=["value", "updated_at"])
+
+    thread = threading.Thread(target=heartbeat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop = True
+        with transaction.atomic():
+            row = AppConfigValue.objects.select_for_update().get(key=key)
+            current_owner, _, _expires_at_text = str(row.value or "").partition("|")
+            if current_owner == owner:
+                row.value = ""
+                row.updated_at = timezone.now()
+                row.save(update_fields=["value", "updated_at"])
+                log.info(
+                    "FFmpeg target lock released job_id=%s lock_key=%s", owner, key
+                )
+
+
 def _postprocess_download_with_ffmpeg(
     *, profile_id: str, payload: dict, parent_job_id: int | str = "inline"
 ) -> Download | None:
@@ -506,16 +612,6 @@ def _postprocess_download_with_ffmpeg(
         ),
         download.download_status if download is not None else "deferred_insert",
     )
-    missing_paths = [path for path in source_paths if not path.exists()]
-    if missing_paths:
-        log.error(
-            "FFmpeg worker post-processing input file is missing parent_job_id=%s download_id=%s paths=%s",
-            parent_job_id,
-            download.id if download is not None else "deferred",
-            missing_paths,
-        )
-        raise FileNotFoundError(f"Downloaded file is missing: {missing_paths[0]}")
-    input_size = sum(path.stat().st_size for path in source_paths)
     media_kind = (
         _preferred_media_kind(download, payload)
         if download is not None
@@ -531,145 +627,188 @@ def _postprocess_download_with_ffmpeg(
         if payload.get("target_file_path")
         else _target_path(source_path, target_ext)
     )
-    ffmpeg_path = _profile_setting(profile_id, "ffmpeg_path", "ffmpeg")
-    codec_args = (
-        _ffmpeg_audio_args(profile_id, target_ext)
-        if media_kind == "audio"
-        else _ffmpeg_video_args(profile_id, target_ext, input_count=len(source_paths))
-    )
-    ffmpeg_threads = _ffmpeg_thread_count(profile_id)
-    input_args = [
-        arg
-        for path in source_paths
-        for arg in ("-threads", ffmpeg_threads, "-i", str(path))
-    ]
-    command = [
-        ffmpeg_path,
-        "-y",
-        "-filter_threads",
-        ffmpeg_threads,
-        "-filter_complex_threads",
-        ffmpeg_threads,
-        *input_args,
-        *codec_args,
-        str(target_path),
-    ]
-    log.info(
-        "FFmpeg conversion prepared job_id=%s download_id=%s media_kind=%s input=%s input_size_bytes=%s target=%s target_ext=%s ffmpeg_path=%s codec_args=%s",
-        parent_job_id,
-        download.id if download is not None else "deferred",
-        media_kind,
-        source_paths if len(source_paths) > 1 else source_path,
-        input_size,
-        target_path,
-        target_ext,
-        ffmpeg_path,
-        codec_args,
-    )
-    log.info(
-        "Downloader FFmpeg conversion starting parent_job_id=%s download_id=%s command=%s",
-        parent_job_id,
-        download.id if download is not None else "deferred",
-        command,
-    )
-    try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        log.error(
-            "FFmpeg conversion failed job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
-            parent_job_id,
-            download.id if download is not None else "deferred",
-            exc.returncode,
-            _tail_text(exc.stdout),
-            _tail_text(exc.stderr),
+    with _transcode_execution_lock(
+        profile_id=profile_id, payload=payload, job_id=parent_job_id
+    ):
+        if download_id:
+            refreshed_download = Download.objects.filter(
+                pk=download_id, profile_id=profile_id
+            ).first()
+            if (
+                refreshed_download is not None
+                and Path(str(refreshed_download.file_path or "")).expanduser().resolve()
+                == target_path
+                and target_path.exists()
+            ):
+                log.info(
+                    "FFmpeg duplicate skipped because target is already current job_id=%s download_id=%s target=%s",
+                    parent_job_id,
+                    download_id,
+                    target_path,
+                )
+                return refreshed_download
+        missing_paths = [path for path in source_paths if not path.exists()]
+        if missing_paths and target_path.exists() and download is not None:
+            log.info(
+                "FFmpeg duplicate skipped because target exists and source is gone job_id=%s download_id=%s target=%s missing_sources=%s",
+                parent_job_id,
+                download.id,
+                target_path,
+                missing_paths,
+            )
+            return download
+        if missing_paths:
+            log.error(
+                "FFmpeg worker post-processing input file is missing parent_job_id=%s download_id=%s paths=%s",
+                parent_job_id,
+                download.id if download is not None else "deferred",
+                missing_paths,
+            )
+            raise FileNotFoundError(f"Downloaded file is missing: {missing_paths[0]}")
+        input_size = sum(path.stat().st_size for path in source_paths)
+        ffmpeg_path = _profile_setting(profile_id, "ffmpeg_path", "ffmpeg")
+        codec_args = (
+            _ffmpeg_audio_args(profile_id, target_ext)
+            if media_kind == "audio"
+            else _ffmpeg_video_args(
+                profile_id, target_ext, input_count=len(source_paths)
+            )
         )
-        raise
-    log.info(
-        "FFmpeg conversion subprocess finished job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
-        parent_job_id,
-        download.id if download is not None else "deferred",
-        result.returncode,
-        _tail_text(result.stdout, limit=1000),
-        _tail_text(result.stderr, limit=1000),
-    )
-    if not target_path.exists():
-        log.error(
-            "Downloader FFmpeg conversion output missing parent_job_id=%s download_id=%s target=%s",
+        ffmpeg_threads = _ffmpeg_thread_count(profile_id)
+        input_args = [
+            arg
+            for path in source_paths
+            for arg in ("-threads", ffmpeg_threads, "-i", str(path))
+        ]
+        command = [
+            ffmpeg_path,
+            "-y",
+            "-filter_threads",
+            ffmpeg_threads,
+            "-filter_complex_threads",
+            ffmpeg_threads,
+            *input_args,
+            *codec_args,
+            str(target_path),
+        ]
+        log.info(
+            "FFmpeg conversion prepared job_id=%s download_id=%s media_kind=%s input=%s input_size_bytes=%s target=%s target_ext=%s ffmpeg_path=%s codec_args=%s",
             parent_job_id,
             download.id if download is not None else "deferred",
+            media_kind,
+            source_paths if len(source_paths) > 1 else source_path,
+            input_size,
             target_path,
+            target_ext,
+            ffmpeg_path,
+            codec_args,
         )
-        raise FileNotFoundError(f"FFmpeg output file was not created: {target_path}")
-    old_path = source_path
-    output_size = target_path.stat().st_size
-    output_root = (
-        Path(str(payload.get("output_root") or _download_output_root(profile_id)))
-        .expanduser()
-        .resolve()
-    )
-    log.info(
-        "FFmpeg conversion updating database job_id=%s download_id=%s old_path=%s new_path=%s old_size_bytes=%s new_size_bytes=%s",
-        parent_job_id,
-        download.id if download is not None else "deferred",
-        old_path,
-        target_path,
-        input_size,
-        output_size,
-    )
-    if download is None:
-        final_defaults = dict(deferred_defaults)
-        final_defaults.update(
-            {
-                "file_path": str(target_path),
-                "file_path_relative": (
-                    str(target_path.relative_to(output_root))
-                    if target_path.is_relative_to(output_root)
-                    else None
-                ),
-                "file_ext": target_path.suffix.lstrip("."),
-                "file_size_bytes": output_size,
-                "download_status": "downloaded",
-                "completed_at": timezone.now(),
-                "last_seen_at": timezone.now(),
-            }
+        log.info(
+            "Downloader FFmpeg conversion starting parent_job_id=%s download_id=%s command=%s",
+            parent_job_id,
+            download.id if download is not None else "deferred",
+            command,
         )
-        download, _created = Download.objects.update_or_create(
-            **deferred_lookup, defaults=final_defaults
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            log.error(
+                "FFmpeg conversion failed job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
+                parent_job_id,
+                download.id if download is not None else "deferred",
+                exc.returncode,
+                _tail_text(exc.stdout),
+                _tail_text(exc.stderr),
+            )
+            raise
+        log.info(
+            "FFmpeg conversion subprocess finished job_id=%s download_id=%s returncode=%s stdout_tail=%s stderr_tail=%s",
+            parent_job_id,
+            download.id if download is not None else "deferred",
+            result.returncode,
+            _tail_text(result.stdout, limit=1000),
+            _tail_text(result.stderr, limit=1000),
         )
-    else:
-        download.file_path = str(target_path)
-        download.file_path_relative = (
-            str(target_path.relative_to(output_root))
-            if target_path.is_relative_to(output_root)
-            else None
+        if not target_path.exists():
+            log.error(
+                "Downloader FFmpeg conversion output missing parent_job_id=%s download_id=%s target=%s",
+                parent_job_id,
+                download.id if download is not None else "deferred",
+                target_path,
+            )
+            raise FileNotFoundError(
+                f"FFmpeg output file was not created: {target_path}"
+            )
+        old_path = source_path
+        output_size = target_path.stat().st_size
+        output_root = (
+            Path(str(payload.get("output_root") or _download_output_root(profile_id)))
+            .expanduser()
+            .resolve()
         )
-        download.file_ext = target_path.suffix.lstrip(".")
-        download.file_size_bytes = output_size
-        download.download_status = "downloaded"
-        download.completed_at = timezone.now()
-        download.last_seen_at = timezone.now()
-        download.save(
-            update_fields=[
-                "file_path",
-                "file_path_relative",
-                "file_ext",
-                "file_size_bytes",
-                "download_status",
-                "completed_at",
-                "last_seen_at",
-            ]
+        log.info(
+            "FFmpeg conversion updating database job_id=%s download_id=%s old_path=%s new_path=%s old_size_bytes=%s new_size_bytes=%s",
+            parent_job_id,
+            download.id if download is not None else "deferred",
+            old_path,
+            target_path,
+            input_size,
+            output_size,
         )
-    deleted_sources = _delete_ffmpeg_source_files(source_paths, target_path)
-    log.info(
-        "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s deleted_original_files=%s",
-        parent_job_id,
-        download.id,
-        target_path,
-        output_size,
-        [str(path) for path in deleted_sources],
-    )
-    download._ffmpeg_original_file_path = ""
-    return download
+        if download is None:
+            final_defaults = dict(deferred_defaults)
+            final_defaults.update(
+                {
+                    "file_path": str(target_path),
+                    "file_path_relative": (
+                        str(target_path.relative_to(output_root))
+                        if target_path.is_relative_to(output_root)
+                        else None
+                    ),
+                    "file_ext": target_path.suffix.lstrip("."),
+                    "file_size_bytes": output_size,
+                    "download_status": "downloaded",
+                    "completed_at": timezone.now(),
+                    "last_seen_at": timezone.now(),
+                }
+            )
+            download, _created = Download.objects.update_or_create(
+                **deferred_lookup, defaults=final_defaults
+            )
+        else:
+            download.file_path = str(target_path)
+            download.file_path_relative = (
+                str(target_path.relative_to(output_root))
+                if target_path.is_relative_to(output_root)
+                else None
+            )
+            download.file_ext = target_path.suffix.lstrip(".")
+            download.file_size_bytes = output_size
+            download.download_status = "downloaded"
+            download.completed_at = timezone.now()
+            download.last_seen_at = timezone.now()
+            download.save(
+                update_fields=[
+                    "file_path",
+                    "file_path_relative",
+                    "file_ext",
+                    "file_size_bytes",
+                    "download_status",
+                    "completed_at",
+                    "last_seen_at",
+                ]
+            )
+        deleted_sources = _delete_ffmpeg_source_files(source_paths, target_path)
+        log.info(
+            "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s deleted_original_files=%s",
+            parent_job_id,
+            download.id,
+            target_path,
+            output_size,
+            [str(path) for path in deleted_sources],
+        )
+        download._ffmpeg_original_file_path = ""
+        return download
 
 
 def transcode_media(job: Job) -> None:
