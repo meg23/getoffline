@@ -1240,6 +1240,8 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(args[args.index("-b:a") + 1], "128k")
         self.assertEqual(args[args.index("-ac") + 1], "2")
         self.assertEqual(args[args.index("-ar") + 1], "48000")
+        self.assertIn("-threads", args)
+        self.assertEqual(args[args.index("-threads") + 1], "1")
         self.assertIn("+faststart", args)
 
     @unittest.skipIf(django is None, "Django is not installed")

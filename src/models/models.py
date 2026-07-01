@@ -141,6 +141,22 @@ class TranscriptSegment(models.Model):
         indexes = [models.Index(fields=["download", "start_seconds"])]
 
 
+class CpuSlotRequest(models.Model):
+    lease_id = models.CharField(max_length=191, primary_key=True)
+    job_type = models.CharField(max_length=32, db_index=True)
+    status = models.CharField(max_length=32, db_index=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "cpu_slot_requests"
+        indexes = [
+            models.Index(fields=["status", "job_type", "expires_at"]),
+            models.Index(fields=["status", "expires_at"]),
+        ]
+
+
 class ScheduledJob(models.Model):
     profile_id = models.CharField(max_length=191, default="default", db_index=True)
     job_type = models.CharField(max_length=64, db_index=True)
