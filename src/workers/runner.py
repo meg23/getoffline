@@ -29,11 +29,13 @@ from app.routing import (  # noqa: E402
 from models.jobs import claim_job, create_job, finish_job  # noqa: E402
 from models.models import Download, Job, SourceConfig  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
+from workers.scheduler import HEAVY_JOB_TYPES, scheduler_from_settings  # noqa: E402
 from app.queue import job_priority, publish_job  # noqa: E402
 
 log = get_logger("workers.runner")
 
 _STOP = False
+_SCHEDULER = None
 
 QUEUE_BY_WORKER = {
     "updates": SERIAL_EPISODE_CHECK_QUEUE,
@@ -133,6 +135,13 @@ def _emit_update_finished_message(
     )
 
 
+def _scheduler():
+    global _SCHEDULER
+    if _SCHEDULER is None:
+        _SCHEDULER = scheduler_from_settings()
+    return _SCHEDULER
+
+
 def process_message(message: Dict) -> None:
     close_old_connections()
     job_id = int(message["job_id"])
@@ -158,8 +167,17 @@ def process_message(message: Dict) -> None:
     )
     try:
         handler = HANDLERS[job.job_type]
-        log.info("Job handler starting job_id=%s job_type=%s", job.id, job.job_type)
-        handler(job)
+        scheduler_job_type = HEAVY_JOB_TYPES.get(job.job_type)
+        log.info(
+            "Job handler starting job_id=%s job_type=%s scheduler_job_type=%s",
+            job.id,
+            job.job_type,
+            scheduler_job_type,
+        )
+        if scheduler_job_type:
+            _scheduler().run(scheduler_job_type, handler, job)
+        else:
+            handler(job)
         finish_job(job, status=Job.STATUS_SUCCEEDED)
         _emit_update_finished_message(job, status=Job.STATUS_SUCCEEDED)
         log.info("Job succeeded job_id=%s job_type=%s", job.id, job.job_type)

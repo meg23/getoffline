@@ -48,6 +48,7 @@ services:
       GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
       GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
       GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
+      GETOFFLINE_CPU_SCHEDULER_SLOTS: ${GETOFFLINE_CPU_SCHEDULER_SLOTS:-3}
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     ports:
@@ -122,11 +123,10 @@ services:
       context: .
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
-    cpus: 1.0
     environment: *getoffline-env
     command: python -m workers ffmpeg
     deploy:
-      replicas: 1
+      replicas: 3
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     depends_on:
@@ -142,11 +142,10 @@ services:
       context: .
       dockerfile: deploy/docker/worker-transcripts.Dockerfile
     restart: unless-stopped
-    cpus: 1.0
     environment: *getoffline-env
     command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-1}"
     deploy:
-      replicas: 1
+      replicas: 3
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     depends_on:
