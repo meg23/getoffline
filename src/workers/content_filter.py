@@ -1,6 +1,5 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,18 +41,21 @@ _EXPLICIT_TERM_PATTERNS = [
 ]
 
 
-def _predict_profanity(texts):
-    """Return legacy profanity-check predictions when explicitly enabled."""
-    if str(os.environ.get("GETOFFLINE_USE_PROFANITY_CHECK") or "").lower() not in {
-        "1",
-        "true",
-        "yes",
-    }:
-        return None
+def _patch_sklearn_externals_joblib() -> None:
+    """Expose joblib at sklearn.externals.joblib for legacy profanity-check."""
+    import joblib
+    import sklearn.externals
 
+    if not hasattr(sklearn.externals, "joblib"):
+        sklearn.externals.joblib = joblib
+
+
+def _predict_profanity(texts):
+    """Return profanity-check predictions, falling back to explicit terms if unavailable."""
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
+            _patch_sklearn_externals_joblib()
             from profanity_check import predict
 
             _PROFANITY_MODEL = predict
@@ -62,7 +64,7 @@ def _predict_profanity(texts):
         ) as exc:  # pragma: no cover - depends on optional package availability
             _PROFANITY_MODEL_ERROR = exc
             log.warning(
-                "legacy profanity-check model is unavailable; using explicit-term fallback for transcript screening: %s",
+                "profanity-check is unavailable; using explicit-term fallback for transcript screening: %s",
                 exc,
             )
     if _PROFANITY_MODEL is None:
