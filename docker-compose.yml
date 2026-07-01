@@ -117,6 +117,26 @@ services:
       frontend:
         condition: service_healthy
 
+  worker-ffmpeg:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker-download.Dockerfile
+    restart: unless-stopped
+    cpus: 1.0
+    environment: *getoffline-env
+    command: python -m workers ffmpeg
+    deploy:
+      replicas: 1
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
   worker-transcripts:
     build:
       context: .

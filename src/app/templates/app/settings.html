@@ -42,7 +42,7 @@
 
       <section class="settings-section blue-section">
         <h2>Conversion preferences</h2>
-        <p class="section-help">Downloaded media is post-processed with FFmpeg inside the YouTube and podcast downloader workers before it becomes available in the library. The downloader writes the preferred output and updates the database row after a successful conversion.</p>
+        <p class="section-help">Downloaded media is post-processed by the dedicated FFmpeg worker after yt-dlp finishes. The FFmpeg service writes the preferred output and updates the database row after a successful conversion.</p>
         <form method="post" action="{% url 'save_config' %}">
           {% csrf_token %}
           <div class="grid two">

@@ -21,6 +21,7 @@ from app.routing import (  # noqa: E402
     SERIAL_EPISODE_CHECK_QUEUE,
     TRANSFER_QUEUE,
     TRANSCRIPT_QUEUE,
+    FFMPEG_QUEUE,
     CLEANUP_QUEUE,
     queue_arguments,
     queue_name,
@@ -39,14 +40,16 @@ QUEUE_BY_WORKER = {
     "downloader-youtube": YOUTUBE_DOWNLOAD_QUEUE,
     "downloader-podcast": PODCAST_DOWNLOAD_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
+    "ffmpeg": FFMPEG_QUEUE,
     "transfer": TRANSFER_QUEUE,
     "cleanup": CLEANUP_QUEUE,
 }
 
 JOB_TYPES_BY_WORKER = {
     "updates": {"check_for_episodes", "update_downloads"},
-    "downloader-youtube": {"download_episode", "download_single", "transcode_media"},
-    "downloader-podcast": {"download_episode", "download_single", "transcode_media"},
+    "downloader-youtube": {"download_episode", "download_single"},
+    "downloader-podcast": {"download_episode", "download_single"},
+    "ffmpeg": {"transcode_media"},
     "transcripts": {"generate_transcript"},
     "transfer": {"transfer_media"},
     "cleanup": {"retention_cleanup"},
