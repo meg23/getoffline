@@ -1118,6 +1118,30 @@ def _source_download_limit_reached(profile_id: str, payload: dict) -> bool:
     return False
 
 
+def _transcode_idempotency_key(profile_id: str, payload: dict) -> str:
+    """Return a stable key for one logical FFmpeg conversion target.
+
+    Download workers can be restarted or the same media can be discovered by more
+    than one active parent job.  Including the parent job id in this key allows
+    duplicate FFmpeg jobs for the same input/output pair to run concurrently, so
+    key the operation by the durable download id when available and otherwise by
+    the canonical source/target paths.
+    """
+    download_id = payload.get("download_id")
+    if download_id:
+        return f"transcode_media:{profile_id}:download:{download_id}"
+    source_paths = payload.get("source_file_paths")
+    if not isinstance(source_paths, list) or not source_paths:
+        source_paths = [payload.get("source_file_path")]
+    key_parts = [
+        str(Path(str(path)).expanduser().resolve()) for path in source_paths if path
+    ]
+    key_parts.append(str(payload.get("target_file_path") or ""))
+    key_parts.append(str(payload.get("item_uid") or ""))
+    digest = hashlib.sha1("|".join(key_parts).encode("utf-8")).hexdigest()
+    return f"transcode_media:{profile_id}:file:{digest}"
+
+
 def _enqueue_transcode_job(
     *, profile_id: str, payload: dict, parent_job_id: int
 ) -> Job:
@@ -1125,7 +1149,7 @@ def _enqueue_transcode_job(
         profile_id=profile_id,
         job_type="transcode_media",
         payload=payload,
-        idempotency_key=f"transcode_media:{profile_id}:{parent_job_id}:{payload.get('download_id') or payload.get('source_file_path')}",
+        idempotency_key=_transcode_idempotency_key(profile_id, payload),
     )
     _publish_created_job(child)
     log.info(
