@@ -323,10 +323,20 @@ def _downloaded_media_requires_ffmpeg(
     return normalized_ext != target_ext, target_ext
 
 
+def _ffmpeg_thread_count(profile_id: str) -> str:
+    raw_value = _profile_setting(profile_id, "ffmpeg_threads", "1").strip() or "1"
+    try:
+        count = max(1, int(raw_value))
+    except ValueError:
+        log.warning("Ignoring invalid ffmpeg_threads=%r; using 1", raw_value)
+        count = 1
+    return str(count)
+
+
 def _ffmpeg_audio_args(profile_id: str, target_ext: str) -> list[str]:
     quality = _profile_setting(profile_id, "audio_quality", "0").strip() or "0"
     audio_filter = _profile_setting(profile_id, "ffmpeg_audio_filter", "").strip()
-    args = ["-vn"]
+    args = ["-vn", "-threads", _ffmpeg_thread_count(profile_id)]
     if target_ext == "mp3":
         args.extend(["-codec:a", "libmp3lame", "-q:a", quality])
     elif target_ext == "opus":
@@ -383,7 +393,20 @@ def _ffmpeg_video_args(
         args.extend(
             ["-c:v", "libx265", "-tag:v", "hvc1", "-crf", "28", "-preset", "medium"]
         )
-    args.extend(["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"])
+    args.extend(
+        [
+            "-threads",
+            _ffmpeg_thread_count(profile_id),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+        ]
+    )
     if target_ext == "mp4":
         args.extend(["-movflags", "+faststart"])
     return args
@@ -514,8 +537,23 @@ def _postprocess_download_with_ffmpeg(
         if media_kind == "audio"
         else _ffmpeg_video_args(profile_id, target_ext, input_count=len(source_paths))
     )
-    input_args = [arg for path in source_paths for arg in ("-i", str(path))]
-    command = [ffmpeg_path, "-y", *input_args, *codec_args, str(target_path)]
+    ffmpeg_threads = _ffmpeg_thread_count(profile_id)
+    input_args = [
+        arg
+        for path in source_paths
+        for arg in ("-threads", ffmpeg_threads, "-i", str(path))
+    ]
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-filter_threads",
+        ffmpeg_threads,
+        "-filter_complex_threads",
+        ffmpeg_threads,
+        *input_args,
+        *codec_args,
+        str(target_path),
+    ]
     log.info(
         "FFmpeg conversion prepared job_id=%s download_id=%s media_kind=%s input=%s input_size_bytes=%s target=%s target_ext=%s ffmpeg_path=%s codec_args=%s",
         parent_job_id,
