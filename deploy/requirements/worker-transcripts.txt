@@ -14,5 +14,5 @@ packaging>=24.0
 protobuf>=5.26
 sympy>=1.12
 
-setuptools>=70
+setuptools>=70,<82
 profanity-check>=1.0.3

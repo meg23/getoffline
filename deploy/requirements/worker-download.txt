@@ -4,5 +4,5 @@ pika>=1.3.2
 yt-dlp>=2025.05.22
 feedparser>=6.0.10
 
-setuptools>=70
+setuptools>=70,<82
 profanity-check>=1.0.3
