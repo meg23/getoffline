@@ -1,5 +1,6 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +43,14 @@ _EXPLICIT_TERM_PATTERNS = [
 
 
 def _predict_profanity(texts):
-    """Return profanity-check predictions, or None when the optional model is unavailable."""
+    """Return legacy profanity-check predictions when explicitly enabled."""
+    if str(os.environ.get("GETOFFLINE_USE_PROFANITY_CHECK") or "").lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return None
+
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
@@ -54,7 +62,7 @@ def _predict_profanity(texts):
         ) as exc:  # pragma: no cover - depends on optional package availability
             _PROFANITY_MODEL_ERROR = exc
             log.warning(
-                "profanity-check is unavailable; using explicit-term fallback for transcript screening: %s",
+                "legacy profanity-check model is unavailable; using explicit-term fallback for transcript screening: %s",
                 exc,
             )
     if _PROFANITY_MODEL is None:
