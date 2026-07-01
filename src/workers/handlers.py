@@ -27,6 +27,11 @@ from workers.youtube import (
     _enable_youtube_quickjs_remote_component,
 )
 from workers.subtitles import create_subtitles
+from workers.content_filter import (
+    delete_media_artifacts,
+    log_filtered_deletion,
+    screen_transcript,
+)
 
 log = get_logger("workers.handlers")
 
@@ -839,6 +844,9 @@ def transcode_media(job: Job) -> None:
             "source_type": download.source_type,
             "media_type": media_kind,
             "recent_download": True,
+            "delete_explicit_content": bool(
+                payload.get("delete_explicit_content", False)
+            ),
         },
         idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
     )
@@ -2213,6 +2221,56 @@ def generate_transcript(job: Job) -> None:
                     else None
                 ),
             )
+            if bool(payload.get("delete_explicit_content", False)):
+                log.info(
+                    "Transcript worker profanity check started job_id=%s download_id=%s subtitle_path=%s media_path=%s",
+                    job.id,
+                    download_id,
+                    subtitle_path,
+                    media_path,
+                )
+                try:
+                    explicit_match = screen_transcript(Path(subtitle_path))
+                except Exception as screening_exc:
+                    deleted_paths = delete_media_artifacts(media_path)
+                    TranscriptSegment.objects.filter(download=download).delete()
+                    download.download_status = "filtered"
+                    download.last_seen_at = timezone.now()
+                    download.save(update_fields=["download_status", "last_seen_at"])
+                    log.warning(
+                        "Deleted download because profanity screening failed after transcript generation job_id=%s download_id=%s error=%s deleted_artifacts=%s",
+                        job.id,
+                        download_id,
+                        screening_exc,
+                        ", ".join(str(path) for path in deleted_paths) or "none",
+                    )
+                    return
+                if explicit_match is not None:
+                    deleted_paths = delete_media_artifacts(media_path)
+                    TranscriptSegment.objects.filter(download=download).delete()
+                    download.download_status = "filtered"
+                    download.last_seen_at = timezone.now()
+                    download.save(update_fields=["download_status", "last_seen_at"])
+                    log_filtered_deletion(
+                        source_type=download.source_type,
+                        source_name=download.source_name,
+                        title=str(download.title or media_path.stem),
+                        media_path=media_path,
+                        match=explicit_match,
+                        deleted_paths=deleted_paths,
+                    )
+                    log.warning(
+                        "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
+                        job.id,
+                        download_id,
+                        explicit_match.category,
+                    )
+                    return
+                log.info(
+                    "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
+                    job.id,
+                    download_id,
+                )
         else:
             log.warning(
                 "Transcript worker completed without subtitle output job_id=%s download_id=%s enabled=%s media_path=%s",
@@ -2221,6 +2279,17 @@ def generate_transcript(job: Job) -> None:
                 enabled,
                 media_path,
             )
+            if bool(payload.get("delete_explicit_content", False)):
+                deleted_paths = delete_media_artifacts(media_path)
+                download.download_status = "filtered"
+                download.last_seen_at = timezone.now()
+                download.save(update_fields=["download_status", "last_seen_at"])
+                log.warning(
+                    "Deleted download because transcript generation failed before profanity screening job_id=%s download_id=%s deleted_artifacts=%s",
+                    job.id,
+                    download_id,
+                    ", ".join(str(path) for path in deleted_paths) or "none",
+                )
 
 
 def retention_cleanup(job: Job) -> None:
