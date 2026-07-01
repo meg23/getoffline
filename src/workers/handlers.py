@@ -2232,17 +2232,11 @@ def generate_transcript(job: Job) -> None:
                 try:
                     explicit_match = screen_transcript(Path(subtitle_path))
                 except Exception as screening_exc:
-                    deleted_paths = delete_media_artifacts(media_path)
-                    TranscriptSegment.objects.filter(download=download).delete()
-                    download.download_status = "filtered"
-                    download.last_seen_at = timezone.now()
-                    download.save(update_fields=["download_status", "last_seen_at"])
-                    log.warning(
-                        "Deleted download because profanity screening failed after transcript generation job_id=%s download_id=%s error=%s deleted_artifacts=%s",
+                    log.error(
+                        "Transcript worker profanity check failed without deleting media job_id=%s download_id=%s error=%s",
                         job.id,
                         download_id,
                         screening_exc,
-                        ", ".join(str(path) for path in deleted_paths) or "none",
                     )
                     return
                 if explicit_match is not None:

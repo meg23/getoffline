@@ -1288,6 +1288,62 @@ class SharedDjangoModelTests(TestCase):
             )
             deletion_log.assert_called_once()
 
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_generate_transcript_keeps_media_when_screening_errors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "video.mp4"
+            media.write_text("media", encoding="utf-8")
+            subtitle = media.with_suffix(".srt")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_name="Channel",
+                title="Unchecked video",
+                item_uid="video-3",
+                file_path=str(media),
+                file_ext="mp4",
+                file_size_bytes=media.stat().st_size,
+                download_status="downloaded",
+            )
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="generate_transcript",
+                payload={
+                    "download_id": download.id,
+                    "subtitles": True,
+                    "delete_explicit_content": True,
+                },
+            )
+
+            def fake_create_subtitles(*_args, **_kwargs):
+                subtitle.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\nunchecked words\n",
+                    encoding="utf-8",
+                )
+                return subtitle
+
+            with (
+                patch(
+                    "workers.handlers.create_subtitles",
+                    side_effect=fake_create_subtitles,
+                ),
+                patch(
+                    "workers.handlers.screen_transcript",
+                    side_effect=RuntimeError("profanity-check unavailable"),
+                ),
+                patch("workers.handlers.log_filtered_deletion") as deletion_log,
+            ):
+                generate_transcript(job)
+
+            download.refresh_from_db()
+            self.assertEqual(download.download_status, "downloaded")
+            self.assertTrue(media.exists())
+            self.assertTrue(subtitle.exists())
+            self.assertTrue(
+                TranscriptSegment.objects.filter(download=download).exists()
+            )
+            deletion_log.assert_not_called()
+
 
 class QueueRoutingTests(unittest.TestCase):
     @unittest.skipIf(django is None, "Django is not installed")
