@@ -14,9 +14,9 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
         rm -rf /wheels /tmp/wheel-verify \
         && mkdir -p /wheels \
         && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt \
-        && python -m pip wheel --no-cache-dir --wheel-dir /wheels faster-whisper==${FASTER_WHISPER_VERSION} \
+        && python -m pip wheel --no-cache-dir --wheel-dir /wheels -c /tmp/requirements.txt faster-whisper==${FASTER_WHISPER_VERSION} \
         && python -m pip install --no-cache-dir --target /tmp/wheel-verify --no-index --find-links=/wheels -r /tmp/requirements.txt \
-        && python -m pip install --no-cache-dir --target /tmp/wheel-verify --no-index --find-links=/wheels faster-whisper==${FASTER_WHISPER_VERSION} \
+        && python -m pip install --no-cache-dir --target /tmp/wheel-verify --no-index --find-links=/wheels -c /tmp/requirements.txt faster-whisper==${FASTER_WHISPER_VERSION} \
         && break; \
         if [ "$attempt" = "3" ]; then exit 1; fi; \
         sleep 5; \
@@ -40,7 +40,7 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels faster-whisper==${FASTER_WHISPER_VERSION}
+    && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -c /tmp/requirements.txt faster-whisper==${FASTER_WHISPER_VERSION}
 RUN /opt/venv/bin/python - <<'PY'
 import os
 from faster_whisper.utils import download_model
@@ -69,7 +69,7 @@ WORKDIR /app
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
-    && python -m pip install --no-cache-dir --no-index --find-links=/wheels faster-whisper==${FASTER_WHISPER_VERSION}
+    && python -m pip install --no-cache-dir --no-index --find-links=/wheels -c /tmp/requirements.txt faster-whisper==${FASTER_WHISPER_VERSION}
 RUN rm -rf /tmp/requirements.txt /root/.cache /opt/venv/share
 COPY --from=model-cache /app/model-cache /app/model-cache
 COPY src ./src
