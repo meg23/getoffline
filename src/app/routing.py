@@ -2,6 +2,7 @@ SERIAL_EPISODE_CHECK_QUEUE = "getoffline.jobs.updates"
 YOUTUBE_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.youtube"
 PODCAST_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.podcast"
 TRANSCRIPT_QUEUE = "getoffline.jobs.transcripts"
+FFMPEG_QUEUE = "getoffline.jobs.ffmpeg"
 TRANSFER_QUEUE = "getoffline.jobs.transfer"
 CLEANUP_QUEUE = "getoffline.jobs.cleanup"
 MAX_QUEUE_PRIORITY = 10
@@ -9,7 +10,12 @@ MAX_QUEUE_PRIORITY = 10
 
 def queue_arguments(queue: str) -> dict:
     """RabbitMQ queue declaration options shared by publishers and consumers."""
-    if queue in {YOUTUBE_DOWNLOAD_QUEUE, PODCAST_DOWNLOAD_QUEUE, TRANSCRIPT_QUEUE}:
+    if queue in {
+        YOUTUBE_DOWNLOAD_QUEUE,
+        PODCAST_DOWNLOAD_QUEUE,
+        TRANSCRIPT_QUEUE,
+        FFMPEG_QUEUE,
+    }:
         return {"x-max-priority": MAX_QUEUE_PRIORITY}
     return {}
 
@@ -36,7 +42,7 @@ def queue_name(job_type: str, payload: dict | None = None) -> str:
     if job_type in {"download_episode", "download_single"}:
         return _download_queue_name(payload)
     if job_type == "transcode_media":
-        return _download_queue_name(payload)
+        return FFMPEG_QUEUE
     if job_type == "generate_transcript":
         return TRANSCRIPT_QUEUE
     if job_type == "transfer_media":

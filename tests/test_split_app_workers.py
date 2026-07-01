@@ -86,6 +86,7 @@ if django is not None:
         _ffmpeg_video_args,
         _idempotency_key,
         _is_expected_ytdlp_download_error,
+        _download_with_yt_dlp,
         _youtube_candidates,
     )  # noqa: E402
 
@@ -240,7 +241,6 @@ class SharedDjangoModelTests(TestCase):
                     "attempt": 1,
                 }
             )
-
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_library_preview_keeps_default_limit(self):
@@ -431,7 +431,6 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(favorite_download.download_status, "downloaded")
 
     @unittest.skipIf(django is None, "Django is not installed")
-
     def test_queue_counts_groups_active_jobs_by_worker_queue(self):
         Job.objects.create(
             profile_id="default", job_type="update_downloads", status=Job.STATUS_QUEUED
@@ -546,9 +545,7 @@ class SharedDjangoModelTests(TestCase):
                 download_status="downloaded",
             )
 
-            response = client.get(
-                f"/media/{download.id}/", HTTP_RANGE="bytes=0-"
-            )
+            response = client.get(f"/media/{download.id}/", HTTP_RANGE="bytes=0-")
             body = b"".join(response.streaming_content)
 
         self.assertEqual(response.status_code, 206)
@@ -580,9 +577,7 @@ class SharedDjangoModelTests(TestCase):
                 download_status="downloaded",
             )
 
-            response = client.get(
-                f"/media/{download.id}/", HTTP_RANGE="bytes=2-5"
-            )
+            response = client.get(f"/media/{download.id}/", HTTP_RANGE="bytes=2-5")
             body = b"".join(response.streaming_content)
 
         self.assertEqual(response.status_code, 206)
@@ -763,9 +758,7 @@ class SharedDjangoModelTests(TestCase):
             self.assertFalse(media_path.exists())
             self.assertTrue(directory_path.exists())
             self.assertFalse(Download.objects.filter(pk=download.pk).exists())
-            self.assertFalse(
-                Download.objects.filter(pk=directory_download.pk).exists()
-            )
+            self.assertFalse(Download.objects.filter(pk=directory_download.pk).exists())
             self.assertFalse(
                 TranscriptSegment.objects.filter(download_id=download.pk).exists()
             )
@@ -834,7 +827,6 @@ class SharedDjangoModelTests(TestCase):
         )
 
     @unittest.skipIf(django is None, "Django is not installed")
-
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(
             profile_id="default",
@@ -1081,6 +1073,75 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(candidates[0]["item_uid"], "MbEO1g8_COs")
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_video_without_explicit_delete_is_inserted_before_ffmpeg(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            media_file = output_root / "Channel" / "Fast Video [fast-video].mp4"
+
+            class FakeYoutubeDLForFastVideo:
+                def __init__(self, opts):
+                    self.opts = opts
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def extract_info(self, url, download):
+                    media_file.parent.mkdir(parents=True, exist_ok=True)
+                    media_file.write_text("raw video", encoding="utf-8")
+                    for hook in self.opts.get("progress_hooks", []):
+                        hook(
+                            {
+                                "status": "finished",
+                                "filename": str(media_file),
+                                "info_dict": {"title": "Fast Video"},
+                            }
+                        )
+                    return {
+                        "id": "fast-video",
+                        "title": "Fast Video",
+                        "webpage_url": "https://youtube.com/watch?v=fast-video",
+                        "filepath": str(media_file),
+                    }
+
+                def prepare_filename(self, info):
+                    return str(media_file)
+
+            fake_module = SimpleNamespace(YoutubeDL=FakeYoutubeDLForFastVideo)
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="download_episode",
+                payload={
+                    "source_type": SourceConfig.SOURCE_YOUTUBE,
+                    "source_name": "Channel",
+                    "media_type": "video",
+                    "item_uid": "fast-video",
+                    "item_url": "https://youtube.com/watch?v=fast-video",
+                    "media_url": "https://youtube.com/watch?v=fast-video",
+                    "delete_explicit_content": False,
+                },
+            )
+
+            with (
+                patch.dict(sys.modules, {"yt_dlp": fake_module}),
+                patch(
+                    "workers.handlers._download_output_root", return_value=output_root
+                ),
+            ):
+                result = _download_with_yt_dlp(job, job.payload)
+
+            self.assertIsInstance(result, dict)
+            self.assertIn("download_id", result)
+            self.assertNotIn("download_lookup", result)
+            download = Download.objects.get(pk=result["download_id"])
+            self.assertEqual(download.download_status, "downloaded")
+            self.assertEqual(download.file_path, str(media_file.resolve()))
+            self.assertEqual(result["source_file_paths"], [str(media_file.resolve())])
+            self.assertFalse(result["delete_explicit_content"])
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_transcode_media_updates_row_deletes_original_and_queues_transcript(
         self,
     ):
@@ -1165,7 +1226,9 @@ class QueueRoutingTests(unittest.TestCase):
             values = {"video_codec": "h264"}
             return values.get(key, default)
 
-        with patch("workers.handlers._profile_setting", side_effect=fake_profile_setting):
+        with patch(
+            "workers.handlers._profile_setting", side_effect=fake_profile_setting
+        ):
             args = _ffmpeg_video_args("default", "mp4")
 
         self.assertIn("-c:v", args)
@@ -1185,7 +1248,9 @@ class QueueRoutingTests(unittest.TestCase):
             values = {"video_format": "mp4", "video_codec": "h264"}
             return values.get(key, default)
 
-        with patch("workers.handlers._profile_setting", side_effect=fake_profile_setting):
+        with patch(
+            "workers.handlers._profile_setting", side_effect=fake_profile_setting
+        ):
             webm_requires, webm_target = _downloaded_media_requires_ffmpeg(
                 profile_id="default",
                 media_kind="video",
@@ -1210,7 +1275,9 @@ class QueueRoutingTests(unittest.TestCase):
             values = {"video_format": "mp4", "video_codec": "copy"}
             return values.get(key, default)
 
-        with patch("workers.handlers._profile_setting", side_effect=fake_profile_setting):
+        with patch(
+            "workers.handlers._profile_setting", side_effect=fake_profile_setting
+        ):
             webm_requires, webm_target = _downloaded_media_requires_ffmpeg(
                 profile_id="default",
                 media_kind="video",
@@ -1302,10 +1369,11 @@ class QueueRoutingTests(unittest.TestCase):
         )
         self.assertEqual(
             queue_name("transcode_media", {"source_type": "youtube"}),
-            YOUTUBE_DOWNLOAD_QUEUE,
+            "getoffline.jobs.ffmpeg",
         )
 
     def test_non_download_jobs_get_separate_queues(self):
+        self.assertEqual(queue_name("transcode_media"), "getoffline.jobs.ffmpeg")
         self.assertEqual(queue_name("transfer_media"), "getoffline.jobs.transfer")
         self.assertEqual(
             queue_name("generate_transcript"), "getoffline.jobs.transcripts"
