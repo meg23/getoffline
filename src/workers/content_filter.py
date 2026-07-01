@@ -11,10 +11,38 @@ log = get_logger("content_filter")
 
 _PROFANITY_MODEL = None
 _PROFANITY_MODEL_ERROR: Optional[Exception] = None
+_EXPLICIT_TERM_PATTERNS = [
+    re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+    for term in (
+        "anal",
+        "bitch",
+        "blowjob",
+        "bullshit",
+        "cocksucker",
+        "cunt",
+        "dick",
+        "fag",
+        "faggot",
+        "fuck",
+        "fucked",
+        "fucker",
+        "fucking",
+        "handjob",
+        "motherfucker",
+        "nigger",
+        "porn",
+        "pornography",
+        "pussy",
+        "shit",
+        "slut",
+        "twat",
+        "whore",
+    )
+]
 
 
 def _predict_profanity(texts):
-    """Return profanity-check predictions for text values."""
+    """Return profanity-check predictions, or None when the optional model is unavailable."""
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
@@ -25,14 +53,12 @@ def _predict_profanity(texts):
             Exception
         ) as exc:  # pragma: no cover - depends on optional package availability
             _PROFANITY_MODEL_ERROR = exc
-            log.error(
-                "profanity-check is required for transcript profanity screening: %s",
+            log.warning(
+                "profanity-check is unavailable; using explicit-term fallback for transcript screening: %s",
                 exc,
             )
     if _PROFANITY_MODEL is None:
-        raise RuntimeError(
-            "profanity-check is required for transcript profanity screening"
-        ) from _PROFANITY_MODEL_ERROR
+        return None
     return _PROFANITY_MODEL(list(texts))
 
 
@@ -64,7 +90,7 @@ def transcript_text(subtitle_path: Path) -> str:
 
 
 def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
-    """Find profanity in transcript text using the profanity-check model."""
+    """Find explicit language in transcript text."""
     transcript = str(text or "").strip()
     if not transcript:
         return None
@@ -78,17 +104,28 @@ def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
         sentences = [transcript]
 
     predictions = _predict_profanity(sentences)
-    for sentence, prediction in zip(sentences, predictions):
-        try:
-            is_profane = int(prediction) == 1
-        except (TypeError, ValueError):
-            is_profane = bool(prediction)
-        if is_profane:
-            return ExplicitContentMatch(
-                category="profanity",
-                term="profanity-check",
-                sentence=sentence,
-            )
+    if predictions is not None:
+        for sentence, prediction in zip(sentences, predictions):
+            try:
+                is_profane = int(prediction) == 1
+            except (TypeError, ValueError):
+                is_profane = bool(prediction)
+            if is_profane:
+                return ExplicitContentMatch(
+                    category="profanity",
+                    term="profanity-check",
+                    sentence=sentence,
+                )
+
+    for sentence in sentences:
+        for pattern in _EXPLICIT_TERM_PATTERNS:
+            match = pattern.search(sentence)
+            if match:
+                return ExplicitContentMatch(
+                    category="profanity",
+                    term=match.group(0).lower(),
+                    sentence=sentence,
+                )
     return None
 
 
