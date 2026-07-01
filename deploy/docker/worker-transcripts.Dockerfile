@@ -10,8 +10,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt \
-    && python -m pip wheel --no-cache-dir --wheel-dir /wheels faster-whisper==${FASTER_WHISPER_VERSION}
+    && for attempt in 1 2 3; do \
+        rm -rf /wheels /tmp/wheel-verify \
+        && mkdir -p /wheels \
+        && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt \
+        && python -m pip wheel --no-cache-dir --wheel-dir /wheels faster-whisper==${FASTER_WHISPER_VERSION} \
+        && python -m pip install --no-cache-dir --target /tmp/wheel-verify --no-index --find-links=/wheels -r /tmp/requirements.txt \
+        && python -m pip install --no-cache-dir --target /tmp/wheel-verify --no-index --find-links=/wheels faster-whisper==${FASTER_WHISPER_VERSION} \
+        && break; \
+        if [ "$attempt" = "3" ]; then exit 1; fi; \
+        sleep 5; \
+    done \
+    && rm -rf /tmp/wheel-verify
 
 FROM python:3.12-slim AS model-cache
 
