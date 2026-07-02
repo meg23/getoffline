@@ -241,24 +241,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         nargs="?",
         help="Path to an SRT/VTT subtitle file to screen.",
     )
+    parser.add_argument(
+        "--fail-on-match",
+        action="store_true",
+        help="Exit with status 1 when explicit content is matched.",
+    )
     args = parser.parse_args(argv)
 
     if args.check_model:
         predictions = _predict_profanity(["plain words"])
         if predictions is None:
-            print(f"model=fallback error={_PROFANITY_MODEL_ERROR}")
+            print(f"model=fallback error={_PROFANITY_MODEL_ERROR}", flush=True)
             return 2
-        print("model=profanity-check")
+        print("model=profanity-check", flush=True)
         return 0
 
     match = _screen_text_or_file(text=args.text, subtitle_path=args.subtitle_path)
     if match is None:
-        print("clean")
+        print("clean", flush=True)
         return 0
-    print(f"matched category={match.category} term={match.term!r}")
+    print(f"matched category={match.category} term={match.term!r}", flush=True)
     if match.sentence:
-        print(f"sentence={match.sentence}")
-    return 1
+        print(f"sentence={match.sentence}", flush=True)
+    return 1 if args.fail_on_match else 0
 
 
 if __name__ == "__main__":

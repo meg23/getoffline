@@ -116,7 +116,7 @@ class ContentFilterTests(unittest.TestCase):
             patch("builtins.print") as print_call,
         ):
             self.assertEqual(main(["--text", "plain words"]), 0)
-        print_call.assert_called_once_with("clean")
+        print_call.assert_called_once_with("clean", flush=True)
 
         match = ExplicitContentMatch(
             category="profanity",
@@ -127,9 +127,19 @@ class ContentFilterTests(unittest.TestCase):
             patch("workers.content_filter.find_explicit_content", return_value=match),
             patch("builtins.print") as print_call,
         ):
-            self.assertEqual(main(["--text", "flagged words"]), 1)
-        print_call.assert_any_call("matched category=profanity term='profanity-check'")
-        print_call.assert_any_call("sentence=flagged words")
+            self.assertEqual(main(["--text", "flagged words"]), 0)
+        print_call.assert_any_call(
+            "matched category=profanity term='profanity-check'", flush=True
+        )
+        print_call.assert_any_call("sentence=flagged words", flush=True)
+
+        with (
+            patch("workers.content_filter.find_explicit_content", return_value=match),
+            patch("builtins.print"),
+        ):
+            self.assertEqual(
+                main(["--fail-on-match", "--text", "flagged words"]), 1
+            )
 
     def test_cli_check_model_reports_active_model(self):
         with (
@@ -137,7 +147,7 @@ class ContentFilterTests(unittest.TestCase):
             patch("builtins.print") as print_call,
         ):
             self.assertEqual(main(["--check-model"]), 0)
-        print_call.assert_called_once_with("model=profanity-check")
+        print_call.assert_called_once_with("model=profanity-check", flush=True)
 
         with (
             patch("workers.content_filter._predict_profanity", return_value=None),
