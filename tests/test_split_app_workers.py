@@ -1143,6 +1143,168 @@ class SharedDjangoModelTests(TestCase):
             self.assertFalse(result["delete_explicit_content"])
 
     @unittest.skipIf(django is None, "Django is not installed")
+    def test_video_with_explicit_delete_is_screened_before_database_insert(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            media_file = output_root / "Channel" / "Clean Video [clean-video].mp4"
+            subtitle_file = media_file.with_suffix(".srt")
+
+            class FakeYoutubeDLForCleanVideo:
+                def __init__(self, opts):
+                    self.opts = opts
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def extract_info(self, url, download):
+                    media_file.parent.mkdir(parents=True, exist_ok=True)
+                    media_file.write_text("raw video", encoding="utf-8")
+                    return {
+                        "id": "clean-video",
+                        "title": "Clean Video",
+                        "webpage_url": "https://youtube.com/watch?v=clean-video",
+                        "filepath": str(media_file),
+                    }
+
+                def prepare_filename(self, info):
+                    return str(media_file)
+
+            def fake_create_subtitles(*_args, **_kwargs):
+                subtitle_file.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\nclean words\n",
+                    encoding="utf-8",
+                )
+                return subtitle_file
+
+            fake_module = SimpleNamespace(YoutubeDL=FakeYoutubeDLForCleanVideo)
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="download_episode",
+                payload={
+                    "source_type": SourceConfig.SOURCE_YOUTUBE,
+                    "source_name": "Channel",
+                    "media_type": "video",
+                    "item_uid": "clean-video",
+                    "item_url": "https://youtube.com/watch?v=clean-video",
+                    "media_url": "https://youtube.com/watch?v=clean-video",
+                    "delete_explicit_content": True,
+                    "subtitles": True,
+                },
+            )
+
+            with (
+                patch.dict(sys.modules, {"yt_dlp": fake_module}),
+                patch(
+                    "workers.handlers._download_output_root", return_value=output_root
+                ),
+                patch(
+                    "workers.handlers._downloaded_media_requires_ffmpeg",
+                    return_value=(False, "mp4"),
+                ),
+                patch(
+                    "workers.handlers.create_subtitles",
+                    side_effect=fake_create_subtitles,
+                ) as subtitles,
+                patch("workers.handlers.screen_transcript", return_value=None) as screen,
+            ):
+                result = _download_with_yt_dlp(job, job.payload)
+
+            subtitles.assert_called_once()
+            screen.assert_called_once_with(subtitle_file)
+            self.assertIsInstance(result, Download)
+            self.assertEqual(Download.objects.count(), 1)
+            download = Download.objects.get()
+            self.assertEqual(download.item_uid, "clean-video")
+            self.assertEqual(download.download_status, "downloaded")
+            self.assertEqual(download.subtitle_path, str(subtitle_file))
+            self.assertTrue(
+                TranscriptSegment.objects.filter(download=download).exists()
+            )
+
+    @unittest.skipIf(django is None, "Django is not installed")
+    def test_video_with_explicit_match_is_not_added_to_database(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            media_file = output_root / "Channel" / "Explicit Video [bad-video].mp4"
+            subtitle_file = media_file.with_suffix(".srt")
+
+            class FakeYoutubeDLForExplicitVideo:
+                def __init__(self, opts):
+                    self.opts = opts
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def extract_info(self, url, download):
+                    media_file.parent.mkdir(parents=True, exist_ok=True)
+                    media_file.write_text("raw video", encoding="utf-8")
+                    return {
+                        "id": "bad-video",
+                        "title": "Explicit Video",
+                        "webpage_url": "https://youtube.com/watch?v=bad-video",
+                        "filepath": str(media_file),
+                    }
+
+                def prepare_filename(self, info):
+                    return str(media_file)
+
+            def fake_create_subtitles(*_args, **_kwargs):
+                subtitle_file.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\nbad words\n",
+                    encoding="utf-8",
+                )
+                return subtitle_file
+
+            match = SimpleNamespace(
+                category="profanity", term="profanity-check", sentence="bad words"
+            )
+            fake_module = SimpleNamespace(YoutubeDL=FakeYoutubeDLForExplicitVideo)
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="download_episode",
+                payload={
+                    "source_type": SourceConfig.SOURCE_YOUTUBE,
+                    "source_name": "Channel",
+                    "media_type": "video",
+                    "item_uid": "bad-video",
+                    "item_url": "https://youtube.com/watch?v=bad-video",
+                    "media_url": "https://youtube.com/watch?v=bad-video",
+                    "delete_explicit_content": True,
+                    "subtitles": True,
+                },
+            )
+
+            with (
+                patch.dict(sys.modules, {"yt_dlp": fake_module}),
+                patch(
+                    "workers.handlers._download_output_root", return_value=output_root
+                ),
+                patch(
+                    "workers.handlers._downloaded_media_requires_ffmpeg",
+                    return_value=(False, "mp4"),
+                ),
+                patch(
+                    "workers.handlers.create_subtitles",
+                    side_effect=fake_create_subtitles,
+                ),
+                patch("workers.handlers.screen_transcript", return_value=match),
+                patch("workers.handlers.log_filtered_deletion") as deletion_log,
+            ):
+                result = _download_with_yt_dlp(job, job.payload)
+
+            self.assertIsNone(result)
+            self.assertEqual(Download.objects.count(), 0)
+            self.assertFalse(media_file.exists())
+            self.assertFalse(subtitle_file.exists())
+            deletion_log.assert_called_once()
+
+    @unittest.skipIf(django is None, "Django is not installed")
     def test_transcode_media_updates_row_deletes_original_and_queues_transcript(
         self,
     ):

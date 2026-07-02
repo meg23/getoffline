@@ -1,7 +1,12 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
+import argparse
+import importlib.util
 import re
+import sys
+import warnings
 from dataclasses import dataclass
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import List, Optional
 
@@ -41,13 +46,20 @@ _EXPLICIT_TERM_PATTERNS = [
 ]
 
 
-def _patch_sklearn_externals_joblib() -> None:
-    """Expose joblib at sklearn.externals.joblib for legacy profanity-check."""
+def _patch_profanity_check_compat() -> None:
+    """Expose legacy sklearn module paths required by profanity-check pickles."""
     import joblib
     import sklearn.externals
 
     if not hasattr(sklearn.externals, "joblib"):
         sklearn.externals.joblib = joblib
+    sys.modules.setdefault("sklearn.externals.joblib", joblib)
+
+    try:
+        import sklearn.svm._classes as svm_classes
+    except Exception:  # pragma: no cover - depends on scikit-learn internals
+        return
+    sys.modules.setdefault("sklearn.svm.classes", svm_classes)
 
 
 def _predict_profanity(texts):
@@ -55,16 +67,29 @@ def _predict_profanity(texts):
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
-            _patch_sklearn_externals_joblib()
-            from profanity_check import predict
+            if importlib.util.find_spec("profanity_check") is None:
+                raise ModuleNotFoundError("No module named 'profanity_check'")
+            _patch_profanity_check_compat()
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="pkg_resources is deprecated as an API.*",
+                    category=UserWarning,
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Trying to unpickle estimator .* from version .*",
+                    category=UserWarning,
+                )
+                from profanity_check import predict
 
             _PROFANITY_MODEL = predict
         except (
             Exception
         ) as exc:  # pragma: no cover - depends on optional package availability
             _PROFANITY_MODEL_ERROR = exc
-            log.warning(
-                "profanity-check is unavailable; using explicit-term fallback for transcript screening: %s",
+            log.debug(
+                "profanity-check model is unavailable; using built-in explicit-term transcript screening: %r",
                 exc,
             )
     if _PROFANITY_MODEL is None:
@@ -150,7 +175,7 @@ def delete_media_artifacts(media_path: Path) -> List[Path]:
     media_path = Path(media_path).expanduser().resolve()
     candidates = {media_path}
     deleted_paths = []
-    for candidate in media_path.parent.glob(f"{media_path.stem}.*"):
+    for candidate in media_path.parent.glob(f"{glob_escape(media_path.stem)}.*"):
         if candidate.is_file():
             candidates.add(candidate)
     for candidate in candidates:
@@ -189,3 +214,65 @@ def log_filtered_deletion(
         Path(media_path).expanduser().resolve(),
         deleted_artifacts,
     )
+
+
+def _screen_text_or_file(*, text: Optional[str], subtitle_path: Optional[str]):
+    if text is not None:
+        return find_explicit_content(text)
+    return screen_transcript(Path(str(subtitle_path)))
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Test GetOffline's transcript explicit-content screening against text "
+            "or an SRT/VTT subtitle file."
+        )
+    )
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
+        "--check-model",
+        action="store_true",
+        help="Verify that the profanity-check model loads instead of using fallback terms.",
+    )
+    input_group.add_argument(
+        "--text",
+        help="Text to screen directly. Useful for checking whether profanity-check loads.",
+    )
+    input_group.add_argument(
+        "subtitle_path",
+        nargs="?",
+        help="Path to an SRT/VTT subtitle file to screen.",
+    )
+    parser.add_argument(
+        "--fail-on-match",
+        action="store_true",
+        help="Exit with status 1 when explicit content is matched.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.check_model:
+        predictions = _predict_profanity(["plain words"])
+        if predictions is None:
+            error = (
+                f"{type(_PROFANITY_MODEL_ERROR).__name__}: {_PROFANITY_MODEL_ERROR!r}"
+                if _PROFANITY_MODEL_ERROR is not None
+                else "unknown"
+            )
+            print(f"model=fallback error={error}", flush=True)
+            return 2
+        print("model=profanity-check", flush=True)
+        return 0
+
+    match = _screen_text_or_file(text=args.text, subtitle_path=args.subtitle_path)
+    if match is None:
+        print("clean", flush=True)
+        return 0
+    print(f"matched category={match.category} term={match.term!r}", flush=True)
+    if match.sentence:
+        print(f"sentence={match.sentence}", flush=True)
+    return 1 if args.fail_on_match else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

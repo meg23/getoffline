@@ -760,6 +760,34 @@ def _postprocess_download_with_ffmpeg(
             input_size,
             output_size,
         )
+        if (
+            download is None
+            and media_kind == "video"
+            and bool(payload.get("delete_explicit_content", False))
+        ):
+            screened_download = _screen_deferred_video_before_insert(
+                profile_id=profile_id,
+                media_path=target_path,
+                download_lookup=deferred_lookup,
+                download_defaults={
+                    **deferred_defaults,
+                    "file_path": str(target_path),
+                    "file_path_relative": (
+                        str(target_path.relative_to(output_root))
+                        if target_path.is_relative_to(output_root)
+                        else None
+                    ),
+                    "file_ext": target_path.suffix.lstrip("."),
+                    "file_size_bytes": output_size,
+                    "download_status": "downloaded",
+                    "completed_at": timezone.now(),
+                    "last_seen_at": timezone.now(),
+                },
+                payload=payload,
+                job_id=parent_job_id,
+            )
+            _delete_ffmpeg_source_files(source_paths, target_path)
+            return screened_download
         if download is None:
             final_defaults = dict(deferred_defaults)
             final_defaults.update(
@@ -829,6 +857,12 @@ def transcode_media(job: Job) -> None:
     download = _postprocess_download_with_ffmpeg(
         profile_id=job.profile_id, payload=payload, parent_job_id=job.id
     )
+    if download is None:
+        log.info(
+            "Legacy FFmpeg job stopped before transcript queue parent_job_id=%s reason=postprocess-returned-none",
+            job.id,
+        )
+        return
     media_kind = (
         str(payload.get("media_type") or _preferred_media_kind(download, payload))
         .strip()
@@ -1243,6 +1277,15 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
                 transcode_payload["delete_explicit_content"],
             )
         return transcode_payload
+    if media_kind == "video" and bool(payload.get("delete_explicit_content", False)):
+        return _screen_deferred_video_before_insert(
+            profile_id=job.profile_id,
+            media_path=downloaded_file,
+            download_lookup=download_lookup,
+            download_defaults=download_defaults,
+            payload=payload,
+            job_id=job.id,
+        )
     download, _created = Download.objects.update_or_create(
         **download_lookup,
         defaults=download_defaults,
@@ -2084,6 +2127,110 @@ def _load_segments_from_subtitle(path: Path) -> list[str]:
         if body:
             segments.append(body)
     return segments
+
+
+def _screen_deferred_video_before_insert(
+    *,
+    profile_id: str,
+    media_path: Path,
+    download_lookup: dict,
+    download_defaults: dict,
+    payload: dict,
+    job_id: int | str,
+) -> Download | None:
+    """Generate and screen a video transcript before exposing the Download row."""
+    subtitle_offset = (
+        float(payload.get("subtitle_offset_seconds"))
+        if payload.get("subtitle_offset_seconds") not in {None, ""}
+        else None
+    )
+    transcription_mode = _profile_setting(
+        profile_id, "subtitle_transcription_mode", "in_process"
+    )
+    log.info(
+        "Download worker profanity check generating transcript before database insert job_id=%s media_path=%s",
+        job_id,
+        media_path,
+    )
+    subtitle_path = create_subtitles(
+        media_path,
+        subtitle_offset,
+        True,
+        log,
+        str(download_defaults.get("title") or media_path.name),
+        "download",
+        transcription_mode,
+    )
+    if subtitle_path is None:
+        deleted_paths = delete_media_artifacts(media_path)
+        log.warning(
+            "Deleted video because transcript generation failed before profanity screening job_id=%s media_path=%s deleted_artifacts=%s",
+            job_id,
+            media_path,
+            ", ".join(str(path) for path in deleted_paths) or "none",
+        )
+        return None
+    try:
+        explicit_match = screen_transcript(Path(subtitle_path))
+    except Exception as screening_exc:
+        deleted_paths = delete_media_artifacts(media_path)
+        log.warning(
+            "Deleted video because profanity screening failed before database insert job_id=%s media_path=%s error=%s deleted_artifacts=%s",
+            job_id,
+            media_path,
+            screening_exc,
+            ", ".join(str(path) for path in deleted_paths) or "none",
+        )
+        return None
+    if explicit_match is not None:
+        deleted_paths = delete_media_artifacts(media_path)
+        log_filtered_deletion(
+            source_type=download_lookup.get("source_type"),
+            source_name=download_lookup.get("source_name"),
+            title=str(download_defaults.get("title") or media_path.stem),
+            media_path=media_path,
+            match=explicit_match,
+            deleted_paths=deleted_paths,
+        )
+        log.warning(
+            "Deleted video before database insert after profanity screening job_id=%s media_path=%s category=%s",
+            job_id,
+            media_path,
+            explicit_match.category,
+        )
+        return None
+    output_root = _download_output_root(profile_id)
+    final_defaults = dict(download_defaults)
+    final_defaults["subtitle_path"] = str(subtitle_path)
+    final_defaults["subtitle_path_relative"] = (
+        str(Path(subtitle_path).relative_to(output_root))
+        if Path(subtitle_path).is_relative_to(output_root)
+        else None
+    )
+    download, _created = Download.objects.update_or_create(
+        **download_lookup,
+        defaults=final_defaults,
+    )
+    segments = _load_segments_from_subtitle(Path(subtitle_path))
+    TranscriptSegment.objects.bulk_create(
+        [
+            TranscriptSegment(
+                download=download,
+                subtitle_path=str(subtitle_path),
+                start_seconds=0.0,
+                end_seconds=None,
+                text=text,
+            )
+            for text in segments
+        ]
+    )
+    log.info(
+        "Download worker added video to database after profanity check passed job_id=%s download_id=%s subtitle_path=%s",
+        job_id,
+        download.id,
+        subtitle_path,
+    )
+    return download
 
 
 def generate_transcript(job: Job) -> None:
