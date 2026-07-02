@@ -1208,7 +1208,9 @@ class SharedDjangoModelTests(TestCase):
                     "workers.handlers.create_subtitles",
                     side_effect=fake_create_subtitles,
                 ) as subtitles,
-                patch("workers.handlers.screen_transcript", return_value=None) as screen,
+                patch(
+                    "workers.handlers.screen_transcript", return_value=None
+                ) as screen,
             ):
                 result = _download_with_yt_dlp(job, job.payload)
 
@@ -1262,7 +1264,7 @@ class SharedDjangoModelTests(TestCase):
                 return subtitle_file
 
             match = SimpleNamespace(
-                category="profanity", term="profanity-check", sentence="bad words"
+                category="profanity", term="alt-profanity-check", sentence="bad words"
             )
             fake_module = SimpleNamespace(YoutubeDL=FakeYoutubeDLForExplicitVideo)
             job = Job.objects.create(
@@ -1422,7 +1424,7 @@ class SharedDjangoModelTests(TestCase):
                 },
             )
             match = SimpleNamespace(
-                category="profanity", term="profanity-check", sentence="bad words"
+                category="profanity", term="alt-profanity-check", sentence="bad words"
             )
 
             def fake_create_subtitles(*_args, **_kwargs):

@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.content_filter import (  # noqa: E402
     ExplicitContentMatch,
-    _patch_profanity_check_compat,
     delete_media_artifacts,
     find_explicit_content,
     log_filtered_deletion,
@@ -26,7 +25,7 @@ class ContentFilterTests(unittest.TestCase):
 
         self.assertIsNotNone(match)
         self.assertEqual(match.category, "profanity")
-        self.assertEqual(match.term, "profanity-check")
+        self.assertEqual(match.term, "alt-profanity-check")
         self.assertEqual(match.sentence, "That was fucking ridiculous.")
 
         with patch("workers.content_filter._predict_profanity", return_value=[0]):
@@ -41,17 +40,12 @@ class ContentFilterTests(unittest.TestCase):
             )
 
         self.assertIsNotNone(match)
-        self.assertEqual(match.term, "profanity-check")
+        self.assertEqual(match.term, "alt-profanity-check")
         self.assertEqual(match.sentence, "The next sentence contains bullshit!")
 
-    def test_falls_back_to_explicit_term_list_when_model_unavailable(self):
+    def test_returns_clean_when_model_unavailable(self):
         with patch("workers.content_filter._predict_profanity", return_value=None):
-            match = find_explicit_content("That was fucking ridiculous.")
-
-        self.assertIsNotNone(match)
-        self.assertEqual(match.category, "profanity")
-        self.assertEqual(match.term, "fucking")
-        self.assertEqual(match.sentence, "That was fucking ridiculous.")
+            self.assertIsNone(find_explicit_content("That was fucking ridiculous."))
 
     def test_reads_srt_without_timestamps_or_sequence_numbers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -101,22 +95,6 @@ class ContentFilterTests(unittest.TestCase):
             self.assertTrue(similarly_named.exists())
             self.assertEqual(set(deleted_paths), {media.resolve(), subtitle.resolve()})
 
-    def test_profanity_check_compat_exposes_legacy_sklearn_modules(self):
-        try:
-            import joblib  # noqa: F401
-            import sklearn.externals  # noqa: F401
-            import sklearn.svm._classes  # noqa: F401
-        except Exception as exc:
-            self.skipTest(f"optional sklearn/joblib compatibility deps unavailable: {exc}")
-
-        sys.modules.pop("sklearn.externals.joblib", None)
-        sys.modules.pop("sklearn.svm.classes", None)
-
-        _patch_profanity_check_compat()
-
-        self.assertIn("sklearn.externals.joblib", sys.modules)
-        self.assertIn("sklearn.svm.classes", sys.modules)
-
     def test_cli_reports_clean_and_matched_text(self):
         with (
             patch("workers.content_filter.find_explicit_content", return_value=None),
@@ -127,7 +105,7 @@ class ContentFilterTests(unittest.TestCase):
 
         match = ExplicitContentMatch(
             category="profanity",
-            term="profanity-check",
+            term="alt-profanity-check",
             sentence="flagged words",
         )
         with (
@@ -136,7 +114,7 @@ class ContentFilterTests(unittest.TestCase):
         ):
             self.assertEqual(main(["--text", "flagged words"]), 0)
         print_call.assert_any_call(
-            "matched category=profanity term='profanity-check'", flush=True
+            "matched category=profanity term='alt-profanity-check'", flush=True
         )
         print_call.assert_any_call("sentence=flagged words", flush=True)
 
@@ -144,9 +122,7 @@ class ContentFilterTests(unittest.TestCase):
             patch("workers.content_filter.find_explicit_content", return_value=match),
             patch("builtins.print"),
         ):
-            self.assertEqual(
-                main(["--fail-on-match", "--text", "flagged words"]), 1
-            )
+            self.assertEqual(main(["--fail-on-match", "--text", "flagged words"]), 1)
 
     def test_cli_check_model_reports_active_model(self):
         with (
@@ -154,14 +130,17 @@ class ContentFilterTests(unittest.TestCase):
             patch("builtins.print") as print_call,
         ):
             self.assertEqual(main(["--check-model"]), 0)
-        print_call.assert_called_once_with("model=profanity-check", flush=True)
+        print_call.assert_called_once_with("model=alt-profanity-check", flush=True)
 
         with (
             patch("workers.content_filter._predict_profanity", return_value=None),
             patch("builtins.print") as print_call,
         ):
             self.assertEqual(main(["--check-model"]), 2)
-        self.assertIn("model=fallback", print_call.call_args.args[0])
+        self.assertIn(
+            "model=unavailable package=alt-profanity-check",
+            print_call.call_args.args[0],
+        )
 
     def test_filtered_deletion_writes_stable_audit_event(self):
         media_path = Path("/tmp/episode.mp3")

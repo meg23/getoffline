@@ -13,3 +13,4 @@ flatbuffers>=24.3.25
 packaging>=24.0
 protobuf>=5.26
 sympy>=1.12
+alt-profanity-check>=1.5.2

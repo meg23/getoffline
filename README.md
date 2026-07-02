@@ -122,7 +122,7 @@ transcripts with the same filter used for configured YouTube and podcast
 sources. Matching uploads and their sidecars are deleted, marked as filtered in
 the database, and recorded with a `CONTENT_FILTER_DELETION` audit event.
 
-Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls. Each source also has a **Delete downloads containing profanity or sexual content** checkbox. When enabled, GetOffline transcribes every new item for screening, deletes matching media and sidecars, and records it as filtered so it is not downloaded again. This local term-based filter is intentionally conservative and can miss context, euphemisms, or transcription errors.
+Open `http://127.0.0.1:8080/settings` to edit persisted defaults (`output_root`, formats, limits, etc.), store the full YouTube `cookies.txt` payload directly in the database, and manage YouTube/podcast sources with add/delete/enable/disable controls. Each source also has a **Delete downloads containing profanity or sexual content** checkbox. When enabled, GetOffline transcribes every new item for screening, deletes matching media and sidecars, and records it as filtered so it is not downloaded again. This filter uses the `alt-profanity-check` model and can miss context, euphemisms, or transcription errors.
 
 To test the transcript filter inside Docker, rebuild the transcript worker image
 after pulling code changes, then run the diagnostic CLI:
@@ -133,10 +133,10 @@ docker compose up -d worker-transcripts
 docker compose exec worker-transcripts python -m workers.content_filter --text "that was shit"
 ```
 
-The expected output is `matched category=profanity term='shit'` followed by the
-matched sentence. If you still see an old warning such as `profanity-check is
-unavailable; using explicit-term fallback`, the running container is using an
-older image; rebuild and recreate the worker with the commands above.
+The expected output is `matched category=profanity term='alt-profanity-check'` followed by the
+matched sentence. If the diagnostic reports `model=unavailable package=alt-profanity-check`,
+the running container is missing the required model package; rebuild and recreate
+the worker with the commands above.
 
 Use the **Update Downloads** button in the web UI to trigger background downloads immediately, and use **Mark played**/**Mark unplayed** to track listening/watching progress.
 
