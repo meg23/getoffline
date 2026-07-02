@@ -1,5 +1,6 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
+import argparse
 import re
 import sys
 import warnings
@@ -70,6 +71,11 @@ def _predict_profanity(texts):
                 warnings.filterwarnings(
                     "ignore",
                     message="pkg_resources is deprecated as an API.*",
+                    category=UserWarning,
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Trying to unpickle estimator .* from version .*",
                     category=UserWarning,
                 )
                 from profanity_check import predict
@@ -205,3 +211,55 @@ def log_filtered_deletion(
         Path(media_path).expanduser().resolve(),
         deleted_artifacts,
     )
+
+
+def _screen_text_or_file(*, text: Optional[str], subtitle_path: Optional[str]):
+    if text is not None:
+        return find_explicit_content(text)
+    return screen_transcript(Path(str(subtitle_path)))
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Test GetOffline's transcript explicit-content screening against text "
+            "or an SRT/VTT subtitle file."
+        )
+    )
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
+        "--check-model",
+        action="store_true",
+        help="Verify that the profanity-check model loads instead of using fallback terms.",
+    )
+    input_group.add_argument(
+        "--text",
+        help="Text to screen directly. Useful for checking whether profanity-check loads.",
+    )
+    input_group.add_argument(
+        "subtitle_path",
+        nargs="?",
+        help="Path to an SRT/VTT subtitle file to screen.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.check_model:
+        predictions = _predict_profanity(["plain words"])
+        if predictions is None:
+            print(f"model=fallback error={_PROFANITY_MODEL_ERROR}")
+            return 2
+        print("model=profanity-check")
+        return 0
+
+    match = _screen_text_or_file(text=args.text, subtitle_path=args.subtitle_path)
+    if match is None:
+        print("clean")
+        return 0
+    print(f"matched category={match.category} term={match.term!r}")
+    if match.sentence:
+        print(f"sentence={match.sentence}")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -13,6 +13,7 @@ from workers.content_filter import (  # noqa: E402
     delete_media_artifacts,
     find_explicit_content,
     log_filtered_deletion,
+    main,
     screen_transcript,
     transcript_text,
 )
@@ -108,6 +109,42 @@ class ContentFilterTests(unittest.TestCase):
 
         self.assertIn("sklearn.externals.joblib", sys.modules)
         self.assertIn("sklearn.svm.classes", sys.modules)
+
+    def test_cli_reports_clean_and_matched_text(self):
+        with (
+            patch("workers.content_filter.find_explicit_content", return_value=None),
+            patch("builtins.print") as print_call,
+        ):
+            self.assertEqual(main(["--text", "plain words"]), 0)
+        print_call.assert_called_once_with("clean")
+
+        match = ExplicitContentMatch(
+            category="profanity",
+            term="profanity-check",
+            sentence="flagged words",
+        )
+        with (
+            patch("workers.content_filter.find_explicit_content", return_value=match),
+            patch("builtins.print") as print_call,
+        ):
+            self.assertEqual(main(["--text", "flagged words"]), 1)
+        print_call.assert_any_call("matched category=profanity term='profanity-check'")
+        print_call.assert_any_call("sentence=flagged words")
+
+    def test_cli_check_model_reports_active_model(self):
+        with (
+            patch("workers.content_filter._predict_profanity", return_value=[0]),
+            patch("builtins.print") as print_call,
+        ):
+            self.assertEqual(main(["--check-model"]), 0)
+        print_call.assert_called_once_with("model=profanity-check")
+
+        with (
+            patch("workers.content_filter._predict_profanity", return_value=None),
+            patch("builtins.print") as print_call,
+        ):
+            self.assertEqual(main(["--check-model"]), 2)
+        self.assertIn("model=fallback", print_call.call_args.args[0])
 
     def test_filtered_deletion_writes_stable_audit_event(self):
         media_path = Path("/tmp/episode.mp3")
