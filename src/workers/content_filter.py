@@ -1,6 +1,8 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
 import re
+import sys
+import warnings
 from dataclasses import dataclass
 from glob import escape as glob_escape
 from pathlib import Path
@@ -42,13 +44,20 @@ _EXPLICIT_TERM_PATTERNS = [
 ]
 
 
-def _patch_sklearn_externals_joblib() -> None:
-    """Expose joblib at sklearn.externals.joblib for legacy profanity-check."""
+def _patch_profanity_check_compat() -> None:
+    """Expose legacy sklearn module paths required by profanity-check pickles."""
     import joblib
     import sklearn.externals
 
     if not hasattr(sklearn.externals, "joblib"):
         sklearn.externals.joblib = joblib
+    sys.modules.setdefault("sklearn.externals.joblib", joblib)
+
+    try:
+        import sklearn.svm._classes as svm_classes
+    except Exception:  # pragma: no cover - depends on scikit-learn internals
+        return
+    sys.modules.setdefault("sklearn.svm.classes", svm_classes)
 
 
 def _predict_profanity(texts):
@@ -56,8 +65,14 @@ def _predict_profanity(texts):
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
-            _patch_sklearn_externals_joblib()
-            from profanity_check import predict
+            _patch_profanity_check_compat()
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="pkg_resources is deprecated as an API.*",
+                    category=UserWarning,
+                )
+                from profanity_check import predict
 
             _PROFANITY_MODEL = predict
         except (

@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.content_filter import (  # noqa: E402
     ExplicitContentMatch,
+    _patch_profanity_check_compat,
     delete_media_artifacts,
     find_explicit_content,
     log_filtered_deletion,
@@ -82,6 +83,31 @@ class ContentFilterTests(unittest.TestCase):
                 set(deleted_paths),
                 {media.resolve(), subtitle.resolve(), thumbnail.resolve()},
             )
+
+    def test_delete_media_artifacts_escapes_glob_characters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            media = folder / "Episode [abc123].mp4"
+            subtitle = folder / "Episode [abc123].srt"
+            similarly_named = folder / "Episode a.srt"
+            for path in (media, subtitle, similarly_named):
+                path.write_text("data", encoding="utf-8")
+
+            deleted_paths = delete_media_artifacts(media)
+
+            self.assertFalse(media.exists())
+            self.assertFalse(subtitle.exists())
+            self.assertTrue(similarly_named.exists())
+            self.assertEqual(set(deleted_paths), {media.resolve(), subtitle.resolve()})
+
+    def test_profanity_check_compat_exposes_legacy_sklearn_modules(self):
+        sys.modules.pop("sklearn.externals.joblib", None)
+        sys.modules.pop("sklearn.svm.classes", None)
+
+        _patch_profanity_check_compat()
+
+        self.assertIn("sklearn.externals.joblib", sys.modules)
+        self.assertIn("sklearn.svm.classes", sys.modules)
 
     def test_filtered_deletion_writes_stable_audit_event(self):
         media_path = Path("/tmp/episode.mp3")
