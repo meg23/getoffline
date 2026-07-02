@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import List, Optional
 
@@ -150,7 +151,7 @@ def delete_media_artifacts(media_path: Path) -> List[Path]:
     media_path = Path(media_path).expanduser().resolve()
     candidates = {media_path}
     deleted_paths = []
-    for candidate in media_path.parent.glob(f"{media_path.stem}.*"):
+    for candidate in media_path.parent.glob(f"{glob_escape(media_path.stem)}.*"):
         if candidate.is_file():
             candidates.add(candidate)
     for candidate in candidates:
