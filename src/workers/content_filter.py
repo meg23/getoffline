@@ -33,6 +33,7 @@ _EXPLICIT_TERM_PATTERNS = [
         "fucker",
         "fucking",
         "handjob",
+        "hello",
         "motherfucker",
         "nigger",
         "porn",
@@ -40,8 +41,9 @@ _EXPLICIT_TERM_PATTERNS = [
         "pussy",
         "shit",
         "slut",
+        "sex",
         "twat",
-        "whore",
+        "whore"
     )
 ]
 
