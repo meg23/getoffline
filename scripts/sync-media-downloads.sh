@@ -5,9 +5,10 @@ usage() {
   cat <<'USAGE'
 Usage: sync-media-downloads.sh <downloads_dir> <sync_dir> <owner[:group]>
 
-Copies audio/video files from <downloads_dir> into <sync_dir> for cron jobs.
-The destination filename is "<artist> - <original filename>", where <artist>
-is the source file's parent directory name.
+Copies converted audio/video files from <downloads_dir> into <sync_dir> for cron jobs.
+Only source filenames containing "converted" are synced. The destination filename is
+"<artist> - <original filename>", where <artist> is the source file's parent
+directory name.
 
 Examples:
   sync-media-downloads.sh /srv/getoffline/downloads /mnt/media getoffline:getoffline
@@ -86,13 +87,19 @@ skipped=0
 failed=0
 
 while IFS= read -r -d '' source_path; do
+  source_basename=$(basename "$source_path")
+
+  if [[ ${source_basename,,} != *converted* ]]; then
+    continue
+  fi
+
   if ! is_media_file "$source_path"; then
     continue
   fi
 
   parent_dir=$(basename "$(dirname "$source_path")")
   artist=$(sanitize_component "$parent_dir")
-  filename=$(sanitize_component "$(basename "$source_path")")
+  filename=$(sanitize_component "$source_basename")
   dest_path="$SYNC_DIR/$artist - $filename"
 
   if [[ -e "$dest_path" && ! "$source_path" -nt "$dest_path" ]]; then
