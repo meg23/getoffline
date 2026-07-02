@@ -42,6 +42,15 @@ class ContentFilterTests(unittest.TestCase):
         self.assertEqual(match.term, "profanity-check")
         self.assertEqual(match.sentence, "The next sentence contains bullshit!")
 
+    def test_falls_back_to_explicit_term_list_when_model_unavailable(self):
+        with patch("workers.content_filter._predict_profanity", return_value=None):
+            match = find_explicit_content("That was fucking ridiculous.")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.category, "profanity")
+        self.assertEqual(match.term, "fucking")
+        self.assertEqual(match.sentence, "That was fucking ridiculous.")
+
     def test_reads_srt_without_timestamps_or_sequence_numbers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             subtitle = Path(tmpdir) / "episode.srt"

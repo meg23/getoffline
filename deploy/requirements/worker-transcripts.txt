@@ -8,9 +8,12 @@ requests>=2.31
 tokenizers>=0.13,<1
 tqdm>=4.64
 coloredlogs>=15.0.1
+ctranslate2==4.6.0
 flatbuffers>=24.3.25
 packaging>=24.0
 protobuf>=5.26
 sympy>=1.12
 
+setuptools>=70,<81
+joblib>=1.4
 profanity-check>=1.0.3
