@@ -1,6 +1,7 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
 import argparse
+import importlib.util
 import re
 import sys
 import warnings
@@ -66,6 +67,8 @@ def _predict_profanity(texts):
     global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
     if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
         try:
+            if importlib.util.find_spec("profanity_check") is None:
+                raise ModuleNotFoundError("No module named 'profanity_check'")
             _patch_profanity_check_compat()
             with warnings.catch_warnings():
                 warnings.filterwarnings(

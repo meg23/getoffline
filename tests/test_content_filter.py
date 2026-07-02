@@ -102,6 +102,13 @@ class ContentFilterTests(unittest.TestCase):
             self.assertEqual(set(deleted_paths), {media.resolve(), subtitle.resolve()})
 
     def test_profanity_check_compat_exposes_legacy_sklearn_modules(self):
+        try:
+            import joblib  # noqa: F401
+            import sklearn.externals  # noqa: F401
+            import sklearn.svm._classes  # noqa: F401
+        except Exception as exc:
+            self.skipTest(f"optional sklearn/joblib compatibility deps unavailable: {exc}")
+
         sys.modules.pop("sklearn.externals.joblib", None)
         sys.modules.pop("sklearn.svm.classes", None)
 
