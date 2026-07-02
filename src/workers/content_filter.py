@@ -85,8 +85,8 @@ def _predict_profanity(texts):
             Exception
         ) as exc:  # pragma: no cover - depends on optional package availability
             _PROFANITY_MODEL_ERROR = exc
-            log.warning(
-                "profanity-check is unavailable; using explicit-term fallback for transcript screening: %s",
+            log.debug(
+                "profanity-check model is unavailable; using built-in explicit-term transcript screening: %r",
                 exc,
             )
     if _PROFANITY_MODEL is None:
@@ -251,7 +251,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.check_model:
         predictions = _predict_profanity(["plain words"])
         if predictions is None:
-            print(f"model=fallback error={_PROFANITY_MODEL_ERROR}", flush=True)
+            error = (
+                f"{type(_PROFANITY_MODEL_ERROR).__name__}: {_PROFANITY_MODEL_ERROR!r}"
+                if _PROFANITY_MODEL_ERROR is not None
+                else "unknown"
+            )
+            print(f"model=fallback error={error}", flush=True)
             return 2
         print("model=profanity-check", flush=True)
         return 0
