@@ -11,7 +11,6 @@ from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
 
-import feedparser
 from django.db import IntegrityError
 from django.db import transaction
 from django.utils import timezone
@@ -1525,6 +1524,7 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
         source.name,
         source.url,
     )
+    feedparser = importlib.import_module("feedparser")
     feed = feedparser.parse(source.url)
     if getattr(feed, "bozo", False):
         log.warning(
