@@ -202,7 +202,7 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
     )
     if str(source_media_type or "").strip().lower() in {"audio", "video"}:
         return str(source_media_type).strip().lower()
-    if download.source_type is SourceType.PODCAST:
+    if parse_str_enum(SourceType, download.source_type) is SourceType.PODCAST:
         return "audio"
     return (
         "video"
@@ -210,6 +210,9 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
         else "audio"
     )
 
+
+def _source_config_type(source: SourceConfig) -> SourceType | None:
+    return parse_str_enum(SourceType, source.source_type)
 
 def _delete_ffmpeg_source_files(
     source_paths: Iterable[Path], target_path: Path
@@ -1798,9 +1801,10 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
 
 
 def _candidates_for_source(source: SourceConfig) -> Iterable[dict]:
-    if source.source_type is SourceType.PODCAST:
+    source_type = _source_config_type(source)
+    if source_type is SourceType.PODCAST:
         return _podcast_candidates(source)
-    if source.source_type is SourceType.YOUTUBE:
+    if source_type is SourceType.YOUTUBE:
         return _youtube_candidates(source)
     log.warning(
         "Unsupported source type for episode check source_id=%s source_type=%s",
@@ -1880,7 +1884,8 @@ def check_for_episodes(job: Job) -> None:
                         title,
                     )
                     continue
-                if source.source_type is SourceType.PODCAST:
+                source_type = _source_config_type(source)
+                if source_type is SourceType.PODCAST:
                     log.info(
                         "New podcast episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s media_url=%s",
                         profile_id,
@@ -1890,7 +1895,7 @@ def check_for_episodes(job: Job) -> None:
                         title,
                         candidate.get("media_url") or item_url,
                     )
-                elif source.source_type is SourceType.YOUTUBE:
+                elif source_type is SourceType.YOUTUBE:
                     log.info(
                         "New YouTube episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s item_url=%s",
                         profile_id,
@@ -1938,7 +1943,7 @@ def check_for_episodes(job: Job) -> None:
                         "media_type": source.media_type
                         or (
                             "audio"
-                            if source.source_type is SourceType.PODCAST
+                            if source_type is SourceType.PODCAST
                             else "video"
                         ),
                         "source_max_downloads": limit,
