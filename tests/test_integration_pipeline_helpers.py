@@ -1,12 +1,8 @@
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR))
-
-from integration import test_youtube_pipeline as pipeline
+from tests.integration import test_youtube_pipeline as pipeline
 
 
 class IntegrationPipelineHelperTests(unittest.TestCase):
