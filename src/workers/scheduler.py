@@ -18,21 +18,23 @@ from django.db import IntegrityError
 from django.db import transaction
 from django.utils import timezone
 
+from models.domain import CpuSlotStatus
+from models.domain import HeavyJobKind
+from models.domain import JobType
+from models.domain import parse_str_enum
 from workers.logger import get_logger
 
 log = get_logger("workers.scheduler")
 
 HEAVY_JOB_TYPES = {
-    "transcode_media": "ffmpeg",
-    "generate_transcript": "transcript",
+    JobType.TRANSCODE_MEDIA: HeavyJobKind.FFMPEG,
+    JobType.GENERATE_TRANSCRIPT: HeavyJobKind.TRANSCRIPT,
 }
 DEFAULT_CAPACITY = 3
 DEFAULT_LEASE_SECONDS = 120.0
 DEFAULT_HEARTBEAT_SECONDS = 30.0
 DEFAULT_POLL_SECONDS = 1.0
 LOCK_KEY = "cpu_slot_scheduler_lock"
-STATUS_WAITING = "waiting"
-STATUS_RUNNING = "running"
 
 
 class SlotBackend(Protocol):
@@ -70,7 +72,7 @@ class DatabaseSlotBackend:
                 lease_id=lease_id,
                 defaults={
                     "job_type": job_type,
-                    "status": STATUS_WAITING,
+                    "status": CpuSlotStatus.WAITING,
                     "updated_at": timezone.now(),
                     "expires_at": self._expires_at(lease_seconds),
                 },
@@ -82,7 +84,7 @@ class DatabaseSlotBackend:
             self._purge_expired()
             CpuSlotRequest = self._request_model()
             updated = CpuSlotRequest.objects.filter(
-                lease_id=lease_id, status=STATUS_WAITING
+                lease_id=lease_id, status=CpuSlotStatus.WAITING
             ).update(
                 updated_at=timezone.now(), expires_at=self._expires_at(lease_seconds)
             )
@@ -95,7 +97,7 @@ class DatabaseSlotBackend:
             self._purge_expired()
             CpuSlotRequest = self._request_model()
             CpuSlotRequest.objects.filter(
-                lease_id=lease_id, status=STATUS_WAITING
+                lease_id=lease_id, status=CpuSlotStatus.WAITING
             ).delete()
             return self._stats("wait-finished")
 
@@ -105,19 +107,19 @@ class DatabaseSlotBackend:
         with self._locked():
             self._purge_expired()
             CpuSlotRequest = self._request_model()
-            in_use = CpuSlotRequest.objects.filter(status=STATUS_RUNNING).count()
+            in_use = CpuSlotRequest.objects.filter(status=CpuSlotStatus.RUNNING).count()
             waiting_ffmpeg = (
-                CpuSlotRequest.objects.filter(status=STATUS_WAITING, job_type="ffmpeg")
+                CpuSlotRequest.objects.filter(status=CpuSlotStatus.WAITING, job_type=HeavyJobKind.FFMPEG)
                 .exclude(lease_id=lease_id)
                 .exists()
             )
             allowed = False
             reason = "capacity-full"
             if in_use < self.capacity:
-                if job_type == "ffmpeg" or not waiting_ffmpeg:
+                if parse_str_enum(HeavyJobKind, job_type) is HeavyJobKind.FFMPEG or not waiting_ffmpeg:
                     updated = CpuSlotRequest.objects.filter(lease_id=lease_id).update(
                         job_type=job_type,
-                        status=STATUS_RUNNING,
+                        status=CpuSlotStatus.RUNNING,
                         updated_at=timezone.now(),
                         expires_at=self._expires_at(lease_seconds),
                     )
@@ -125,7 +127,7 @@ class DatabaseSlotBackend:
                         CpuSlotRequest.objects.create(
                             lease_id=lease_id,
                             job_type=job_type,
-                            status=STATUS_RUNNING,
+                            status=CpuSlotStatus.RUNNING,
                             expires_at=self._expires_at(lease_seconds),
                         )
                     allowed = True
@@ -146,7 +148,7 @@ class DatabaseSlotBackend:
             self._purge_expired()
             CpuSlotRequest = self._request_model()
             updated = CpuSlotRequest.objects.filter(
-                lease_id=lease_id, status=STATUS_RUNNING
+                lease_id=lease_id, status=CpuSlotStatus.RUNNING
             ).update(
                 updated_at=timezone.now(), expires_at=self._expires_at(lease_seconds)
             )
@@ -204,12 +206,12 @@ class DatabaseSlotBackend:
         CpuSlotRequest = self._request_model()
         return {
             "reason": reason,
-            "in_use": CpuSlotRequest.objects.filter(status=STATUS_RUNNING).count(),
+            "in_use": CpuSlotRequest.objects.filter(status=CpuSlotStatus.RUNNING).count(),
             "waiting_ffmpeg": CpuSlotRequest.objects.filter(
-                status=STATUS_WAITING, job_type="ffmpeg"
+                status=CpuSlotStatus.WAITING, job_type=HeavyJobKind.FFMPEG
             ).count(),
             "waiting_transcript": CpuSlotRequest.objects.filter(
-                status=STATUS_WAITING, job_type="transcript"
+                status=CpuSlotStatus.WAITING, job_type=HeavyJobKind.TRANSCRIPT
             ).count(),
         }
 
@@ -239,7 +241,7 @@ class InMemorySlotBackend:
             self._purge()
             self.requests[lease_id] = {
                 "job_type": job_type,
-                "status": STATUS_WAITING,
+                "status": CpuSlotStatus.WAITING,
                 "expires_at": self.clock() + lease_seconds,
             }
             return self._stats("wait-started")
@@ -249,7 +251,7 @@ class InMemorySlotBackend:
             self._purge()
             renewed = (
                 lease_id in self.requests
-                and self.requests[lease_id]["status"] == STATUS_WAITING
+                and self.requests[lease_id]["status"] is CpuSlotStatus.WAITING
             )
             if renewed:
                 self.requests[lease_id]["expires_at"] = self.clock() + lease_seconds
@@ -260,7 +262,7 @@ class InMemorySlotBackend:
     def wait_finished(self, lease_id: str) -> dict:
         with self.lock:
             self._purge()
-            if self.requests.get(lease_id, {}).get("status") == STATUS_WAITING:
+            if self.requests.get(lease_id, {}).get("status") is CpuSlotStatus.WAITING:
                 self.requests.pop(lease_id, None)
             return self._stats("wait-finished")
 
@@ -272,21 +274,21 @@ class InMemorySlotBackend:
             in_use = sum(
                 1
                 for request in self.requests.values()
-                if request["status"] == STATUS_RUNNING
+                if request["status"] is CpuSlotStatus.RUNNING
             )
             ffmpeg_waiting = any(
                 other_id != lease_id
-                and request["status"] == STATUS_WAITING
-                and request["job_type"] == "ffmpeg"
+                and request["status"] is CpuSlotStatus.WAITING
+                and parse_str_enum(HeavyJobKind, request["job_type"]) is HeavyJobKind.FFMPEG
                 for other_id, request in self.requests.items()
             )
             reason = "capacity-full"
             ok = False
             if in_use < self.capacity:
-                if job_type == "ffmpeg" or not ffmpeg_waiting:
+                if parse_str_enum(HeavyJobKind, job_type) is HeavyJobKind.FFMPEG or not ffmpeg_waiting:
                     self.requests[lease_id] = {
                         "job_type": job_type,
-                        "status": STATUS_RUNNING,
+                        "status": CpuSlotStatus.RUNNING,
                         "expires_at": self.clock() + lease_seconds,
                     }
                     ok = True
@@ -306,7 +308,7 @@ class InMemorySlotBackend:
             self._purge()
             renewed = (
                 lease_id in self.requests
-                and self.requests[lease_id]["status"] == STATUS_RUNNING
+                and self.requests[lease_id]["status"] == CpuSlotStatus.RUNNING
             )
             if renewed:
                 self.requests[lease_id]["expires_at"] = self.clock() + lease_seconds
@@ -325,18 +327,18 @@ class InMemorySlotBackend:
             "in_use": sum(
                 1
                 for request in self.requests.values()
-                if request["status"] == STATUS_RUNNING
+                if request["status"] is CpuSlotStatus.RUNNING
             ),
             "waiting_ffmpeg": sum(
                 1
                 for request in self.requests.values()
-                if request["status"] == STATUS_WAITING
-                and request["job_type"] == "ffmpeg"
+                if request["status"] is CpuSlotStatus.WAITING
+                and parse_str_enum(HeavyJobKind, request["job_type"]) is HeavyJobKind.FFMPEG
             ),
             "waiting_transcript": sum(
                 1
                 for request in self.requests.values()
-                if request["status"] == STATUS_WAITING
+                if request["status"] is CpuSlotStatus.WAITING
                 and request["job_type"] == "transcript"
             ),
         }

@@ -8,6 +8,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any
 
+from models.domain import DownloadStatus
 from workers.logger import get_logger
 
 log = get_logger("download_store")
@@ -15,16 +16,12 @@ log = get_logger("download_store")
 HAS_SQLALCHEMY = False
 
 
-DOWNLOAD_STATUS_DOWNLOADED = "downloaded"
-DOWNLOAD_STATUS_FILTERED = "filtered"
-DOWNLOAD_STATUS_MISSING = "missing"
-DOWNLOAD_STATUS_RETENTION_DELETED = "retention_deleted"
-PROCESSED_DOWNLOAD_STATUSES = (
-    DOWNLOAD_STATUS_DOWNLOADED,
-    DOWNLOAD_STATUS_FILTERED,
-    DOWNLOAD_STATUS_MISSING,
-    DOWNLOAD_STATUS_RETENTION_DELETED,
-)
+PROCESSED_DOWNLOAD_STATUSES = frozenset({
+    DownloadStatus.DOWNLOADED,
+    DownloadStatus.FILTERED,
+    DownloadStatus.MISSING,
+    DownloadStatus.RETENTION_DELETED,
+})
 
 
 def _is_sqlite_lock_error_message(message: str) -> bool:

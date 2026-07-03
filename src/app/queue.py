@@ -4,6 +4,10 @@ from typing import Any
 import pika
 from django.conf import settings
 
+from models.domain import JobType
+from models.domain import MediaType
+from models.domain import SourceType
+from models.domain import parse_str_enum
 from models.models import Job
 
 from .routing import MAX_QUEUE_PRIORITY
@@ -22,29 +26,27 @@ def job_priority(message: dict[str, Any]) -> int:
     product rules around freshness and user intent while leaving same-priority
     work FIFO within each durable RabbitMQ queue.
     """
-    job_type = str(message.get("job_type") or "")
+    job_type = parse_str_enum(JobType, message.get("job_type"))
     payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
 
-    if job_type == "download_single":
+    if job_type is JobType.DOWNLOAD_SINGLE:
         if _as_bool(payload.get("manual_enqueue")) or _as_bool(
             payload.get("redownload")
         ):
             return 10
         return 9
-    if job_type == "download_episode":
+    if job_type is JobType.DOWNLOAD_EPISODE:
         if _as_bool(payload.get("redownload")):
             return 9
         return 5
-    if job_type == "generate_transcript":
+    if job_type is JobType.GENERATE_TRANSCRIPT:
         if _as_bool(payload.get("startup_missing_subtitle")):
             return 2
-        source_type = (
-            str(payload.get("source_type") or payload.get("media_source_type") or "")
-            .strip()
-            .lower()
+        source_type = parse_str_enum(
+            SourceType, payload.get("source_type") or payload.get("media_source_type")
         )
-        media_type = str(payload.get("media_type") or "").strip().lower()
-        if source_type == "podcast" or media_type == "audio":
+        media_type = parse_str_enum(MediaType, payload.get("media_type"))
+        if source_type is SourceType.PODCAST or media_type is MediaType.AUDIO:
             return 8
         if payload.get("download_id"):
             return 7

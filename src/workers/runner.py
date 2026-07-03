@@ -11,6 +11,11 @@ from django.conf import settings
 from django.db import close_old_connections
 from pika import exceptions as pika_exceptions
 
+from models.domain import JobStatus
+from models.domain import JobType
+from models.domain import MediaType
+from models.domain import SourceType
+from models.domain import parse_str_enum
 from workers.logger import get_logger
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
@@ -51,13 +56,13 @@ QUEUE_BY_WORKER = {
 }
 
 JOB_TYPES_BY_WORKER = {
-    "updates": {"check_for_episodes", "update_downloads"},
-    "downloader-youtube": {"download_episode", "download_single"},
-    "downloader-podcast": {"download_episode", "download_single"},
-    "ffmpeg": {"transcode_media"},
-    "transcripts": {"generate_transcript"},
-    "transfer": {"transfer_media"},
-    "cleanup": {"retention_cleanup"},
+    "updates": {JobType.CHECK_FOR_EPISODES, JobType.UPDATE_DOWNLOADS},
+    "downloader-youtube": {JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE},
+    "downloader-podcast": {JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE},
+    "ffmpeg": {JobType.TRANSCODE_MEDIA},
+    "transcripts": {JobType.GENERATE_TRANSCRIPT},
+    "transfer": {JobType.TRANSFER_MEDIA},
+    "cleanup": {JobType.RETENTION_CLEANUP},
 }
 
 SERIAL_WORKERS = {"updates", "downloader-youtube"}
@@ -99,22 +104,18 @@ def _worker_accepts_job(worker_type: str, job_id: int) -> bool:
     if job is None:
         return True
     payload = job.payload if isinstance(job.payload, dict) else {}
-    source_type = (
-        str(
-            payload.get("source_type")
-            or ("podcast" if payload.get("media_type") == "audio" else "youtube")
-        )
-        .strip()
-        .lower()
-    )
-    allowed = "youtube" if worker_type == "downloader-youtube" else "podcast"
-    return source_type == allowed
+    source_type = parse_str_enum(SourceType, payload.get("source_type"))
+    if source_type is None:
+        media_type = parse_str_enum(MediaType, payload.get("media_type"))
+        source_type = SourceType.PODCAST if media_type is MediaType.AUDIO else SourceType.YOUTUBE
+    allowed = SourceType.YOUTUBE if worker_type == "downloader-youtube" else SourceType.PODCAST
+    return source_type is allowed
 
 
 def _emit_update_finished_message(
     job: Job, *, status: str, error_message: str = ""
 ) -> None:
-    if job.job_type != "update_downloads":
+    if parse_str_enum(JobType, job.job_type) is not JobType.UPDATE_DOWNLOADS:
         return
     payload = job.payload if isinstance(job.payload, dict) else {}
     completion_token = str(payload.get("completion_token") or "").strip()
@@ -126,7 +127,7 @@ def _emit_update_finished_message(
     Job.objects.create(
         profile_id=job.profile_id,
         job_type="worker_message",
-        status=Job.STATUS_SUCCEEDED,
+        status=JobStatus.SUCCEEDED,
         payload={
             "event_type": "update_downloads_finished",
             "completion_token": completion_token,
@@ -181,13 +182,13 @@ def process_message(message: dict) -> None:
             _scheduler().run(scheduler_job_type, handler, job)
         else:
             handler(job)
-        finish_job(job, status=Job.STATUS_SUCCEEDED)
-        _emit_update_finished_message(job, status=Job.STATUS_SUCCEEDED)
+        finish_job(job, status=JobStatus.SUCCEEDED)
+        _emit_update_finished_message(job, status=JobStatus.SUCCEEDED)
         log.info("Job succeeded job_id=%s job_type=%s", job.id, job.job_type)
     except Exception as exc:
-        finish_job(job, status=Job.STATUS_FAILED, error_message=str(exc))
+        finish_job(job, status=JobStatus.FAILED, error_message=str(exc))
         _emit_update_finished_message(
-            job, status=Job.STATUS_FAILED, error_message=str(exc)
+            job, status=JobStatus.FAILED, error_message=str(exc)
         )
         log.exception(
             "Job failed job_id=%s job_type=%s error=%s", job.id, job.job_type, exc
@@ -209,7 +210,7 @@ def requeue_existing_jobs(channel, worker_type: str) -> int:
     job_types = JOB_TYPES_BY_WORKER[worker_type]
     queue = QUEUE_BY_WORKER[worker_type]
     rows = list(
-        Job.objects.filter(status=Job.STATUS_QUEUED, job_type__in=job_types).order_by(
+        Job.objects.filter(status=JobStatus.QUEUED, job_type__in=job_types).order_by(
             "created_at", "id"
         )[:500]
     )

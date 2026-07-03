@@ -7,8 +7,7 @@ from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
 
-from workers.download_store import DOWNLOAD_STATUS_MISSING
-from workers.download_store import DOWNLOAD_STATUS_RETENTION_DELETED
+from models.domain import DownloadStatus
 from workers.download_store import resolve_download_artifact_path
 from workers.logger import get_logger
 
@@ -75,8 +74,9 @@ def enforce_content_retention(
             SELECT id, source_type, file_path, file_path_relative,
                    completed_at, first_seen_at, COALESCE(favorite, 0)
             FROM downloads
-            WHERE download_status = 'downloaded'
-            """
+            WHERE download_status = ?
+            """,
+            (DownloadStatus.DOWNLOADED,),
         ).fetchall()
 
         ignored_manual = sum(1 for row in rows if str(row[1]).lower() == "manual")
@@ -99,7 +99,7 @@ def enforce_content_retention(
             media_path = Path(resolved) if resolved else None
             if media_path is None or not media_path.is_file():
                 status_updates.append(
-                    (DOWNLOAD_STATUS_MISSING, "Media file is missing", int(row_id))
+                    (DownloadStatus.MISSING, "Media file is missing", int(row_id))
                 )
                 marked_missing += 1
                 continue
@@ -126,7 +126,7 @@ def enforce_content_retention(
                 deleted_files += 1
             status_updates.append(
                 (
-                    DOWNLOAD_STATUS_RETENTION_DELETED,
+                    DownloadStatus.RETENTION_DELETED,
                     "Media file removed by content retention",
                     int(row_id),
                 )
@@ -138,7 +138,13 @@ def enforce_content_retention(
             update_parameters = []
             for download_status, error_message, row_id in status_updates:
                 update_parameters.append(
-                    (download_status, error_message, timestamp, row_id)
+                    (
+                        download_status,
+                        error_message,
+                        timestamp,
+                        row_id,
+                        DownloadStatus.DOWNLOADED,
+                    )
                 )
             conn.executemany(
                 """
@@ -146,7 +152,7 @@ def enforce_content_retention(
                 SET download_status = ?,
                     error_message = ?,
                     last_seen_at = ?
-                WHERE id = ? AND download_status = 'downloaded'
+                WHERE id = ? AND download_status = ?
                 """,
                 update_parameters,
             )

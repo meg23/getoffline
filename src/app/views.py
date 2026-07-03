@@ -28,6 +28,11 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
+from models.domain import DownloadStatus
+from models.domain import JobStatus
+from models.domain import JobType
+from models.domain import SourceType
+from models.domain import parse_str_enum
 from models.jobs import create_job
 from models.models import AppConfigValue
 from models.models import Download
@@ -47,12 +52,16 @@ from .routing import TRANSFER_QUEUE
 from .routing import YOUTUBE_DOWNLOAD_QUEUE
 from .routing import queue_name
 
-ALLOWED_JOB_TYPES = {
-    "update_downloads",
-    "download_single",
-    "transfer_media",
-}
-DOWNLOAD_STATUSES = ["downloaded", "missing", "retention_deleted"]
+ALLOWED_JOB_TYPES = frozenset({
+    JobType.UPDATE_DOWNLOADS,
+    JobType.DOWNLOAD_SINGLE,
+    JobType.TRANSFER_MEDIA,
+})
+DOWNLOAD_STATUSES = [
+    DownloadStatus.DOWNLOADED,
+    DownloadStatus.MISSING,
+    DownloadStatus.RETENTION_DELETED,
+]
 LIBRARY_PREVIEW_LIMIT = 100
 MEDIA_UPLOAD_EXTENSIONS = {
     ".mp3",
@@ -124,9 +133,10 @@ def _decorate_download(item: Download) -> Download:
     if item.played:
         item.status_label = "PLAYED"
         item.status_class = "status-played"
-    if item.download_status in {"missing", "retention_deleted"}:
+    download_status = parse_str_enum(DownloadStatus, item.download_status)
+    if download_status in {DownloadStatus.MISSING, DownloadStatus.RETENTION_DELETED}:
         item.status_label = (
-            "REMOVED" if item.download_status == "retention_deleted" else "MISSING"
+            "REMOVED" if download_status is DownloadStatus.RETENTION_DELETED else "MISSING"
         )
         item.status_class = "status-missing"
 
@@ -249,9 +259,9 @@ def _supersede_active_transcript_job(profile_id: str, download_id: int) -> None:
         profile_id=profile_id,
         job_type="generate_transcript",
         idempotency_key=f"generate_transcript:{profile_id}:{download_id}",
-        status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+        status__in=[JobStatus.QUEUED, JobStatus.RUNNING],
     ).update(
-        status=Job.STATUS_FAILED,
+        status=JobStatus.FAILED,
         error_message="Superseded by a manual transcript regeneration request.",
         finished_at=now,
         updated_at=now,
@@ -428,7 +438,7 @@ def _job_still_needs_work(job: Job) -> bool:
         )
         return not (has_transcript or has_subtitle_file)
     if job.job_type in {"download_episode", "download_single"}:
-        return download.download_status != "downloaded"
+        return parse_str_enum(DownloadStatus, download.download_status) is not DownloadStatus.DOWNLOADED
     return True
 
 
@@ -442,7 +452,7 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
                 "generate_transcript",
                 "transcode_media",
             ],
-            status=Job.STATUS_RUNNING,
+            status=JobStatus.RUNNING,
         ).order_by("started_at", "created_at", "id")[:40]
     )
     active_jobs = [
@@ -480,7 +490,9 @@ def jobs(request: HttpRequest) -> HttpResponse:
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.resolved_subtitle_path = (
-        _resolve_subtitle_path(item) if item.download_status == "downloaded" else None
+        _resolve_subtitle_path(item)
+        if parse_str_enum(DownloadStatus, item.download_status) is DownloadStatus.DOWNLOADED
+        else None
     )
     item.has_subtitles = item.resolved_subtitle_path is not None
     try:
@@ -691,11 +703,11 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
         TRANSFER_QUEUE: "Transfer",
     }
     counts = {
-        queue: {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0} for queue in queue_labels
+        queue: {JobStatus.QUEUED: 0, JobStatus.RUNNING: 0} for queue in queue_labels
     }
     rows = (
         Job.objects.filter(
-            profile_id=profile_id, status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING]
+            profile_id=profile_id, status__in=[JobStatus.QUEUED, JobStatus.RUNNING]
         )
         .values("job_type", "status", "payload")
         .annotate(total=Count("id"))
@@ -705,16 +717,16 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
             str(row["job_type"]),
             row.get("payload") if isinstance(row.get("payload"), dict) else None,
         )
-        counts.setdefault(queue, {Job.STATUS_QUEUED: 0, Job.STATUS_RUNNING: 0})
+        counts.setdefault(queue, {JobStatus.QUEUED: 0, JobStatus.RUNNING: 0})
         counts[queue][str(row["status"])] = int(row["total"] or 0)
         queue_labels.setdefault(queue, queue.removeprefix("getoffline."))
     return [
         {
             "queue": queue,
             "label": queue_labels[queue],
-            "queued": values[Job.STATUS_QUEUED],
-            "running": values[Job.STATUS_RUNNING],
-            "total": values[Job.STATUS_QUEUED] + values[Job.STATUS_RUNNING],
+            "queued": values[JobStatus.QUEUED],
+            "running": values[JobStatus.RUNNING],
+            "total": values[JobStatus.QUEUED] + values[JobStatus.RUNNING],
         }
         for queue, values in sorted(
             counts.items(), key=lambda item: queue_labels[item[0]].lower()
@@ -745,8 +757,8 @@ def settings_page(request: HttpRequest) -> HttpResponse:
         {
             "settings": settings,
             "sources": sources,
-            "youtube_sources": sources.filter(source_type=SourceConfig.SOURCE_YOUTUBE),
-            "podcast_sources": sources.filter(source_type=SourceConfig.SOURCE_PODCAST),
+            "youtube_sources": sources.filter(source_type=SourceType.YOUTUBE),
+            "podcast_sources": sources.filter(source_type=SourceType.PODCAST),
             "download_settings": download_settings,
             "profile_id": profile_id,
             "profile_name": profile_name,
@@ -838,7 +850,7 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> tuple[Download, Path
             "file_size_bytes": bytes_written,
             "subtitle_path": None,
             "subtitle_path_relative": None,
-            "download_status": "downloaded",
+            "download_status": DownloadStatus.DOWNLOADED,
             "raw_metadata_json": '{"ingest_method":"drag-and-drop"}',
             "last_seen_at": now,
             "completed_at": now,
@@ -936,7 +948,7 @@ def worker_message_status(request: HttpRequest) -> JsonResponse:
     return JsonResponse(
         {
             "finished": True,
-            "ok": source_status != Job.STATUS_FAILED,
+            "ok": parse_str_enum(JobStatus, source_status) is not JobStatus.FAILED,
             "status": source_status,
             "error_message": str(payload.get("error_message") or ""),
         }
@@ -1147,7 +1159,7 @@ def _delete_external_download_dependents(row_ids: list[int]) -> None:
 def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     _delete_download_media_file(item)
-    item.download_status = "missing"
+    item.download_status = DownloadStatus.MISSING
     item.last_seen_at = timezone.now()
     item.save(update_fields=["download_status", "last_seen_at"])
     return _redirect_back(request)
@@ -1256,8 +1268,8 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
 @login_required
 @require_POST
 def add_source(request: HttpRequest) -> HttpResponseRedirect:
-    source_type = str(request.POST.get("source_type") or "").strip().lower()
-    if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
+    source_type = parse_str_enum(SourceType, request.POST.get("source_type"))
+    if source_type not in {SourceType.YOUTUBE, SourceType.PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
     profile_id = _profile_id(request)
     position = (
@@ -1275,7 +1287,7 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         url=str(request.POST.get("url") or "").strip(),
         media_type=(
             str(request.POST.get("media_type") or "audio").strip().lower()
-            if source_type == SourceConfig.SOURCE_YOUTUBE
+            if source_type is SourceType.YOUTUBE
             else None
         ),
         enabled=True,
@@ -1286,9 +1298,9 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         max_downloads=_optional_int(request.POST.get("max_downloads")),
         delete_explicit_content=request.POST.get("delete_explicit_content")
         in {"1", "true", "yes", "on"},
-        include_shorts=source_type == SourceConfig.SOURCE_YOUTUBE
+        include_shorts=source_type is SourceType.YOUTUBE
         and request.POST.get("include_shorts") in {"1", "true", "yes", "on"},
-        include_livestreams=source_type == SourceConfig.SOURCE_YOUTUBE
+        include_livestreams=source_type is SourceType.YOUTUBE
         and request.POST.get("include_livestreams") in {"1", "true", "yes", "on"},
         title_exclude=str(request.POST.get("title_exclude") or "").strip(),
         updated_at=timezone.now(),
@@ -1304,7 +1316,7 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     )
     source.name = str(request.POST.get("name") or source.name).strip()
     source.url = str(request.POST.get("url") or source.url).strip()
-    if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+    if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
         source.media_type = (
             str(request.POST.get("media_type") or source.media_type or "audio")
             .strip()
@@ -1322,7 +1334,7 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
         "yes",
         "on",
     }
-    if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+    if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
         source.include_shorts = request.POST.get("include_shorts") in {
             "1",
             "true",
@@ -1358,7 +1370,7 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
 @require_POST
 def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect:
     source_type = str(source_type or "").strip().lower()
-    if source_type not in {SourceConfig.SOURCE_YOUTUBE, SourceConfig.SOURCE_PODCAST}:
+    if source_type not in {SourceType.YOUTUBE, SourceType.PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
     profile_id = _profile_id(request)
     source_ids = [
@@ -1381,7 +1393,7 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
             continue
         source.name = str(request.POST.get(prefix + "name") or source.name).strip()
         source.url = str(request.POST.get(prefix + "url") or source.url).strip()
-        if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+        if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
             source.media_type = (
                 str(
                     request.POST.get(prefix + "media_type")
@@ -1411,7 +1423,7 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
         source.delete_explicit_content = request.POST.get(
             prefix + "delete_explicit_content"
         ) in {"1", "true", "yes", "on"}
-        if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+        if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
             source.include_shorts = request.POST.get(prefix + "include_shorts") in {
                 "1",
                 "true",
@@ -1489,7 +1501,7 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
     elif action == "delete":
         for item in rows:
             _delete_download_media_file(item)
-        rows.update(download_status="missing", last_seen_at=now)
+        rows.update(download_status=DownloadStatus.MISSING, last_seen_at=now)
     elif action == "purge":
         selected_rows = list(rows)
         row_ids = [item.pk for item in selected_rows]
