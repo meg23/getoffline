@@ -40,6 +40,8 @@ def _clear_django_test_data():
         model.objects.all().delete()
 
 
+from models.domain import JobStatus
+from models.domain import SourceType
 from app.queue import job_priority  # noqa: E402
 from app.routing import CLEANUP_QUEUE  # noqa: E402
 from app.routing import PODCAST_DOWNLOAD_QUEUE
@@ -133,10 +135,10 @@ class SharedDjangoModelTests(TestCase):
         )
         claimed = claim_job(job.id)
         self.assertIsNotNone(claimed)
-        self.assertEqual(claimed.status, Job.STATUS_RUNNING)
-        finish_job(claimed, status=Job.STATUS_SUCCEEDED)
+        self.assertEqual(claimed.status, JobStatus.RUNNING)
+        finish_job(claimed, status=JobStatus.SUCCEEDED)
         claimed.refresh_from_db()
-        self.assertEqual(claimed.status, Job.STATUS_SUCCEEDED)
+        self.assertEqual(claimed.status, JobStatus.SUCCEEDED)
         self.assertEqual(claimed.payload, {"source": "test"})
 
     def test_idempotency_reuses_queued_job(self):
@@ -344,7 +346,7 @@ class SharedDjangoModelTests(TestCase):
             )
             expired_download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 title="Expired",
                 file_path=str(expired),
@@ -353,7 +355,7 @@ class SharedDjangoModelTests(TestCase):
             )
             favorite_download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 title="Favorite",
                 file_path=str(favorite),
@@ -376,18 +378,18 @@ class SharedDjangoModelTests(TestCase):
 
     def test_queue_counts_groups_active_jobs_by_worker_queue(self):
         Job.objects.create(
-            profile_id="default", job_type="update_downloads", status=Job.STATUS_QUEUED
+            profile_id="default", job_type="update_downloads", status=JobStatus.QUEUED
         )
         Job.objects.create(
             profile_id="default",
             job_type="check_for_episodes",
-            status=Job.STATUS_RUNNING,
+            status=JobStatus.RUNNING,
         )
         Job.objects.create(
-            profile_id="default", job_type="download_episode", status=Job.STATUS_QUEUED
+            profile_id="default", job_type="download_episode", status=JobStatus.QUEUED
         )
         Job.objects.create(
-            profile_id="other", job_type="download_episode", status=Job.STATUS_QUEUED
+            profile_id="other", job_type="download_episode", status=JobStatus.QUEUED
         )
 
         counts = {row["label"]: row for row in _queue_counts("default")}
@@ -414,7 +416,7 @@ class SharedDjangoModelTests(TestCase):
             )
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_PODCAST,
+                source_type=SourceType.PODCAST,
                 source_name="Podcast",
                 item_uid="episode-1",
                 title="Podcast Episode",
@@ -447,7 +449,7 @@ class SharedDjangoModelTests(TestCase):
             )
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 item_uid="video-1",
                 title="Video",
@@ -476,7 +478,7 @@ class SharedDjangoModelTests(TestCase):
             media.write_bytes(b"a" * (2 * 1024 * 1024))
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 item_uid="range-video-1",
                 title="Range Video",
@@ -507,7 +509,7 @@ class SharedDjangoModelTests(TestCase):
             media.write_bytes(b"0123456789")
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 item_uid="range-video-2",
                 title="Range Video",
@@ -539,7 +541,7 @@ class SharedDjangoModelTests(TestCase):
             )
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 item_uid="video-player-1",
                 title="Video Player",
@@ -569,7 +571,7 @@ class SharedDjangoModelTests(TestCase):
         client = Client()
         download = Download.objects.create(
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             source_name="Channel",
             item_uid="position-video-1",
             title="Position Video",
@@ -725,7 +727,7 @@ class SharedDjangoModelTests(TestCase):
         active_job = Job.objects.create(
             profile_id="default",
             job_type="generate_transcript",
-            status=Job.STATUS_RUNNING,
+            status=JobStatus.RUNNING,
             payload={"download_id": download.id},
             idempotency_key=f"generate_transcript:default:{download.id}",
         )
@@ -738,10 +740,10 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         active_job.refresh_from_db()
-        self.assertEqual(active_job.status, Job.STATUS_RUNNING)
+        self.assertEqual(active_job.status, JobStatus.RUNNING)
         replacement = Job.objects.get(
             job_type="download_single",
-            status=Job.STATUS_QUEUED,
+            status=JobStatus.QUEUED,
             idempotency_key=f"download_single:default:{download.id}",
         )
         self.assertEqual(replacement.payload["redownload"], True)
@@ -757,7 +759,7 @@ class SharedDjangoModelTests(TestCase):
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             name="Test Channel",
             url="https://www.youtube.com/@example/videos",
             enabled=True,
@@ -766,7 +768,7 @@ class SharedDjangoModelTests(TestCase):
         job = Job.objects.create(
             profile_id="default",
             job_type="check_for_episodes",
-            status=Job.STATUS_QUEUED,
+            status=JobStatus.QUEUED,
         )
         candidates = iter(
             [
@@ -805,7 +807,7 @@ class SharedDjangoModelTests(TestCase):
     def test_episode_checker_republishes_existing_queued_download_job(self):
         source = SourceConfig.objects.create(
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             name="Test Channel",
             url="https://www.youtube.com/@example/videos",
             enabled=True,
@@ -816,7 +818,7 @@ class SharedDjangoModelTests(TestCase):
             job_type="download_episode",
             payload={
                 "source_id": source.id,
-                "source_type": SourceConfig.SOURCE_YOUTUBE,
+                "source_type": SourceType.YOUTUBE,
                 "item_uid": "video-1",
             },
             idempotency_key=_idempotency_key(
@@ -826,7 +828,7 @@ class SharedDjangoModelTests(TestCase):
         job = Job.objects.create(
             profile_id="default",
             job_type="check_for_episodes",
-            status=Job.STATUS_QUEUED,
+            status=JobStatus.QUEUED,
         )
         candidates = iter(
             [
@@ -856,7 +858,7 @@ class SharedDjangoModelTests(TestCase):
     def test_episode_checker_resets_and_republishes_stale_running_download_job(self):
         source = SourceConfig.objects.create(
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             name="Test Channel",
             url="https://www.youtube.com/@example/videos",
             enabled=True,
@@ -867,7 +869,7 @@ class SharedDjangoModelTests(TestCase):
             job_type="download_episode",
             payload={
                 "source_id": source.id,
-                "source_type": SourceConfig.SOURCE_YOUTUBE,
+                "source_type": SourceType.YOUTUBE,
                 "item_uid": "video-1",
             },
             idempotency_key=_idempotency_key(
@@ -876,7 +878,7 @@ class SharedDjangoModelTests(TestCase):
         )
         stale_started_at = timezone.now() - timedelta(hours=7)
         Job.objects.filter(pk=existing.id).update(
-            status=Job.STATUS_RUNNING,
+            status=JobStatus.RUNNING,
             started_at=stale_started_at,
             updated_at=stale_started_at,
         )
@@ -884,7 +886,7 @@ class SharedDjangoModelTests(TestCase):
         job = Job.objects.create(
             profile_id="default",
             job_type="check_for_episodes",
-            status=Job.STATUS_QUEUED,
+            status=JobStatus.QUEUED,
         )
         candidates = iter(
             [
@@ -904,7 +906,7 @@ class SharedDjangoModelTests(TestCase):
             check_for_episodes(job)
 
         existing.refresh_from_db()
-        self.assertEqual(existing.status, Job.STATUS_QUEUED)
+        self.assertEqual(existing.status, JobStatus.QUEUED)
         self.assertIsNone(existing.started_at)
         publish.assert_called_once_with(existing)
 
@@ -912,7 +914,7 @@ class SharedDjangoModelTests(TestCase):
         source = SourceConfig(
             id=4,
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             name="gamer",
             url="https://www.youtube.com/@gameranxTV",
             enabled=True,
@@ -943,7 +945,7 @@ class SharedDjangoModelTests(TestCase):
         source = SourceConfig(
             id=5,
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             name="streamer",
             url="https://www.youtube.com/playlist?list=uploads",
             enabled=True,
@@ -972,7 +974,7 @@ class SharedDjangoModelTests(TestCase):
         source = SourceConfig(
             id=6,
             profile_id="default",
-            source_type=SourceConfig.SOURCE_YOUTUBE,
+            source_type=SourceType.YOUTUBE,
             name="streamer",
             url="https://www.youtube.com/playlist?list=uploads",
             enabled=True,
@@ -1032,7 +1034,7 @@ class SharedDjangoModelTests(TestCase):
                 profile_id="default",
                 job_type="download_episode",
                 payload={
-                    "source_type": SourceConfig.SOURCE_YOUTUBE,
+                    "source_type": SourceType.YOUTUBE,
                     "source_name": "Channel",
                     "media_type": "video",
                     "item_uid": "fast-video",
@@ -1100,7 +1102,7 @@ class SharedDjangoModelTests(TestCase):
                 profile_id="default",
                 job_type="download_episode",
                 payload={
-                    "source_type": SourceConfig.SOURCE_YOUTUBE,
+                    "source_type": SourceType.YOUTUBE,
                     "source_name": "Channel",
                     "media_type": "video",
                     "item_uid": "clean-video",
@@ -1186,7 +1188,7 @@ class SharedDjangoModelTests(TestCase):
                 profile_id="default",
                 job_type="download_episode",
                 payload={
-                    "source_type": SourceConfig.SOURCE_YOUTUBE,
+                    "source_type": SourceType.YOUTUBE,
                     "source_name": "Channel",
                     "media_type": "video",
                     "item_uid": "bad-video",
@@ -1226,7 +1228,7 @@ class SharedDjangoModelTests(TestCase):
     ):
         source = SourceConfig.objects.create(
             profile_id="default",
-            source_type=SourceConfig.SOURCE_PODCAST,
+            source_type=SourceType.PODCAST,
             name="Podcast",
             url="https://example.com/feed.xml",
             enabled=True,
@@ -1282,7 +1284,7 @@ class SharedDjangoModelTests(TestCase):
             original.write_text("downloaded", encoding="utf-8")
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 item_uid="video-1",
                 file_path=str(original),
@@ -1319,7 +1321,7 @@ class SharedDjangoModelTests(TestCase):
             subtitle = media.with_suffix(".srt")
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 title="Explicit video",
                 item_uid="video-2",
@@ -1373,7 +1375,7 @@ class SharedDjangoModelTests(TestCase):
             subtitle = media.with_suffix(".srt")
             download = Download.objects.create(
                 profile_id="default",
-                source_type=SourceConfig.SOURCE_YOUTUBE,
+                source_type=SourceType.YOUTUBE,
                 source_name="Channel",
                 title="Unchecked video",
                 item_uid="video-3",

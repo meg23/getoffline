@@ -15,6 +15,10 @@ from django.db import IntegrityError
 from django.db import transaction
 from django.utils import timezone
 
+from models.domain import DownloadStatus
+from models.domain import JobStatus
+from models.domain import SourceType
+from models.domain import parse_str_enum
 from app.queue import publish_job
 from models.jobs import create_job
 from models.models import AppConfigValue
@@ -168,7 +172,7 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
     )
     if str(source_media_type or "").strip().lower() in {"audio", "video"}:
         return str(source_media_type).strip().lower()
-    if download.source_type == SourceConfig.SOURCE_PODCAST:
+    if download.source_type is SourceType.PODCAST:
         return "audio"
     return (
         "video"
@@ -215,7 +219,7 @@ def _delete_ffmpeg_source_files(
             )
             continue
         if not exists:
-            skipped.append({"path": str(candidate), "reason": "missing"})
+            skipped.append({"path": str(candidate), "reason": DownloadStatus.MISSING})
             log.warning(
                 "FFmpeg source cleanup skipped source=%s reason=missing",
                 candidate,
@@ -783,7 +787,7 @@ def _postprocess_download_with_ffmpeg(
                     ),
                     "file_ext": target_path.suffix.lstrip("."),
                     "file_size_bytes": output_size,
-                    "download_status": "downloaded",
+                    "download_status": DownloadStatus.DOWNLOADED,
                     "completed_at": timezone.now(),
                     "last_seen_at": timezone.now(),
                 },
@@ -804,7 +808,7 @@ def _postprocess_download_with_ffmpeg(
                     ),
                     "file_ext": target_path.suffix.lstrip("."),
                     "file_size_bytes": output_size,
-                    "download_status": "downloaded",
+                    "download_status": DownloadStatus.DOWNLOADED,
                     "completed_at": timezone.now(),
                     "last_seen_at": timezone.now(),
                 }
@@ -821,7 +825,7 @@ def _postprocess_download_with_ffmpeg(
             )
             download.file_ext = target_path.suffix.lstrip(".")
             download.file_size_bytes = output_size
-            download.download_status = "downloaded"
+            download.download_status = DownloadStatus.DOWNLOADED
             download.completed_at = timezone.now()
             download.last_seen_at = timezone.now()
             download.save(
@@ -993,9 +997,9 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             payload,
         )
         return None
-    source_type = str(payload.get("source_type") or "youtube").strip()
+    source_type = parse_str_enum(SourceType, payload.get("source_type")) or SourceType.YOUTUBE
     source_name = str(payload.get("source_name") or "").strip()
-    if not source_name and source_type == SourceConfig.SOURCE_YOUTUBE:
+    if not source_name and source_type is SourceType.YOUTUBE:
         try:
             source_name = resolve_youtube_source_name(download_url)
         except Exception as exc:
@@ -1006,7 +1010,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
                 exc,
             )
     source_name = source_name or str(payload.get("source_type") or "GetOffline").strip()
-    if source_type == SourceConfig.SOURCE_YOUTUBE and not _is_youtube_video_url(
+    if source_type is SourceType.YOUTUBE and not _is_youtube_video_url(
         download_url
     ):
         fallback_uid = str(payload.get("item_uid") or "").strip()
@@ -1070,13 +1074,13 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     requested_media_type = (
         str(
             payload.get("media_type")
-            or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")
+            or ("audio" if source_type is SourceType.PODCAST else "video")
         )
         .strip()
         .lower()
     )
     if (
-        source_type == SourceConfig.SOURCE_YOUTUBE
+        source_type is SourceType.YOUTUBE
         and requested_media_type != "audio"
         and max_height.isdigit()
     ):
@@ -1088,7 +1092,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         # work to the downloader's FFmpeg post-processing without enabling yt-dlp's unplayable-format mode.
         ydl_opts["ffmpeg_location"] = "/usr/bin/ffmpeg"
         ydl_opts["ignoreerrors"] = True
-    if source_type == SourceConfig.SOURCE_YOUTUBE:
+    if source_type is SourceType.YOUTUBE:
         include_shorts = bool(payload.get("include_shorts", False))
         include_livestreams = bool(payload.get("include_livestreams", False))
 
@@ -1182,14 +1186,14 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         "file_size_bytes": (
             downloaded_file.stat().st_size if downloaded_file.exists() else None
         ),
-        "download_status": "downloaded",
+        "download_status": DownloadStatus.DOWNLOADED,
         "last_seen_at": now,
         "completed_at": now,
     }
     media_kind = (
         str(
             payload.get("media_type")
-            or ("audio" if source_type == SourceConfig.SOURCE_PODCAST else "video")
+            or ("audio" if source_type is SourceType.PODCAST else "video")
         )
         .strip()
         .lower()
@@ -1315,7 +1319,7 @@ def _downloaded_count_for_source(profile_id: str, source: SourceConfig) -> int:
         profile_id=profile_id,
         source_type=source.source_type,
         source_name=source.name,
-        download_status="downloaded",
+        download_status=DownloadStatus.DOWNLOADED,
     ).count()
 
 
@@ -1472,7 +1476,7 @@ def _active_download_job(idempotency_key: str) -> Job | None:
     return (
         Job.objects.filter(
             idempotency_key=idempotency_key,
-            status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+            status__in=[JobStatus.QUEUED, JobStatus.RUNNING],
         )
         .order_by("created_at", "id")
         .first()
@@ -1492,7 +1496,7 @@ def _stale_running_job_cutoff() -> datetime | None:
 
 
 def _make_stale_job_queued(job: Job) -> bool:
-    if job.status != Job.STATUS_RUNNING:
+    if parse_str_enum(JobStatus, job.status) is not JobStatus.RUNNING:
         return False
     cutoff = _stale_running_job_cutoff()
     if cutoff is None:
@@ -1500,7 +1504,7 @@ def _make_stale_job_queued(job: Job) -> bool:
     started_at = job.started_at or job.updated_at or job.created_at
     if started_at and started_at > cutoff:
         return False
-    job.status = Job.STATUS_QUEUED
+    job.status = JobStatus.QUEUED
     job.error_message = "Reset stale running job so it can be published again."
     job.started_at = None
     job.finished_at = None
@@ -1764,9 +1768,9 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
 
 
 def _candidates_for_source(source: SourceConfig) -> Iterable[dict]:
-    if source.source_type == SourceConfig.SOURCE_PODCAST:
+    if source.source_type is SourceType.PODCAST:
         return _podcast_candidates(source)
-    if source.source_type == SourceConfig.SOURCE_YOUTUBE:
+    if source.source_type is SourceType.YOUTUBE:
         return _youtube_candidates(source)
     log.warning(
         "Unsupported source type for episode check source_id=%s source_type=%s",
@@ -1846,7 +1850,7 @@ def check_for_episodes(job: Job) -> None:
                         title,
                     )
                     continue
-                if source.source_type == SourceConfig.SOURCE_PODCAST:
+                if source.source_type is SourceType.PODCAST:
                     log.info(
                         "New podcast episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s media_url=%s",
                         profile_id,
@@ -1856,7 +1860,7 @@ def check_for_episodes(job: Job) -> None:
                         title,
                         candidate.get("media_url") or item_url,
                     )
-                elif source.source_type == SourceConfig.SOURCE_YOUTUBE:
+                elif source.source_type is SourceType.YOUTUBE:
                     log.info(
                         "New YouTube episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s item_url=%s",
                         profile_id,
@@ -1875,7 +1879,7 @@ def check_for_episodes(job: Job) -> None:
                 existing_job = _active_download_job(idempotency_key)
                 if existing_job is not None:
                     was_stale = _make_stale_job_queued(existing_job)
-                    if existing_job.status == Job.STATUS_QUEUED:
+                    if parse_str_enum(JobStatus, existing_job.status) is JobStatus.QUEUED:
                         _publish_created_job(existing_job)
                         total_enqueued += 1
                     source_enqueued += 1
@@ -1885,7 +1889,7 @@ def check_for_episodes(job: Job) -> None:
                         source.id,
                         existing_job.id,
                         existing_job.status,
-                        existing_job.status == Job.STATUS_QUEUED,
+                        parse_str_enum(JobStatus, existing_job.status) is JobStatus.QUEUED,
                         was_stale,
                         item_uid,
                         title,
@@ -1904,7 +1908,7 @@ def check_for_episodes(job: Job) -> None:
                         "media_type": source.media_type
                         or (
                             "audio"
-                            if source.source_type == SourceConfig.SOURCE_PODCAST
+                            if source.source_type is SourceType.PODCAST
                             else "video"
                         ),
                         "source_max_downloads": limit,
@@ -2383,7 +2387,7 @@ def generate_transcript(job: Job) -> None:
                 if explicit_match is not None:
                     deleted_paths = delete_media_artifacts(media_path)
                     TranscriptSegment.objects.filter(download=download).delete()
-                    download.download_status = "filtered"
+                    download.download_status = DownloadStatus.FILTERED
                     download.last_seen_at = timezone.now()
                     download.save(update_fields=["download_status", "last_seen_at"])
                     log_filtered_deletion(
@@ -2416,7 +2420,7 @@ def generate_transcript(job: Job) -> None:
             )
             if bool(payload.get("delete_explicit_content", False)):
                 deleted_paths = delete_media_artifacts(media_path)
-                download.download_status = "filtered"
+                download.download_status = DownloadStatus.FILTERED
                 download.last_seen_at = timezone.now()
                 download.save(update_fields=["download_status", "last_seen_at"])
                 log.warning(
@@ -2449,7 +2453,7 @@ def retention_cleanup(job: Job) -> None:
         return
     cutoff = timezone.now() - timedelta(days=retention_days)
     rows = list(
-        Download.objects.filter(profile_id=job.profile_id, download_status="downloaded")
+        Download.objects.filter(profile_id=job.profile_id, download_status=DownloadStatus.DOWNLOADED)
         .exclude(source_type="manual")
         .order_by("completed_at", "first_seen_at", "id")
     )
@@ -2464,7 +2468,7 @@ def retention_cleanup(job: Job) -> None:
             else None
         )
         if not media_path or not media_path.is_file():
-            download.download_status = "missing"
+            download.download_status = DownloadStatus.MISSING
             download.last_seen_at = now
             download.save(update_fields=["download_status", "last_seen_at"])
             marked_missing += 1
@@ -2488,7 +2492,7 @@ def retention_cleanup(job: Job) -> None:
                 exc,
             )
             continue
-        download.download_status = "retention_deleted"
+        download.download_status = DownloadStatus.RETENTION_DELETED
         download.last_seen_at = now
         download.save(update_fields=["download_status", "last_seen_at"])
         deleted += 1

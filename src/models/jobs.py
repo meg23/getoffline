@@ -1,3 +1,4 @@
+from .domain import JobStatus
 from typing import Any
 
 from django.db import transaction
@@ -16,7 +17,7 @@ def create_job(
     if idempotency_key:
         existing = Job.objects.filter(
             idempotency_key=idempotency_key,
-            status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+            status__in=[JobStatus.QUEUED, JobStatus.RUNNING],
         ).first()
         if existing is not None:
             return existing
@@ -25,7 +26,7 @@ def create_job(
         job_type=job_type,
         payload=payload or {},
         idempotency_key=idempotency_key,
-        status=Job.STATUS_QUEUED,
+        status=JobStatus.QUEUED,
     )
 
 
@@ -33,13 +34,13 @@ def create_job(
 def claim_job(job_id: int) -> Job | None:
     job = (
         Job.objects.select_for_update()
-        .filter(pk=int(job_id), status=Job.STATUS_QUEUED)
+        .filter(pk=int(job_id), status=JobStatus.QUEUED)
         .first()
     )
     if job is None:
         return None
     now = timezone.now()
-    job.status = Job.STATUS_RUNNING
+    job.status = JobStatus.RUNNING
     job.started_at = now
     job.updated_at = now
     job.save(update_fields=["status", "started_at", "updated_at"])

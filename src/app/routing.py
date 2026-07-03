@@ -1,34 +1,44 @@
-SERIAL_EPISODE_CHECK_QUEUE = "getoffline.jobs.updates"
-YOUTUBE_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.youtube"
-PODCAST_DOWNLOAD_QUEUE = "getoffline.jobs.downloads.podcast"
-TRANSCRIPT_QUEUE = "getoffline.jobs.transcripts"
-FFMPEG_QUEUE = "getoffline.jobs.ffmpeg"
-TRANSFER_QUEUE = "getoffline.jobs.transfer"
-CLEANUP_QUEUE = "getoffline.jobs.cleanup"
+from models.domain import JobType
+from models.domain import MediaType
+from models.domain import QueueName
+from models.domain import SourceType
+from models.domain import parse_str_enum
+
+SERIAL_EPISODE_CHECK_QUEUE = QueueName.SERIAL_EPISODE_CHECK
+YOUTUBE_DOWNLOAD_QUEUE = QueueName.YOUTUBE_DOWNLOAD
+PODCAST_DOWNLOAD_QUEUE = QueueName.PODCAST_DOWNLOAD
+TRANSCRIPT_QUEUE = QueueName.TRANSCRIPT
+FFMPEG_QUEUE = QueueName.FFMPEG
+TRANSFER_QUEUE = QueueName.TRANSFER
+CLEANUP_QUEUE = QueueName.CLEANUP
 MAX_QUEUE_PRIORITY = 10
+
+PRIORITY_QUEUES = frozenset({
+    YOUTUBE_DOWNLOAD_QUEUE,
+    PODCAST_DOWNLOAD_QUEUE,
+    TRANSCRIPT_QUEUE,
+    FFMPEG_QUEUE,
+})
+SERIAL_JOB_TYPES = frozenset({JobType.CHECK_FOR_EPISODES, JobType.UPDATE_DOWNLOADS})
+DOWNLOAD_JOB_TYPES = frozenset({JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE})
 
 
 def queue_arguments(queue: str) -> dict:
     """RabbitMQ queue declaration options shared by publishers and consumers."""
-    if queue in {
-        YOUTUBE_DOWNLOAD_QUEUE,
-        PODCAST_DOWNLOAD_QUEUE,
-        TRANSCRIPT_QUEUE,
-        FFMPEG_QUEUE,
-    }:
+    if queue in PRIORITY_QUEUES:
         return {"x-max-priority": MAX_QUEUE_PRIORITY}
     return {}
 
 
 def _download_queue_name(payload: dict | None = None) -> str:
     payload = payload if isinstance(payload, dict) else {}
-    source_type = str(payload.get("source_type") or "").strip().lower()
-    media_type = str(payload.get("media_type") or "").strip().lower()
-    if source_type == "podcast":
+    source_type = parse_str_enum(SourceType, payload.get("source_type"))
+    media_type = parse_str_enum(MediaType, payload.get("media_type"))
+    if source_type is SourceType.PODCAST:
         return PODCAST_DOWNLOAD_QUEUE
-    if source_type == "youtube":
+    if source_type is SourceType.YOUTUBE:
         return YOUTUBE_DOWNLOAD_QUEUE
-    if media_type == "audio":
+    if media_type is MediaType.AUDIO:
         return PODCAST_DOWNLOAD_QUEUE
     # Manual URL downloads and payload-less download jobs default to the
     # YouTube-capable downloader; the legacy shared downloads queue is no longer
@@ -37,16 +47,17 @@ def _download_queue_name(payload: dict | None = None) -> str:
 
 
 def queue_name(job_type: str, payload: dict | None = None) -> str:
-    if job_type in {"check_for_episodes", "update_downloads"}:
+    parsed_job_type = parse_str_enum(JobType, job_type)
+    if parsed_job_type in SERIAL_JOB_TYPES:
         return SERIAL_EPISODE_CHECK_QUEUE
-    if job_type in {"download_episode", "download_single"}:
+    if parsed_job_type in DOWNLOAD_JOB_TYPES:
         return _download_queue_name(payload)
-    if job_type == "transcode_media":
+    if parsed_job_type is JobType.TRANSCODE_MEDIA:
         return FFMPEG_QUEUE
-    if job_type == "generate_transcript":
+    if parsed_job_type is JobType.GENERATE_TRANSCRIPT:
         return TRANSCRIPT_QUEUE
-    if job_type == "transfer_media":
+    if parsed_job_type is JobType.TRANSFER_MEDIA:
         return TRANSFER_QUEUE
-    if job_type == "retention_cleanup":
+    if parsed_job_type is JobType.RETENTION_CLEANUP:
         return CLEANUP_QUEUE
     return f"getoffline.jobs.{job_type}"

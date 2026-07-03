@@ -167,13 +167,14 @@ def _verify_profanity_model() -> None:
 
 def _queue_download_job() -> int:
     from app.queue import publish_job
+    from models.domain import SourceType
     from models.jobs import create_job
     from models.models import AppConfigValue, ProfileConfigValue, SourceConfig
 
     SourceConfig.objects.filter(profile_id=PROFILE_ID, name=SOURCE_NAME).delete()
     source = SourceConfig.objects.create(
         profile_id=PROFILE_ID,
-        source_type=SourceConfig.SOURCE_YOUTUBE,
+        source_type=SourceType.YOUTUBE,
         name=SOURCE_NAME,
         url=YOUTUBE_URL,
         media_type="audio",
@@ -202,7 +203,7 @@ def _queue_download_job() -> int:
         job_type="download_single",
         payload={
             "source_id": source.id,
-            "source_type": SourceConfig.SOURCE_YOUTUBE,
+            "source_type": SourceType.YOUTUBE,
             "source_name": source.name,
             "source_url": source.url,
             "item_uid": "BB49x_uMlGA",
@@ -252,12 +253,11 @@ def _assert_pipeline_result(
     transcript_count: int,
     jobs: list,
 ) -> None:
-    from models.models import Job
-
+    from models.domain import JobStatus
     active_jobs = [
         job
         for job in jobs
-        if job.status in {Job.STATUS_QUEUED, Job.STATUS_RUNNING}
+        if job.status in {JobStatus.QUEUED, JobStatus.RUNNING}
     ]
     if active_jobs:
         details = ", ".join(f"{job.id}:{job.job_type}" for job in active_jobs)
@@ -265,7 +265,7 @@ def _assert_pipeline_result(
     _log_check("no queued or running jobs remain for integration profile")
 
     succeeded_job_types = {
-        job.job_type for job in jobs if job.status == Job.STATUS_SUCCEEDED
+        job.job_type for job in jobs if JobStatus(job.status) is JobStatus.SUCCEEDED
     }
     required_job_types = {"download_single", "transcode_media", "generate_transcript"}
     missing_job_types = required_job_types - succeeded_job_types
@@ -308,10 +308,11 @@ def _assert_pipeline_result(
 def _wait_for_pipeline(
     job_id: int, deadline: float, host_downloads_dir: Path
 ) -> None:
+    from models.domain import JobStatus
     from models.models import Download, Job, TranscriptSegment
     from workers.content_filter import screen_transcript
 
-    terminal = {Job.STATUS_SUCCEEDED, Job.STATUS_FAILED}
+    terminal = {JobStatus.SUCCEEDED, JobStatus.FAILED}
     while time.monotonic() < deadline:
         job = Job.objects.get(pk=job_id)
         downloads = list(
@@ -321,7 +322,7 @@ def _wait_for_pipeline(
         failed = [
             candidate
             for candidate in child_jobs
-            if candidate.status == Job.STATUS_FAILED
+            if JobStatus(candidate.status) is JobStatus.FAILED
         ]
         if failed:
             details = "; ".join(
@@ -339,7 +340,7 @@ def _wait_for_pipeline(
             ).count()
             active_jobs_done = not Job.objects.filter(
                 profile_id=PROFILE_ID,
-                status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+                status__in=[JobStatus.QUEUED, JobStatus.RUNNING],
             ).exists()
             if job.status in terminal and active_jobs_done:
                 _assert_pipeline_result(
