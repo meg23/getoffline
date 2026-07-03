@@ -4,6 +4,8 @@ import json
 import os
 import signal
 import time
+from dataclasses import dataclass
+from typing import Any
 
 import django
 import pika
@@ -33,9 +35,7 @@ from app.routing import queue_arguments
 from app.routing import queue_name
 from models.jobs import claim_job  # noqa: E402
 from models.jobs import finish_job
-from models.models import Download  # noqa: E402
-from models.models import Job
-from models.models import SourceConfig
+from models.models import Job  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
 from workers.scheduler import HEAVY_JOB_TYPES  # noqa: E402
 from workers.scheduler import scheduler_from_settings
@@ -66,20 +66,77 @@ JOB_TYPES_BY_WORKER = {
 }
 
 SERIAL_WORKERS = {"updates", "downloader-youtube"}
+DOWNLOADER_WORKERS = {"downloader-youtube", "downloader-podcast"}
+
+
+@dataclass(frozen=True)
+class WorkerConfig:
+    worker_type: str
+    queue: str
+    prefetch_count: int
+    max_messages: int
+
+
+@dataclass(frozen=True)
+class QueuedJobMessage:
+    job_id: int
+    job_type: str | None = None
+    profile_id: str | None = None
+    attempt: int | None = None
+
+    @classmethod
+    def from_body(cls, body: bytes) -> "QueuedJobMessage":
+        payload = json.loads(body.decode("utf-8"))
+        return cls.from_payload(payload)
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "QueuedJobMessage":
+        return cls(
+            job_id=int(payload["job_id"]),
+            job_type=payload.get("job_type"),
+            profile_id=payload.get("profile_id"),
+            attempt=payload.get("attempt"),
+        )
 
 
 def worker_rabbitmq_parameters():
-    """Return RabbitMQ connection parameters safe for long-running jobs.
-
-    BlockingConnection only services RabbitMQ heartbeats while control returns to
-    pika. Transcript generation can legitimately run longer than RabbitMQ's
-    default heartbeat interval, so worker consumer connections disable heartbeat
-    checks unless the URL explicitly opts into a heartbeat query parameter.
-    """
+    """Return RabbitMQ connection parameters safe for long-running jobs."""
     params = pika.URLParameters(settings.RABBITMQ_URL)
     if "heartbeat=" not in settings.RABBITMQ_URL.lower():
         params.heartbeat = 0
     return params
+
+
+def build_worker_config(
+    worker_type: str,
+    *,
+    prefetch_count: int | None = None,
+    max_messages: int | None = None,
+) -> WorkerConfig:
+    return WorkerConfig(
+        worker_type=worker_type,
+        queue=QUEUE_BY_WORKER[worker_type],
+        prefetch_count=safe_prefetch_count(worker_type, prefetch_count),
+        max_messages=safe_max_messages(max_messages),
+    )
+
+
+def safe_prefetch_count(worker_type: str, requested_prefetch: int | None) -> int:
+    if worker_type in SERIAL_WORKERS:
+        return 1
+    return max(1, int(requested_prefetch or 4))
+
+
+def safe_max_messages(requested_max_messages: int | None) -> int:
+    configured_max_messages = os.getenv("GETOFFLINE_WORKER_MAX_MESSAGES", "1")
+    return max(
+        1,
+        int(
+            requested_max_messages
+            if requested_max_messages is not None
+            else configured_max_messages
+        ),
+    )
 
 
 def close_connection_if_open(connection) -> None:
@@ -97,30 +154,111 @@ def _handle_signal(signum, _frame) -> None:
     _STOP = True
 
 
-def _worker_accepts_job(worker_type: str, job_id: int) -> bool:
-    if worker_type not in {"downloader-youtube", "downloader-podcast"}:
-        return True
-    job = Job.objects.filter(pk=job_id).only("payload", "job_type").first()
+def _scheduler():
+    global _SCHEDULER
+    if _SCHEDULER is None:
+        _SCHEDULER = scheduler_from_settings()
+    return _SCHEDULER
+
+
+def process_message(message: dict) -> None:
+    process_queued_job_message(QueuedJobMessage.from_payload(message))
+
+
+def process_queued_job_message(message: QueuedJobMessage) -> None:
+    close_old_connections()
+    log_received_message(message)
+    job = claim_queued_job(message.job_id)
     if job is None:
-        return True
-    payload = job.payload if isinstance(job.payload, dict) else {}
-    source_type = parse_str_enum(SourceType, payload.get("source_type"))
-    if source_type is None:
-        media_type = parse_str_enum(MediaType, payload.get("media_type"))
-        source_type = SourceType.PODCAST if media_type is MediaType.AUDIO else SourceType.YOUTUBE
-    allowed = SourceType.YOUTUBE if worker_type == "downloader-youtube" else SourceType.PODCAST
-    return source_type is allowed
+        return
+    try:
+        run_claimed_job(job)
+        mark_job_succeeded(job)
+    except Exception as exc:
+        mark_job_failed(job, exc)
+        raise
+    finally:
+        close_old_connections()
 
 
-def _emit_update_finished_message(
+def log_received_message(message: QueuedJobMessage) -> None:
+    log.info(
+        "Message received job_id=%s job_type=%s profile_id=%s attempt=%s",
+        message.job_id,
+        message.job_type,
+        message.profile_id,
+        message.attempt,
+    )
+
+
+def claim_queued_job(job_id: int) -> Job | None:
+    job = claim_job(job_id)
+    if job is None:
+        log.info(
+            "Job skipped because it was already claimed or no longer queued job_id=%s",
+            job_id,
+        )
+        return None
+    log.info(
+        "Job claimed job_id=%s job_type=%s profile_id=%s",
+        job.id,
+        job.job_type,
+        job.profile_id,
+    )
+    return job
+
+
+def run_claimed_job(job: Job) -> None:
+    handler = HANDLERS[job.job_type]
+    scheduler_job_type = HEAVY_JOB_TYPES.get(job.job_type)
+    log.info(
+        "Job handler starting job_id=%s job_type=%s scheduler_job_type=%s",
+        job.id,
+        job.job_type,
+        scheduler_job_type,
+    )
+    if scheduler_job_type:
+        _scheduler().run(scheduler_job_type, handler, job)
+        return
+    handler(job)
+
+
+def mark_job_succeeded(job: Job) -> None:
+    finish_job(job, status=JobStatus.SUCCEEDED)
+    emit_update_finished_message(job, status=JobStatus.SUCCEEDED)
+    log.info("Job succeeded job_id=%s job_type=%s", job.id, job.job_type)
+
+
+def mark_job_failed(job: Job, exc: Exception) -> None:
+    error_message = str(exc)
+    finish_job(job, status=JobStatus.FAILED, error_message=error_message)
+    emit_update_finished_message(
+        job, status=JobStatus.FAILED, error_message=error_message
+    )
+    log.exception(
+        "Job failed job_id=%s job_type=%s error=%s", job.id, job.job_type, exc
+    )
+
+
+def emit_update_finished_message(
     job: Job, *, status: str, error_message: str = ""
 ) -> None:
     if parse_str_enum(JobType, job.job_type) is not JobType.UPDATE_DOWNLOADS:
         return
-    payload = job.payload if isinstance(job.payload, dict) else {}
-    completion_token = str(payload.get("completion_token") or "").strip()
+    completion_token = update_completion_token(job)
     if not completion_token:
         return
+    create_update_finished_message_once(job, completion_token, status, error_message)
+
+
+def update_completion_token(job: Job) -> str:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    return str(payload.get("completion_token") or "").strip()
+
+
+def create_update_finished_message_once(
+    job: Job, completion_token: str, status: str, error_message: str
+) -> None:
     idempotency_key = f"worker_message:update_downloads:{job.id}:{completion_token}"
     if Job.objects.filter(idempotency_key=idempotency_key).exists():
         return
@@ -139,128 +277,69 @@ def _emit_update_finished_message(
     )
 
 
-def _scheduler():
-    global _SCHEDULER
-    if _SCHEDULER is None:
-        _SCHEDULER = scheduler_from_settings()
-    return _SCHEDULER
-
-
-def process_message(message: dict) -> None:
-    close_old_connections()
-    job_id = int(message["job_id"])
-    log.info(
-        "Message received job_id=%s job_type=%s profile_id=%s attempt=%s",
-        job_id,
-        message.get("job_type"),
-        message.get("profile_id"),
-        message.get("attempt"),
-    )
-    job = claim_job(job_id)
-    if job is None:
-        log.info(
-            "Job skipped because it was already claimed or no longer queued job_id=%s",
-            job_id,
-        )
-        return
-    log.info(
-        "Job claimed job_id=%s job_type=%s profile_id=%s",
-        job.id,
-        job.job_type,
-        job.profile_id,
-    )
-    try:
-        handler = HANDLERS[job.job_type]
-        scheduler_job_type = HEAVY_JOB_TYPES.get(job.job_type)
-        log.info(
-            "Job handler starting job_id=%s job_type=%s scheduler_job_type=%s",
-            job.id,
-            job.job_type,
-            scheduler_job_type,
-        )
-        if scheduler_job_type:
-            _scheduler().run(scheduler_job_type, handler, job)
-        else:
-            handler(job)
-        finish_job(job, status=JobStatus.SUCCEEDED)
-        _emit_update_finished_message(job, status=JobStatus.SUCCEEDED)
-        log.info("Job succeeded job_id=%s job_type=%s", job.id, job.job_type)
-    except Exception as exc:
-        finish_job(job, status=JobStatus.FAILED, error_message=str(exc))
-        _emit_update_finished_message(
-            job, status=JobStatus.FAILED, error_message=str(exc)
-        )
-        log.exception(
-            "Job failed job_id=%s job_type=%s error=%s", job.id, job.job_type, exc
-        )
-        raise
-    finally:
-        close_old_connections()
+# Backwards-compatible name for tests or external callers.
+_emit_update_finished_message = emit_update_finished_message
 
 
 def requeue_existing_jobs(channel, worker_type: str) -> int:
-    """Publish queue messages for queued DB jobs that do not have a live broker message.
+    """Publish queue messages for queued DB jobs that do not have a live broker message."""
+    jobs = queued_jobs_for_worker(worker_type)
+    return publish_requeued_jobs(channel, worker_type, jobs)
 
-    The database is the durable source of truth for job state. If a worker queue is
-    introduced after jobs were created, RabbitMQ data is reset, or a publish is
-    interrupted after the DB row is committed, this startup pass makes the queue
-    self-healing. Duplicate messages are safe because ``claim_job`` only allows
-    one consumer to transition a queued job to running.
-    """
+
+def queued_jobs_for_worker(worker_type: str) -> list[Job]:
     job_types = JOB_TYPES_BY_WORKER[worker_type]
-    queue = QUEUE_BY_WORKER[worker_type]
-    rows = list(
+    return list(
         Job.objects.filter(status=JobStatus.QUEUED, job_type__in=job_types).order_by(
             "created_at", "id"
         )[:500]
     )
+
+
+def publish_requeued_jobs(channel, worker_type: str, jobs: list[Job]) -> int:
     published = 0
-    for job in rows:
-        message = {
-            "job_id": job.id,
-            "job_type": job.job_type,
-            "profile_id": job.profile_id,
-            "attempt": 1,
-            "payload": job.payload,
-        }
-        target_queue = queue_name(
-            job.job_type, job.payload if isinstance(job.payload, dict) else None
-        )
-        if (
-            worker_type in {"downloader-youtube", "downloader-podcast"}
-            and target_queue != queue
-        ):
+    for job in jobs:
+        target_queue = queue_for_job(job)
+        if worker_type_is_wrong_downloader(worker_type, target_queue):
             continue
-        channel.basic_publish(
-            exchange=settings.RABBITMQ_EXCHANGE,
-            routing_key=target_queue,
-            body=json.dumps(
-                {k: v for k, v in message.items() if k != "payload"}, sort_keys=True
-            ).encode("utf-8"),
-            properties=pika.BasicProperties(
-                content_type="application/json",
-                delivery_mode=2,
-                priority=job_priority(message),
-            ),
-            mandatory=True,
-        )
+        publish_requeued_job(channel, job, target_queue)
         published += 1
     return published
 
 
-def _source_subtitle_settings(download: Download) -> tuple[bool, float | None]:
-    source = (
-        SourceConfig.objects.filter(
-            profile_id=download.profile_id,
-            source_type=download.source_type,
-            name=download.source_name,
-        )
-        .only("subtitles", "subtitle_offset_seconds")
-        .first()
+def queue_for_job(job: Job) -> str:
+    payload = job.payload if isinstance(job.payload, dict) else None
+    return queue_name(job.job_type, payload)
+
+
+def worker_type_is_wrong_downloader(worker_type: str, target_queue: str) -> bool:
+    return (
+        worker_type in DOWNLOADER_WORKERS
+        and target_queue != QUEUE_BY_WORKER[worker_type]
     )
-    if source is None:
-        return True, None
-    return bool(source.subtitles), source.subtitle_offset_seconds
+
+
+def publish_requeued_job(channel, job: Job, target_queue: str) -> None:
+    message = {
+        "job_id": job.id,
+        "job_type": job.job_type,
+        "profile_id": job.profile_id,
+        "attempt": 1,
+        "payload": job.payload,
+    }
+    channel.basic_publish(
+        exchange=settings.RABBITMQ_EXCHANGE,
+        routing_key=target_queue,
+        body=json.dumps(
+            {k: v for k, v in message.items() if k != "payload"}, sort_keys=True
+        ).encode("utf-8"),
+        properties=pika.BasicProperties(
+            content_type="application/json",
+            delivery_mode=2,
+            priority=job_priority(message),
+        ),
+        mandatory=True,
+    )
 
 
 def requeue_existing_jobs_enabled() -> bool:
@@ -278,121 +357,222 @@ def run_worker(
     prefetch_count: int | None = None,
     max_messages: int | None = None,
 ) -> None:
-    queue = QUEUE_BY_WORKER[worker_type]
-    safe_prefetch = (
-        1 if worker_type in SERIAL_WORKERS else max(1, int(prefetch_count or 4))
+    config = build_worker_config(
+        worker_type, prefetch_count=prefetch_count, max_messages=max_messages
     )
-    safe_max_messages = max(
-        1,
-        int(
-            max_messages
-            if max_messages is not None
-            else os.getenv("GETOFFLINE_WORKER_MAX_MESSAGES", "1")
-        ),
-    )
-    processed_messages = 0
-    log.info(
-        "Worker starting worker_type=%s queue=%s prefetch=%s serial=%s max_messages=%s",
-        worker_type,
-        queue,
-        safe_prefetch,
-        worker_type in SERIAL_WORKERS,
-        safe_max_messages,
-    )
+    log_worker_starting(config)
     connection = pika.BlockingConnection(worker_rabbitmq_parameters())
-    log.info("RabbitMQ connected worker_type=%s queue=%s", worker_type, queue)
+    log.info(
+        "RabbitMQ connected worker_type=%s queue=%s", config.worker_type, config.queue
+    )
     try:
-        channel = connection.channel()
-        channel.exchange_declare(
-            exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True
-        )
-        channel.queue_declare(
-            queue=queue, durable=True, arguments=queue_arguments(queue) or None
-        )
-        channel.queue_bind(
-            queue=queue, exchange=settings.RABBITMQ_EXCHANGE, routing_key=queue
-        )
-        channel.basic_qos(prefetch_count=safe_prefetch)
-        if requeue_existing_jobs_enabled():
-            requeued = requeue_existing_jobs(channel, worker_type)
-            log.info(
-                "Worker requeued existing jobs worker_type=%s queue=%s count=%s",
-                worker_type,
-                queue,
-                requeued,
-            )
-        log.info(
-            "Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s",
-            worker_type,
-            queue,
-            settings.RABBITMQ_EXCHANGE,
-            safe_prefetch,
-        )
-        for method_frame, _properties, body in channel.consume(
-            queue, inactivity_timeout=1
-        ):
-            if _STOP:
-                log.info(
-                    "Worker stop requested worker_type=%s queue=%s", worker_type, queue
-                )
-                break
-            if method_frame is None:
-                continue
-            message = json.loads(body.decode("utf-8"))
-            job_id = int(message.get("job_id", 0))
-            if not _worker_accepts_job(worker_type, job_id):
-                channel.basic_nack(method_frame.delivery_tag, requeue=True)
-                log.info(
-                    "Message requeued for matching downloader worker worker_type=%s queue=%s job_id=%s",
-                    worker_type,
-                    queue,
-                    job_id,
-                )
-                time.sleep(0.25)
-                continue
-            try:
-                process_message(message)
-            except Exception:
-                channel.basic_nack(method_frame.delivery_tag, requeue=False)
-                processed_messages += 1
-                log.warning(
-                    "Message nacked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s",
-                    worker_type,
-                    queue,
-                    method_frame.delivery_tag,
-                    processed_messages,
-                )
-            else:
-                channel.basic_ack(method_frame.delivery_tag)
-                processed_messages += 1
-                log.info(
-                    "Message acked worker_type=%s queue=%s delivery_tag=%s processed_messages=%s",
-                    worker_type,
-                    queue,
-                    method_frame.delivery_tag,
-                    processed_messages,
-                )
-            if processed_messages >= safe_max_messages:
-                log.info(
-                    "Worker processed max messages; exiting for container restart worker_type=%s queue=%s processed_messages=%s max_messages=%s",
-                    worker_type,
-                    queue,
-                    processed_messages,
-                    safe_max_messages,
-                )
-                break
-        channel.cancel()
-        log.info(
-            "Worker consumer cancelled worker_type=%s queue=%s", worker_type, queue
-        )
+        channel = open_worker_channel(connection, config)
+        requeue_jobs_if_enabled(channel, config)
+        consume_worker_messages(channel, config)
+        cancel_worker_channel(channel, config)
     finally:
         close_connection_if_open(connection)
         log.info(
-            "RabbitMQ connection closed worker_type=%s queue=%s", worker_type, queue
+            "RabbitMQ connection closed worker_type=%s queue=%s",
+            config.worker_type,
+            config.queue,
         )
 
 
+def log_worker_starting(config: WorkerConfig) -> None:
+    log.info(
+        "Worker starting worker_type=%s queue=%s prefetch=%s serial=%s max_messages=%s",
+        config.worker_type,
+        config.queue,
+        config.prefetch_count,
+        config.worker_type in SERIAL_WORKERS,
+        config.max_messages,
+    )
+
+
+def open_worker_channel(connection, config: WorkerConfig):
+    channel = connection.channel()
+    declare_worker_exchange(channel)
+    declare_worker_queue(channel, config)
+    channel.basic_qos(prefetch_count=config.prefetch_count)
+    return channel
+
+
+def declare_worker_exchange(channel) -> None:
+    channel.exchange_declare(
+        exchange=settings.RABBITMQ_EXCHANGE, exchange_type="direct", durable=True
+    )
+
+
+def declare_worker_queue(channel, config: WorkerConfig) -> None:
+    channel.queue_declare(
+        queue=config.queue,
+        durable=True,
+        arguments=queue_arguments(config.queue) or None,
+    )
+    channel.queue_bind(
+        queue=config.queue,
+        exchange=settings.RABBITMQ_EXCHANGE,
+        routing_key=config.queue,
+    )
+
+
+def requeue_jobs_if_enabled(channel, config: WorkerConfig) -> None:
+    if not requeue_existing_jobs_enabled():
+        return
+    requeued = requeue_existing_jobs(channel, config.worker_type)
+    log.info(
+        "Worker requeued existing jobs worker_type=%s queue=%s count=%s",
+        config.worker_type,
+        config.queue,
+        requeued,
+    )
+
+
+def consume_worker_messages(channel, config: WorkerConfig) -> None:
+    log_worker_consuming(config)
+    processed_messages = 0
+    for method_frame, _properties, body in channel.consume(
+        config.queue, inactivity_timeout=1
+    ):
+        if worker_should_stop():
+            log.info(
+                "Worker stop requested worker_type=%s queue=%s",
+                config.worker_type,
+                config.queue,
+            )
+            break
+        if method_frame is None:
+            continue
+        processed_messages += handle_delivery(channel, config, method_frame, body)
+        if processed_messages >= config.max_messages:
+            log.info(
+                "Worker processed max messages; exiting for container restart worker_type=%s queue=%s processed_messages=%s max_messages=%s",
+                config.worker_type,
+                config.queue,
+                processed_messages,
+                config.max_messages,
+            )
+            break
+
+
+def log_worker_consuming(config: WorkerConfig) -> None:
+    log.info(
+        "Worker consuming worker_type=%s queue=%s exchange=%s prefetch=%s",
+        config.worker_type,
+        config.queue,
+        settings.RABBITMQ_EXCHANGE,
+        config.prefetch_count,
+    )
+
+
+def worker_should_stop() -> bool:
+    return _STOP
+
+
+def handle_delivery(channel, config: WorkerConfig, method_frame, body: bytes) -> int:
+    message = QueuedJobMessage.from_body(body)
+    if worker_should_requeue_message(config.worker_type, message):
+        requeue_message_for_matching_worker(channel, config, method_frame, message)
+        return 0
+    return process_delivery(channel, config, method_frame, message)
+
+
+def worker_should_requeue_message(worker_type: str, message: QueuedJobMessage) -> bool:
+    return not worker_accepts_job(worker_type, message.job_id)
+
+
+def worker_accepts_job(worker_type: str, job_id: int) -> bool:
+    if worker_type not in DOWNLOADER_WORKERS:
+        return True
+    job = Job.objects.filter(pk=job_id).only("payload", "job_type").first()
+    if job is None:
+        return True
+    source_type = source_type_for_downloader_job(job)
+    allowed = (
+        SourceType.YOUTUBE
+        if worker_type == "downloader-youtube"
+        else SourceType.PODCAST
+    )
+    return source_type is allowed
+
+
+# Backwards-compatible name for tests or external callers.
+_worker_accepts_job = worker_accepts_job
+
+
+def source_type_for_downloader_job(job: Job) -> SourceType:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    source_type = parse_str_enum(SourceType, payload.get("source_type"))
+    if source_type is not None:
+        return source_type
+    media_type = parse_str_enum(MediaType, payload.get("media_type"))
+    return SourceType.PODCAST if media_type is MediaType.AUDIO else SourceType.YOUTUBE
+
+
+def requeue_message_for_matching_worker(
+    channel, config: WorkerConfig, method_frame, message: QueuedJobMessage
+) -> None:
+    channel.basic_nack(method_frame.delivery_tag, requeue=True)
+    log.info(
+        "Message requeued for matching downloader worker worker_type=%s queue=%s job_id=%s",
+        config.worker_type,
+        config.queue,
+        message.job_id,
+    )
+    time.sleep(0.25)
+
+
+def process_delivery(
+    channel, config: WorkerConfig, method_frame, message: QueuedJobMessage
+) -> int:
+    try:
+        process_queued_job_message(message)
+    except Exception:
+        nack_failed_delivery(channel, config, method_frame)
+    else:
+        ack_completed_delivery(channel, config, method_frame)
+    return 1
+
+
+def nack_failed_delivery(channel, config: WorkerConfig, method_frame) -> None:
+    channel.basic_nack(method_frame.delivery_tag, requeue=False)
+    log.warning(
+        "Message nacked worker_type=%s queue=%s delivery_tag=%s",
+        config.worker_type,
+        config.queue,
+        method_frame.delivery_tag,
+    )
+
+
+def ack_completed_delivery(channel, config: WorkerConfig, method_frame) -> None:
+    channel.basic_ack(method_frame.delivery_tag)
+    log.info(
+        "Message acked worker_type=%s queue=%s delivery_tag=%s",
+        config.worker_type,
+        config.queue,
+        method_frame.delivery_tag,
+    )
+
+
+def cancel_worker_channel(channel, config: WorkerConfig) -> None:
+    channel.cancel()
+    log.info(
+        "Worker consumer cancelled worker_type=%s queue=%s",
+        config.worker_type,
+        config.queue,
+    )
+
+
 def main() -> None:
+    args = parse_args()
+    install_signal_handlers()
+    run_worker(
+        args.worker_type, prefetch_count=args.prefetch, max_messages=args.max_messages
+    )
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a GetOffline worker")
     parser.add_argument(
         "worker_type", choices=sorted(QUEUE_BY_WORKER), help="Which queue to consume"
@@ -409,12 +589,12 @@ def main() -> None:
         default=None,
         help="Exit after processing this many messages; defaults to GETOFFLINE_WORKER_MAX_MESSAGES or 1",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
-    run_worker(
-        args.worker_type, prefetch_count=args.prefetch, max_messages=args.max_messages
-    )
 
 
 if __name__ == "__main__":
