@@ -17,7 +17,6 @@ from django.utils import timezone
 
 from models.domain import DownloadStatus
 from models.domain import JobStatus
-from models.domain import JobType
 from models.domain import SourceType
 from models.domain import parse_str_enum
 from app.queue import publish_job

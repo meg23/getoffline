@@ -254,8 +254,6 @@ def _assert_pipeline_result(
     jobs: list,
 ) -> None:
     from models.domain import JobStatus
-    from models.models import Job
-
     active_jobs = [
         job
         for job in jobs
