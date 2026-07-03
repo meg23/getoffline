@@ -1,3 +1,4 @@
+import importlib
 import os
 import re
 import resource
@@ -8,8 +9,6 @@ from concurrent.futures import as_completed
 from pathlib import Path
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
-
-from yt_dlp import YoutubeDL
 
 from workers.content_filter import delete_media_artifacts
 from workers.content_filter import log_filtered_deletion
@@ -1500,4 +1499,4 @@ def download_youtube_items(config, downloaded_items):
 
 
 def _get_youtubedl():
-    return YoutubeDL
+    return importlib.import_module("yt_dlp").YoutubeDL

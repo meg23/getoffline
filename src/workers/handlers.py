@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 import os
 import re
 import subprocess
@@ -14,7 +15,6 @@ import feedparser
 from django.db import IntegrityError
 from django.db import transaction
 from django.utils import timezone
-from yt_dlp import YoutubeDL
 
 from app.queue import publish_job
 from models.jobs import create_job
@@ -35,6 +35,10 @@ from workers.youtube import _enable_youtube_quickjs_remote_component
 from workers.youtube import resolve_youtube_source_name
 
 log = get_logger("workers.handlers")
+
+
+def _youtube_dl_class():
+    return importlib.import_module("yt_dlp").YoutubeDL
 
 
 def _touch_active_job(job: Job, *, stage: str, title: str = "") -> None:
@@ -1119,7 +1123,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         outtmpl,
         {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
     )
-    with YoutubeDL(ydl_opts) as ydl:
+    with _youtube_dl_class()(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(download_url, download=True) or {}
         except Exception as exc:
@@ -1654,7 +1658,7 @@ def _youtube_entries_from_url(
         url,
         {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
     )
-    with YoutubeDL(ydl_opts) as ydl:
+    with _youtube_dl_class()(ydl_opts) as ydl:
         payload = ydl.extract_info(url, download=False) or {}
     if isinstance(payload, dict):
         _log_youtube_response(f"yt-dlp extract response ({reason})", payload)

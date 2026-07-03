@@ -1,3 +1,4 @@
+import importlib
 import math
 import os
 import subprocess
@@ -5,8 +6,6 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-
-from faster_whisper import WhisperModel
 
 from workers.logger import get_logger
 
@@ -16,6 +15,10 @@ _WHISPER_MODEL_CACHE = {}
 _TRANSCRIPTION_CACHE = {}
 _TRANSCRIPTION_CACHE_LOCK = threading.Lock()
 _WHISPER_MODEL_LOCK = threading.Lock()
+
+
+def _whisper_model_class():
+    return importlib.import_module("faster_whisper").WhisperModel
 
 
 class TranscriptionError(RuntimeError):
@@ -164,7 +167,7 @@ def _transcribe_in_process(
             log.info(
                 "Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir
             )
-            model = WhisperModel(
+            model = _whisper_model_class()(
                 model_name,
                 device="cpu",
                 compute_type="int8",

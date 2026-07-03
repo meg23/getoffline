@@ -167,7 +167,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.check_model:
-        _predict_profanity(["plain words"])
+        predictions = _predict_profanity(["plain words"])
+        if predictions is None:
+            print("model=fallback error=unavailable", flush=True)
+            return 2
         print("model=profanityfilter", flush=True)
         return 0
 
