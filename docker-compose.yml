@@ -3,8 +3,8 @@ services:
     image: rabbitmq:3.13-management
     restart: unless-stopped
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${GETOFFLINE_RABBITMQ_PUBLISHED_PORT:-5672}:5672"
+      - "${GETOFFLINE_RABBITMQ_MANAGEMENT_PUBLISHED_PORT:-15672}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -22,7 +22,7 @@ services:
       MYSQL_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
       MYSQL_ROOT_PASSWORD: ${GETOFFLINE_DB_ROOT_PASSWORD:-getoffline-root}
     ports:
-      - "3306:3306"
+      - "${GETOFFLINE_DB_PUBLISHED_PORT:-3306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
@@ -52,7 +52,7 @@ services:
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     ports:
-      - "8080:80"
+      - "${GETOFFLINE_FRONTEND_PUBLISHED_PORT:-8080}:80"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
       interval: 10s

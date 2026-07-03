@@ -1,4 +1,4 @@
-.PHONY: build run run-no-pex test test-compile test-ruff test-vulture test-coverage clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: build run run-no-pex test integration-test test-compile test-ruff test-vulture test-coverage clean check-system-deps venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -51,6 +51,10 @@ run-no-pex: venv check-system-deps
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers.main
 
 test: test-compile test-ruff test-vulture test-coverage
+
+integration-test: venv
+	@echo "Running Docker Compose integration test..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_youtube_pipeline.py
 
 test-compile: venv
 	@echo "Compiling Python files..."
