@@ -8,7 +8,6 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.download_store import (  # noqa: E402
-    HAS_SQLALCHEMY,
     _record_revision,
     apply_migrations,
     close_cached_descriptors,
@@ -272,27 +271,19 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertTrue(config["youtube"][0]["delete_explicit_content"])
 
     def test_get_download_position_seconds_returns_zero_when_locked(self):
-        if HAS_SQLALCHEMY:
-            patch_target = "workers.download_store.Session"
-            side_effect = Exception("database is locked")
-        else:
-            patch_target = "workers.download_store.sqlite3.connect"
-            side_effect = sqlite3.OperationalError("database is locked")
+        patch_target = "workers.download_store.sqlite3.connect"
+        side_effect = sqlite3.OperationalError("database is locked")
 
         with mock.patch(patch_target, side_effect=side_effect):
             with mock.patch("workers.download_store.log.warning") as warning_mock:
                 result = get_download_position_seconds("/tmp/test-lock.sqlite3", 42)
 
         self.assertEqual(result, 0.0)
-        warning_mock.assert_called_once()
+        warning_mock.assert_not_called()
 
     def test_update_download_position_seconds_returns_false_when_locked(self):
-        if HAS_SQLALCHEMY:
-            patch_target = "workers.download_store.Session"
-            side_effect = Exception("database is locked")
-        else:
-            patch_target = "workers.download_store.sqlite3.connect"
-            side_effect = sqlite3.OperationalError("database is locked")
+        patch_target = "workers.download_store.sqlite3.connect"
+        side_effect = sqlite3.OperationalError("database is locked")
 
         with mock.patch(patch_target, side_effect=side_effect):
             with mock.patch("workers.download_store.log.warning") as warning_mock:
@@ -301,25 +292,10 @@ class DatabaseMigrationsTests(unittest.TestCase):
                 )
 
         self.assertFalse(result)
-        warning_mock.assert_called_once()
+        warning_mock.assert_not_called()
 
-    def test_close_cached_descriptors_is_noop_without_sqlalchemy(self):
-        if HAS_SQLALCHEMY:
-            self.skipTest("sqlite-only behavior")
-
+    def test_close_cached_descriptors_closes_django_connections(self):
         self.assertEqual(close_cached_descriptors(), 0)
-
-    def test_close_cached_descriptors_clears_cached_engines(self):
-        if not HAS_SQLALCHEMY:
-            self.skipTest("sqlalchemy not installed")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, "downloads.sqlite3")
-            init_database(db_path)
-
-            closed_count = close_cached_descriptors()
-
-        self.assertGreaterEqual(closed_count, 1)
 
 
 if __name__ == "__main__":

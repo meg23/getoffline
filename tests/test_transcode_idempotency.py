@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-os.environ.setdefault("GETOFFLINE_DB_ENGINE", "sqlite")
+os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
