@@ -1262,7 +1262,7 @@ class SharedDjangoModelTests(TestCase):
                 return subtitle_file
 
             match = SimpleNamespace(
-                category="profanity", term="profanity-check", sentence="bad words"
+                category="profanity", term="profanityfilter", sentence="bad words"
             )
             fake_module = SimpleNamespace(YoutubeDL=FakeYoutubeDLForExplicitVideo)
             job = Job.objects.create(
@@ -1422,7 +1422,7 @@ class SharedDjangoModelTests(TestCase):
                 },
             )
             match = SimpleNamespace(
-                category="profanity", term="profanity-check", sentence="bad words"
+                category="profanity", term="profanityfilter", sentence="bad words"
             )
 
             def fake_create_subtitles(*_args, **_kwargs):
@@ -1491,7 +1491,7 @@ class SharedDjangoModelTests(TestCase):
                 ),
                 patch(
                     "workers.handlers.screen_transcript",
-                    side_effect=RuntimeError("profanity-check unavailable"),
+                    side_effect=RuntimeError("profanityfilter unavailable"),
                 ),
                 patch("workers.handlers.log_filtered_deletion") as deletion_log,
             ):

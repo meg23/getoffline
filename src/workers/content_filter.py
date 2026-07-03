@@ -3,8 +3,6 @@
 import argparse
 import importlib.util
 import re
-import sys
-import warnings
 from dataclasses import dataclass
 from glob import escape as glob_escape
 from pathlib import Path
@@ -14,89 +12,27 @@ from workers.logger import get_logger
 
 log = get_logger("content_filter")
 
-_PROFANITY_MODEL = None
-_PROFANITY_MODEL_ERROR: Optional[Exception] = None
-_EXPLICIT_TERM_PATTERNS = [
-    re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
-    for term in (
-        "anal",
-        "bitch",
-        "blowjob",
-        "bullshit",
-        "cocksucker",
-        "cunt",
-        "dick",
-        "fag",
-        "faggot",
-        "fuck",
-        "fucked",
-        "fucker",
-        "fucking",
-        "handjob",
-        "hello",
-        "motherfucker",
-        "nigger",
-        "porn",
-        "pornography",
-        "pussy",
-        "shit",
-        "slut",
-        "sex",
-        "twat",
-        "whore"
-    )
-]
-
-
-def _patch_profanity_check_compat() -> None:
-    """Expose legacy sklearn module paths required by profanity-check pickles."""
-    import joblib
-    import sklearn.externals
-
-    if not hasattr(sklearn.externals, "joblib"):
-        sklearn.externals.joblib = joblib
-    sys.modules.setdefault("sklearn.externals.joblib", joblib)
-
-    try:
-        import sklearn.svm._classes as svm_classes
-    except Exception:  # pragma: no cover - depends on scikit-learn internals
-        return
-    sys.modules.setdefault("sklearn.svm.classes", svm_classes)
+_PROFANITY_FILTER = None
+_PROFANITY_FILTER_ERROR: Optional[Exception] = None
+_PROFANITY_FILTER_TERM = "profanityfilter"
 
 
 def _predict_profanity(texts):
-    """Return profanity-check predictions, falling back to explicit terms if unavailable."""
-    global _PROFANITY_MODEL, _PROFANITY_MODEL_ERROR
-    if _PROFANITY_MODEL is None and _PROFANITY_MODEL_ERROR is None:
+    """Return profanityfilter predictions, or None when the package is unavailable."""
+    global _PROFANITY_FILTER, _PROFANITY_FILTER_ERROR
+    if _PROFANITY_FILTER is None and _PROFANITY_FILTER_ERROR is None:
         try:
-            if importlib.util.find_spec("profanity_check") is None:
-                raise ModuleNotFoundError("No module named 'profanity_check'")
-            _patch_profanity_check_compat()
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="pkg_resources is deprecated as an API.*",
-                    category=UserWarning,
-                )
-                warnings.filterwarnings(
-                    "ignore",
-                    message="Trying to unpickle estimator .* from version .*",
-                    category=UserWarning,
-                )
-                from profanity_check import predict
+            if importlib.util.find_spec("profanityfilter") is None:
+                raise ModuleNotFoundError("No module named 'profanityfilter'")
+            from profanityfilter import ProfanityFilter
 
-            _PROFANITY_MODEL = predict
-        except (
-            Exception
-        ) as exc:  # pragma: no cover - depends on optional package availability
-            _PROFANITY_MODEL_ERROR = exc
-            log.debug(
-                "profanity-check model is unavailable; using built-in explicit-term transcript screening: %r",
-                exc,
-            )
-    if _PROFANITY_MODEL is None:
+            _PROFANITY_FILTER = ProfanityFilter()
+        except Exception as exc:  # pragma: no cover - depends on optional package availability
+            _PROFANITY_FILTER_ERROR = exc
+            log.debug("profanityfilter is unavailable: %r", exc)
+    if _PROFANITY_FILTER is None:
         return None
-    return _PROFANITY_MODEL(list(texts))
+    return [bool(_PROFANITY_FILTER.is_profane(text)) for text in texts]
 
 
 _SRT_METADATA_RE = re.compile(
@@ -150,19 +86,10 @@ def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
             if is_profane:
                 return ExplicitContentMatch(
                     category="profanity",
-                    term="profanity-check",
+                    term=_PROFANITY_FILTER_TERM,
                     sentence=sentence,
                 )
 
-    for sentence in sentences:
-        for pattern in _EXPLICIT_TERM_PATTERNS:
-            match = pattern.search(sentence)
-            if match:
-                return ExplicitContentMatch(
-                    category="profanity",
-                    term=match.group(0).lower(),
-                    sentence=sentence,
-                )
     return None
 
 
@@ -235,11 +162,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     input_group.add_argument(
         "--check-model",
         action="store_true",
-        help="Verify that the profanity-check model loads instead of using fallback terms.",
+        help="Verify that profanityfilter loads successfully.",
     )
     input_group.add_argument(
         "--text",
-        help="Text to screen directly. Useful for checking whether profanity-check loads.",
+        help="Text to screen directly. Useful for checking whether profanityfilter loads.",
     )
     input_group.add_argument(
         "subtitle_path",
@@ -257,13 +184,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         predictions = _predict_profanity(["plain words"])
         if predictions is None:
             error = (
-                f"{type(_PROFANITY_MODEL_ERROR).__name__}: {_PROFANITY_MODEL_ERROR!r}"
-                if _PROFANITY_MODEL_ERROR is not None
+                f"{type(_PROFANITY_FILTER_ERROR).__name__}: {_PROFANITY_FILTER_ERROR!r}"
+                if _PROFANITY_FILTER_ERROR is not None
                 else "unknown"
             )
             print(f"model=fallback error={error}", flush=True)
             return 2
-        print("model=profanity-check", flush=True)
+        print("model=profanityfilter", flush=True)
         return 0
 
     match = _screen_text_or_file(text=args.text, subtitle_path=args.subtitle_path)

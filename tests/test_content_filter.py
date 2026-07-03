@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.content_filter import (  # noqa: E402
     ExplicitContentMatch,
-    _patch_profanity_check_compat,
     delete_media_artifacts,
     find_explicit_content,
     log_filtered_deletion,
@@ -20,13 +19,13 @@ from workers.content_filter import (  # noqa: E402
 
 
 class ContentFilterTests(unittest.TestCase):
-    def test_detects_profanity_with_profanity_check_model(self):
+    def test_detects_profanity_with_profanityfilter(self):
         with patch("workers.content_filter._predict_profanity", return_value=[1]):
             match = find_explicit_content("That was fucking ridiculous.")
 
         self.assertIsNotNone(match)
         self.assertEqual(match.category, "profanity")
-        self.assertEqual(match.term, "profanity-check")
+        self.assertEqual(match.term, "profanityfilter")
         self.assertEqual(match.sentence, "That was fucking ridiculous.")
 
         with patch("workers.content_filter._predict_profanity", return_value=[0]):
@@ -41,17 +40,14 @@ class ContentFilterTests(unittest.TestCase):
             )
 
         self.assertIsNotNone(match)
-        self.assertEqual(match.term, "profanity-check")
+        self.assertEqual(match.term, "profanityfilter")
         self.assertEqual(match.sentence, "The next sentence contains bullshit!")
 
-    def test_falls_back_to_explicit_term_list_when_model_unavailable(self):
+    def test_returns_clean_when_profanityfilter_is_unavailable(self):
         with patch("workers.content_filter._predict_profanity", return_value=None):
             match = find_explicit_content("That was fucking ridiculous.")
 
-        self.assertIsNotNone(match)
-        self.assertEqual(match.category, "profanity")
-        self.assertEqual(match.term, "fucking")
-        self.assertEqual(match.sentence, "That was fucking ridiculous.")
+        self.assertIsNone(match)
 
     def test_reads_srt_without_timestamps_or_sequence_numbers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -101,22 +97,6 @@ class ContentFilterTests(unittest.TestCase):
             self.assertTrue(similarly_named.exists())
             self.assertEqual(set(deleted_paths), {media.resolve(), subtitle.resolve()})
 
-    def test_profanity_check_compat_exposes_legacy_sklearn_modules(self):
-        try:
-            import joblib  # noqa: F401
-            import sklearn.externals  # noqa: F401
-            import sklearn.svm._classes  # noqa: F401
-        except Exception as exc:
-            self.skipTest(f"optional sklearn/joblib compatibility deps unavailable: {exc}")
-
-        sys.modules.pop("sklearn.externals.joblib", None)
-        sys.modules.pop("sklearn.svm.classes", None)
-
-        _patch_profanity_check_compat()
-
-        self.assertIn("sklearn.externals.joblib", sys.modules)
-        self.assertIn("sklearn.svm.classes", sys.modules)
-
     def test_cli_reports_clean_and_matched_text(self):
         with (
             patch("workers.content_filter.find_explicit_content", return_value=None),
@@ -127,7 +107,7 @@ class ContentFilterTests(unittest.TestCase):
 
         match = ExplicitContentMatch(
             category="profanity",
-            term="profanity-check",
+            term="profanityfilter",
             sentence="flagged words",
         )
         with (
@@ -136,7 +116,7 @@ class ContentFilterTests(unittest.TestCase):
         ):
             self.assertEqual(main(["--text", "flagged words"]), 0)
         print_call.assert_any_call(
-            "matched category=profanity term='profanity-check'", flush=True
+            "matched category=profanity term='profanityfilter'", flush=True
         )
         print_call.assert_any_call("sentence=flagged words", flush=True)
 
@@ -154,7 +134,7 @@ class ContentFilterTests(unittest.TestCase):
             patch("builtins.print") as print_call,
         ):
             self.assertEqual(main(["--check-model"]), 0)
-        print_call.assert_called_once_with("model=profanity-check", flush=True)
+        print_call.assert_called_once_with("model=profanityfilter", flush=True)
 
         with (
             patch("workers.content_filter._predict_profanity", return_value=None),
