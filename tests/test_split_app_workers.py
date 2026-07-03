@@ -92,6 +92,7 @@ Client = AuthenticatedClient
 class SharedDjangoModelTests(TestCase):
     @classmethod
     def setUpClass(cls):
+        _ = cls
         _ensure_django_test_schema()
         super().setUpClass()
 
