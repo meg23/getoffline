@@ -1,3 +1,4 @@
+import importlib
 import math
 import os
 import subprocess
@@ -14,6 +15,10 @@ _WHISPER_MODEL_CACHE = {}
 _TRANSCRIPTION_CACHE = {}
 _TRANSCRIPTION_CACHE_LOCK = threading.Lock()
 _WHISPER_MODEL_LOCK = threading.Lock()
+
+
+def _whisper_model_class():
+    return importlib.import_module("faster_whisper").WhisperModel
 
 
 class TranscriptionError(RuntimeError):
@@ -149,11 +154,6 @@ def _transcribe_in_process(
     language: str = None,
     log_prefix: str = "transcription",
 ):
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError("faster-whisper is required for transcription.") from exc
-
     with _WHISPER_MODEL_LOCK:
         model = _WHISPER_MODEL_CACHE.get(model_name)
         if model is None:
@@ -167,7 +167,7 @@ def _transcribe_in_process(
             log.info(
                 "Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir
             )
-            model = WhisperModel(
+            model = _whisper_model_class()(
                 model_name,
                 device="cpu",
                 compute_type="int8",

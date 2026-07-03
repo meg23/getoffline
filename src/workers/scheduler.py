@@ -7,12 +7,15 @@ import socket
 import threading
 import time
 import uuid
+from collections.abc import Callable
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable, Iterator, Protocol
+from typing import Protocol
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError
+from django.db import transaction
 from django.utils import timezone
 
 from workers.logger import get_logger
@@ -341,7 +344,7 @@ class InMemorySlotBackend:
 
 @dataclass
 class SlotLease:
-    scheduler: "GlobalSlotScheduler"
+    scheduler: GlobalSlotScheduler
     job_type: str
     lease_id: str
     _stop: threading.Event

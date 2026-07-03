@@ -1,6 +1,7 @@
 """Subprocess entrypoint for isolated Whisper transcription work."""
 
 import gc
+import importlib
 import json
 import sys
 import traceback
@@ -14,9 +15,9 @@ def transcribe_worker_once(
     model = None
     segments = None
     try:
-        from faster_whisper import WhisperModel
-
-        model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        model = importlib.import_module("faster_whisper").WhisperModel(
+            model_name, device="cpu", compute_type="int8"
+        )
         transcribe_kwargs = {"vad_filter": True}
         if language:
             transcribe_kwargs["language"] = language

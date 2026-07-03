@@ -1,15 +1,21 @@
 import json
-from typing import Any, Dict
+from typing import Any
 
+import pika
+from django.conf import settings
 
-from .routing import MAX_QUEUE_PRIORITY, queue_arguments, queue_name
+from models.models import Job
+
+from .routing import MAX_QUEUE_PRIORITY
+from .routing import queue_arguments
+from .routing import queue_name
 
 
 def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def job_priority(message: Dict[str, Any]) -> int:
+def job_priority(message: dict[str, Any]) -> int:
     """Return the RabbitMQ priority for a job message.
 
     Higher numbers are consumed first.  Priorities intentionally encode the
@@ -46,15 +52,13 @@ def job_priority(message: Dict[str, Any]) -> int:
     return 0
 
 
-def _message_with_payload(message: Dict[str, Any]) -> Dict[str, Any]:
+def _message_with_payload(message: dict[str, Any]) -> dict[str, Any]:
     if isinstance(message.get("payload"), dict):
         return message
     job_id = message.get("job_id")
     if not job_id:
         return message
     try:
-        from models.models import Job
-
         payload = (
             Job.objects.filter(pk=int(job_id)).values_list("payload", flat=True).first()
         )
@@ -67,10 +71,7 @@ def _message_with_payload(message: Dict[str, Any]) -> Dict[str, Any]:
     return enriched
 
 
-def publish_job(message: Dict[str, Any]) -> None:
-    import pika
-    from django.conf import settings
-
+def publish_job(message: dict[str, Any]) -> None:
     message = _message_with_payload(message)
     job_type = str(message["job_type"])
     queue = queue_name(

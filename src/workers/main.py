@@ -1,15 +1,14 @@
 import argparse
-from pathlib import Path
 import os
-from typing import Dict, List
+from pathlib import Path
+
+from django.core.management import execute_from_command_line
 
 from workers.config import load_config
+from workers.media_library_server import VIDEO_EXTENSIONS
+from workers.media_library_server import AppState
+from workers.media_library_server import import_local_media_file
 from workers.podcasts import download_podcasts
-from workers.media_library_server import (
-    AppState,
-    VIDEO_EXTENSIONS,
-    import_local_media_file,
-)
 from workers.youtube import download_youtube_items
 
 
@@ -29,8 +28,6 @@ def run_downloads() -> None:
 
 
 def _execute_django_runserver(addr: str) -> None:
-    from django.core.management import execute_from_command_line
-
     execute_from_command_line(["getoffline", "runserver", addr])
 
 
@@ -45,7 +42,7 @@ def _path_sort_key(path: Path) -> str:
 
 def _directory_video_files(
     directory: Path, recursive: bool, excluded_root: Path
-) -> List[Path]:
+) -> list[Path]:
     iterator = directory.rglob("*") if recursive else directory.iterdir()
     files = []
     for candidate in iterator:
@@ -63,7 +60,7 @@ def _directory_video_files(
     return sorted(files, key=_path_sort_key)
 
 
-def _unused_update_runner(config: Dict, downloaded_items: List[str]) -> None:
+def _unused_update_runner(config: dict, downloaded_items: list[str]) -> None:
     _ = config, downloaded_items
 
 

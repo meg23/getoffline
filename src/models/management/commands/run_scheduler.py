@@ -8,7 +8,6 @@ from django.utils import timezone
 from models.models import ScheduledJob
 from models.scheduler import enqueue_due_scheduled_jobs
 
-
 DEFAULT_SCHEDULES = [
     {
         "profile_id": "default",

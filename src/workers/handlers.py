@@ -1,39 +1,44 @@
 import hashlib
+import importlib
 import os
+import re
 import subprocess
 import threading
 import time
+from collections.abc import Iterable
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
-from typing import Iterable
+
+import feedparser
+from django.db import IntegrityError
+from django.db import transaction
+from django.utils import timezone
 
 from app.queue import publish_job
-from django.db import IntegrityError, transaction
-from django.utils import timezone
-from workers.logger import get_logger
 from models.jobs import create_job
-from models.models import (
-    AppConfigValue,
-    Download,
-    Job,
-    ProfileConfigValue,
-    SourceConfig,
-    TranscriptSegment,
-)
-from workers.utils import sanitize_channel_name
-from workers.youtube import (
-    _apply_ytdlp_player_js_variant_workaround,
-    _enable_youtube_quickjs_remote_component,
-)
+from models.models import AppConfigValue
+from models.models import Download
+from models.models import Job
+from models.models import ProfileConfigValue
+from models.models import SourceConfig
+from models.models import TranscriptSegment
+from workers.content_filter import delete_media_artifacts
+from workers.content_filter import log_filtered_deletion
+from workers.content_filter import screen_transcript
+from workers.logger import get_logger
 from workers.subtitles import create_subtitles
-from workers.content_filter import (
-    delete_media_artifacts,
-    log_filtered_deletion,
-    screen_transcript,
-)
+from workers.utils import sanitize_channel_name
+from workers.youtube import _apply_ytdlp_player_js_variant_workaround
+from workers.youtube import _enable_youtube_quickjs_remote_component
+from workers.youtube import resolve_youtube_source_name
 
 log = get_logger("workers.handlers")
+
+
+def _youtube_dl_class():
+    return importlib.import_module("yt_dlp").YoutubeDL
 
 
 def _touch_active_job(job: Job, *, stage: str, title: str = "") -> None:
@@ -993,8 +998,6 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     source_name = str(payload.get("source_name") or "").strip()
     if not source_name and source_type == SourceConfig.SOURCE_YOUTUBE:
         try:
-            from workers.youtube import resolve_youtube_source_name
-
             source_name = resolve_youtube_source_name(download_url)
         except Exception as exc:
             log.warning(
@@ -1120,9 +1123,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         outtmpl,
         {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
     )
-    from yt_dlp import YoutubeDL
-
-    with YoutubeDL(ydl_opts) as ydl:
+    with _youtube_dl_class()(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(download_url, download=True) or {}
         except Exception as exc:
@@ -1524,8 +1525,6 @@ def _podcast_candidates(source: SourceConfig) -> Iterable[dict]:
         source.name,
         source.url,
     )
-    import feedparser
-
     feed = feedparser.parse(source.url)
     if getattr(feed, "bozo", False):
         log.warning(
@@ -1659,9 +1658,7 @@ def _youtube_entries_from_url(
         url,
         {k: v for k, v in ydl_opts.items() if k not in {"logger", "progress_hooks"}},
     )
-    from yt_dlp import YoutubeDL
-
-    with YoutubeDL(ydl_opts) as ydl:
+    with _youtube_dl_class()(ydl_opts) as ydl:
         payload = ydl.extract_info(url, download=False) or {}
     if isinstance(payload, dict):
         _log_youtube_response(f"yt-dlp extract response ({reason})", payload)
@@ -2112,8 +2109,6 @@ def _subtitle_offset_for_download(download: Download, payload: dict) -> float | 
 def _load_segments_from_subtitle(path: Path) -> list[str]:
     if not path.exists() or path.suffix.lower() != ".srt":
         return []
-    import re
-
     text = path.read_text(encoding="utf-8", errors="replace")
     segments: list[str] = []
     for block in re.split(r"\n\s*\n", text.strip()):

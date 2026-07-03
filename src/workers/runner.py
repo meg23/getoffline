@@ -1,36 +1,39 @@
+# ruff: noqa: E402
 import argparse
 import json
 import os
 import signal
 import time
-from typing import Dict
 
 import django
 import pika
-from pika import exceptions as pika_exceptions
 from django.conf import settings
 from django.db import close_old_connections
+from pika import exceptions as pika_exceptions
+
 from workers.logger import get_logger
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 django.setup()
 
-from app.routing import (  # noqa: E402
-    YOUTUBE_DOWNLOAD_QUEUE,
-    PODCAST_DOWNLOAD_QUEUE,
-    SERIAL_EPISODE_CHECK_QUEUE,
-    TRANSFER_QUEUE,
-    TRANSCRIPT_QUEUE,
-    FFMPEG_QUEUE,
-    CLEANUP_QUEUE,
-    queue_arguments,
-    queue_name,
-)
-from models.jobs import claim_job, finish_job  # noqa: E402
-from models.models import Download, Job, SourceConfig  # noqa: E402
-from workers.handlers import HANDLERS  # noqa: E402
-from workers.scheduler import HEAVY_JOB_TYPES, scheduler_from_settings  # noqa: E402
 from app.queue import job_priority  # noqa: E402
+from app.routing import CLEANUP_QUEUE  # noqa: E402
+from app.routing import FFMPEG_QUEUE
+from app.routing import PODCAST_DOWNLOAD_QUEUE
+from app.routing import SERIAL_EPISODE_CHECK_QUEUE
+from app.routing import TRANSCRIPT_QUEUE
+from app.routing import TRANSFER_QUEUE
+from app.routing import YOUTUBE_DOWNLOAD_QUEUE
+from app.routing import queue_arguments
+from app.routing import queue_name
+from models.jobs import claim_job  # noqa: E402
+from models.jobs import finish_job
+from models.models import Download  # noqa: E402
+from models.models import Job
+from models.models import SourceConfig
+from workers.handlers import HANDLERS  # noqa: E402
+from workers.scheduler import HEAVY_JOB_TYPES  # noqa: E402
+from workers.scheduler import scheduler_from_settings
 
 log = get_logger("workers.runner")
 
@@ -142,7 +145,7 @@ def _scheduler():
     return _SCHEDULER
 
 
-def process_message(message: Dict) -> None:
+def process_message(message: dict) -> None:
     close_old_connections()
     job_id = int(message["job_id"])
     log.info(

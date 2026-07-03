@@ -3,18 +3,19 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.content_retention import enforce_content_retention  # noqa: E402
-from workers.download_store import (
-    init_database,
-    is_downloaded,
-    upsert_download,
-)  # noqa: E402
 from support import DatabaseCleanupTestCase  # noqa: E402
+
+from workers.content_retention import enforce_content_retention  # noqa: E402
+from workers.download_store import init_database  # noqa: E402
+from workers.download_store import is_downloaded
+from workers.download_store import upsert_download
 
 
 class ContentRetentionTests(DatabaseCleanupTestCase):

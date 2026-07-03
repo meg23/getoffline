@@ -7,15 +7,13 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.content_filter import (  # noqa: E402
-    ExplicitContentMatch,
-    delete_media_artifacts,
-    find_explicit_content,
-    log_filtered_deletion,
-    main,
-    screen_transcript,
-    transcript_text,
-)
+from workers.content_filter import ExplicitContentMatch  # noqa: E402
+from workers.content_filter import delete_media_artifacts
+from workers.content_filter import find_explicit_content
+from workers.content_filter import log_filtered_deletion
+from workers.content_filter import main
+from workers.content_filter import screen_transcript
+from workers.content_filter import transcript_text
 
 
 class ContentFilterTests(unittest.TestCase):

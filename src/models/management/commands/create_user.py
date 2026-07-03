@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
+from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.utils import timezone
 

@@ -1,19 +1,17 @@
+import hashlib
 import json
 import re
+import secrets
 import threading
 import uuid
-import hashlib
-import secrets
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from workers.download_store import (
-    ensure_config_seeded,
-    get_stored_config,
-    init_database,
-    update_stored_defaults,
-)
+from workers.download_store import ensure_config_seeded
+from workers.download_store import get_stored_config
+from workers.download_store import init_database
+from workers.download_store import update_stored_defaults
 
 
 @dataclass(frozen=True)
@@ -39,7 +37,7 @@ class ProfileManager:
     ) -> None:
         self.registry_path = registry_path.expanduser().resolve()
         self.lock = threading.RLock()
-        self.profiles: Dict[str, Profile] = {}
+        self.profiles: dict[str, Profile] = {}
         self.active_profile_id = "default"
         self._load(default_output_root, default_database_path)
 
@@ -119,7 +117,7 @@ class ProfileManager:
             return profile_root
         return download_output_root
 
-    def _read_registry(self) -> Dict[str, Any]:
+    def _read_registry(self) -> dict[str, Any]:
         if not self.registry_path.exists():
             return {}
         try:
@@ -131,7 +129,7 @@ class ProfileManager:
             return {}
         return parsed
 
-    def _profile_from_entry(self, entry: Any) -> Optional[Profile]:
+    def _profile_from_entry(self, entry: Any) -> Profile | None:
         if not isinstance(entry, dict):
             return None
         profile_id = str(entry.get("id") or "").strip()
@@ -169,7 +167,7 @@ class ProfileManager:
             )
 
     def _write_registry(self) -> None:
-        entries: List[Dict[str, str]] = []
+        entries: list[dict[str, str]] = []
         for profile in self.list_profiles():
             entries.append(
                 {
@@ -191,10 +189,10 @@ class ProfileManager:
         )
         temporary_path.replace(self.registry_path)
 
-    def _profile_sort_key(self, profile: Profile) -> Tuple[bool, str]:
+    def _profile_sort_key(self, profile: Profile) -> tuple[bool, str]:
         return profile.profile_id != "default", profile.name.casefold()
 
-    def list_profiles(self) -> List[Profile]:
+    def list_profiles(self) -> list[Profile]:
         profiles = list(self.profiles.values())
         profiles.sort(key=self._profile_sort_key)
         return profiles
@@ -299,9 +297,9 @@ class ProfileManager:
             )
 
     def _hash_pin(self, salt: str, pin: str) -> str:
-        return hashlib.sha256(f"{salt}:{pin}".encode("utf-8")).hexdigest()
+        return hashlib.sha256(f"{salt}:{pin}".encode()).hexdigest()
 
-    def load_config(self, profile: Profile) -> Dict[str, Any]:
+    def load_config(self, profile: Profile) -> dict[str, Any]:
         stored = get_stored_config(str(profile.database_path))
         return {
             "defaults": stored["defaults"],
@@ -310,7 +308,7 @@ class ProfileManager:
             "podcasts": stored["podcasts"],
         }
 
-    def _ensure_unique_name(self, name: str, ignored_id: Optional[str] = None) -> None:
+    def _ensure_unique_name(self, name: str, ignored_id: str | None = None) -> None:
         for profile in self.profiles.values():
             if profile.profile_id == ignored_id:
                 continue

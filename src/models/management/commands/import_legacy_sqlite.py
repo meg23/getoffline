@@ -1,23 +1,21 @@
 import sqlite3
 from datetime import timezone as datetime_timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
+from django.core.management.base import CommandError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from models.models import (
-    AppConfigValue,
-    Download,
-    DownloadSettings,
-    ProfileConfigValue,
-    ProfileDownloadSettings,
-    SourceConfig,
-    TranscriptSegment,
-)
-
+from models.models import AppConfigValue
+from models.models import Download
+from models.models import DownloadSettings
+from models.models import ProfileConfigValue
+from models.models import ProfileDownloadSettings
+from models.models import SourceConfig
+from models.models import TranscriptSegment
 
 DOWNLOAD_FIELDS = [
     "source_type",
@@ -450,7 +448,7 @@ class Command(BaseCommand):
             return
         self._write_progress(f"Imported {count} {label}...")
 
-    def _datetime(self, value: Any, fallback: Optional[Any]) -> Optional[Any]:
+    def _datetime(self, value: Any, fallback: Any | None) -> Any | None:
         if value in (None, ""):
             return fallback
         if hasattr(value, "tzinfo"):

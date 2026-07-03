@@ -3,36 +3,29 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
-try:
-    import django  # noqa: E402
-    from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
-    from django.test import Client, TestCase  # noqa: E402
-except (
-    ModuleNotFoundError
-):  # pragma: no cover - dependency may be absent outside project venv
-    django = None
-    TestCase = unittest.TestCase
+import django  # noqa: E402
+from django.apps import apps  # noqa: E402
+from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
+from django.db import connection
+from django.test import Client  # noqa: E402
+from django.test import TestCase
+from django.utils import timezone
 
-
-if django is not None:
-    django.setup()
+django.setup()
 
 
 def _ensure_django_test_schema():
-    if django is None:
-        return
-    from django.apps import apps
-    from django.db import connection
-
     existing_tables = set(connection.introspection.table_names())
     with connection.schema_editor() as schema_editor:
         for model in apps.get_models():
@@ -43,80 +36,70 @@ def _ensure_django_test_schema():
 
 
 def _clear_django_test_data():
-    if django is None:
-        return
-    from django.apps import apps
-
     for model in reversed(apps.get_models()):
         model.objects.all().delete()
 
 
 from app.queue import job_priority  # noqa: E402
-from app.routing import (
-    CLEANUP_QUEUE,
-    PODCAST_DOWNLOAD_QUEUE,
-    TRANSCRIPT_QUEUE,
-    YOUTUBE_DOWNLOAD_QUEUE,
-    queue_arguments,
-    queue_name,
-)  # noqa: E402
+from app.routing import CLEANUP_QUEUE  # noqa: E402
+from app.routing import PODCAST_DOWNLOAD_QUEUE
+from app.routing import TRANSCRIPT_QUEUE
+from app.routing import YOUTUBE_DOWNLOAD_QUEUE
+from app.routing import queue_arguments
+from app.routing import queue_name
 
-if django is not None:
-    from models.jobs import claim_job, create_job, finish_job  # noqa: E402
-    from models.models import (
-        Download,
-        Job,
-        ScheduledJob,
-        SourceConfig,
-        ProfileConfigValue,
-        TranscriptSegment,
-    )  # noqa: E402
-    from app.views import (
-        _queue_counts,
-        _sync_update_downloads_schedule,
-        _write_manual_upload,
-    )  # noqa: E402
-    from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
-    from workers.handlers import (
-        check_for_episodes,
-        retention_cleanup,
-        transcode_media,
-        generate_transcript,
-        _delete_ffmpeg_source_files,
-        _downloaded_media_requires_ffmpeg,
-        _ffmpeg_video_args,
-        _idempotency_key,
-        _is_expected_ytdlp_download_error,
-        _download_with_yt_dlp,
-        _youtube_candidates,
-    )  # noqa: E402
+from app.views import _queue_counts  # noqa: E402
+from app.views import _sync_update_downloads_schedule
+from app.views import _write_manual_upload
+from models.jobs import claim_job  # noqa: E402
+from models.jobs import create_job
+from models.jobs import finish_job
+from models.models import Download  # noqa: E402
+from models.models import Job
+from models.models import ProfileConfigValue
+from models.models import ScheduledJob
+from models.models import SourceConfig
+from models.models import TranscriptSegment
+from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
+from workers.handlers import _delete_ffmpeg_source_files  # noqa: E402
+from workers.handlers import _download_with_yt_dlp
+from workers.handlers import _downloaded_media_requires_ffmpeg
+from workers.handlers import _ffmpeg_video_args
+from workers.handlers import _idempotency_key
+from workers.handlers import _is_expected_ytdlp_download_error
+from workers.handlers import _youtube_candidates
+from workers.handlers import check_for_episodes
+from workers.handlers import generate_transcript
+from workers.handlers import retention_cleanup
+from workers.handlers import transcode_media
+from workers import runner
+from django.contrib.auth.models import User
 
-    class AuthenticatedClient(Client):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            from django.contrib.auth.models import User
 
-            user, created = User.objects.get_or_create(username="default")
-            if created:
-                user.set_password("pass")
-                user.save(update_fields=["password"])
-            self.force_login(user)
+class AuthenticatedClient(Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        user, created = User.objects.get_or_create(username="default")
+        if created:
+            user.set_password("pass")
+            user.save(update_fields=["password"])
+        self.force_login(user)
 
-    Client = AuthenticatedClient
+
+Client = AuthenticatedClient
 
 
 class SharedDjangoModelTests(TestCase):
     @classmethod
     def setUpClass(cls):
-        if django is not None:
-            _ensure_django_test_schema()
-        super(SharedDjangoModelTests, cls).setUpClass()
+        _ = cls
+        _ensure_django_test_schema()
+        super().setUpClass()
 
     def setUp(self):
         super().setUp()
         _clear_django_test_data()
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_expected_ytdlp_unavailable_errors_are_nonfatal(self):
         class DownloadError(Exception):
             pass
@@ -130,7 +113,6 @@ class SharedDjangoModelTests(TestCase):
             )
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_unexpected_ytdlp_errors_are_not_suppressed(self):
         class DownloadError(Exception):
             pass
@@ -142,7 +124,6 @@ class SharedDjangoModelTests(TestCase):
             _is_expected_ytdlp_download_error(TypeError("video unavailable"))
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_create_claim_and_finish_job(self):
         job = create_job(
             profile_id="default",
@@ -158,7 +139,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(claimed.status, Job.STATUS_SUCCEEDED)
         self.assertEqual(claimed.payload, {"source": "test"})
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_idempotency_reuses_queued_job(self):
         first = create_job(
             profile_id="default",
@@ -172,7 +152,6 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertEqual(first.id, second.id)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_manual_upload_writes_download_metadata_with_original_filename(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ProfileConfigValue.objects.create(
@@ -193,11 +172,8 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(download.file_ext, "mp4")
             self.assertEqual(download.file_path_relative, "manual/Vacation Clip.mp4")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_manual_upload_endpoint_queues_transcript_pipeline(self):
         client = Client()
-        from django.contrib.auth.models import User
-
         user, _created = User.objects.get_or_create(username="default")
         user.set_password("pass")
         user.save(update_fields=["password"])
@@ -235,12 +211,7 @@ class SharedDjangoModelTests(TestCase):
                 }
             )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_library_preview_keeps_default_limit(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
         base_seen_at = timezone.now()
         for index in range(105):
             Download.objects.create(
@@ -262,12 +233,7 @@ class SharedDjangoModelTests(TestCase):
             response.content.count(b"<tr\n                data-row-id="), 100
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_library_all_filter_renders_every_database_download(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
         base_seen_at = timezone.now()
         for index in range(105):
             Download.objects.create(
@@ -290,11 +256,7 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertContains(response, 'data-server-mode="all"')
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_scheduler_enqueues_due_database_configured_job(self):
-        from datetime import timedelta
-        from django.utils import timezone
-
         due_at = timezone.now() - timedelta(minutes=1)
         schedule = ScheduledJob.objects.create(
             profile_id="default",
@@ -324,10 +286,7 @@ class SharedDjangoModelTests(TestCase):
             }
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_auto_update_setting_creates_enabled_update_schedule(self):
-        from django.utils import timezone
-
         now = timezone.now()
 
         _sync_update_downloads_schedule("alice", "15", now=now)
@@ -344,10 +303,7 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertGreater(schedule.next_run_at, now)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_auto_update_setting_zero_disables_update_schedule(self):
-        from django.utils import timezone
-
         schedule = ScheduledJob.objects.create(
             profile_id="alice",
             job_type="update_downloads",
@@ -362,11 +318,8 @@ class SharedDjangoModelTests(TestCase):
         schedule.refresh_from_db()
         self.assertFalse(schedule.enabled)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_save_config_syncs_auto_update_schedule_for_logged_in_user(self):
         client = Client()
-        from django.contrib.auth.models import User
-
         User.objects.create_user(username="alice", password="pass")
         self.assertTrue(client.login(username="alice", password="pass"))
 
@@ -379,11 +332,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(schedule.enabled)
         self.assertEqual(schedule.interval_seconds, 420)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_retention_cleanup_deletes_expired_non_favorite_content(self):
-        from datetime import timedelta
-        from django.utils import timezone
-
         with tempfile.TemporaryDirectory() as tmpdir:
             expired = Path(tmpdir) / "expired.mp4"
             favorite = Path(tmpdir) / "favorite.mp4"
@@ -425,7 +374,6 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(expired_download.download_status, "retention_deleted")
             self.assertEqual(favorite_download.download_status, "downloaded")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_queue_counts_groups_active_jobs_by_worker_queue(self):
         Job.objects.create(
             profile_id="default", job_type="update_downloads", status=Job.STATUS_QUEUED
@@ -452,7 +400,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(counts["Transcripts"]["total"], 0)
         self.assertEqual(queue_name("retention_cleanup"), CLEANUP_QUEUE)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_library_marks_sibling_podcast_subtitles_when_database_path_missing(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -485,7 +432,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn('data-has-subtitles="1"', body)
         self.assertIn(f"/subtitle/{download.id}/", body)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_subtitle_endpoint_converts_srt_to_vtt_for_browser_tracks(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -519,7 +465,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(body.startswith("WEBVTT"))
         self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_media_endpoint_limits_open_ended_range_for_fast_video_start(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -551,7 +496,6 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertEqual(len(body), 1024 * 1024)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_media_endpoint_honors_explicit_range_end(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -580,7 +524,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response["Content-Range"], "bytes 2-5/10")
         self.assertEqual(body, b"2345")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_video_player_omits_subtitle_track_by_default(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -622,7 +565,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("window.addEventListener('pagehide'", body)
         self.assertIn("navigator.sendBeacon(form.action, body)", body)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_django_player_position_endpoint_persists_resume_and_completion(self):
         client = Client()
         download = Download.objects.create(
@@ -657,7 +599,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertAlmostEqual(download.last_position_seconds, 0.0, places=2)
         self.assertTrue(download.played)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
@@ -683,17 +624,13 @@ class SharedDjangoModelTests(TestCase):
             }
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_purge_deletes_media_and_database_record(self):
         client = Client()
-        from django.contrib.auth.models import User
-
         user, _created = User.objects.get_or_create(username="default")
         user.set_password("pass")
         user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
-        from django.db import connection
-
+    
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS media_summaries")
             cursor.execute(
@@ -765,16 +702,12 @@ class SharedDjangoModelTests(TestCase):
                 self.assertEqual(cursor.fetchone()[0], 0)
 
     def _drop_media_summaries_test_table(self):
-        from django.db import connection
-
+    
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS media_summaries")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_batch_update_transcript_refresh_supersedes_active_job(self):
         client = Client()
-        from django.contrib.auth.models import User
-
         user, _created = User.objects.get_or_create(username="default")
         user.set_password("pass")
         user.save(update_fields=["password"])
@@ -821,7 +754,6 @@ class SharedDjangoModelTests(TestCase):
             }
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(
             profile_id="default",
@@ -870,7 +802,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(jobs.first().payload["item_uid"], "video-1")
         publish.assert_called_once()
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_republishes_existing_queued_download_job(self):
         source = SourceConfig.objects.create(
             profile_id="default",
@@ -922,11 +853,7 @@ class SharedDjangoModelTests(TestCase):
         )
         publish.assert_called_once_with(existing)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_episode_checker_resets_and_republishes_stale_running_download_job(self):
-        from datetime import timedelta
-        from django.utils import timezone
-
         source = SourceConfig.objects.create(
             profile_id="default",
             source_type=SourceConfig.SOURCE_YOUTUBE,
@@ -981,7 +908,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertIsNone(existing.started_at)
         publish.assert_called_once_with(existing)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_youtube_candidates_drill_into_channel_videos_tab(self):
         source = SourceConfig(
             id=4,
@@ -1013,7 +939,6 @@ class SharedDjangoModelTests(TestCase):
             candidates[0]["media_url"], "https://www.youtube.com/watch?v=abcdefghijk"
         )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_youtube_candidates_skip_live_titled_flat_entries_by_default(self):
         source = SourceConfig(
             id=5,
@@ -1043,7 +968,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["item_uid"], "abcdefghijk")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_youtube_candidates_allow_live_titled_flat_entries_when_enabled(self):
         source = SourceConfig(
             id=6,
@@ -1067,7 +991,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["item_uid"], "MbEO1g8_COs")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_video_without_explicit_delete_is_inserted_before_ffmpeg(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_root = Path(tmpdir)
@@ -1136,7 +1059,6 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(result["source_file_paths"], [str(media_file.resolve())])
             self.assertFalse(result["delete_explicit_content"])
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_video_with_explicit_delete_is_screened_before_database_insert(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_root = Path(tmpdir)
@@ -1220,7 +1142,6 @@ class SharedDjangoModelTests(TestCase):
                 TranscriptSegment.objects.filter(download=download).exists()
             )
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_video_with_explicit_match_is_not_added_to_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_root = Path(tmpdir)
@@ -1300,7 +1221,6 @@ class SharedDjangoModelTests(TestCase):
             self.assertFalse(subtitle_file.exists())
             deletion_log.assert_called_once()
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_transcode_media_updates_row_deletes_original_and_queues_transcript(
         self,
     ):
@@ -1356,7 +1276,6 @@ class SharedDjangoModelTests(TestCase):
             run.assert_called_once()
             publish.assert_called_once()
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_transcode_media_propagates_explicit_filter_to_transcript_job(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             original = Path(tmpdir) / "episode.webm"
@@ -1393,7 +1312,6 @@ class SharedDjangoModelTests(TestCase):
             )
             self.assertTrue(transcript_job.payload["delete_explicit_content"])
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_generate_transcript_filters_explicit_recent_download(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "video.mp4"
@@ -1448,7 +1366,6 @@ class SharedDjangoModelTests(TestCase):
             )
             deletion_log.assert_called_once()
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_generate_transcript_keeps_media_when_screening_errors(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "video.mp4"
@@ -1506,7 +1423,6 @@ class SharedDjangoModelTests(TestCase):
 
 
 class QueueRoutingTests(unittest.TestCase):
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_ffmpeg_source_cleanup_logs_and_deletes_only_original_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             original = Path(tmpdir) / "episode.webm"
@@ -1529,7 +1445,6 @@ class QueueRoutingTests(unittest.TestCase):
             self.assertIn("reason=missing", log_output)
             self.assertIn("FFmpeg source cleanup finished", log_output)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_h264_video_args_use_smaller_jellyfin_friendly_crf_profile(self):
         def fake_profile_setting(_profile_id, key, default):
             values = {"video_codec": "h264"}
@@ -1553,7 +1468,6 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(args[args.index("-threads") + 1], "1")
         self.assertIn("+faststart", args)
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_jellyfin_h264_setting_transcodes_single_file_videos(self):
         def fake_profile_setting(_profile_id, key, default):
             values = {"video_format": "mp4", "video_codec": "h264"}
@@ -1580,7 +1494,6 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertTrue(mp4_requires)
         self.assertEqual(mp4_target, "mp4")
 
-    @unittest.skipIf(django is None, "Django is not installed")
     def test_copy_video_setting_only_remuxes_when_container_differs(self):
         def fake_profile_setting(_profile_id, key, default):
             values = {"video_format": "mp4", "video_codec": "copy"}
@@ -1691,11 +1604,8 @@ class QueueRoutingTests(unittest.TestCase):
         )
 
 
-@unittest.skipIf(django is None, "Django is not installed")
 class WorkerRabbitMQConnectionTests(unittest.TestCase):
     def test_worker_rabbitmq_parameters_disables_default_heartbeat(self):
-        from workers import runner
-
         with patch.object(
             runner.settings,
             "RABBITMQ_URL",
@@ -1706,8 +1616,6 @@ class WorkerRabbitMQConnectionTests(unittest.TestCase):
         self.assertEqual(params.heartbeat, 0)
 
     def test_worker_rabbitmq_parameters_respects_url_heartbeat(self):
-        from workers import runner
-
         with patch.object(
             runner.settings,
             "RABBITMQ_URL",
@@ -1718,8 +1626,6 @@ class WorkerRabbitMQConnectionTests(unittest.TestCase):
         self.assertEqual(params.heartbeat, 300)
 
     def test_close_connection_if_open_skips_already_closed_connection(self):
-        from workers import runner
-
         connection = SimpleNamespace(is_closed=True, close=lambda: self.fail("closed"))
 
         runner.close_connection_if_open(connection)

@@ -1,55 +1,51 @@
 import hashlib
 import logging
-import os
-import time
 import mimetypes
-import uuid
+import os
 import re
+import time
+import uuid
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
-from django.http import (
-    FileResponse,
-    Http404,
-    HttpRequest,
-    HttpResponse,
-    HttpResponseBadRequest,
-    HttpResponseRedirect,
-    JsonResponse,
-    StreamingHttpResponse,
-)
-from django.shortcuts import get_object_or_404, render
+from django.contrib.auth.decorators import login_required
+from django.db import connection
+from django.db.models import Count
+from django.db.models import Sum
+from django.http import FileResponse
+from django.http import Http404
+from django.http import HttpRequest
+from django.http import HttpResponse
+from django.http import HttpResponseBadRequest
+from django.http import HttpResponseRedirect
+from django.http import JsonResponse
+from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404
+from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
-from django.db import connection
-from django.db.models import Count, Sum
-from django.views.decorators.http import require_POST
-from django.contrib.auth.decorators import login_required
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from models.jobs import create_job
-from models.models import (
-    AppConfigValue,
-    Download,
-    DownloadSettings,
-    Job,
-    ProfileConfigValue,
-    ProfileDownloadSettings,
-    ScheduledJob,
-    SourceConfig,
-    TranscriptSegment,
-)
+from models.models import AppConfigValue
+from models.models import Download
+from models.models import DownloadSettings
+from models.models import Job
+from models.models import ProfileConfigValue
+from models.models import ProfileDownloadSettings
+from models.models import ScheduledJob
+from models.models import SourceConfig
+from models.models import TranscriptSegment
 
 from .queue import publish_job
-from .routing import (
-    PODCAST_DOWNLOAD_QUEUE,
-    SERIAL_EPISODE_CHECK_QUEUE,
-    TRANSFER_QUEUE,
-    TRANSCRIPT_QUEUE,
-    YOUTUBE_DOWNLOAD_QUEUE,
-    queue_name,
-)
+from .routing import PODCAST_DOWNLOAD_QUEUE
+from .routing import SERIAL_EPISODE_CHECK_QUEUE
+from .routing import TRANSCRIPT_QUEUE
+from .routing import TRANSFER_QUEUE
+from .routing import YOUTUBE_DOWNLOAD_QUEUE
+from .routing import queue_name
 
 ALLOWED_JOB_TYPES = {
     "update_downloads",

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 from django.db import transaction
 from django.utils import timezone
@@ -10,8 +10,8 @@ def create_job(
     *,
     profile_id: str,
     job_type: str,
-    payload: Optional[Dict[str, Any]] = None,
-    idempotency_key: Optional[str] = None,
+    payload: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
 ) -> Job:
     if idempotency_key:
         existing = Job.objects.filter(
@@ -30,7 +30,7 @@ def create_job(
 
 
 @transaction.atomic
-def claim_job(job_id: int) -> Optional[Job]:
+def claim_job(job_id: int) -> Job | None:
     job = (
         Job.objects.select_for_update()
         .filter(pk=int(job_id), status=Job.STATUS_QUEUED)
@@ -46,7 +46,7 @@ def claim_job(job_id: int) -> Optional[Job]:
     return job
 
 
-def finish_job(job: Job, *, status: str, error_message: Optional[str] = None) -> None:
+def finish_job(job: Job, *, status: str, error_message: str | None = None) -> None:
     now = timezone.now()
     job.status = status
     job.error_message = error_message

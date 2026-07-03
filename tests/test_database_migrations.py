@@ -7,22 +7,20 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.download_store import (  # noqa: E402
-    _record_revision,
-    apply_migrations,
-    close_cached_descriptors,
-    get_download_position_seconds,
-    get_stored_config,
-    init_database,
-    resolve_download_artifact_path,
-    resolve_database_path,
-    update_download_position_seconds,
-    replace_sources,
-    seed_sources_from_config,
-    update_download_settings,
-    update_source_config,
-    update_stored_defaults,
-)
+from workers.download_store import _record_revision  # noqa: E402
+from workers.download_store import apply_migrations
+from workers.download_store import close_cached_descriptors
+from workers.download_store import get_download_position_seconds
+from workers.download_store import get_stored_config
+from workers.download_store import init_database
+from workers.download_store import replace_sources
+from workers.download_store import resolve_database_path
+from workers.download_store import resolve_download_artifact_path
+from workers.download_store import seed_sources_from_config
+from workers.download_store import update_download_position_seconds
+from workers.download_store import update_download_settings
+from workers.download_store import update_source_config
+from workers.download_store import update_stored_defaults
 
 
 class DatabaseMigrationsTests(unittest.TestCase):
