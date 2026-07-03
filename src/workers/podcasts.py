@@ -28,6 +28,7 @@ from workers.utils import split_title_filter_terms
 from workers.utils import title_matches_filter
 
 PODCAST_DOWNLOAD_RETRIES = 3
+YoutubeDL = None
 
 
 class _YoutubeDlQuietLogger:
@@ -651,4 +652,4 @@ def download_podcasts(config, downloaded_items):
 
 
 def _get_youtubedl():
-    return importlib.import_module("yt_dlp").YoutubeDL
+    return YoutubeDL or importlib.import_module("yt_dlp").YoutubeDL

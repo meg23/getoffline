@@ -32,6 +32,7 @@ from workers.utils import split_title_filter_terms
 from workers.utils import title_matches_filter
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
+YoutubeDL = None
 
 
 log = get_logger("youtube")
@@ -1499,4 +1500,4 @@ def download_youtube_items(config, downloaded_items):
 
 
 def _get_youtubedl():
-    return importlib.import_module("yt_dlp").YoutubeDL
+    return YoutubeDL or importlib.import_module("yt_dlp").YoutubeDL
