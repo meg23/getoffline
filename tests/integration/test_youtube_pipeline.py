@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,11 @@ SRC = ROOT / "src"
 
 
 def _run(
-    cmd: list[str], *, env: dict[str, str], timeout: int = 300
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    timeout: int = 300,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     print(f"+ {' '.join(cmd)}", flush=True)
     completed = subprocess.run(
@@ -43,7 +48,7 @@ def _run(
     )
     if completed.stdout:
         print(completed.stdout, flush=True)
-    if completed.returncode != 0:
+    if check and completed.returncode != 0:
         raise AssertionError(
             f"command failed with exit code {completed.returncode}: {' '.join(cmd)}"
         )
@@ -77,14 +82,24 @@ def _django_setup(env: dict[str, str]) -> None:
     django.setup()
 
 
-def _wait_for_frontend(deadline: float) -> None:
+def _free_tcp_port(excluded: set[int]) -> int:
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = int(sock.getsockname()[1])
+        if port not in excluded:
+            excluded.add(port)
+            return port
+
+
+def _wait_for_frontend(deadline: float, frontend_port: int) -> None:
     import urllib.request
 
     last_error = None
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(
-                "http://127.0.0.1:8080/", timeout=5
+                f"http://127.0.0.1:{frontend_port}/", timeout=5
             ) as response:
                 if response.status < 500:
                     return
@@ -228,29 +243,60 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="getoffline-integration-") as tmp:
         downloads_dir = Path(tmp) / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
+        reserved_ports: set[int] = set()
+        frontend_port = _free_tcp_port(reserved_ports)
+        mysql_port = _free_tcp_port(reserved_ports)
+        rabbitmq_port = _free_tcp_port(reserved_ports)
+        rabbitmq_management_port = _free_tcp_port(reserved_ports)
         project = f"getoffline-it-{uuid.uuid4().hex[:8]}"
-        env = os.environ.copy()
-        env.update(
+        compose_env = os.environ.copy()
+        compose_env.update(
             {
                 "COMPOSE_PROJECT_NAME": project,
                 "GETOFFLINE_DJANGO_SECRET_KEY": "integration-test-secret",
                 "GETOFFLINE_DOWNLOADS_DIR": str(downloads_dir),
-                "GETOFFLINE_DB_HOST": "127.0.0.1",
+                "GETOFFLINE_FRONTEND_PUBLISHED_PORT": str(frontend_port),
+                "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
+                "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
+                "GETOFFLINE_RABBITMQ_MANAGEMENT_PUBLISHED_PORT": str(
+                    rabbitmq_management_port
+                ),
+                "GETOFFLINE_DB_HOST": "mysql",
                 "GETOFFLINE_DB_PORT": "3306",
                 "GETOFFLINE_DB_NAME": "getoffline",
                 "GETOFFLINE_DB_USER": "getoffline",
                 "GETOFFLINE_DB_PASSWORD": "getoffline",
-                "GETOFFLINE_RABBITMQ_URL": "amqp://guest:guest@127.0.0.1:5672/%2F",
+                "GETOFFLINE_RABBITMQ_URL": "amqp://guest:guest@rabbitmq:5672/%2F",
                 "GETOFFLINE_RABBITMQ_EXCHANGE": "getoffline",
+            }
+        )
+        host_env = compose_env.copy()
+        host_env.update(
+            {
+                "GETOFFLINE_DB_HOST": "127.0.0.1",
+                "GETOFFLINE_DB_PORT": str(mysql_port),
+                "GETOFFLINE_RABBITMQ_URL": (
+                    f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
+                ),
                 "DJANGO_SETTINGS_MODULE": "app.settings",
                 "PYTHONPATH": str(SRC),
             }
         )
         try:
-            _run([*compose, "up", "-d", "--build"], env=env, timeout=1800)
+            try:
+                _run([*compose, "up", "-d", "--build"], env=compose_env, timeout=1800)
+            except AssertionError:
+                _run([*compose, "ps"], env=compose_env, timeout=60, check=False)
+                _run(
+                    [*compose, "logs", "--tail", "200"],
+                    env=compose_env,
+                    timeout=120,
+                    check=False,
+                )
+                raise
             deadline = time.monotonic() + timeout_seconds
-            _wait_for_frontend(deadline)
-            _django_setup(env)
+            _wait_for_frontend(deadline, frontend_port)
+            _django_setup(host_env)
             _verify_profanity_model()
             job_id = _queue_download_job()
             _wait_for_pipeline(job_id, deadline)
@@ -259,8 +305,9 @@ def main() -> int:
             if keep_stack.lower() not in {"1", "true", "yes"}:
                 _run(
                     [*compose, "down", "-v", "--remove-orphans"],
-                    env=env,
+                    env=compose_env,
                     timeout=600,
+                    check=False,
                 )
     return 0
 
