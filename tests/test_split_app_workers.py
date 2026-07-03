@@ -257,8 +257,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Library Item 000")
         self.assertNotContains(response, "Library Item 104")
-        self.assertEqual(len(response.context["downloads"]), 100)
-        self.assertEqual(response.context["stats"]["visible"], 100)
+        self.assertEqual(response.content.count(b"<tr\n                data-row-id="), 100)
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_library_all_filter_renders_every_database_download(self):
@@ -283,9 +282,8 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Library Item 000")
         self.assertContains(response, "Library Item 104")
-        self.assertEqual(len(response.context["downloads"]), 105)
-        self.assertEqual(response.context["stats"]["visible"], 105)
-        self.assertEqual(response.context["library_filter_mode"], "all")
+        self.assertEqual(response.content.count(b"<tr\n                data-row-id="), 105)
+        self.assertContains(response, 'data-server-mode="all"')
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_scheduler_enqueues_due_database_configured_job(self):

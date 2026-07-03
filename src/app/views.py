@@ -345,6 +345,8 @@ def library(request: HttpRequest) -> HttpResponse:
     total_elapsed = time.perf_counter() - total_start
 
     log.info(
+        "Library rendered profile_id=%s setup=%.3fs rows=%.3fs stats=%.3fs "
+        "jobs=%.3fs render=%.3fs total=%.3fs visible_downloads=%s",
         profile_id,
         setup_elapsed,
         rows_elapsed,
