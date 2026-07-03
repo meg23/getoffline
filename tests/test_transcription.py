@@ -79,6 +79,50 @@ class TranscriptionChunkingTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertTrue(all(kwargs["language"] == "en" for _, kwargs in calls))
 
+    def test_in_process_reuses_loaded_model_for_same_cache_dir(self):
+        constructed = []
+
+        class FakeModel:
+            def __init__(self, *args, **kwargs):
+                constructed.append((args, kwargs))
+
+            def transcribe(self, audio, **kwargs):
+                return (
+                    [FakeSegment(0.0, 1.0, f"text {len(constructed)}")],
+                    SimpleNamespace(
+                        language="en",
+                        language_probability=1.0,
+                        duration=1.0,
+                        duration_after_vad=1.0,
+                    ),
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = Path(tmpdir) / "episode.mp3"
+            input_file.write_bytes(b"audio")
+            model_cache = Path(tmpdir) / "models"
+
+            fake_module = types.SimpleNamespace(WhisperModel=FakeModel)
+            with patch.dict(sys.modules, {"faster_whisper": fake_module}), patch.object(
+                transcription, "_WHISPER_MODEL_CACHE", {}
+            ), patch.object(
+                transcription, "_probe_audio_duration", return_value=1.0
+            ), patch.dict(
+                os.environ, {"GETOFFLINE_MODEL_CACHE_DIR": str(model_cache)}
+            ):
+                first = transcription._transcribe_in_process(
+                    input_file, "base", language="en", log_prefix="first"
+                )
+                second = transcription._transcribe_in_process(
+                    input_file, "base", language="en", log_prefix="second"
+                )
+
+        self.assertEqual(len(constructed), 1)
+        self.assertEqual(first["text"], "text 1")
+        self.assertEqual(second["text"], "text 1")
+        self.assertEqual(constructed[0][0], ("base",))
+        self.assertEqual(constructed[0][1]["download_root"], str(model_cache))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 
 from workers.logger import get_logger
-from workers.transcription import transcribe_with_whisper
 
 log = get_logger("subtitles")
 
@@ -195,6 +194,8 @@ def generate_whisper_subtitles(
         failed_marker_path,
     )
     try:
+        from workers.transcription import transcribe_with_whisper
+
         result = transcribe_with_whisper(
             input_file,
             model_name,
