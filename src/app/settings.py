@@ -70,11 +70,20 @@ TEMPLATES = [
         },
     }
 ]
-if os.getenv("GETOFFLINE_DB_ENGINE", "mysql").strip().lower() == "sqlite":
+USE_IN_MEMORY_TEST_DB = os.getenv(
+    "GETOFFLINE_TEST_IN_MEMORY_DB", "0"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+if USE_IN_MEMORY_TEST_DB:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": os.getenv("GETOFFLINE_DB_NAME", ":memory:"),
+            "NAME": ":memory:",
         }
     }
 else:

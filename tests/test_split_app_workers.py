@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-os.environ.setdefault("GETOFFLINE_DB_ENGINE", "sqlite")
+os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
@@ -258,7 +258,9 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Library Item 000")
         self.assertNotContains(response, "Library Item 104")
-        self.assertEqual(response.content.count(b"<tr\n                data-row-id="), 100)
+        self.assertEqual(
+            response.content.count(b"<tr\n                data-row-id="), 100
+        )
 
     @unittest.skipIf(django is None, "Django is not installed")
     def test_library_all_filter_renders_every_database_download(self):
@@ -283,7 +285,9 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Library Item 000")
         self.assertContains(response, "Library Item 104")
-        self.assertEqual(response.content.count(b"<tr\n                data-row-id="), 105)
+        self.assertEqual(
+            response.content.count(b"<tr\n                data-row-id="), 105
+        )
         self.assertContains(response, 'data-server-mode="all"')
 
     @unittest.skipIf(django is None, "Django is not installed")
@@ -1198,7 +1202,9 @@ class SharedDjangoModelTests(TestCase):
                     "workers.handlers.create_subtitles",
                     side_effect=fake_create_subtitles,
                 ) as subtitles,
-                patch("workers.handlers.screen_transcript", return_value=None) as screen,
+                patch(
+                    "workers.handlers.screen_transcript", return_value=None
+                ) as screen,
             ):
                 result = _download_with_yt_dlp(job, job.payload)
 

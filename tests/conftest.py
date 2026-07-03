@@ -8,10 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 # Unit tests should not depend on external MySQL/RabbitMQ services. Configure
-# Django to use SQLite before any test module imports app.settings or calls
-# django.setup().
-os.environ.setdefault("GETOFFLINE_DB_ENGINE", "sqlite")
-os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
+# Django to use its in-memory test database before any test module imports
+# app.settings or calls django.setup().
+os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
 try:

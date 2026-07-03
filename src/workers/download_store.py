@@ -4,30 +4,10 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
-import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from workers.logger import get_logger
-
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    Float,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-    bindparam,
-    create_engine,
-    func,
-    select,
-    update,
-)
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
-from sqlalchemy.pool import NullPool
-
-HAS_SQLALCHEMY = True
 
 log = get_logger("download_store")
 
@@ -122,14 +102,12 @@ def _table_columns_sqlite(db_path: str, table_name: str) -> set[str]:
 def _ensure_schema_migrations_table(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 revision TEXT PRIMARY KEY,
                 applied_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -159,8 +137,7 @@ def _record_revision(db_path: str, revision: str) -> None:
 def _migration_0001_create_downloads(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_type TEXT NOT NULL,
@@ -205,8 +182,7 @@ def _migration_0001_create_downloads(db_path: str) -> None:
                 last_position_updated_at TEXT,
                 UNIQUE(source_type, source_name, item_uid)
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -229,32 +205,28 @@ def _migration_0002_add_playback_columns(db_path: str) -> None:
 def _migration_0003_add_config_tables(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS download_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 youtube_cookie_text TEXT,
                 cookie_updated_at TEXT,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         conn.commit()
+
 
 def _migration_0004_add_source_configs(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS source_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_type TEXT NOT NULL,
@@ -267,16 +239,18 @@ def _migration_0004_add_source_configs(db_path: str) -> None:
                 subtitle_offset_seconds REAL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         conn.commit()
+
 
 def _migration_0005_add_source_enabled(db_path: str) -> None:
     columns = _table_columns_sqlite(db_path, "source_configs")
     if "enabled" in columns:
         return
     with sqlite3.connect(db_path) as conn:
-        conn.execute("ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            "ALTER TABLE source_configs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
+        )
         conn.commit()
 
 
@@ -307,8 +281,7 @@ def _migration_0007_add_relative_media_paths(db_path: str) -> None:
 def _migration_0008_add_transcript_search_tables(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS transcript_segments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 download_id INTEGER NOT NULL,
@@ -318,14 +291,11 @@ def _migration_0008_add_transcript_search_tables(db_path: str) -> None:
                 text TEXT NOT NULL,
                 UNIQUE(download_id, subtitle_path, start_seconds, text)
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_transcript_segments_download_id
             ON transcript_segments(download_id)
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -378,17 +348,22 @@ def _migration_0013_add_source_title_exclude_filter(db_path: str) -> None:
 def _run_migration_0003(db_path: str) -> None:
     _migration_0003_add_config_tables(db_path)
 
+
 def _run_migration_0004(db_path: str) -> None:
     _migration_0004_add_source_configs(db_path)
+
 
 def _run_migration_0005(db_path: str) -> None:
     _migration_0005_add_source_enabled(db_path)
 
+
 def _run_migration_0006(db_path: str) -> None:
     _migration_0006_add_favorite_column(db_path)
 
+
 def _run_migration_0007(db_path: str) -> None:
     _migration_0007_add_relative_media_paths(db_path)
+
 
 def _run_migration_0008(db_path: str) -> None:
     _migration_0008_add_transcript_search_tables(db_path)
@@ -397,8 +372,10 @@ def _run_migration_0008(db_path: str) -> None:
 def _run_migration_0010(db_path: str) -> None:
     _migration_0010_add_source_max_downloads(db_path)
 
+
 def _run_migration_0011(db_path: str) -> None:
     _migration_0011_add_source_explicit_content_filter(db_path)
+
 
 def _run_migration_0012(db_path: str) -> None:
     _migration_0012_add_youtube_include_flags(db_path)
@@ -517,13 +494,11 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
         row = conn.execute(
             "SELECT youtube_cookie_text FROM download_settings WHERE id = 1"
         ).fetchone()
-        source_rows = conn.execute(
-            """
+        source_rows = conn.execute("""
             SELECT id, source_type, name, url, media_type, enabled, subtitles, subtitle_offset_seconds, max_downloads, delete_explicit_content, include_shorts, include_livestreams, title_exclude
             FROM source_configs
             ORDER BY source_type, position, id
-            """
-        ).fetchall()
+            """).fetchall()
 
     youtube = []
     podcasts = []
@@ -975,413 +950,225 @@ def resolve_download_artifact_path(
     return None
 
 
+_DJANGO_READY = False
 
-class Base(DeclarativeBase):
-    pass
 
-class DownloadRecord(Base):
-    __tablename__ = "downloads"
-    __table_args__ = (
-        UniqueConstraint(
-            "source_type", "source_name", "item_uid", name="uq_download_source_item"
-        ),
-    )
+def _ensure_django_ready() -> None:
+    global _DJANGO_READY
+    if _DJANGO_READY:
+        return
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+    import django
+    from django.apps import apps
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    source_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    item_uid: Mapped[str] = mapped_column(String(255), nullable=False)
-    item_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    item_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    media_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    uploader: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    channel: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    extractor: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    playlist_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    playlist_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    upload_date: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    file_path_relative: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    file_ext: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    expected_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    format_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    format_note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    audio_codec: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    video_codec: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    resolution: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    fps: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    subtitle_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True
-    )
-    subtitle_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    subtitle_path_relative: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True
-    )
-    download_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="downloaded"
-    )
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    raw_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    first_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-    last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    played: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    played_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_position_seconds: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
-    total_listened_seconds: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
-    last_position_updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    if not apps.ready:
+        django.setup()
+    _DJANGO_READY = True
 
-_UPDATE_PROGRESS_STMT = (
-    update(DownloadRecord)
-    .where(DownloadRecord.id == bindparam("row_id_param"))
-    .values(
-        last_position_seconds=bindparam("safe_position_param"),
-        total_listened_seconds=func.max(
-            0.0,
-            func.coalesce(DownloadRecord.total_listened_seconds, 0.0)
-            + func.max(
-                0.0,
-                bindparam("safe_position_param")
-                - func.coalesce(DownloadRecord.last_position_seconds, 0.0),
-            ),
-        ),
-        last_position_updated_at=bindparam("updated_at_param"),
-        last_seen_at=bindparam("updated_at_param"),
-    )
-)
 
-_ENGINE_LOCK = threading.Lock()
-_ENGINE_REGISTRY: Dict[str, Any] = {}
-_INITIALIZED_PATHS: set[str] = set()
+def _download_model():
+    _ensure_django_ready()
+    from models.models import Download
 
-def _normalize_db_path(db_path: str) -> str:
-    return str(Path(db_path).expanduser().resolve())
+    return Download
 
-def _engine_for(db_path: str):
-    normalized_db_path = _normalize_db_path(db_path)
-    Path(normalized_db_path).parent.mkdir(parents=True, exist_ok=True)
-    with _ENGINE_LOCK:
-        engine = _ENGINE_REGISTRY.get(normalized_db_path)
-        if engine is not None:
-            return engine
-
-        engine = create_engine(
-            f"sqlite:///{normalized_db_path}",
-            future=True,
-            poolclass=NullPool,
-            pool_pre_ping=True,
-        )
-        _ENGINE_REGISTRY[normalized_db_path] = engine
-        log.info("Created SQLAlchemy engine db=%s", normalized_db_path)
-        return engine
 
 def close_cached_descriptors() -> int:
-    """Dispose cached SQLAlchemy engines to proactively release open file descriptors."""
-    with _ENGINE_LOCK:
-        count = len(_ENGINE_REGISTRY)
-        engines = list(_ENGINE_REGISTRY.values())
-        _ENGINE_REGISTRY.clear()
-        _INITIALIZED_PATHS.clear()
-    for engine in engines:
-        try:
-            engine.dispose()
-        except Exception:  # pragma: no cover - defensive cleanup only
-            pass
-    return count
+    """Close Django database connections; kept for compatibility with callers."""
+    _ensure_django_ready()
+    from django.db import connections
+
+    connections.close_all()
+    return 0
+
 
 def init_database(db_path: str) -> None:
-    normalized_db_path = _normalize_db_path(db_path)
-    apply_migrations(normalized_db_path)
-    engine = _engine_for(normalized_db_path)
+    """Initialize the configured Django database.
 
-    with _ENGINE_LOCK:
-        already_initialized = normalized_db_path in _INITIALIZED_PATHS
-    if already_initialized:
-        log.debug(
-            "Skipping create_all; already initialized db=%s", normalized_db_path
-        )
-        return
+    ``db_path`` is accepted for legacy call-site compatibility; application data now
+    lives in the configured Django database rather than a per-profile SQLite file.
+    """
+    _ = db_path
+    _ensure_django_ready()
 
-    Base.metadata.create_all(engine)
-
-    with _ENGINE_LOCK:
-        _INITIALIZED_PATHS.add(normalized_db_path)
-    log.info("Ran create_all for db=%s", normalized_db_path)
 
 def is_downloaded(
     db_path: str, source_type: str, source_name: str, item_uid: str
 ) -> bool:
-    with Session(_engine_for(db_path)) as session:
-        stmt = select(DownloadRecord.id).where(
-            DownloadRecord.source_type == source_type,
-            DownloadRecord.source_name == source_name,
-            DownloadRecord.item_uid == item_uid,
-            DownloadRecord.download_status.in_(PROCESSED_DOWNLOAD_STATUSES),
-        )
-        row_id = session.execute(stmt).scalar_one_or_none()
-        return row_id is not None
+    _ = db_path
+    Download = _download_model()
+    return Download.objects.filter(
+        source_type=source_type,
+        source_name=source_name,
+        item_uid=item_uid,
+        download_status__in=PROCESSED_DOWNLOAD_STATUSES,
+    ).exists()
+
 
 def has_episode_title_for_source(
     db_path: str, source_type: str, source_name: str, title: Optional[str]
 ) -> bool:
+    _ = db_path
     normalized = str(title or "").strip().casefold()
     if not normalized:
         return False
+    Download = _download_model()
+    titles = Download.objects.filter(
+        source_type=source_type,
+        source_name=source_name,
+        download_status__in=PROCESSED_DOWNLOAD_STATUSES,
+        title__isnull=False,
+    ).values_list("title", flat=True)
+    return any(str(value or "").strip().casefold() == normalized for value in titles)
 
-    with Session(_engine_for(db_path)) as session:
-        rows = session.execute(
-            select(DownloadRecord.title).where(
-                DownloadRecord.source_type == source_type,
-                DownloadRecord.source_name == source_name,
-                DownloadRecord.download_status.in_(PROCESSED_DOWNLOAD_STATUSES),
-                DownloadRecord.title.is_not(None),
-            )
-        ).all()
-        return any(
-            str(row.title or "").strip().casefold() == normalized for row in rows
-        )
 
 def upsert_download(db_path: str, payload: Dict[str, Any]):
+    _ = db_path
+    Download = _download_model()
     now = _utcnow()
     file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(
         payload
     )
-    try:
-        with Session(_engine_for(db_path)) as session:
-            stmt = select(DownloadRecord).where(
-                DownloadRecord.source_type == payload["source_type"],
-                DownloadRecord.source_name == payload["source_name"],
-                DownloadRecord.item_uid == payload["item_uid"],
-            )
-            existing = session.execute(stmt).scalar_one_or_none()
-            if existing is None:
-                existing = DownloadRecord(
-                    source_type=payload["source_type"],
-                    source_name=payload["source_name"],
-                    source_url=payload.get("source_url"),
-                    item_uid=payload["item_uid"],
-                    first_seen_at=now,
-                )
-                session.add(existing)
+    defaults = {
+        "source_url": payload.get("source_url"),
+        "last_seen_at": now,
+        "file_path_relative": file_path_relative,
+        "subtitle_enabled": bool(payload.get("subtitle_enabled", True)),
+        "subtitle_path_relative": subtitle_path_relative,
+        "raw_metadata_json": _coerce_json(payload.get("raw_metadata")),
+    }
+    for key in [
+        "item_id",
+        "item_url",
+        "media_url",
+        "title",
+        "description",
+        "uploader",
+        "channel",
+        "upload_date",
+        "duration_seconds",
+        "file_path",
+        "file_ext",
+        "file_size_bytes",
+        "subtitle_path",
+        "download_status",
+    ]:
+        defaults[key] = payload.get(key)
+    if defaults.get("download_status") == "downloaded":
+        defaults["completed_at"] = now
+    Download.objects.update_or_create(
+        source_type=payload["source_type"],
+        source_name=payload["source_name"],
+        item_uid=payload["item_uid"],
+        defaults=defaults,
+    )
 
-            for key in [
-                "item_id",
-                "item_url",
-                "media_url",
-                "title",
-                "description",
-                "uploader",
-                "channel",
-                "extractor",
-                "playlist_id",
-                "playlist_title",
-                "upload_date",
-                "duration_seconds",
-                "file_path",
-                "file_path_relative",
-                "file_ext",
-                "file_size_bytes",
-                "expected_bytes",
-                "format_id",
-                "format_note",
-                "audio_codec",
-                "video_codec",
-                "resolution",
-                "fps",
-                "subtitle_path",
-                "subtitle_path_relative",
-                "download_status",
-                "error_message",
-            ]:
-                setattr(existing, key, payload.get(key))
-            existing.file_path_relative = file_path_relative
-            existing.subtitle_enabled = bool(payload.get("subtitle_enabled", True))
-            existing.subtitle_path_relative = subtitle_path_relative
-            existing.raw_metadata_json = _coerce_json(payload.get("raw_metadata"))
-            existing.last_seen_at = now
-            if existing.download_status == "downloaded":
-                existing.completed_at = now
-            session.commit()
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(db_path, "upserting download row", exc)
-        raise
 
 def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
-    now = _utcnow() if played else None
-    try:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            record.played = bool(played)
-            record.played_at = now
-            record.last_seen_at = _utcnow()
-            session.commit()
-            return True
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(db_path, "marking download played", exc)
-        raise
+    _ = db_path
+    Download = _download_model()
+    updated = Download.objects.filter(pk=int(row_id)).update(
+        played=bool(played),
+        played_at=_utcnow() if played else None,
+        last_seen_at=_utcnow(),
+    )
+    return updated > 0
+
 
 def reset_download_playback(db_path: str, row_id: int) -> bool:
+    _ = db_path
     now = _utcnow()
-    try:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            record.played = False
-            record.played_at = None
-            record.last_position_seconds = 0.0
-            record.last_position_updated_at = now
-            record.last_seen_at = now
-            session.commit()
-            return True
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(db_path, "resetting download playback", exc)
-        raise
+    Download = _download_model()
+    updated = Download.objects.filter(pk=int(row_id)).update(
+        played=False,
+        played_at=None,
+        last_position_seconds=0.0,
+        last_position_updated_at=now,
+        last_seen_at=now,
+    )
+    return updated > 0
+
 
 def mark_all_downloads_played(db_path: str) -> int:
+    _ = db_path
     now = _utcnow()
-    try:
-        with Session(_engine_for(db_path)) as session:
-            updated = (
-                session.query(DownloadRecord)
-                .filter(DownloadRecord.played.is_(False))
-                .update(
-                    {
-                        DownloadRecord.played: True,
-                        DownloadRecord.played_at: now,
-                        DownloadRecord.last_seen_at: now,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            session.commit()
-            return int(updated or 0)
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(db_path, "marking all downloads played", exc)
-        raise
+    Download = _download_model()
+    return int(
+        Download.objects.filter(played=False).update(
+            played=True, played_at=now, last_seen_at=now
+        )
+    )
 
-def mark_download_favorite(
-    db_path: str, row_id: int, favorite: bool = True
-) -> bool:
-    try:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            record.favorite = bool(favorite)
-            record.last_seen_at = _utcnow()
-            session.commit()
-            return True
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(db_path, "marking download favorite", exc)
-        raise
+
+def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
+    _ = db_path
+    Download = _download_model()
+    return (
+        Download.objects.filter(pk=int(row_id)).update(
+            favorite=bool(favorite), last_seen_at=_utcnow()
+        )
+        > 0
+    )
+
 
 def delete_download_entry(db_path: str, row_id: int) -> bool:
-    try:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            session.delete(record)
-            session.commit()
-            return True
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(db_path, "deleting download entry", exc)
-        raise
+    _ = db_path
+    Download = _download_model()
+    deleted, _detail = Download.objects.filter(pk=int(row_id)).delete()
+    return deleted > 0
+
 
 def get_download_position_seconds(db_path: str, row_id: int) -> float:
-    try:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return 0.0
-            return float(record.last_position_seconds or 0)
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(
-            db_path, "reading download playback position", exc
-        )
-        if _is_sqlite_lock_error_message(str(exc)):
-            return 0.0
-        raise
+    _ = db_path
+    Download = _download_model()
+    value = (
+        Download.objects.filter(pk=int(row_id))
+        .values_list("last_position_seconds", flat=True)
+        .first()
+    )
+    return float(value or 0.0)
+
 
 def update_download_position_seconds(
     db_path: str, row_id: int, position_seconds: float
 ) -> bool:
+    _ = db_path
+    Download = _download_model()
+    record = Download.objects.filter(pk=int(row_id)).first()
+    if record is None:
+        return False
     safe_position = max(0.0, float(position_seconds or 0.0))
-    now = _utcnow()
-    try:
-        with Session(_engine_for(db_path)) as session:
-            record = session.get(DownloadRecord, int(row_id))
-            if record is None:
-                return False
-            previous = max(0.0, float(record.last_position_seconds or 0.0))
-            listened_delta = max(0.0, safe_position - previous)
-            record.last_position_seconds = safe_position
-            record.total_listened_seconds = (
-                max(0.0, float(record.total_listened_seconds or 0.0))
-                + listened_delta
-            )
-            record.last_position_updated_at = now
-            record.last_seen_at = now
-            session.commit()
-            return True
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(
-            db_path, "updating download playback position", exc
-        )
-        if _is_sqlite_lock_error_message(str(exc)):
-            return False
-        raise
+    previous = max(0.0, float(record.last_position_seconds or 0.0))
+    record.last_position_seconds = safe_position
+    record.total_listened_seconds = max(
+        0.0, float(record.total_listened_seconds or 0.0)
+    ) + max(0.0, safe_position - previous)
+    record.last_position_updated_at = _utcnow()
+    record.last_seen_at = record.last_position_updated_at
+    record.save(
+        update_fields=[
+            "last_position_seconds",
+            "total_listened_seconds",
+            "last_position_updated_at",
+            "last_seen_at",
+        ]
+    )
+    return True
+
 
 def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> int:
-    payload = []
-    now = _utcnow()
-    for row_id, raw_seconds in updates.items():
-        payload.append(
-            {
-                "row_id_param": int(row_id),
-                "safe_position_param": max(0.0, float(raw_seconds or 0.0)),
-                "updated_at_param": now,
-            }
-        )
-    if not payload:
-        return 0
-    try:
-        with _engine_for(db_path).begin() as conn:
-            result = conn.execute(_UPDATE_PROGRESS_STMT, payload)
-            return int(result.rowcount or 0)
-    except Exception as exc:
-        _log_sqlite_lock_if_needed(
-            db_path, "batch updating download playback positions", exc
-        )
-        if _is_sqlite_lock_error_message(str(exc)):
-            return 0
-        raise
+    count = 0
+    for row_id, seconds in updates.items():
+        if update_download_position_seconds(db_path, row_id, seconds):
+            count += 1
+    return count
+
 
 def get_total_listened_seconds(db_path: str) -> float:
-    with Session(_engine_for(db_path)) as session:
-        stmt = select(DownloadRecord.total_listened_seconds)
-        values = session.execute(stmt).scalars().all()
-        return float(sum(float(value or 0.0) for value in values))
+    _ = db_path
+    _ensure_django_ready()
+    from django.db.models import Sum
+
+    Download = _download_model()
+    value = Download.objects.aggregate(total=Sum("total_listened_seconds"))["total"]
+    return float(value or 0.0)

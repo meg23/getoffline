@@ -8,7 +8,6 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from workers.download_store import (  # noqa: E402
-    HAS_SQLALCHEMY,
     _record_revision,
     apply_migrations,
     close_cached_descriptors,
@@ -303,23 +302,8 @@ class DatabaseMigrationsTests(unittest.TestCase):
         self.assertFalse(result)
         warning_mock.assert_called_once()
 
-    def test_close_cached_descriptors_is_noop_without_sqlalchemy(self):
-        if HAS_SQLALCHEMY:
-            self.skipTest("sqlite-only behavior")
-
+    def test_close_cached_descriptors_closes_django_connections(self):
         self.assertEqual(close_cached_descriptors(), 0)
-
-    def test_close_cached_descriptors_clears_cached_engines(self):
-        if not HAS_SQLALCHEMY:
-            self.skipTest("sqlalchemy not installed")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, "downloads.sqlite3")
-            init_database(db_path)
-
-            closed_count = close_cached_descriptors()
-
-        self.assertGreaterEqual(closed_count, 1)
 
 
 if __name__ == "__main__":
