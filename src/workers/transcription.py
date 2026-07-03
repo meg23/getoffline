@@ -12,6 +12,52 @@ from workers.logger import get_logger
 log = get_logger("transcription")
 
 _WHISPER_MODEL_CACHE = {}
+
+
+def _model_cache_dir() -> Path:
+    return Path(
+        os.getenv("GETOFFLINE_MODEL_CACHE_DIR")
+        or os.getenv("HF_HOME")
+        or "/app/model-cache"
+    ).expanduser()
+
+
+def _model_cache_key(model_name: str, cache_dir: Path) -> tuple[str, str]:
+    return (str(model_name), str(cache_dir.resolve()))
+
+
+def _get_or_load_whisper_model(model_name: str):
+    """Return a process-local faster-whisper model, loading it on first use only."""
+    cache_dir = _model_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = _model_cache_key(model_name, cache_dir)
+    with _WHISPER_MODEL_LOCK:
+        model = _WHISPER_MODEL_CACHE.get(cache_key)
+        if model is not None:
+            log.info(
+                "Using cached faster-whisper model=%s cache_dir=%s",
+                model_name,
+                cache_dir,
+            )
+            return model
+
+        load_started_at = time.monotonic()
+        log.info("Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir)
+        model = _whisper_model_class()(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+            download_root=str(cache_dir),
+        )
+        _WHISPER_MODEL_CACHE[cache_key] = model
+        log.info(
+            "Loaded faster-whisper model=%s elapsed_seconds=%.2f",
+            model_name,
+            time.monotonic() - load_started_at,
+        )
+        return model
+
+
 _TRANSCRIPTION_CACHE = {}
 _TRANSCRIPTION_CACHE_LOCK = threading.Lock()
 _WHISPER_MODEL_LOCK = threading.Lock()
@@ -154,33 +200,7 @@ def _transcribe_in_process(
     language: str = None,
     log_prefix: str = "transcription",
 ):
-    with _WHISPER_MODEL_LOCK:
-        model = _WHISPER_MODEL_CACHE.get(model_name)
-        if model is None:
-            cache_dir = Path(
-                os.getenv("GETOFFLINE_MODEL_CACHE_DIR")
-                or os.getenv("HF_HOME")
-                or "/app/model-cache"
-            ).expanduser()
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            load_started_at = time.monotonic()
-            log.info(
-                "Loading faster-whisper model=%s cache_dir=%s", model_name, cache_dir
-            )
-            model = _whisper_model_class()(
-                model_name,
-                device="cpu",
-                compute_type="int8",
-                download_root=str(cache_dir),
-            )
-            _WHISPER_MODEL_CACHE[model_name] = model
-            log.info(
-                "Loaded faster-whisper model=%s elapsed_seconds=%.2f",
-                model_name,
-                time.monotonic() - load_started_at,
-            )
-        else:
-            log.info("Using cached faster-whisper model=%s", model_name)
+    model = _get_or_load_whisper_model(model_name)
 
     transcribe_kwargs = {"vad_filter": True}
     if language:

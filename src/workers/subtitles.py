@@ -3,9 +3,17 @@ import time
 from pathlib import Path
 
 from workers.logger import get_logger
-from workers.transcription import transcribe_with_whisper
 
 log = get_logger("subtitles")
+
+
+def transcribe_with_whisper(*args, **kwargs):
+    """Lazily delegate to Whisper transcription so imports stay lightweight."""
+    from workers.transcription import (
+        transcribe_with_whisper as _transcribe_with_whisper,
+    )
+
+    return _transcribe_with_whisper(*args, **kwargs)
 
 
 _SUBTITLE_SIDECAR_SUFFIXES = {
