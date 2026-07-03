@@ -121,7 +121,7 @@ services:
   worker-ffmpeg:
     build:
       context: .
-      dockerfile: deploy/docker/worker-download.Dockerfile
+      dockerfile: deploy/docker/worker-transcripts.Dockerfile
     restart: unless-stopped
     cpus: 1.0
     environment: *getoffline-env
