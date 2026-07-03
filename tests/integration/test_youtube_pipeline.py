@@ -1,0 +1,269 @@
+"""End-to-end Docker Compose verification for the YouTube download pipeline.
+
+This test intentionally exercises the real runtime stack instead of mocks:
+MySQL, RabbitMQ, the frontend, downloader, FFmpeg, transcript, transfer,
+scheduler, and cleanup services. It queues a real YouTube download and verifies
+that the queued pipeline creates media, generates a transcript, and runs the
+profanity screening path.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from pathlib import Path
+
+YOUTUBE_URL = "https://www.youtube.com/watch?v=BB49x_uMlGA"
+PROFILE_ID = "integration"
+SOURCE_NAME = "Integration YouTube Runtime"
+DEFAULT_TIMEOUT_SECONDS = 1800
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "src"
+
+
+def _run(
+    cmd: list[str], *, env: dict[str, str], timeout: int = 300
+) -> subprocess.CompletedProcess[str]:
+    print(f"+ {' '.join(cmd)}", flush=True)
+    completed = subprocess.run(
+        cmd,
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.stdout:
+        print(completed.stdout, flush=True)
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"command failed with exit code {completed.returncode}: {' '.join(cmd)}"
+        )
+    return completed
+
+
+def _compose_cmd() -> list[str]:
+    if shutil.which("docker") is None:
+        raise AssertionError("docker is required for integration-test")
+    probe = subprocess.run(
+        ["docker", "compose", "version"],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if probe.returncode == 0:
+        return ["docker", "compose"]
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+    raise AssertionError("docker compose v2 or docker-compose is required")
+
+
+def _django_setup(env: dict[str, str]) -> None:
+    os.environ.update(env)
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+    sys.path.insert(0, str(SRC))
+    import django
+
+    django.setup()
+
+
+def _wait_for_frontend(deadline: float) -> None:
+    import urllib.request
+
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(
+                "http://127.0.0.1:8080/", timeout=5
+            ) as response:
+                if response.status < 500:
+                    return
+        except Exception as exc:  # noqa: BLE001 - diagnostic polling
+            last_error = exc
+        time.sleep(5)
+    raise AssertionError(f"frontend did not become reachable: {last_error}")
+
+
+def _verify_profanity_model() -> None:
+    from workers.content_filter import find_explicit_content
+
+    match = find_explicit_content("This sentence is fucking profane.")
+    if match is None or match.category != "profanity":
+        raise AssertionError("profanity model did not detect the runtime sample")
+
+
+def _queue_download_job() -> int:
+    from app.queue import publish_job
+    from models.jobs import create_job
+    from models.models import AppConfigValue, ProfileConfigValue, SourceConfig
+
+    SourceConfig.objects.filter(profile_id=PROFILE_ID, name=SOURCE_NAME).delete()
+    source = SourceConfig.objects.create(
+        profile_id=PROFILE_ID,
+        source_type=SourceConfig.SOURCE_YOUTUBE,
+        name=SOURCE_NAME,
+        url=YOUTUBE_URL,
+        media_type="audio",
+        enabled=True,
+        subtitles=True,
+        max_downloads=1,
+        delete_explicit_content=True,
+        include_shorts=False,
+        include_livestreams=False,
+    )
+    for key, value in {
+        "output_root": "/app/downloads/integration",
+        "audio_format": "mp3",
+        "audio_quality": "5",
+        "subtitle_transcription_mode": "in_process",
+        "js_runtime_path": "qjs",
+    }.items():
+        ProfileConfigValue.objects.update_or_create(
+            profile_id=PROFILE_ID, key=key, defaults={"value": value}
+        )
+    AppConfigValue.objects.update_or_create(
+        key="manual_upload_delete_explicit_content", defaults={"value": "1"}
+    )
+    job = create_job(
+        profile_id=PROFILE_ID,
+        job_type="download_single",
+        payload={
+            "source_id": source.id,
+            "source_type": SourceConfig.SOURCE_YOUTUBE,
+            "source_name": source.name,
+            "source_url": source.url,
+            "item_uid": "BB49x_uMlGA",
+            "item_url": YOUTUBE_URL,
+            "media_url": YOUTUBE_URL,
+            "url": YOUTUBE_URL,
+            "title": "Integration YouTube runtime video",
+            "media_type": "audio",
+            "subtitles": True,
+            "delete_explicit_content": True,
+            "manual_enqueue": True,
+            "redownload": True,
+        },
+        idempotency_key=f"integration:{uuid.uuid4()}",
+    )
+    publish_job(
+        {
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "profile_id": job.profile_id,
+            "payload": job.payload,
+        }
+    )
+    return job.id
+
+
+def _wait_for_pipeline(job_id: int, deadline: float) -> None:
+    from models.models import Download, Job, TranscriptSegment
+    from workers.content_filter import screen_transcript
+
+    terminal = {Job.STATUS_SUCCEEDED, Job.STATUS_FAILED}
+    while time.monotonic() < deadline:
+        job = Job.objects.get(pk=job_id)
+        downloads = list(
+            Download.objects.filter(profile_id=PROFILE_ID, item_uid="BB49x_uMlGA")
+        )
+        child_jobs = list(Job.objects.filter(profile_id=PROFILE_ID).order_by("id"))
+        failed = [
+            candidate
+            for candidate in child_jobs
+            if candidate.status == Job.STATUS_FAILED
+        ]
+        if failed:
+            details = "; ".join(
+                f"{j.id}:{j.job_type}:{j.error_message}" for j in failed
+            )
+            raise AssertionError(f"pipeline job failed: {details}")
+        if downloads:
+            download = downloads[-1]
+            media_path = Path(download.file_path or "")
+            subtitle_path = Path(download.subtitle_path or "")
+            transcript_count = TranscriptSegment.objects.filter(
+                download=download
+            ).count()
+            transcript_jobs_done = not Job.objects.filter(
+                profile_id=PROFILE_ID,
+                job_type="generate_transcript",
+                status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
+            ).exists()
+            if (
+                job.status in terminal
+                and transcript_jobs_done
+                and media_path.exists()
+                and media_path.stat().st_size > 0
+                and subtitle_path.exists()
+                and subtitle_path.stat().st_size > 0
+                and transcript_count > 0
+            ):
+                match = screen_transcript(subtitle_path)
+                if match is not None:
+                    raise AssertionError(
+                        f"download transcript unexpectedly matched profanity: {match}"
+                    )
+                return
+        time.sleep(10)
+    raise AssertionError(
+        f"pipeline did not finish within timeout for job_id={job_id}"
+    )
+
+
+def main() -> int:
+    timeout_seconds = int(
+        os.getenv("GETOFFLINE_INTEGRATION_TIMEOUT", DEFAULT_TIMEOUT_SECONDS)
+    )
+    compose = _compose_cmd()
+    with tempfile.TemporaryDirectory(prefix="getoffline-integration-") as tmp:
+        downloads_dir = Path(tmp) / "downloads"
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        project = f"getoffline-it-{uuid.uuid4().hex[:8]}"
+        env = os.environ.copy()
+        env.update(
+            {
+                "COMPOSE_PROJECT_NAME": project,
+                "GETOFFLINE_DJANGO_SECRET_KEY": "integration-test-secret",
+                "GETOFFLINE_DOWNLOADS_DIR": str(downloads_dir),
+                "GETOFFLINE_DB_HOST": "127.0.0.1",
+                "GETOFFLINE_DB_PORT": "3306",
+                "GETOFFLINE_DB_NAME": "getoffline",
+                "GETOFFLINE_DB_USER": "getoffline",
+                "GETOFFLINE_DB_PASSWORD": "getoffline",
+                "GETOFFLINE_RABBITMQ_URL": "amqp://guest:guest@127.0.0.1:5672/%2F",
+                "GETOFFLINE_RABBITMQ_EXCHANGE": "getoffline",
+                "DJANGO_SETTINGS_MODULE": "app.settings",
+                "PYTHONPATH": str(SRC),
+            }
+        )
+        try:
+            _run([*compose, "up", "-d", "--build"], env=env, timeout=1800)
+            deadline = time.monotonic() + timeout_seconds
+            _wait_for_frontend(deadline)
+            _django_setup(env)
+            _verify_profanity_model()
+            job_id = _queue_download_job()
+            _wait_for_pipeline(job_id, deadline)
+        finally:
+            keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
+            if keep_stack.lower() not in {"1", "true", "yes"}:
+                _run(
+                    [*compose, "down", "-v", "--remove-orphans"],
+                    env=env,
+                    timeout=600,
+                )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
