@@ -33,7 +33,7 @@ class FakeYoutubeDL:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type, exc, _tb):
         return False
 
     def download(self, urls):

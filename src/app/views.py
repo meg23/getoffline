@@ -23,7 +23,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.db import connection
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Sum
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 from django.utils.http import url_has_allowed_host_and_scheme

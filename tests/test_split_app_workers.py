@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import os
 import sys
 import tempfile
@@ -109,7 +110,7 @@ class SharedDjangoModelTests(TestCase):
     def setUpClass(cls):
         if django is not None:
             _ensure_django_test_schema()
-        super().setUpClass()
+        super(SharedDjangoModelTests, cls).setUpClass()
 
     def setUp(self):
         super().setUp()
@@ -1075,7 +1076,7 @@ class SharedDjangoModelTests(TestCase):
                 def __enter__(self):
                     return self
 
-                def __exit__(self, exc_type, exc, tb):
+                def __exit__(self, exc_type, exc, _tb):
                     return False
 
                 def extract_info(self, url, download):
@@ -1145,7 +1146,7 @@ class SharedDjangoModelTests(TestCase):
                 def __enter__(self):
                     return self
 
-                def __exit__(self, exc_type, exc, tb):
+                def __exit__(self, exc_type, exc, _tb):
                     return False
 
                 def extract_info(self, url, download):
@@ -1227,7 +1228,7 @@ class SharedDjangoModelTests(TestCase):
                 def __enter__(self):
                     return self
 
-                def __exit__(self, exc_type, exc, tb):
+                def __exit__(self, exc_type, exc, _tb):
                     return False
 
                 def extract_info(self, url, download):
@@ -1320,6 +1321,7 @@ class SharedDjangoModelTests(TestCase):
             output = Path(tmpdir) / "episode.converted.mp3"
 
             def fake_run(command, check, capture_output, text):
+                _ = (check, capture_output)
                 self.assertIn("-codec:a", command)
                 output.write_text("converted", encoding="utf-8")
                 return SimpleNamespace(returncode=0, stdout="", stderr="ffmpeg done")
@@ -1365,6 +1367,7 @@ class SharedDjangoModelTests(TestCase):
             output = Path(tmpdir) / "episode.converted.mp4"
 
             def fake_run(command, check, capture_output, text):
+                _ = (check, capture_output)
                 output.write_text("converted", encoding="utf-8")
                 return SimpleNamespace(returncode=0, stdout="", stderr="ffmpeg done")
 

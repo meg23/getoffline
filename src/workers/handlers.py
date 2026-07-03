@@ -2235,7 +2235,6 @@ def _screen_deferred_video_before_insert(
 
 def generate_transcript(job: Job) -> None:
     """Generate Whisper subtitles/transcript segments."""
-    started_at = time.monotonic()
     log.info(
         "Transcript worker started job_id=%s profile_id=%s payload=%s",
         job.id,
