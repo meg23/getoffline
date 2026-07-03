@@ -4,6 +4,7 @@ import resource
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 import feedparser
@@ -44,6 +45,15 @@ class _YoutubeDlQuietLogger:
 
 
 log = get_logger("podcast")
+
+
+@dataclass(frozen=True, order=True)
+class ArtworkQuality:
+    area: int
+    source_priority: int
+    longest_edge: int
+    format_bonus: int
+    url_length: int
 
 
 def _http_retry_backoff(retry_count: int) -> int:
@@ -279,7 +289,7 @@ def _append_podcast_artwork_candidates(candidates: list, value: object) -> None:
             _append_artwork_candidate(candidates, image_value, source_priority=1)
 
 
-def _artwork_quality_score(candidate: dict) -> tuple:
+def _artwork_quality_score(candidate: dict) -> ArtworkQuality:
     width = int(candidate.get("width") or 0)
     height = int(candidate.get("height") or 0)
     url = str(candidate.get("url") or "")
@@ -293,7 +303,9 @@ def _artwork_quality_score(candidate: dict) -> tuple:
     lower_url = url.lower()
     if ".jpg" in lower_url or ".jpeg" in lower_url or ".png" in lower_url:
         format_bonus = 1
-    return (area, source_priority, max(width, height), format_bonus, len(url))
+    return ArtworkQuality(
+        area, source_priority, max(width, height), format_bonus, len(url)
+    )
 
 
 def _podcast_artwork_url(feed: object, entry: object) -> str:

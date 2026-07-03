@@ -5,6 +5,7 @@ import os
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlencode
@@ -76,6 +77,28 @@ MEDIA_UPLOAD_EXTENSIONS = {
     ".mov",
 }
 VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
+
+
+@dataclass(frozen=True)
+class JobStage:
+    name: str
+    label: str
+
+    def __iter__(self):
+        yield self.name
+        yield self.label
+
+
+@dataclass(frozen=True)
+class ManualUploadResult:
+    download: Download
+    path: Path
+
+    def __iter__(self):
+        yield self.download
+        yield self.path
+
+
 log = logging.getLogger(__name__)
 MEDIA_RANGE_CHUNK_SIZE = 64 * 1024
 MEDIA_INITIAL_RANGE_SIZE = 1024 * 1024
@@ -384,18 +407,18 @@ def _job_display_title(job: Job) -> str:
     return job.job_type.replace("_", " ").title()
 
 
-def _job_stage(job: Job) -> tuple[str, str]:
+def _job_stage(job: Job) -> JobStage:
     payload = job.payload if isinstance(job.payload, dict) else {}
     active_stage = str(payload.get("active_stage") or "").strip()
     if active_stage == "downloading":
-        return "downloading", "Downloading"
+        return JobStage("downloading", "Downloading")
     if active_stage == "transcript_generation":
-        return "transcript_generation", "Transcript generation"
+        return JobStage("transcript_generation", "Transcript generation")
     if job.job_type in {"download_episode", "download_single"}:
-        return "downloading", "Downloading"
+        return JobStage("downloading", "Downloading")
     if job.job_type in {"generate_transcript", "transcode_media"}:
-        return "transcript_generation", "Transcript generation"
-    return "queued", job.job_type.replace("_", " ").title()
+        return JobStage("transcript_generation", "Transcript generation")
+    return JobStage("queued", job.job_type.replace("_", " ").title())
 
 
 def _active_pipeline_cutoff():
@@ -463,8 +486,8 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
             "id": job.id,
             "title": _job_display_title(job),
             "status": job.status,
-            "stage": _job_stage(job)[0],
-            "stage_label": _job_stage(job)[1],
+            "stage": _job_stage(job).name,
+            "stage_label": _job_stage(job).label,
             "updated_at": job.updated_at.isoformat() if job.updated_at else "",
         }
         for job in active_jobs
@@ -790,7 +813,7 @@ def _normalize_upload_stem(value: str) -> str:
     return normalized or "manual-upload"
 
 
-def _write_manual_upload(profile_id: str, uploaded_file) -> tuple[Download, Path]:
+def _write_manual_upload(profile_id: str, uploaded_file) -> ManualUploadResult:
     original_name = Path(str(uploaded_file.name or "")).name
     if not original_name:
         raise ValueError("Missing filename")
@@ -856,7 +879,7 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> tuple[Download, Path
             "completed_at": now,
         },
     )
-    return download, destination_path
+    return ManualUploadResult(download, destination_path)
 
 
 @login_required

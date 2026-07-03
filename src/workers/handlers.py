@@ -7,6 +7,8 @@ import threading
 import time
 from collections.abc import Iterable
 from contextlib import contextmanager
+from dataclasses import asdict
+from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
@@ -38,6 +40,34 @@ from workers.youtube import _enable_youtube_quickjs_remote_component
 from workers.youtube import resolve_youtube_source_name
 
 log = get_logger("workers.handlers")
+
+
+@dataclass(frozen=True)
+class SkippedSourceFile:
+    path: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DownloadFfmpegRequirement:
+    requires_ffmpeg: bool
+    media_kind: str
+    target_ext: str
+
+    def __iter__(self):
+        yield self.requires_ffmpeg
+        yield self.media_kind
+        yield self.target_ext
+
+
+@dataclass(frozen=True)
+class DownloadedMediaFfmpegRequirement:
+    requires_ffmpeg: bool
+    target_ext: str
+
+    def __iter__(self):
+        yield self.requires_ffmpeg
+        yield self.target_ext
 
 
 def _youtube_dl_class():
@@ -194,7 +224,7 @@ def _delete_ffmpeg_source_files(
         [str(path) for path in source_path_list],
     )
     deleted: list[Path] = []
-    skipped: list[dict[str, str]] = []
+    skipped: list[SkippedSourceFile] = []
     for source_path in source_path_list:
         candidate = Path(source_path).expanduser().resolve()
         exists = candidate.exists()
@@ -212,21 +242,21 @@ def _delete_ffmpeg_source_files(
             size_bytes,
         )
         if same_as_target:
-            skipped.append({"path": str(candidate), "reason": "matches-target"})
+            skipped.append(SkippedSourceFile(str(candidate), "matches-target"))
             log.info(
                 "FFmpeg source cleanup skipped source=%s reason=matches-target",
                 candidate,
             )
             continue
         if not exists:
-            skipped.append({"path": str(candidate), "reason": DownloadStatus.MISSING})
+            skipped.append(SkippedSourceFile(str(candidate), DownloadStatus.MISSING))
             log.warning(
                 "FFmpeg source cleanup skipped source=%s reason=missing",
                 candidate,
             )
             continue
         if not is_file:
-            skipped.append({"path": str(candidate), "reason": "not-file"})
+            skipped.append(SkippedSourceFile(str(candidate), "not-file"))
             log.warning(
                 "FFmpeg source cleanup skipped source=%s reason=not-file",
                 candidate,
@@ -267,7 +297,7 @@ def _delete_ffmpeg_source_files(
         "FFmpeg source cleanup finished target=%s deleted=%s skipped=%s",
         resolved_target,
         [str(path) for path in deleted],
-        skipped,
+        [asdict(item) for item in skipped],
     )
     return deleted
 
@@ -298,7 +328,7 @@ def _preferred_target_ext(profile_id: str, media_kind: str) -> str:
 
 def _download_requires_ffmpeg(
     download: Download, payload: dict
-) -> tuple[bool, str, str]:
+) -> DownloadFfmpegRequirement:
     media_kind = _preferred_media_kind(download, payload)
     target_ext = _preferred_target_ext(download.profile_id, media_kind)
     current_ext = (
@@ -313,12 +343,12 @@ def _download_requires_ffmpeg(
         requires_ffmpeg = current_ext != target_ext or codec not in {"copy", ""}
     else:
         requires_ffmpeg = current_ext != target_ext
-    return requires_ffmpeg, media_kind, target_ext
+    return DownloadFfmpegRequirement(requires_ffmpeg, media_kind, target_ext)
 
 
 def _downloaded_media_requires_ffmpeg(
     *, profile_id: str, media_kind: str, current_ext: str, input_count: int
-) -> tuple[bool, str]:
+) -> DownloadedMediaFfmpegRequirement:
     target_ext = (
         "mp3"
         if media_kind == "audio"
@@ -327,7 +357,7 @@ def _downloaded_media_requires_ffmpeg(
     normalized_ext = str(current_ext or "").strip().lower().lstrip(".")
     if media_kind == "video":
         codec = _profile_setting(profile_id, "video_codec", "h264").strip().lower()
-        return (
+        return DownloadedMediaFfmpegRequirement(
             input_count > 1
             or normalized_ext != target_ext
             or codec
@@ -337,7 +367,7 @@ def _downloaded_media_requires_ffmpeg(
             },
             target_ext,
         )
-    return normalized_ext != target_ext, target_ext
+    return DownloadedMediaFfmpegRequirement(normalized_ext != target_ext, target_ext)
 
 
 def _ffmpeg_thread_count(profile_id: str) -> str:

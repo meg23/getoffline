@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
@@ -41,6 +42,14 @@ _YTDLP_REMOTE_COMPONENT = "ejs:github"
 _THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
 
+@dataclass(frozen=True, order=True)
+class ThumbnailQuality:
+    area: int
+    longest_edge: int
+    preference: int
+    url_length: int
+
+
 def _delete_original_media_file(original_path: Path, final_path: Path) -> bool:
     original_path = Path(original_path).expanduser().resolve()
     final_path = Path(final_path).expanduser().resolve()
@@ -73,7 +82,7 @@ def _thumbnail_dimension(value: object, key: str) -> int:
         return 0
 
 
-def _thumbnail_quality_score(thumbnail: dict) -> tuple:
+def _thumbnail_quality_score(thumbnail: dict) -> ThumbnailQuality:
     width = _thumbnail_dimension(thumbnail, "width")
     height = _thumbnail_dimension(thumbnail, "height")
     url = str(thumbnail.get("url") or "")
@@ -85,7 +94,7 @@ def _thumbnail_quality_score(thumbnail: dict) -> tuple:
         preference_value = int(float(preference))
     except (TypeError, ValueError):
         preference_value = 0
-    return (area, max(width, height), preference_value, len(url))
+    return ThumbnailQuality(area, max(width, height), preference_value, len(url))
 
 
 def _best_thumbnail_url(info: dict) -> str:

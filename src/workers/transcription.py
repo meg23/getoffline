@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from workers.logger import get_logger
@@ -12,6 +13,12 @@ from workers.logger import get_logger
 log = get_logger("transcription")
 
 _WHISPER_MODEL_CACHE = {}
+
+
+@dataclass(frozen=True)
+class WhisperModelCacheKey:
+    model_name: str
+    cache_dir: str
 
 
 def _model_cache_dir() -> Path:
@@ -22,8 +29,8 @@ def _model_cache_dir() -> Path:
     ).expanduser()
 
 
-def _model_cache_key(model_name: str, cache_dir: Path) -> tuple[str, str]:
-    return (str(model_name), str(cache_dir.resolve()))
+def _model_cache_key(model_name: str, cache_dir: Path) -> WhisperModelCacheKey:
+    return WhisperModelCacheKey(str(model_name), str(cache_dir.resolve()))
 
 
 def _get_or_load_whisper_model(model_name: str):

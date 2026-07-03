@@ -1,4 +1,6 @@
 import os
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,28 @@ from workers.download_store import resolve_database_path
 CONFIG_FILE_NAME = "config.yml"
 
 
+@dataclass(frozen=True)
+class YamlConfig:
+    path: Path
+    defaults: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BootstrapConfig:
+    defaults: dict[str, Any]
+    download_settings: dict[str, Any]
+    youtube: list[dict[str, Any]]
+    podcasts: list[dict[str, Any]]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "defaults": self.defaults,
+            "download_settings": self.download_settings,
+            "youtube": self.youtube,
+            "podcasts": self.podcasts,
+        }
+
+
 def _resolve_path(value: Any, *, base_dir: Path) -> str:
     raw = str(value or "").strip()
     expanded = os.path.expandvars(os.path.expanduser(raw))
@@ -21,10 +45,10 @@ def _resolve_path(value: Any, *, base_dir: Path) -> str:
     return str(candidate.resolve())
 
 
-def _load_yaml_config(config_path: Path | None = None) -> dict[str, Any]:
+def _load_yaml_config(config_path: Path | None = None) -> YamlConfig | None:
     path = config_path or (Path.cwd() / CONFIG_FILE_NAME)
     if not path.is_file():
-        return {}
+        return None
 
     defaults: dict[str, Any] = {}
     in_defaults = False
@@ -48,18 +72,18 @@ def _load_yaml_config(config_path: Path | None = None) -> dict[str, Any]:
             continue
         if in_defaults or indent == 0:
             defaults[key] = value
-    return {"path": path, "defaults": defaults or {}}
+    return YamlConfig(path=path, defaults=defaults or {})
 
 
 def _build_bootstrap_defaults(config_path: Path | None = None):
     defaults = dict(DEFAULT_APP_CONFIG)
     file_config = _load_yaml_config(config_path)
     config_dir = (
-        file_config.get("path", Path.cwd()).parent if file_config else Path.cwd()
+        file_config.path.parent if file_config else Path.cwd()
     )
 
     for key in ("output_root", "database_path"):
-        configured_value = file_config.get("defaults", {}).get(key)
+        configured_value = file_config.defaults.get(key) if file_config else None
         if configured_value is not None:
             defaults[key] = configured_value
 
@@ -73,12 +97,12 @@ def _build_bootstrap_defaults(config_path: Path | None = None):
 
 
 def load_bootstrap_config(config_path: Path | None = None):
-    return {
-        "defaults": _build_bootstrap_defaults(config_path),
-        "download_settings": {"youtube_cookie_text": None},
-        "youtube": [],
-        "podcasts": [],
-    }
+    return BootstrapConfig(
+        defaults=_build_bootstrap_defaults(config_path),
+        download_settings={"youtube_cookie_text": None},
+        youtube=[],
+        podcasts=[],
+    ).as_dict()
 
 
 def load_config(config_path: Path | None = None):
@@ -88,9 +112,9 @@ def load_config(config_path: Path | None = None):
 
     materialize_youtube_cookie_file(defaults["database_path"])
     persisted = get_stored_config(defaults["database_path"])
-    return {
-        "defaults": persisted["defaults"],
-        "download_settings": persisted["download_settings"],
-        "youtube": persisted["youtube"],
-        "podcasts": persisted["podcasts"],
-    }
+    return BootstrapConfig(
+        defaults=persisted["defaults"],
+        download_settings=persisted["download_settings"],
+        youtube=persisted["youtube"],
+        podcasts=persisted["podcasts"],
+    ).as_dict()
