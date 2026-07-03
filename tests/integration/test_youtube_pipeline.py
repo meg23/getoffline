@@ -236,6 +236,52 @@ def _host_download_path(raw_path: str | None, host_downloads_dir: Path) -> Path:
     return candidate
 
 
+def _assert_pipeline_result(
+    *,
+    download,
+    media_path: Path,
+    subtitle_path: Path,
+    transcript_count: int,
+    jobs: list,
+) -> None:
+    from models.models import Job
+
+    active_jobs = [
+        job
+        for job in jobs
+        if job.status in {Job.STATUS_QUEUED, Job.STATUS_RUNNING}
+    ]
+    if active_jobs:
+        details = ", ".join(f"{job.id}:{job.job_type}" for job in active_jobs)
+        raise AssertionError(f"pipeline still has active jobs: {details}")
+
+    succeeded_job_types = {
+        job.job_type for job in jobs if job.status == Job.STATUS_SUCCEEDED
+    }
+    required_job_types = {"download_single", "transcode_media", "generate_transcript"}
+    missing_job_types = required_job_types - succeeded_job_types
+    if missing_job_types:
+        raise AssertionError(
+            "pipeline did not complete expected job types: "
+            + ", ".join(sorted(missing_job_types))
+        )
+
+    if download.download_status != "downloaded":
+        raise AssertionError(
+            f"unexpected download status: {download.download_status!r}"
+        )
+    if (download.file_ext or "").lower() != "mp3":
+        raise AssertionError(f"expected mp3 download, got {download.file_ext!r}")
+    if not str(download.subtitle_path or "").strip():
+        raise AssertionError("download row did not record a subtitle path")
+    if not media_path.exists() or media_path.stat().st_size <= 0:
+        raise AssertionError(f"media artifact missing or empty: {media_path}")
+    if not subtitle_path.exists() or subtitle_path.stat().st_size <= 0:
+        raise AssertionError(f"subtitle artifact missing or empty: {subtitle_path}")
+    if transcript_count <= 0:
+        raise AssertionError("transcript segments were not saved")
+
+
 def _wait_for_pipeline(
     job_id: int, deadline: float, host_downloads_dir: Path
 ) -> None:
@@ -268,20 +314,18 @@ def _wait_for_pipeline(
             transcript_count = TranscriptSegment.objects.filter(
                 download=download
             ).count()
-            transcript_jobs_done = not Job.objects.filter(
+            active_jobs_done = not Job.objects.filter(
                 profile_id=PROFILE_ID,
-                job_type="generate_transcript",
                 status__in=[Job.STATUS_QUEUED, Job.STATUS_RUNNING],
             ).exists()
-            if (
-                job.status in terminal
-                and transcript_jobs_done
-                and media_path.exists()
-                and media_path.stat().st_size > 0
-                and subtitle_path.exists()
-                and subtitle_path.stat().st_size > 0
-                and transcript_count > 0
-            ):
+            if job.status in terminal and active_jobs_done:
+                _assert_pipeline_result(
+                    download=download,
+                    media_path=media_path,
+                    subtitle_path=subtitle_path,
+                    transcript_count=transcript_count,
+                    jobs=child_jobs,
+                )
                 match = screen_transcript(subtitle_path)
                 if match is not None:
                     raise AssertionError(
