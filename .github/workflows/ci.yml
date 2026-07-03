@@ -20,15 +20,23 @@ jobs:
           python3 -m venv .venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r src/requirements.txt
+          .venv/bin/python -m pip install -r src/requirements.txt coverage ruff vulture
 
       - name: Compile Python files
-        run: python -m py_compile src/*.py tests/*.py
+        run: python -m py_compile $(git ls-files '*.py')
 
-      - name: Run unit tests
+      - name: Run Ruff linting
+        run: ruff check src tests
+
+      - name: Run Vulture dead-code analysis
+        run: vulture src tests --min-confidence 100
+
+      - name: Run unit tests with coverage
         env:
           PYTHONPATH: src
           GETOFFLINE_DB_ENGINE: sqlite
           GETOFFLINE_DB_NAME: ":memory:"
           GETOFFLINE_MODEL_CACHE_DIR: ${{ runner.temp }}/getoffline-model-cache
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        run: |
+          coverage run --source=src -m unittest discover -s tests -p 'test_*.py' -v
+          coverage report --show-missing

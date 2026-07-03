@@ -26,11 +26,11 @@ from app.routing import (  # noqa: E402
     queue_arguments,
     queue_name,
 )
-from models.jobs import claim_job, create_job, finish_job  # noqa: E402
+from models.jobs import claim_job, finish_job  # noqa: E402
 from models.models import Download, Job, SourceConfig  # noqa: E402
 from workers.handlers import HANDLERS  # noqa: E402
 from workers.scheduler import HEAVY_JOB_TYPES, scheduler_from_settings  # noqa: E402
-from app.queue import job_priority, publish_job  # noqa: E402
+from app.queue import job_priority  # noqa: E402
 
 log = get_logger("workers.runner")
 
