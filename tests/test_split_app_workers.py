@@ -7,20 +7,19 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+os.environ.setdefault("GETOFFLINE_DB_ENGINE", "sqlite")
+os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
 try:
     import django  # noqa: E402
     from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
-    from django.test import Client, TestCase, override_settings  # noqa: E402
+    from django.test import Client, TestCase  # noqa: E402
 except (
     ModuleNotFoundError
 ):  # pragma: no cover - dependency may be absent outside project venv
     django = None
     TestCase = unittest.TestCase
-
-    def override_settings(**_kwargs):
-        return lambda cls: cls
 
 
 if django is not None:
@@ -105,14 +104,6 @@ if django is not None:
     Client = AuthenticatedClient
 
 
-@override_settings(
-    DATABASES={
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
-        }
-    }
-)
 class SharedDjangoModelTests(TestCase):
     @classmethod
     def setUpClass(cls):
