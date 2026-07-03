@@ -35,9 +35,9 @@ from workers.content_filter import screen_transcript
 from workers.logger import get_logger
 from workers.subtitles import create_subtitles
 from workers.utils import sanitize_channel_name
-from workers.youtube import _apply_ytdlp_player_js_variant_workaround
-from workers.youtube import _enable_youtube_quickjs_remote_component
-from workers.youtube import resolve_youtube_source_name
+from workers.ytdlp_helpers import apply_ytdlp_player_js_variant_workaround
+from workers.ytdlp_helpers import enable_youtube_quickjs_remote_component
+from workers.ytdlp_helpers import resolve_youtube_source_name
 
 log = get_logger("workers.handlers")
 
@@ -202,7 +202,7 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
     )
     if str(source_media_type or "").strip().lower() in {"audio", "video"}:
         return str(source_media_type).strip().lower()
-    if download.source_type is SourceType.PODCAST:
+    if parse_str_enum(SourceType, download.source_type) is SourceType.PODCAST:
         return "audio"
     return (
         "video"
@@ -210,6 +210,9 @@ def _preferred_media_kind(download: Download, payload: dict) -> str:
         else "audio"
     )
 
+
+def _source_config_type(source: SourceConfig) -> SourceType | None:
+    return parse_str_enum(SourceType, source.source_type)
 
 def _delete_ffmpeg_source_files(
     source_paths: Iterable[Path], target_path: Path
@@ -1139,12 +1142,12 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})[
                 "skip"
             ] = ["shorts"]
-        _enable_youtube_quickjs_remote_component(
+        enable_youtube_quickjs_remote_component(
             ydl_opts,
             f"download job {job.id}",
             _profile_setting(job.profile_id, "js_runtime_path", "qjs"),
         )
-        _apply_ytdlp_player_js_variant_workaround(ydl_opts)
+        apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     log.info(
         "yt-dlp download starting job_id=%s profile_id=%s source_type=%s source_name=%s url=%s output_template=%s options=%s",
@@ -1678,12 +1681,12 @@ def _youtube_entries_from_url(
         playlistend=limit,
         playlist_items=f"1-{limit}",
     )
-    _enable_youtube_quickjs_remote_component(
+    enable_youtube_quickjs_remote_component(
         ydl_opts,
         f"update source {source.name}",
         _profile_setting(source.profile_id, "js_runtime_path", "qjs"),
     )
-    _apply_ytdlp_player_js_variant_workaround(ydl_opts)
+    apply_ytdlp_player_js_variant_workaround(ydl_opts)
     log.info(
         "yt-dlp extract starting source_id=%s source_name=%s reason=%s url=%s options=%s",
         source.id,
@@ -1798,9 +1801,10 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
 
 
 def _candidates_for_source(source: SourceConfig) -> Iterable[dict]:
-    if source.source_type is SourceType.PODCAST:
+    source_type = _source_config_type(source)
+    if source_type is SourceType.PODCAST:
         return _podcast_candidates(source)
-    if source.source_type is SourceType.YOUTUBE:
+    if source_type is SourceType.YOUTUBE:
         return _youtube_candidates(source)
     log.warning(
         "Unsupported source type for episode check source_id=%s source_type=%s",
@@ -1880,7 +1884,8 @@ def check_for_episodes(job: Job) -> None:
                         title,
                     )
                     continue
-                if source.source_type is SourceType.PODCAST:
+                source_type = _source_config_type(source)
+                if source_type is SourceType.PODCAST:
                     log.info(
                         "New podcast episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s media_url=%s",
                         profile_id,
@@ -1890,7 +1895,7 @@ def check_for_episodes(job: Job) -> None:
                         title,
                         candidate.get("media_url") or item_url,
                     )
-                elif source.source_type is SourceType.YOUTUBE:
+                elif source_type is SourceType.YOUTUBE:
                     log.info(
                         "New YouTube episode found profile_id=%s source_id=%s source_name=%s item_uid=%s title=%s item_url=%s",
                         profile_id,
@@ -1938,7 +1943,7 @@ def check_for_episodes(job: Job) -> None:
                         "media_type": source.media_type
                         or (
                             "audio"
-                            if source.source_type is SourceType.PODCAST
+                            if source_type is SourceType.PODCAST
                             else "video"
                         ),
                         "source_max_downloads": limit,

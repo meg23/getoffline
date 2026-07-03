@@ -1,11 +1,11 @@
 # GetOffline: Automated Media Downloader
 
-**GetOffline** is a Python-based tool to batch download YouTube videos and podcast episodes. Runtime defaults, source lists, and download settings (including full `cookies.txt` content) are persisted in SQLite and editable in the web UI.
+**GetOffline** is a Python-based tool to batch download YouTube videos and podcast episodes. Runtime defaults, source lists, and download settings (including full `cookies.txt` content) are persisted in the Django database and editable in the web UI.
 
 ## Features
 
 - Batch download from YouTube playlists/channels and podcast RSS feeds
-- Central SQLite download history using SQLAlchemy (replaces per-source text archives)
+- Central Django database download history (replaces per-source text archives)
 - Automatic audio extraction to MP3
 - Configurable FFmpeg audio filter for automatic volume/loudness normalization on extracted audio and YouTube video audio tracks
 - Automatic Whisper subtitle (`.srt`) generation for new audio downloads when `subtitles: true`
@@ -15,7 +15,7 @@
 - Optional per-entry `subtitle_offset_seconds` to override subtitle timing offset for that source
 - Automatically skips YouTube live streams in configured sources while allowing a live video to be downloaded from the web app's **+** button
 - Browser cookie support for private or age-restricted YouTube videos
-- Database-backed runtime configuration with optional `config.yml` bootstrap paths
+- Database-backed runtime configuration managed from the web UI
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
 - Username/password login with per-user settings, source feeds, playback history, and download folders
 - Optional offline transfer that copies selected media to a directory on disk or to a connected Android phone with `adb push`
@@ -46,21 +46,7 @@ GetOffline sets `js_runtimes={"quickjs": {"path": "qjs"}}` and `--remote-compone
 
 ## Configuration
 
-On startup, defaults are seeded in SQLite automatically and can be edited at `/settings`.
-Initial bootstrap values come from built-in defaults, an optional `config.yml`, and optional environment overrides:
-
-```yaml
-defaults:
-  output_root: ./downloads
-  database_path: ./downloads/downloads.sqlite3
-```
-
-If `config.yml` is present in the current working directory, relative paths are resolved from that directory. Without a config file, both paths default under a `downloads/` folder in the current working directory.
-
-Environment variables still override the file when needed:
-
-- `GETOFFLINE_OUTPUT_ROOT`
-- `GETOFFLINE_DATABASE_PATH`
+On startup, defaults are seeded into the configured Django database automatically and can be edited at `/settings`. Environment variables configure the Django/MySQL connection for deployments; app runtime settings such as `output_root`, formats, limits, source lists, cookies, and transfer options live in the database.
 
 YouTube live streams are skipped automatically for configured playlist and channel sources. To download a specific live video, paste its URL into the web app's **+** dialog. The download remains active until the stream ends or the application stops.
 
@@ -68,50 +54,18 @@ YouTube live streams are skipped automatically for configured playlist and chann
 
 For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, keep the FFmpeg worker running so downloaded files are converted after download, and run multiple transfer workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
 
-To migrate an older standalone SQLite library into the split Django/MySQL database, first run `make migrate-db`, create the destination user if needed, and then run:
-
-```bash
-PYTHONPATH=src DJANGO_SETTINGS_MODULE=app.settings python -m django import_legacy_sqlite /path/to/downloads.sqlite3 --profile-id <username>
-```
-
-Use `--replace-profile` to clear the destination user's existing imported library/settings before loading the SQLite data again. Imported media and subtitle paths are rewritten from their relative path columns under `/app/downloads/<profile-id>` by default, and the destination profile's `output_root` is set to that same container-visible folder. Pass `--media-root /app/downloads/custom-folder` only when the files are mounted somewhere else. The importer prints progress as each major table starts and every 500 imported rows by default; pass `--progress-interval 50` (or another positive number) for more frequent updates. It copies downloads, source settings, playback flags, and transcripts; legacy youtube-dl format columns that are no longer represented by the Django models are ignored.
-
 
 ## Usage
 
-Build and run the app:
+Run the Django app directly in development mode:
 
 ```bash
-make run
+make run-app-debug
 ```
 
-This command creates a virtual environment, installs Python dependencies, validates required system dependencies, builds the executable, and runs the app.
+To import local videos, open the web app and use the browser drag-and-drop importer. It copies supported files into `manual/<original-name>` under `output_root`, registers them as manual videos, and then runs the existing subtitle/filter pipeline. Existing manual files are renamed with numeric suffixes instead of overwritten.
 
-You can still run the Python entrypoint directly if needed:
-
-```bash
-PYTHONPATH=src python -m workers.main
-```
-
-To import every supported video in a local directory through the same workflow
-as browser drag-and-drop (copy to `manual`, database registration, Whisper
-transcription, optional explicit-content filtering, audit logging
-generation), run:
-
-```bash
-PYTHONPATH=src python -m workers.main import-directory /path/to/videos
-```
-
-Add `--recursive` to include videos in subdirectories:
-
-```bash
-PYTHONPATH=src python -m workers.main import-directory /path/to/videos --recursive
-```
-
-Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The command
-skips non-video files and skips GetOffline's destination `manual` directory. It
-uses the **Delete drag-and-drop uploads containing profanity or sexual content**
-setting under **Settings → General**.
+Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The importer skips non-video files and uses the **Delete drag-and-drop uploads containing profanity or sexual content** setting under **Settings → General**.
 
 Then open `http://127.0.0.1:8080` in your browser to play audio/video files from your library.
 
@@ -169,12 +123,6 @@ To transfer over Wi-Fi, pair the device with `adb` first, then switch **ADB conn
 
 When enabled, GetOffline periodically transfers to the selected destination using the same interval as automatic download checks, and it also attempts a transfer after new downloads finish. The **Save and transfer** button in Settings persists the configuration and starts a transfer immediately. Completed destination paths are recorded in `transferdb.txt` and skipped on later runs. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android transfer also asks the device's media scanner to rescan pushed files. Each transfer writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
-To build a standalone executable with Pex:
-
-```bash
-./scripts/build.sh
-```
-
 Clean up generated files:
 
 ```bash
@@ -185,7 +133,7 @@ Clean up generated files:
 
 Downloaded files are stored under the `output_root` directory, sorted by source name and upload date.
 
-Download tracking and app settings are stored in one SQLite database (`defaults.database_path`, default: `<output_root>/downloads.sqlite3`). This includes media metadata plus key/value defaults and a dedicated download-settings row for persisted YouTube cookie text.
+Download tracking and app settings are stored in the configured Django database. This includes media metadata plus key/value defaults and a dedicated download-settings row for persisted YouTube cookie text.
 
 Media rows now keep a relative path reference alongside the resolved file path so you can move the downloads directory and keep database-backed playback references working after updating `output_root`.
 

@@ -63,6 +63,7 @@ from models.models import ScheduledJob
 from models.models import SourceConfig
 from models.models import TranscriptSegment
 from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
+from workers.handlers import _candidates_for_source
 from workers.handlers import _delete_ffmpeg_source_files  # noqa: E402
 from workers.handlers import _download_with_yt_dlp
 from workers.handlers import _downloaded_media_requires_ffmpeg
@@ -755,6 +756,34 @@ class SharedDjangoModelTests(TestCase):
                 "attempt": 1,
             }
         )
+
+    def test_candidates_for_source_dispatches_reloaded_source_type_strings(self):
+        youtube_source = SourceConfig.objects.create(
+            profile_id="default",
+            source_type=SourceType.YOUTUBE,
+            name="Test Channel",
+            url="https://www.youtube.com/@example/videos",
+            enabled=True,
+        )
+        podcast_source = SourceConfig.objects.create(
+            profile_id="default",
+            source_type=SourceType.PODCAST,
+            name="Test Podcast",
+            url="https://example.com/feed.xml",
+            enabled=True,
+        )
+        youtube_source.refresh_from_db()
+        podcast_source.refresh_from_db()
+
+        with (
+            patch("workers.handlers._youtube_candidates", return_value=[{"item_uid": "yt"}]) as youtube_candidates,
+            patch("workers.handlers._podcast_candidates", return_value=[{"item_uid": "pod"}]) as podcast_candidates,
+        ):
+            self.assertEqual(list(_candidates_for_source(youtube_source)), [{"item_uid": "yt"}])
+            self.assertEqual(list(_candidates_for_source(podcast_source)), [{"item_uid": "pod"}])
+
+        youtube_candidates.assert_called_once_with(youtube_source)
+        podcast_candidates.assert_called_once_with(podcast_source)
 
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(
