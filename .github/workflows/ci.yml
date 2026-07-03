@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  compile:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,16 +20,55 @@ jobs:
           python3 -m venv .venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r src/requirements.txt coverage ruff vulture
+          .venv/bin/python -m pip install -r src/requirements.txt
 
       - name: Compile Python files
         run: python -m py_compile $(git ls-files '*.py')
 
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Python virtual environment
+        run: |
+          python3 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r src/requirements.txt ruff
+
       - name: Run Ruff linting
         run: ruff check src tests
 
+  vulture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Python virtual environment
+        run: |
+          python3 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r src/requirements.txt vulture
+
       - name: Run Vulture dead-code analysis
         run: vulture src tests --min-confidence 100
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Python virtual environment
+        run: |
+          python3 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r src/requirements.txt coverage
 
       - name: Run unit tests with coverage
         env:
