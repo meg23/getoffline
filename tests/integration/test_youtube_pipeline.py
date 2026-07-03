@@ -69,6 +69,10 @@ def _run(
     return completed
 
 
+def _log_check(message: str) -> None:
+    print(f"[integration-test] PASS: {message}", flush=True)
+
+
 def _compose_up_command(compose: list[str]) -> list[str]:
     cmd = [*compose, "up", "-d", "--build"]
     for service in COMPOSE_SERVICES:
@@ -222,6 +226,10 @@ def _queue_download_job() -> int:
             "payload": job.payload,
         }
     )
+    print(
+        f"[integration-test] QUEUED: job_id={job.id} url={YOUTUBE_URL}",
+        flush=True,
+    )
     return job.id
 
 
@@ -254,6 +262,7 @@ def _assert_pipeline_result(
     if active_jobs:
         details = ", ".join(f"{job.id}:{job.job_type}" for job in active_jobs)
         raise AssertionError(f"pipeline still has active jobs: {details}")
+    _log_check("no queued or running jobs remain for integration profile")
 
     succeeded_job_types = {
         job.job_type for job in jobs if job.status == Job.STATUS_SUCCEEDED
@@ -265,21 +274,35 @@ def _assert_pipeline_result(
             "pipeline did not complete expected job types: "
             + ", ".join(sorted(missing_job_types))
         )
+    _log_check(
+        "expected job types succeeded: " + ", ".join(sorted(required_job_types))
+    )
 
     if download.download_status != "downloaded":
         raise AssertionError(
             f"unexpected download status: {download.download_status!r}"
         )
+    _log_check("download row status is downloaded")
+
     if (download.file_ext or "").lower() != "mp3":
         raise AssertionError(f"expected mp3 download, got {download.file_ext!r}")
+    _log_check("download row records an mp3 artifact")
+
     if not str(download.subtitle_path or "").strip():
         raise AssertionError("download row did not record a subtitle path")
+    _log_check("download row records a subtitle path")
+
     if not media_path.exists() or media_path.stat().st_size <= 0:
         raise AssertionError(f"media artifact missing or empty: {media_path}")
+    _log_check(f"media artifact exists and is non-empty: {media_path}")
+
     if not subtitle_path.exists() or subtitle_path.stat().st_size <= 0:
         raise AssertionError(f"subtitle artifact missing or empty: {subtitle_path}")
+    _log_check(f"subtitle artifact exists and is non-empty: {subtitle_path}")
+
     if transcript_count <= 0:
         raise AssertionError("transcript segments were not saved")
+    _log_check(f"transcript segments were saved: count={transcript_count}")
 
 
 def _wait_for_pipeline(
@@ -331,6 +354,7 @@ def _wait_for_pipeline(
                     raise AssertionError(
                         f"download transcript unexpectedly matched profanity: {match}"
                     )
+                _log_check("profanity screening completed with clean result")
                 return
         time.sleep(10)
     raise AssertionError(
