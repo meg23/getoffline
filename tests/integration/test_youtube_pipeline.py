@@ -23,6 +23,7 @@ YOUTUBE_URL = "https://www.youtube.com/watch?v=BB49x_uMlGA"
 PROFILE_ID = "integration"
 SOURCE_NAME = "Integration YouTube Runtime"
 DEFAULT_TIMEOUT_SECONDS = 1800
+CONTAINER_DOWNLOAD_ROOT = Path("/app/downloads")
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -224,7 +225,20 @@ def _queue_download_job() -> int:
     return job.id
 
 
-def _wait_for_pipeline(job_id: int, deadline: float) -> None:
+def _host_download_path(raw_path: str | None, host_downloads_dir: Path) -> Path:
+    candidate = Path(raw_path or "")
+    if candidate.is_absolute():
+        try:
+            relative_path = candidate.relative_to(CONTAINER_DOWNLOAD_ROOT)
+        except ValueError:
+            return candidate
+        return host_downloads_dir / relative_path
+    return candidate
+
+
+def _wait_for_pipeline(
+    job_id: int, deadline: float, host_downloads_dir: Path
+) -> None:
     from models.models import Download, Job, TranscriptSegment
     from workers.content_filter import screen_transcript
 
@@ -247,8 +261,10 @@ def _wait_for_pipeline(job_id: int, deadline: float) -> None:
             raise AssertionError(f"pipeline job failed: {details}")
         if downloads:
             download = downloads[-1]
-            media_path = Path(download.file_path or "")
-            subtitle_path = Path(download.subtitle_path or "")
+            media_path = _host_download_path(download.file_path, host_downloads_dir)
+            subtitle_path = _host_download_path(
+                download.subtitle_path, host_downloads_dir
+            )
             transcript_count = TranscriptSegment.objects.filter(
                 download=download
             ).count()
@@ -344,7 +360,7 @@ def main() -> int:
             _django_setup(host_env)
             _verify_profanity_model()
             job_id = _queue_download_job()
-            _wait_for_pipeline(job_id, deadline)
+            _wait_for_pipeline(job_id, deadline, downloads_dir)
         finally:
             _stop_log_stream(log_stream)
             keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
