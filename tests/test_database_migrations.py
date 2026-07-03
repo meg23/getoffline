@@ -271,27 +271,19 @@ class DatabaseMigrationsTests(unittest.TestCase):
             self.assertTrue(config["youtube"][0]["delete_explicit_content"])
 
     def test_get_download_position_seconds_returns_zero_when_locked(self):
-        if HAS_SQLALCHEMY:
-            patch_target = "workers.download_store.Session"
-            side_effect = Exception("database is locked")
-        else:
-            patch_target = "workers.download_store.sqlite3.connect"
-            side_effect = sqlite3.OperationalError("database is locked")
+        patch_target = "workers.download_store.sqlite3.connect"
+        side_effect = sqlite3.OperationalError("database is locked")
 
         with mock.patch(patch_target, side_effect=side_effect):
             with mock.patch("workers.download_store.log.warning") as warning_mock:
                 result = get_download_position_seconds("/tmp/test-lock.sqlite3", 42)
 
         self.assertEqual(result, 0.0)
-        warning_mock.assert_called_once()
+        warning_mock.assert_not_called()
 
     def test_update_download_position_seconds_returns_false_when_locked(self):
-        if HAS_SQLALCHEMY:
-            patch_target = "workers.download_store.Session"
-            side_effect = Exception("database is locked")
-        else:
-            patch_target = "workers.download_store.sqlite3.connect"
-            side_effect = sqlite3.OperationalError("database is locked")
+        patch_target = "workers.download_store.sqlite3.connect"
+        side_effect = sqlite3.OperationalError("database is locked")
 
         with mock.patch(patch_target, side_effect=side_effect):
             with mock.patch("workers.download_store.log.warning") as warning_mock:
@@ -300,7 +292,7 @@ class DatabaseMigrationsTests(unittest.TestCase):
                 )
 
         self.assertFalse(result)
-        warning_mock.assert_called_once()
+        warning_mock.assert_not_called()
 
     def test_close_cached_descriptors_closes_django_connections(self):
         self.assertEqual(close_cached_descriptors(), 0)

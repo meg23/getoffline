@@ -11,6 +11,8 @@ from workers.logger import get_logger
 
 log = get_logger("download_store")
 
+HAS_SQLALCHEMY = False
+
 
 DOWNLOAD_STATUS_DOWNLOADED = "downloaded"
 DOWNLOAD_STATUS_FILTERED = "filtered"
@@ -950,6 +952,128 @@ def resolve_download_artifact_path(
     return None
 
 
+def _legacy_sqlite_ready(db_path: str) -> bool:
+    if not db_path:
+        return False
+    try:
+        path = Path(str(db_path)).expanduser()
+        return path.exists() and "downloads" in _table_names_sqlite(str(path))
+    except sqlite3.OperationalError as exc:
+        if _is_sqlite_lock_error_message(str(exc)):
+            raise
+        return False
+    except sqlite3.Error:
+        return False
+
+
+def _table_names_sqlite(db_path: str) -> set[str]:
+    with sqlite3.connect(db_path) as conn:
+        return {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+
+
+def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]) -> None:
+    now = _utcnow().isoformat()
+    file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(
+        payload
+    )
+    values = {
+        "source_type": payload["source_type"],
+        "source_name": payload["source_name"],
+        "source_url": payload.get("source_url"),
+        "item_uid": payload["item_uid"],
+        "item_id": payload.get("item_id"),
+        "item_url": payload.get("item_url"),
+        "media_url": payload.get("media_url"),
+        "title": payload.get("title"),
+        "description": payload.get("description"),
+        "uploader": payload.get("uploader"),
+        "channel": payload.get("channel"),
+        "extractor": payload.get("extractor"),
+        "playlist_id": payload.get("playlist_id"),
+        "playlist_title": payload.get("playlist_title"),
+        "upload_date": payload.get("upload_date"),
+        "duration_seconds": payload.get("duration_seconds"),
+        "file_path": payload.get("file_path"),
+        "file_path_relative": file_path_relative,
+        "file_ext": payload.get("file_ext"),
+        "file_size_bytes": payload.get("file_size_bytes"),
+        "expected_bytes": payload.get("expected_bytes"),
+        "format_id": payload.get("format_id"),
+        "format_note": payload.get("format_note"),
+        "audio_codec": payload.get("audio_codec"),
+        "video_codec": payload.get("video_codec"),
+        "resolution": payload.get("resolution"),
+        "fps": payload.get("fps"),
+        "subtitle_enabled": 1 if payload.get("subtitle_enabled", True) else 0,
+        "subtitle_path": payload.get("subtitle_path"),
+        "subtitle_path_relative": subtitle_path_relative,
+        "download_status": payload.get("download_status") or "downloaded",
+        "error_message": payload.get("error_message"),
+        "raw_metadata_json": _coerce_json(payload.get("raw_metadata")),
+        "last_seen_at": now,
+        "completed_at": now if payload.get("download_status") == "downloaded" else None,
+    }
+    columns = [
+        column
+        for column in values
+        if column in _table_columns_sqlite(db_path, "downloads")
+    ]
+    insert_columns = columns + ["first_seen_at"]
+    insert_values = [values[column] for column in columns] + [now]
+    update_columns = [
+        column
+        for column in columns
+        if column not in {"source_type", "source_name", "item_uid"}
+    ]
+    assignments = ", ".join(f"{column}=excluded.{column}" for column in update_columns)
+    sql = f"""
+        INSERT INTO downloads ({", ".join(insert_columns)})
+        VALUES ({", ".join("?" for _ in insert_columns)})
+        ON CONFLICT(source_type, source_name, item_uid) DO UPDATE SET {assignments}
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(sql, insert_values)
+        conn.commit()
+
+
+def _update_download_position_sqlite(
+    db_path: str, row_id: int, position_seconds: float
+) -> bool:
+    safe_position = max(0.0, float(position_seconds or 0.0))
+    now = _utcnow().isoformat()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT last_position_seconds, total_listened_seconds FROM downloads WHERE id = ?",
+                (int(row_id),),
+            ).fetchone()
+            if row is None:
+                return False
+            previous = max(0.0, float(row[0] or 0.0))
+            total = max(0.0, float(row[1] or 0.0)) + max(0.0, safe_position - previous)
+            cur = conn.execute(
+                """
+                UPDATE downloads
+                SET last_position_seconds = ?, total_listened_seconds = ?,
+                    last_position_updated_at = ?, last_seen_at = ?
+                WHERE id = ?
+                """,
+                (safe_position, total, now, now, int(row_id)),
+            )
+            conn.commit()
+            return (cur.rowcount or 0) > 0
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+        if _is_sqlite_lock_error_message(str(exc)):
+            return False
+        raise
+
+
 _DJANGO_READY = False
 
 
@@ -963,7 +1087,28 @@ def _ensure_django_ready() -> None:
 
     if not apps.ready:
         django.setup()
+    _ensure_in_memory_test_schema()
     _DJANGO_READY = True
+
+
+def _ensure_in_memory_test_schema() -> None:
+    if os.getenv("GETOFFLINE_TEST_IN_MEMORY_DB", "0").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
+
+    from django.apps import apps
+    from django.db import connection
+
+    existing_tables = set(connection.introspection.table_names())
+    with connection.schema_editor() as schema_editor:
+        for model in apps.get_models():
+            if model._meta.managed and model._meta.db_table not in existing_tables:
+                schema_editor.create_model(model)
+                existing_tables.add(model._meta.db_table)
 
 
 def _download_model():
@@ -983,18 +1128,26 @@ def close_cached_descriptors() -> int:
 
 
 def init_database(db_path: str) -> None:
-    """Initialize the configured Django database.
-
-    ``db_path`` is accepted for legacy call-site compatibility; application data now
-    lives in the configured Django database rather than a per-profile SQLite file.
-    """
-    _ = db_path
+    """Initialize legacy file state plus the configured Django database."""
+    apply_migrations(str(db_path))
     _ensure_django_ready()
 
 
 def is_downloaded(
     db_path: str, source_type: str, source_name: str, item_uid: str
 ) -> bool:
+    if _legacy_sqlite_ready(db_path):
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM downloads
+                WHERE source_type = ? AND source_name = ? AND item_uid = ?
+                  AND download_status IN (?, ?, ?, ?)
+                LIMIT 1
+                """,
+                (source_type, source_name, item_uid, *PROCESSED_DOWNLOAD_STATUSES),
+            ).fetchone()
+            return row is not None
     _ = db_path
     Download = _download_model()
     return Download.objects.filter(
@@ -1008,6 +1161,22 @@ def is_downloaded(
 def has_episode_title_for_source(
     db_path: str, source_type: str, source_name: str, title: Optional[str]
 ) -> bool:
+    if _legacy_sqlite_ready(db_path):
+        normalized_sqlite = str(title or "").strip().casefold()
+        if not normalized_sqlite:
+            return False
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT title FROM downloads
+                WHERE source_type = ? AND source_name = ?
+                  AND download_status IN (?, ?, ?, ?) AND title IS NOT NULL
+                """,
+                (source_type, source_name, *PROCESSED_DOWNLOAD_STATUSES),
+            ).fetchall()
+        return any(
+            str(row[0] or "").strip().casefold() == normalized_sqlite for row in rows
+        )
     _ = db_path
     normalized = str(title or "").strip().casefold()
     if not normalized:
@@ -1023,6 +1192,9 @@ def has_episode_title_for_source(
 
 
 def upsert_download(db_path: str, payload: Dict[str, Any]):
+    if _legacy_sqlite_ready(db_path):
+        _upsert_download_sqlite(db_path, payload)
+        return
     _ = db_path
     Download = _download_model()
     now = _utcnow()
@@ -1033,7 +1205,6 @@ def upsert_download(db_path: str, payload: Dict[str, Any]):
         "source_url": payload.get("source_url"),
         "last_seen_at": now,
         "file_path_relative": file_path_relative,
-        "subtitle_enabled": bool(payload.get("subtitle_enabled", True)),
         "subtitle_path_relative": subtitle_path_relative,
         "raw_metadata_json": _coerce_json(payload.get("raw_metadata")),
     }
@@ -1065,6 +1236,15 @@ def upsert_download(db_path: str, payload: Dict[str, Any]):
 
 
 def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool:
+    if _legacy_sqlite_ready(db_path):
+        now = _utcnow().isoformat()
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET played = ?, played_at = ?, last_seen_at = ? WHERE id = ?",
+                (1 if played else 0, now if played else None, now, int(row_id)),
+            )
+            conn.commit()
+            return (cur.rowcount or 0) > 0
     _ = db_path
     Download = _download_model()
     updated = Download.objects.filter(pk=int(row_id)).update(
@@ -1076,6 +1256,20 @@ def mark_download_played(db_path: str, row_id: int, played: bool = True) -> bool
 
 
 def reset_download_playback(db_path: str, row_id: int) -> bool:
+    if _legacy_sqlite_ready(db_path):
+        now_text = _utcnow().isoformat()
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                """
+                UPDATE downloads
+                SET played = 0, played_at = NULL, last_position_seconds = 0,
+                    last_position_updated_at = ?, last_seen_at = ?
+                WHERE id = ?
+                """,
+                (now_text, now_text, int(row_id)),
+            )
+            conn.commit()
+            return (cur.rowcount or 0) > 0
     _ = db_path
     now = _utcnow()
     Download = _download_model()
@@ -1090,6 +1284,15 @@ def reset_download_playback(db_path: str, row_id: int) -> bool:
 
 
 def mark_all_downloads_played(db_path: str) -> int:
+    if _legacy_sqlite_ready(db_path):
+        now_text = _utcnow().isoformat()
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET played = 1, played_at = ?, last_seen_at = ? WHERE played = 0",
+                (now_text, now_text),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
     _ = db_path
     now = _utcnow()
     Download = _download_model()
@@ -1101,6 +1304,14 @@ def mark_all_downloads_played(db_path: str) -> int:
 
 
 def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> bool:
+    if _legacy_sqlite_ready(db_path):
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "UPDATE downloads SET favorite = ?, last_seen_at = ? WHERE id = ?",
+                (1 if favorite else 0, _utcnow().isoformat(), int(row_id)),
+            )
+            conn.commit()
+            return (cur.rowcount or 0) > 0
     _ = db_path
     Download = _download_model()
     return (
@@ -1112,6 +1323,11 @@ def mark_download_favorite(db_path: str, row_id: int, favorite: bool = True) -> 
 
 
 def delete_download_entry(db_path: str, row_id: int) -> bool:
+    if _legacy_sqlite_ready(db_path):
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute("DELETE FROM downloads WHERE id = ?", (int(row_id),))
+            conn.commit()
+            return (cur.rowcount or 0) > 0
     _ = db_path
     Download = _download_model()
     deleted, _detail = Download.objects.filter(pk=int(row_id)).delete()
@@ -1119,6 +1335,28 @@ def delete_download_entry(db_path: str, row_id: int) -> bool:
 
 
 def get_download_position_seconds(db_path: str, row_id: int) -> float:
+    try:
+        use_legacy_sqlite = _legacy_sqlite_ready(db_path)
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "reading download playback position", exc)
+        if _is_sqlite_lock_error_message(str(exc)):
+            return 0.0
+        raise
+    if use_legacy_sqlite:
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT last_position_seconds FROM downloads WHERE id = ?",
+                    (int(row_id),),
+                ).fetchone()
+                return float((row[0] if row else 0.0) or 0.0)
+        except sqlite3.OperationalError as exc:
+            _log_sqlite_lock_if_needed(
+                db_path, "reading download playback position", exc
+            )
+            if _is_sqlite_lock_error_message(str(exc)):
+                return 0.0
+            raise
     _ = db_path
     Download = _download_model()
     value = (
@@ -1132,6 +1370,15 @@ def get_download_position_seconds(db_path: str, row_id: int) -> float:
 def update_download_position_seconds(
     db_path: str, row_id: int, position_seconds: float
 ) -> bool:
+    try:
+        use_legacy_sqlite = _legacy_sqlite_ready(db_path)
+    except sqlite3.OperationalError as exc:
+        _log_sqlite_lock_if_needed(db_path, "updating download playback position", exc)
+        if _is_sqlite_lock_error_message(str(exc)):
+            return False
+        raise
+    if use_legacy_sqlite:
+        return _update_download_position_sqlite(db_path, row_id, position_seconds)
     _ = db_path
     Download = _download_model()
     record = Download.objects.filter(pk=int(row_id)).first()
@@ -1165,6 +1412,12 @@ def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> 
 
 
 def get_total_listened_seconds(db_path: str) -> float:
+    if _legacy_sqlite_ready(db_path):
+        with sqlite3.connect(db_path) as conn:
+            value = conn.execute(
+                "SELECT COALESCE(SUM(total_listened_seconds), 0) FROM downloads"
+            ).fetchone()[0]
+            return float(value or 0.0)
     _ = db_path
     _ensure_django_ready()
     from django.db.models import Sum
