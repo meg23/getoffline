@@ -4,7 +4,7 @@ import sys
 from workers.podcasts import _download_podcasts_in_process
 
 
-def _download_podcast_entry_in_subprocess(payload: dict) -> dict:
+def _download_podcast_entry_in_worker(payload: dict) -> dict:
     config = payload["config"]
     downloaded_items = []
     _download_podcasts_in_process(config, downloaded_items)
@@ -13,5 +13,5 @@ def _download_podcast_entry_in_subprocess(payload: dict) -> dict:
 
 if __name__ == "__main__":
     payload = json.loads(sys.stdin.read())
-    result = _download_podcast_entry_in_subprocess(payload)
+    result = _download_podcast_entry_in_worker(payload)
     sys.stdout.write(json.dumps(result))
