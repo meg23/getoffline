@@ -4,23 +4,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import django
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 
-try:
-    import django
+django.setup()
 
-    django.setup()
-except Exception:  # pragma: no cover - import guard matches existing tests
-    django = None
-
-if django is not None:
-    from workers.handlers import _transcode_idempotency_key, _transcode_lock_key
+from workers.handlers import _transcode_idempotency_key
+from workers.handlers import _transcode_lock_key
 
 
-@unittest.skipIf(django is None, "Django is not installed")
 class TranscodeIdempotencyTests(unittest.TestCase):
     def test_download_id_key_ignores_parent_job(self):
         payload = {"download_id": 42, "source_file_path": "/tmp/input.webm"}

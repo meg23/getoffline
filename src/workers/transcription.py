@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+from faster_whisper import WhisperModel
+
 from workers.logger import get_logger
 
 log = get_logger("transcription")
@@ -149,11 +151,6 @@ def _transcribe_in_process(
     language: str = None,
     log_prefix: str = "transcription",
 ):
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError("faster-whisper is required for transcription.") from exc
-
     with _WHISPER_MODEL_LOCK:
         model = _WHISPER_MODEL_CACHE.get(model_name)
         if model is None:

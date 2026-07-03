@@ -1,39 +1,36 @@
 import os
 import re
+import resource
 import shutil
 import subprocess
-import resource
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from pathlib import Path
-from typing import Dict, List, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs
+from urllib.parse import urlparse
 
+from yt_dlp import YoutubeDL
 
-from workers.content_filter import (
-    delete_media_artifacts,
-    log_filtered_deletion,
-    screen_transcript,
-)
-from workers.download_store import (
-    build_item_uid,
-    ensure_config_seeded,
-    get_stored_config,
-    init_database,
-    is_downloaded,
-    materialize_youtube_cookie_file,
-    resolve_database_path,
-    upsert_download,
-    has_episode_title_for_source,
-)
+from workers.content_filter import delete_media_artifacts
+from workers.content_filter import log_filtered_deletion
+from workers.content_filter import screen_transcript
+from workers.download_store import build_item_uid
+from workers.download_store import ensure_config_seeded
+from workers.download_store import get_stored_config
+from workers.download_store import has_episode_title_for_source
+from workers.download_store import init_database
+from workers.download_store import is_downloaded
+from workers.download_store import materialize_youtube_cookie_file
+from workers.download_store import resolve_database_path
+from workers.download_store import upsert_download
 from workers.logger import get_logger
-from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from workers.utils import (
-    ensure_dir,
-    normalize_media_filename,
-    sanitize_channel_name,
-    split_title_filter_terms,
-    title_matches_filter,
-)
+from workers.subtitles import cleanup_subtitle_sidecars_for_folder
+from workers.subtitles import create_subtitles
+from workers.utils import ensure_dir
+from workers.utils import normalize_media_filename
+from workers.utils import sanitize_channel_name
+from workers.utils import split_title_filter_terms
+from workers.utils import title_matches_filter
 
 _EMOJI_RE = re.compile(r"[🇦-🇿🌀-🫿☀-➿️]+")
 
@@ -91,7 +88,7 @@ def _thumbnail_quality_score(thumbnail: dict) -> tuple:
     return (area, max(width, height), preference_value, len(url))
 
 
-def _best_thumbnail_url(info: Dict) -> str:
+def _best_thumbnail_url(info: dict) -> str:
     thumbnails = info.get("thumbnails") or []
     candidates = []
     if isinstance(thumbnails, list):
@@ -104,7 +101,7 @@ def _best_thumbnail_url(info: Dict) -> str:
     return str(info.get("thumbnail") or "").strip()
 
 
-def _find_thumbnail_sidecar(*paths: object) -> Optional[str]:
+def _find_thumbnail_sidecar(*paths: object) -> str | None:
     seen = set()
     for raw_path in paths:
         if not raw_path:
@@ -182,7 +179,7 @@ def _apply_ffmpeg_audio_filter(media_file: Path, ffmpeg_audio_filter: str) -> bo
     return True
 
 
-def _resolve_quickjs_binary(js_runtime_path: Optional[str] = None) -> Optional[str]:
+def _resolve_quickjs_binary(js_runtime_path: str | None = None) -> str | None:
     candidate = str(js_runtime_path or "qjs").strip() or "qjs"
     if os.sep in candidate or (os.altsep and os.altsep in candidate):
         path = Path(candidate).expanduser()
@@ -200,7 +197,7 @@ def _prepend_runtime_to_path(runtime_binary: str) -> None:
 
 
 def _enable_youtube_quickjs_remote_component(
-    ydl_opts: Dict, context_label: str, js_runtime_path: Optional[str] = None
+    ydl_opts: dict, context_label: str, js_runtime_path: str | None = None
 ):
     """Configure yt-dlp's YouTube EJS remote component to use QuickJS when available."""
     quickjs_binary = _resolve_quickjs_binary(js_runtime_path)
@@ -238,7 +235,7 @@ def _enable_youtube_quickjs_remote_component(
     )
 
 
-def _apply_ytdlp_player_js_variant_workaround(ydl_opts: Dict):
+def _apply_ytdlp_player_js_variant_workaround(ydl_opts: dict):
     """Work around yt-dlp issue #16256 by forcing youtube:player_js_variant=main."""
     extractor_args = ydl_opts.get("extractor_args")
     if not isinstance(extractor_args, dict):
@@ -263,7 +260,7 @@ def _clean_log_title(value: str) -> str:
     return text or "unknown title"
 
 
-def _human_size(num_bytes: Optional[float]) -> str:
+def _human_size(num_bytes: float | None) -> str:
     if not num_bytes or num_bytes <= 0:
         return "unknown size"
 
@@ -278,7 +275,7 @@ def _human_size(num_bytes: Optional[float]) -> str:
     return f"{num_bytes:.0f} B"
 
 
-def _extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
+def _extract_youtube_video_id(url: str | None) -> str | None:
     candidate = str(url or "").strip()
     if not candidate:
         return None
@@ -304,7 +301,7 @@ def _extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
     return None
 
 
-def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> str:
+def resolve_youtube_source_name(url: str, cookie_file: str | None = None) -> str:
     source_url = str(url or "").strip()
     if not source_url:
         raise ValueError("Missing YouTube URL")
@@ -344,7 +341,7 @@ def resolve_youtube_source_name(url: str, cookie_file: Optional[str] = None) -> 
     return "youtube-single"
 
 
-def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
+def search_youtube_videos(query: str, limit: int = 8) -> list[dict[str, str]]:
     search_query = str(query or "").strip()
     if not search_query:
         return []
@@ -403,7 +400,7 @@ def search_youtube_videos(query: str, limit: int = 8) -> List[Dict[str, str]]:
 
 
 class _YoutubeDlQuietLogger:
-    def __init__(self, run_stats: Optional[Dict[str, int]] = None):
+    def __init__(self, run_stats: dict[str, int] | None = None):
         self.run_stats = run_stats if run_stats is not None else {}
 
     def _count(self, key: str):
@@ -483,7 +480,7 @@ def _coerce_positive_int(value: object, fallback: int) -> int:
     return max(1, parsed)
 
 
-def _resolve_scan_limit(entry: Dict, defaults: Dict, source_max_downloads: int) -> int:
+def _resolve_scan_limit(entry: dict, defaults: dict, source_max_downloads: int) -> int:
     """Return how many recent playlist entries to inspect.
 
     max_downloads is the cap on NEW downloads. scan_limit is intentionally
@@ -507,13 +504,13 @@ def _build_youtube_payload(
     *,
     source_name: str,
     source_url: str,
-    info: Dict,
-    output_file: Optional[str],
+    info: dict,
+    output_file: str | None,
     storage_root: str,
     subtitle_enabled: bool,
     download_status: str,
-    error_message: Optional[str] = None,
-) -> Dict:
+    error_message: str | None = None,
+) -> dict:
     path = Path(output_file).expanduser().resolve() if output_file else None
     file_size = path.stat().st_size if path and path.exists() else None
     subtitle_path = None
@@ -680,22 +677,22 @@ def _download_youtube_items_in_process(config, downloaded_items):
             allow_live_streams = bool(entry.get("allow_live_streams", False))
             title_exclude_terms = split_title_filter_terms(entry.get("title_exclude"))
 
-            extracted_audio_files: List[Path] = []
-            postprocessed_file_by_key: Dict[str, Path] = {}
-            normalized_path_map: Dict[Path, Path] = {}
+            extracted_audio_files: list[Path] = []
+            postprocessed_file_by_key: dict[str, Path] = {}
+            normalized_path_map: dict[Path, Path] = {}
             completed_download_ids = set()
             download_progress_markers = {}
             known_download_titles = {}
-            finished_download_info: Dict[str, Dict] = {}
-            failed_download_reasons: Dict[str, int] = {}
+            finished_download_info: dict[str, dict] = {}
+            failed_download_reasons: dict[str, int] = {}
             candidate_entries_seen_keys = set()
             candidate_entries_allowed_keys = set()
-            candidate_entries_allowed_examples: List[str] = []
-            progress_status_counts: Dict[str, int] = {}
-            ytdlp_message_stats: Dict[str, int] = {}
-            skip_reason_counts: Dict[str, int] = {}
-            skip_reason_examples: Dict[str, str] = {}
-            subtitle_futures_by_media: Dict[Path, object] = {}
+            candidate_entries_allowed_examples: list[str] = []
+            progress_status_counts: dict[str, int] = {}
+            ytdlp_message_stats: dict[str, int] = {}
+            skip_reason_counts: dict[str, int] = {}
+            skip_reason_examples: dict[str, str] = {}
+            subtitle_futures_by_media: dict[Path, object] = {}
 
             subtitle_or_aux_exts = {
                 ".srt",
@@ -1502,13 +1499,5 @@ def download_youtube_items(config, downloaded_items):
     _download_youtube_items_in_process(config, downloaded_items)
 
 
-YoutubeDL = None
-
-
 def _get_youtubedl():
-    global YoutubeDL
-    if YoutubeDL is None:
-        from yt_dlp import YoutubeDL as _YoutubeDL
-
-        YoutubeDL = _YoutubeDL
     return YoutubeDL

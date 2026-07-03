@@ -10,16 +10,16 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import workers.podcasts as podcasts  # noqa: E402
-import workers.youtube as youtube  # noqa: E402
-from workers.download_store import (
-    build_item_uid,
-    has_episode_title_for_source,
-    is_downloaded,
-    upsert_download,
-    init_database,
-)  # noqa: E402
 from support import DatabaseCleanupTestCase  # noqa: E402
+
+import workers.podcasts as podcasts  # noqa: E402
+import workers.subtitles as subtitles  # noqa: E402
+import workers.youtube as youtube  # noqa: E402
+from workers.download_store import build_item_uid  # noqa: E402
+from workers.download_store import has_episode_title_for_source
+from workers.download_store import init_database
+from workers.download_store import is_downloaded
+from workers.download_store import upsert_download
 
 
 class FakeYoutubeDL:
@@ -538,8 +538,6 @@ class DownloadFlowTests(DatabaseCleanupTestCase):
             self.assertEqual(downloaded_items, [])
 
     def test_downloads_are_tracked_in_sqlite_database(self):
-        import sqlite3
-
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _build_sample_config(tmpdir)
             config["defaults"]["database_path"] = os.path.join(
@@ -1306,8 +1304,6 @@ class SubtitleDefaultsAndYoutubeWhisperTests(DatabaseCleanupTestCase):
             )
 
     def test_youtube_database_file_path_tracks_normalized_filename(self):
-        import sqlite3
-
         class FakeYoutubeDLWithOddDots(FakeYoutubeDL):
             def download(self, urls):
                 self.urls.extend(urls)
@@ -1381,8 +1377,6 @@ class SubtitleDefaultsAndYoutubeWhisperTests(DatabaseCleanupTestCase):
             self.assertTrue(Path(stored_path).exists())
 
     def test_youtube_database_prefers_postprocessed_audio_path_and_size(self):
-        import sqlite3
-
         class FakeYoutubeDLWithSeparatePostprocess(FakeYoutubeDL):
             def download(self, urls):
                 self.urls.extend(urls)
@@ -1473,8 +1467,6 @@ class SubtitleDefaultsAndYoutubeWhisperTests(DatabaseCleanupTestCase):
             self.assertEqual(stored_size, len("real-audio"))
 
     def test_video_download_tracks_merged_file_in_database(self):
-        import sqlite3
-
         class FakeYoutubeDLVideoMerge(FakeYoutubeDL):
             def download(self, urls):
                 self.urls.extend(urls)
@@ -1635,8 +1627,6 @@ class SubtitleDefaultsAndYoutubeWhisperTests(DatabaseCleanupTestCase):
 
 class SubtitleSidecarCleanupTests(DatabaseCleanupTestCase):
     def test_whisper_subtitles_are_canonical_and_cleanup_youtube_sidecars(self):
-        import workers.subtitles as subtitles
-
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "20260311-Cuba_is_Next.mp3"
             media.write_text("fake", encoding="utf-8")
@@ -1666,8 +1656,6 @@ class SubtitleSidecarCleanupTests(DatabaseCleanupTestCase):
             self.assertTrue(media.with_suffix(".srt").exists())
 
     def test_folder_cleanup_removes_existing_en_sidecars_without_new_download(self):
-        import workers.subtitles as subtitles
-
         with tempfile.TemporaryDirectory() as tmpdir:
             media = (
                 Path(tmpdir) / "20260310-Pakistan_and_Afghanistan_are_Still_At_War.mp3"
@@ -1690,8 +1678,6 @@ class SubtitleSidecarCleanupTests(DatabaseCleanupTestCase):
 
 class SubtitleFailureCachingTests(DatabaseCleanupTestCase):
     def test_known_empty_audio_transcription_failure_is_cached(self):
-        import workers.subtitles as subtitles
-
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "broken.mp3"
             media.write_text("fake", encoding="utf-8")
@@ -1717,8 +1703,6 @@ class SubtitleFailureCachingTests(DatabaseCleanupTestCase):
             self.assertTrue(marker.exists())
 
     def test_ffmpeg_no_audio_stream_failure_is_cached(self):
-        import workers.subtitles as subtitles
-
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "video_only.mp4"
             media.write_text("fake", encoding="utf-8")

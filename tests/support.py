@@ -1,6 +1,6 @@
 import gc
-import warnings
 import unittest
+import warnings
 
 from workers.download_store import close_cached_descriptors
 

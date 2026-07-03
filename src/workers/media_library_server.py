@@ -4,20 +4,20 @@ import re
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
-from workers.content_filter import (
-    delete_media_artifacts,
-    log_filtered_deletion,
-    screen_transcript,
-)
+from workers.content_filter import delete_media_artifacts
+from workers.content_filter import log_filtered_deletion
+from workers.content_filter import screen_transcript
+from workers.download_store import upsert_download
 from workers.logger import get_logger
 from workers.profiles import ProfileManager
 from workers.subtitles import create_subtitles
-from workers.download_store import upsert_download
 
 MEDIA_EXTENSIONS = {
     ".mp3",
@@ -41,10 +41,10 @@ log = get_logger("media_import")
 class UpdateStatus:
     lock: threading.Lock = field(default_factory=threading.Lock)
     is_running: bool = False
-    last_started_at: Optional[float] = None
-    last_finished_at: Optional[float] = None
+    last_started_at: float | None = None
+    last_finished_at: float | None = None
     last_result: str = "idle"
-    last_error: Optional[str] = None
+    last_error: str | None = None
     last_items_count: int = 0
 
 
@@ -52,10 +52,10 @@ class UpdateStatus:
 class AndroidSyncStatus:
     lock: threading.Lock = field(default_factory=threading.Lock)
     is_running: bool = False
-    last_started_at: Optional[float] = None
-    last_finished_at: Optional[float] = None
+    last_started_at: float | None = None
+    last_finished_at: float | None = None
     last_result: str = "idle"
-    last_error: Optional[str] = None
+    last_error: str | None = None
     last_copied_count: int = 0
     last_skipped_count: int = 0
 
@@ -64,12 +64,12 @@ class AndroidSyncStatus:
 class AppState:
     output_root: Path
     database_path: Path
-    config: Dict
-    update_runner: Callable[[Dict, List[str]], None]
+    config: dict
+    update_runner: Callable[[dict, list[str]], None]
     update_status: UpdateStatus = field(default_factory=UpdateStatus)
     android_sync_status: AndroidSyncStatus = field(default_factory=AndroidSyncStatus)
     pending_progress_lock: threading.Lock = field(default_factory=threading.Lock)
-    pending_progress: Dict[int, Tuple[float, bool]] = field(default_factory=dict)
+    pending_progress: dict[int, tuple[float, bool]] = field(default_factory=dict)
     pending_progress_event: threading.Event = field(default_factory=threading.Event)
     progress_metrics_lock: threading.Lock = field(default_factory=threading.Lock)
     progress_received_count: int = 0
@@ -77,10 +77,10 @@ class AppState:
     progress_last_log_at: float = 0.0
     progress_last_reason: str = "unknown"
     progress_last_forced: bool = False
-    profile_manager: Optional[ProfileManager] = None
+    profile_manager: ProfileManager | None = None
     profile_lock: threading.RLock = field(default_factory=threading.RLock)
-    profile_update_statuses: Dict[str, UpdateStatus] = field(default_factory=dict)
-    profile_auth_sessions: Dict[str, Tuple[str, float]] = field(default_factory=dict)
+    profile_update_statuses: dict[str, UpdateStatus] = field(default_factory=dict)
+    profile_auth_sessions: dict[str, tuple[str, float]] = field(default_factory=dict)
     profile_auth_lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -142,7 +142,7 @@ def _manual_import_metadata(
     original_filename: str,
     ingest_method: str,
     now_iso: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     drag_drop = ingest_method == "drag-and-drop"
     return {
         "source_type": "manual",
@@ -264,7 +264,7 @@ def import_local_media_file(state: AppState, source_path: Path) -> Path:
         )
 
 
-def _manual_upload_filter_enabled(defaults: Dict) -> bool:
+def _manual_upload_filter_enabled(defaults: dict) -> bool:
     value = defaults.get("manual_upload_delete_explicit_content", False)
     if isinstance(value, bool):
         return value
@@ -274,9 +274,9 @@ def _manual_upload_filter_enabled(defaults: Dict) -> bool:
 def _filter_imported_media(
     item_uid: str,
     media_path: Path,
-    subtitle_path: Optional[Path],
-    defaults: Dict,
-) -> Optional[str]:
+    subtitle_path: Path | None,
+    defaults: dict,
+) -> str | None:
     if not _manual_upload_filter_enabled(defaults):
         log.info(
             "Manual upload profanity check skipped item_uid=%s reason=disabled",
@@ -337,7 +337,7 @@ def _filter_imported_media(
     return explicit_match.category
 
 
-def _download_id_for_item_uid(db_path: Path, item_uid: str) -> Optional[int]:
+def _download_id_for_item_uid(db_path: Path, item_uid: str) -> int | None:
     with sqlite3.connect(str(db_path), timeout=SQLITE_PLAYBACK_TIMEOUT_SECONDS) as conn:
         row = conn.execute(
             """
@@ -355,7 +355,7 @@ def _download_id_for_item_uid(db_path: Path, item_uid: str) -> Optional[int]:
 
 
 def _index_imported_media_transcript(
-    state: AppState, item_uid: str, subtitle_path: Path, defaults: Dict
+    state: AppState, item_uid: str, subtitle_path: Path, defaults: dict
 ) -> None:
     download_id = _download_id_for_item_uid(state.database_path, item_uid)
     if download_id is None:
@@ -397,7 +397,7 @@ def _index_imported_media_transcript(
 
 
 def _postprocess_imported_media(
-    state: AppState, metadata: Dict, media_path: Path
+    state: AppState, metadata: dict, media_path: Path
 ) -> None:
     defaults = (state.config or {}).get("defaults") or {}
     item_uid = str(metadata["item_uid"])
@@ -475,7 +475,7 @@ def _format_vtt_timestamp(value: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
 
-def _parse_srt_timestamp(value: str) -> Optional[float]:
+def _parse_srt_timestamp(value: str) -> float | None:
     parts = value.strip().split(":")
     if len(parts) != 3:
         return None
@@ -494,7 +494,7 @@ def _parse_srt_timestamp(value: str) -> Optional[float]:
     return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
 
 
-def _parse_vtt_timecode(value: str) -> Optional[float]:
+def _parse_vtt_timecode(value: str) -> float | None:
     token = str(value or "").strip()
     if not token:
         return None
@@ -543,12 +543,12 @@ def _srt_to_vtt(content: str) -> str:
     return "\n".join(out_lines).strip() + "\n"
 
 
-def _subtitle_segments_from_path(subtitle_path: Path) -> List[Tuple[float, float, str]]:
+def _subtitle_segments_from_path(subtitle_path: Path) -> list[tuple[float, float, str]]:
     subtitle_text = subtitle_path.read_text(encoding="utf-8", errors="replace")
     if subtitle_path.suffix.lower() == ".srt":
         subtitle_text = _srt_to_vtt(subtitle_text)
     lines = subtitle_text.splitlines()
-    segments: List[Tuple[float, float, str]] = []
+    segments: list[tuple[float, float, str]] = []
     i = 0
     while i < len(lines):
         line = lines[i].strip()

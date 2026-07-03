@@ -5,6 +5,8 @@ import json
 import sys
 import traceback
 
+from faster_whisper import WhisperModel
+
 from workers.transcription import _normalize_faster_whisper_result
 
 
@@ -14,8 +16,6 @@ def transcribe_worker_once(
     model = None
     segments = None
     try:
-        from faster_whisper import WhisperModel
-
         model = WhisperModel(model_name, device="cpu", compute_type="int8")
         transcribe_kwargs = {"vad_filter": True}
         if language:

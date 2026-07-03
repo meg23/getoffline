@@ -1,34 +1,31 @@
 import os
 import resource
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from pathlib import Path
 
 import feedparser
+from yt_dlp import YoutubeDL
 
-from workers.download_store import (
-    build_item_uid,
-    ensure_config_seeded,
-    get_stored_config,
-    init_database,
-    is_downloaded,
-    resolve_database_path,
-    upsert_download,
-)
-from workers.content_filter import (
-    delete_media_artifacts,
-    log_filtered_deletion,
-    screen_transcript,
-)
+from workers.content_filter import delete_media_artifacts
+from workers.content_filter import log_filtered_deletion
+from workers.content_filter import screen_transcript
+from workers.download_store import build_item_uid
+from workers.download_store import ensure_config_seeded
+from workers.download_store import get_stored_config
+from workers.download_store import init_database
+from workers.download_store import is_downloaded
+from workers.download_store import resolve_database_path
+from workers.download_store import upsert_download
 from workers.logger import get_logger
-from workers.subtitles import cleanup_subtitle_sidecars_for_folder, create_subtitles
-from workers.utils import (
-    ensure_dir,
-    sanitize,
-    sanitize_channel_name,
-    split_title_filter_terms,
-    title_matches_filter,
-)
+from workers.subtitles import cleanup_subtitle_sidecars_for_folder
+from workers.subtitles import create_subtitles
+from workers.utils import ensure_dir
+from workers.utils import sanitize
+from workers.utils import sanitize_channel_name
+from workers.utils import split_title_filter_terms
+from workers.utils import title_matches_filter
 
 PODCAST_DOWNLOAD_RETRIES = 3
 
@@ -653,13 +650,5 @@ def download_podcasts(config, downloaded_items):
     _download_podcasts_in_process(config, downloaded_items)
 
 
-YoutubeDL = None
-
-
 def _get_youtubedl():
-    global YoutubeDL
-    if YoutubeDL is None:
-        from yt_dlp import YoutubeDL as _YoutubeDL
-
-        YoutubeDL = _YoutubeDL
     return YoutubeDL

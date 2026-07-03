@@ -2,17 +2,15 @@
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
-from typing import Optional
 
-from workers.download_store import (
-    DOWNLOAD_STATUS_MISSING,
-    DOWNLOAD_STATUS_RETENTION_DELETED,
-    resolve_download_artifact_path,
-)
+from workers.download_store import DOWNLOAD_STATUS_MISSING
+from workers.download_store import DOWNLOAD_STATUS_RETENTION_DELETED
+from workers.download_store import resolve_download_artifact_path
 from workers.logger import get_logger
-
 
 log = get_logger("content_retention")
 
@@ -26,7 +24,7 @@ class RetentionCleanupResult:
     ignored_favorites: int = 0
 
 
-def _parse_database_timestamp(value: Optional[str]) -> Optional[datetime]:
+def _parse_database_timestamp(value: str | None) -> datetime | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -44,7 +42,7 @@ def enforce_content_retention(
     output_root: str,
     retention_days: int,
     *,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> RetentionCleanupResult:
     """Delete expired automatic media while retaining terminal database records.
 

@@ -1,37 +1,23 @@
 """Transcript-based explicit-content screening for downloaded media."""
 
 import argparse
-import importlib.util
 import re
 from dataclasses import dataclass
 from glob import escape as glob_escape
 from pathlib import Path
-from typing import List, Optional
+
+from profanityfilter import ProfanityFilter
 
 from workers.logger import get_logger
 
 log = get_logger("content_filter")
 
-_PROFANITY_FILTER = None
-_PROFANITY_FILTER_ERROR: Optional[Exception] = None
+_PROFANITY_FILTER = ProfanityFilter()
 _PROFANITY_FILTER_TERM = "profanityfilter"
 
 
 def _predict_profanity(texts):
-    """Return profanityfilter predictions, or None when the package is unavailable."""
-    global _PROFANITY_FILTER, _PROFANITY_FILTER_ERROR
-    if _PROFANITY_FILTER is None and _PROFANITY_FILTER_ERROR is None:
-        try:
-            if importlib.util.find_spec("profanityfilter") is None:
-                raise ModuleNotFoundError("No module named 'profanityfilter'")
-            from profanityfilter import ProfanityFilter
-
-            _PROFANITY_FILTER = ProfanityFilter()
-        except Exception as exc:  # pragma: no cover - depends on optional package availability
-            _PROFANITY_FILTER_ERROR = exc
-            log.debug("profanityfilter is unavailable: %r", exc)
-    if _PROFANITY_FILTER is None:
-        return None
+    """Return profanityfilter predictions."""
     return [bool(_PROFANITY_FILTER.is_profane(text)) for text in texts]
 
 
@@ -62,7 +48,7 @@ def transcript_text(subtitle_path: Path) -> str:
     return " ".join(spoken_lines)
 
 
-def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
+def find_explicit_content(text: str) -> ExplicitContentMatch | None:
     """Find explicit language in transcript text."""
     transcript = str(text or "").strip()
     if not transcript:
@@ -93,13 +79,13 @@ def find_explicit_content(text: str) -> Optional[ExplicitContentMatch]:
     return None
 
 
-def screen_transcript(subtitle_path: Optional[Path]) -> Optional[ExplicitContentMatch]:
+def screen_transcript(subtitle_path: Path | None) -> ExplicitContentMatch | None:
     if subtitle_path is None or not Path(subtitle_path).exists():
         return None
     return find_explicit_content(transcript_text(Path(subtitle_path)))
 
 
-def delete_media_artifacts(media_path: Path) -> List[Path]:
+def delete_media_artifacts(media_path: Path) -> list[Path]:
     """Delete a media file and related artifacts, returning deleted paths."""
     media_path = Path(media_path).expanduser().resolve()
     candidates = {media_path}
@@ -127,7 +113,7 @@ def log_filtered_deletion(
     title: str,
     media_path: Path,
     match: ExplicitContentMatch,
-    deleted_paths: List[Path],
+    deleted_paths: list[Path],
 ) -> None:
     """Write a stable audit event after explicit-content artifacts are deleted."""
     deleted_artifacts = ", ".join(str(path) for path in deleted_paths) or "none"
@@ -145,13 +131,13 @@ def log_filtered_deletion(
     )
 
 
-def _screen_text_or_file(*, text: Optional[str], subtitle_path: Optional[str]):
+def _screen_text_or_file(*, text: str | None, subtitle_path: str | None):
     if text is not None:
         return find_explicit_content(text)
     return screen_transcript(Path(str(subtitle_path)))
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Test GetOffline's transcript explicit-content screening against text "
@@ -181,15 +167,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.check_model:
-        predictions = _predict_profanity(["plain words"])
-        if predictions is None:
-            error = (
-                f"{type(_PROFANITY_FILTER_ERROR).__name__}: {_PROFANITY_FILTER_ERROR!r}"
-                if _PROFANITY_FILTER_ERROR is not None
-                else "unknown"
-            )
-            print(f"model=fallback error={error}", flush=True)
-            return 2
+        _predict_profanity(["plain words"])
         print("model=profanityfilter", flush=True)
         return 0
 

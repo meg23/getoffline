@@ -4,7 +4,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.scheduler import GlobalSlotScheduler, InMemorySlotBackend
+from workers.scheduler import GlobalSlotScheduler
+from workers.scheduler import InMemorySlotBackend
 
 
 class CpuSlotSchedulerTests(unittest.TestCase):

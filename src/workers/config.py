@@ -1,16 +1,13 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from workers.download_store import (
-    DEFAULT_APP_CONFIG,
-    ensure_config_seeded,
-    get_stored_config,
-    init_database,
-    materialize_youtube_cookie_file,
-    resolve_database_path,
-)
-
+from workers.download_store import DEFAULT_APP_CONFIG
+from workers.download_store import ensure_config_seeded
+from workers.download_store import get_stored_config
+from workers.download_store import init_database
+from workers.download_store import materialize_youtube_cookie_file
+from workers.download_store import resolve_database_path
 
 CONFIG_FILE_NAME = "config.yml"
 
@@ -24,12 +21,12 @@ def _resolve_path(value: Any, *, base_dir: Path) -> str:
     return str(candidate.resolve())
 
 
-def _load_yaml_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def _load_yaml_config(config_path: Path | None = None) -> dict[str, Any]:
     path = config_path or (Path.cwd() / CONFIG_FILE_NAME)
     if not path.is_file():
         return {}
 
-    defaults: Dict[str, Any] = {}
+    defaults: dict[str, Any] = {}
     in_defaults = False
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].rstrip()
@@ -54,7 +51,7 @@ def _load_yaml_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     return {"path": path, "defaults": defaults or {}}
 
 
-def _build_bootstrap_defaults(config_path: Optional[Path] = None):
+def _build_bootstrap_defaults(config_path: Path | None = None):
     defaults = dict(DEFAULT_APP_CONFIG)
     file_config = _load_yaml_config(config_path)
     config_dir = (
@@ -75,7 +72,7 @@ def _build_bootstrap_defaults(config_path: Optional[Path] = None):
     return defaults
 
 
-def load_bootstrap_config(config_path: Optional[Path] = None):
+def load_bootstrap_config(config_path: Path | None = None):
     return {
         "defaults": _build_bootstrap_defaults(config_path),
         "download_settings": {"youtube_cookie_text": None},
@@ -84,7 +81,7 @@ def load_bootstrap_config(config_path: Optional[Path] = None):
     }
 
 
-def load_config(config_path: Optional[Path] = None):
+def load_config(config_path: Path | None = None):
     defaults = _build_bootstrap_defaults(config_path)
     init_database(defaults["database_path"])
     ensure_config_seeded(defaults["database_path"], defaults)

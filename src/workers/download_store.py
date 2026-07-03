@@ -3,9 +3,10 @@ import json
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from workers.logger import get_logger
 
@@ -49,7 +50,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _resolve_path(value: Any, *, base_dir: Optional[str] = None) -> str:
+def _resolve_path(value: Any, *, base_dir: str | None = None) -> str:
     raw = os.path.expandvars(os.path.expanduser(str(value or "").strip()))
     candidate = Path(raw)
     if not candidate.is_absolute() and base_dir:
@@ -58,7 +59,7 @@ def _resolve_path(value: Any, *, base_dir: Optional[str] = None) -> str:
 
 
 def resolve_database_path(
-    defaults: Dict[str, Any], *, base_dir: Optional[str] = None
+    defaults: dict[str, Any], *, base_dir: str | None = None
 ) -> str:
     configured = defaults.get("database_path")
     if configured:
@@ -71,10 +72,10 @@ def resolve_database_path(
 
 def build_item_uid(
     *,
-    item_id: Optional[str],
-    item_url: Optional[str],
-    media_url: Optional[str],
-    title: Optional[str],
+    item_id: str | None,
+    item_url: str | None,
+    media_url: str | None,
+    title: str | None,
 ) -> str:
     for candidate in (item_id, item_url, media_url):
         if candidate:
@@ -84,7 +85,7 @@ def build_item_uid(
     return f"title:{digest}"
 
 
-def _coerce_json(value: Any) -> Optional[str]:
+def _coerce_json(value: Any) -> str | None:
     if value is None:
         return None
     try:
@@ -448,7 +449,7 @@ def _coerce_int(value: Any, fallback: int) -> int:
 
 
 def ensure_config_seeded(
-    db_path: str, defaults: Optional[Dict[str, Any]] = None
+    db_path: str, defaults: dict[str, Any] | None = None
 ) -> None:
     # Database initialization/migrations are expected to run during process startup.
     now = _utcnow().isoformat()
@@ -485,7 +486,7 @@ def ensure_config_seeded(
         raise
 
 
-def get_stored_config(db_path: str) -> Dict[str, Any]:
+def get_stored_config(db_path: str) -> dict[str, Any]:
     ensure_config_seeded(db_path)
 
     defaults = dict(DEFAULT_APP_CONFIG)
@@ -628,7 +629,7 @@ def get_stored_config(db_path: str) -> Dict[str, Any]:
     }
 
 
-def update_stored_defaults(db_path: str, updates: Dict[str, Any]) -> None:
+def update_stored_defaults(db_path: str, updates: dict[str, Any]) -> None:
     if not updates:
         return
     ensure_config_seeded(db_path)
@@ -653,7 +654,7 @@ def update_stored_defaults(db_path: str, updates: Dict[str, Any]) -> None:
         raise
 
 
-def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -> None:
+def update_download_settings(db_path: str, youtube_cookie_text: str | None) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
     Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
@@ -681,8 +682,8 @@ def update_download_settings(db_path: str, youtube_cookie_text: Optional[str]) -
 
 
 def materialize_youtube_cookie_file(
-    db_path: str, cookie_path: Optional[str] = None
-) -> Optional[str]:
+    db_path: str, cookie_path: str | None = None
+) -> str | None:
     stored = get_stored_config(db_path)
     cookie_text = stored["download_settings"].get("youtube_cookie_text")
     if not cookie_text:
@@ -701,7 +702,7 @@ def materialize_youtube_cookie_file(
 
 
 def replace_sources(
-    db_path: str, youtube: List[Dict[str, Any]], podcasts: List[Dict[str, Any]]
+    db_path: str, youtube: list[dict[str, Any]], podcasts: list[dict[str, Any]]
 ) -> None:
     ensure_config_seeded(db_path)
     now = _utcnow().isoformat()
@@ -765,7 +766,7 @@ def replace_sources(
         raise
 
 
-def seed_sources_from_config(db_path: str, config: Dict[str, Any]) -> None:
+def seed_sources_from_config(db_path: str, config: dict[str, Any]) -> None:
     ensure_config_seeded(db_path, config.get("defaults"))
     with sqlite3.connect(db_path) as conn:
         existing = conn.execute("SELECT COUNT(*) FROM source_configs").fetchone()[0]
@@ -780,10 +781,10 @@ def add_source_config(
     source_type: str,
     name: str,
     url: str,
-    media_type: Optional[str],
+    media_type: str | None,
     subtitles: bool,
-    subtitle_offset_seconds: Optional[float],
-    max_downloads: Optional[int] = None,
+    subtitle_offset_seconds: float | None,
+    max_downloads: int | None = None,
     delete_explicit_content: bool = False,
     include_shorts: bool = False,
     include_livestreams: bool = False,
@@ -869,10 +870,10 @@ def update_source_config(
     row_id: int,
     name: str,
     url: str,
-    media_type: Optional[str],
+    media_type: str | None,
     subtitles: bool,
-    subtitle_offset_seconds: Optional[float],
-    max_downloads: Optional[int] = None,
+    subtitle_offset_seconds: float | None,
+    max_downloads: int | None = None,
     delete_explicit_content: bool = False,
     title_exclude: str = "",
 ) -> bool:
@@ -919,15 +920,15 @@ def update_source_config(
 
 
 def _compute_relative_storage_paths(
-    payload: Dict[str, Any],
-) -> Tuple[Optional[str], Optional[str]]:
+    payload: dict[str, Any],
+) -> tuple[str | None, str | None]:
     storage_root = payload.get("storage_root")
     if not storage_root:
         return None, None
 
     root = Path(str(storage_root)).expanduser().resolve()
 
-    def _relativize(candidate: Any) -> Optional[str]:
+    def _relativize(candidate: Any) -> str | None:
         if not candidate:
             return None
         path = Path(str(candidate)).expanduser().resolve()
@@ -942,8 +943,8 @@ def _compute_relative_storage_paths(
 
 
 def resolve_download_artifact_path(
-    output_root: str, stored_path: Optional[str], relative_path: Optional[str]
-) -> Optional[str]:
+    output_root: str, stored_path: str | None, relative_path: str | None
+) -> str | None:
     root = Path(str(output_root)).expanduser().resolve()
     if relative_path:
         return str((root / str(relative_path)).resolve())
@@ -976,7 +977,7 @@ def _table_names_sqlite(db_path: str) -> set[str]:
         }
 
 
-def _upsert_download_sqlite(db_path: str, payload: Dict[str, Any]) -> None:
+def _upsert_download_sqlite(db_path: str, payload: dict[str, Any]) -> None:
     now = _utcnow().isoformat()
     file_path_relative, subtitle_path_relative = _compute_relative_storage_paths(
         payload
@@ -1159,7 +1160,7 @@ def is_downloaded(
 
 
 def has_episode_title_for_source(
-    db_path: str, source_type: str, source_name: str, title: Optional[str]
+    db_path: str, source_type: str, source_name: str, title: str | None
 ) -> bool:
     if _legacy_sqlite_ready(db_path):
         normalized_sqlite = str(title or "").strip().casefold()
@@ -1191,7 +1192,7 @@ def has_episode_title_for_source(
     return any(str(value or "").strip().casefold() == normalized for value in titles)
 
 
-def upsert_download(db_path: str, payload: Dict[str, Any]):
+def upsert_download(db_path: str, payload: dict[str, Any]):
     if _legacy_sqlite_ready(db_path):
         _upsert_download_sqlite(db_path, payload)
         return
@@ -1403,7 +1404,7 @@ def update_download_position_seconds(
     return True
 
 
-def update_download_positions_batch(db_path: str, updates: Dict[int, float]) -> int:
+def update_download_positions_batch(db_path: str, updates: dict[int, float]) -> int:
     count = 0
     for row_id, seconds in updates.items():
         if update_download_position_seconds(db_path, row_id, seconds):

@@ -3,11 +3,13 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from collections.abc import Iterable
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
-from typing import Callable, Iterable, List, Optional, Tuple
 
 from workers.logger import get_logger
 
@@ -53,10 +55,10 @@ class AndroidSyncItem:
     title: str
     source_name: str
     file_path: Path
-    subtitle_path: Optional[Path] = None
+    subtitle_path: Path | None = None
     position_seconds: float = 0.0
-    artwork_url: Optional[str] = None
-    artwork_path: Optional[Path] = None
+    artwork_url: str | None = None
+    artwork_path: Path | None = None
 
 
 @dataclass
@@ -65,11 +67,11 @@ class AndroidSyncResult:
     copied: int = 0
     skipped: int = 0
     failed: int = 0
-    device_serial: Optional[str] = None
+    device_serial: str | None = None
     message: str = "idle"
-    copied_files: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    vlc_playlist_path: Optional[str] = None
+    copied_files: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    vlc_playlist_path: str | None = None
 
 
 def _coerce_bool(value: object) -> bool:
@@ -118,7 +120,7 @@ def _remote_quote(path: str) -> str:
     return "'" + str(path).replace("'", "'\\''") + "'"
 
 
-def _command_for_log(args: List[str]) -> str:
+def _command_for_log(args: list[str]) -> str:
     return " ".join(
         _remote_quote(arg) if re.search(r"\s", str(arg)) else str(arg) for arg in args
     )
@@ -140,7 +142,7 @@ def _append_error(
 
 
 def _run_adb_command(
-    args: List[str],
+    args: list[str],
     *,
     description: str,
     timeout: int,
@@ -200,7 +202,7 @@ def _metadata_comment(item: AndroidSyncItem) -> str:
     return f"GetOffline row_id={item.row_id} position_seconds={_metadata_position_text(item)}"
 
 
-def _metadata_values(source_path: Path, item: AndroidSyncItem) -> List[Tuple[str, str]]:
+def _metadata_values(source_path: Path, item: AndroidSyncItem) -> list[tuple[str, str]]:
     title = str(item.title or source_path.stem)
     artist = str(item.source_name or "GetOffline")
     return [
@@ -214,13 +216,13 @@ def _metadata_values(source_path: Path, item: AndroidSyncItem) -> List[Tuple[str
 
 
 def _append_metadata_args(
-    command: List[str], metadata_values: List[Tuple[str, str]], prefix: str
+    command: list[str], metadata_values: list[tuple[str, str]], prefix: str
 ) -> None:
     for key, value in metadata_values:
         command.extend([prefix, f"{key}={value}"])
 
 
-def _download_artwork(artwork_url: Optional[str]) -> Optional[Path]:
+def _download_artwork(artwork_url: str | None) -> Path | None:
     url = str(artwork_url or "").strip()
     if not url:
         return None
@@ -249,8 +251,8 @@ def _build_ffmpeg_metadata_command(
     source_path: Path,
     output_path: Path,
     item: AndroidSyncItem,
-    artwork_path: Optional[Path],
-) -> List[str]:
+    artwork_path: Path | None,
+) -> list[str]:
     command = [
         ffmpeg_path,
         "-y",
@@ -367,7 +369,7 @@ def _copy_with_embedded_metadata(
     return output_path
 
 
-def build_vlc_xspf(entries: List[Tuple[AndroidSyncItem, str]]) -> str:
+def build_vlc_xspf(entries: list[tuple[AndroidSyncItem, str]]) -> str:
     track_lines = []
     for idx, (item, remote_path) in enumerate(entries):
         raw_position_seconds = max(0.0, float(item.position_seconds or 0.0))
@@ -414,7 +416,7 @@ def _connect_adb_wifi(
     adb_executable: str,
     wifi_address: str,
     runner: Callable[..., subprocess.CompletedProcess],
-) -> Optional[str]:
+) -> str | None:
     target = _normalize_wifi_address(wifi_address)
     if not target:
         log.warning(
@@ -447,7 +449,7 @@ def find_connected_device(
     *,
     connection_mode: str = "usb",
     wifi_address: str = "",
-) -> Optional[str]:
+) -> str | None:
     adb_executable = (
         shutil.which(adb_path) if not Path(adb_path).is_absolute() else adb_path
     )
@@ -548,7 +550,7 @@ def _rescan_android_media(
         )
 
 
-def _remote_subtitle_paths_for_media(remote_media_path: str) -> List[str]:
+def _remote_subtitle_paths_for_media(remote_media_path: str) -> list[str]:
     paths = []
     for suffix in sorted(MEDIA_SUBTITLE_EXTENSIONS):
         paths.append(
@@ -829,7 +831,7 @@ def sync_items_to_android(
         return result
 
     result.device_serial = device_serial
-    vlc_playlist_entries: List[Tuple[AndroidSyncItem, str]] = []
+    vlc_playlist_entries: list[tuple[AndroidSyncItem, str]] = []
     syncdb_paths: set[str] = set()
     syncdb_changed = False
     try:
@@ -1155,7 +1157,7 @@ def _copy_subtitle_to_directory(
 
 def _write_directory_playlist(
     destination: Path,
-    entries: List[Tuple[AndroidSyncItem, str]],
+    entries: list[tuple[AndroidSyncItem, str]],
     result: AndroidSyncResult,
 ) -> None:
     if not entries:

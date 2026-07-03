@@ -6,8 +6,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.config import _build_bootstrap_defaults, load_bootstrap_config, load_config  # noqa: E402
 from support import DatabaseCleanupTestCase  # noqa: E402
+
+from workers.config import _build_bootstrap_defaults  # noqa: E402
+from workers.config import load_bootstrap_config
+from workers.config import load_config
 
 
 class ConfigTests(DatabaseCleanupTestCase):
