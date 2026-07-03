@@ -26,6 +26,19 @@ DEFAULT_TIMEOUT_SECONDS = 1800
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
+COMPOSE_SERVICES = (
+    "rabbitmq",
+    "mysql",
+    "frontend",
+    "worker-updates",
+    "worker-downloader-youtube",
+    "worker-downloader-podcast",
+    "worker-ffmpeg",
+    "worker-transcripts",
+    "worker-transfer",
+    "scheduler",
+    "worker-cleanup",
+)
 
 
 def _run(
@@ -53,6 +66,36 @@ def _run(
             f"command failed with exit code {completed.returncode}: {' '.join(cmd)}"
         )
     return completed
+
+
+def _compose_up_command(compose: list[str]) -> list[str]:
+    cmd = [*compose, "up", "-d", "--build"]
+    for service in COMPOSE_SERVICES:
+        cmd.extend(["--scale", f"{service}=1"])
+    return cmd
+
+
+def _start_log_stream(
+    compose: list[str], env: dict[str, str]
+) -> subprocess.Popen[str]:
+    print("+ " + " ".join([*compose, "logs", "-f", "--tail", "100"]), flush=True)
+    return subprocess.Popen(
+        [*compose, "logs", "-f", "--tail", "100"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+    )
+
+
+def _stop_log_stream(process: subprocess.Popen[str] | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
 
 
 def _compose_cmd() -> list[str]:
@@ -282,9 +325,10 @@ def main() -> int:
                 "PYTHONPATH": str(SRC),
             }
         )
+        log_stream = None
         try:
             try:
-                _run([*compose, "up", "-d", "--build"], env=compose_env, timeout=1800)
+                _run(_compose_up_command(compose), env=compose_env, timeout=1800)
             except AssertionError:
                 _run([*compose, "ps"], env=compose_env, timeout=60, check=False)
                 _run(
@@ -294,6 +338,7 @@ def main() -> int:
                     check=False,
                 )
                 raise
+            log_stream = _start_log_stream(compose, compose_env)
             deadline = time.monotonic() + timeout_seconds
             _wait_for_frontend(deadline, frontend_port)
             _django_setup(host_env)
@@ -301,6 +346,7 @@ def main() -> int:
             job_id = _queue_download_job()
             _wait_for_pipeline(job_id, deadline)
         finally:
+            _stop_log_stream(log_stream)
             keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
             if keep_stack.lower() not in {"1", "true", "yes"}:
                 _run(
