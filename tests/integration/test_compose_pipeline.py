@@ -106,7 +106,7 @@ def main() -> int:
             youtube._wait_for_pipeline(youtube_job_id, deadline, downloads_dir)
         finally:
             youtube._stop_log_stream(log_stream)
-            youtube._make_downloads_host_writable(compose, compose_env)
+            youtube._make_downloads_host_writable(compose, compose_env, force=True)
             keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
             if keep_stack.lower() not in {"1", "true", "yes"}:
                 youtube._run(

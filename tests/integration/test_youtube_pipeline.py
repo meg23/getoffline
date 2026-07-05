@@ -236,11 +236,11 @@ def _queue_download_job() -> int:
 
 
 def _make_downloads_host_writable(
-    compose: list[str], compose_env: dict[str, str]
+    compose: list[str], compose_env: dict[str, str], *, force: bool = False
 ) -> None:
-    """Allow host cleanup to remove Docker-created download artifacts once."""
+    """Allow host cleanup to remove Docker-created download artifacts."""
     project = str(compose_env.get("COMPOSE_PROJECT_NAME") or "")
-    if project in _WRITABLE_DOWNLOAD_STACKS:
+    if not force and project in _WRITABLE_DOWNLOAD_STACKS:
         return
     _run(
         [
@@ -453,7 +453,7 @@ def main() -> int:
             _wait_for_pipeline(job_id, deadline, downloads_dir)
         finally:
             _stop_log_stream(log_stream)
-            _make_downloads_host_writable(compose, compose_env)
+            _make_downloads_host_writable(compose, compose_env, force=True)
             keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
             if keep_stack.lower() not in {"1", "true", "yes"}:
                 _run(
