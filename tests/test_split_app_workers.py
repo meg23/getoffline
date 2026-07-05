@@ -127,6 +127,130 @@ class SharedDjangoModelTests(TestCase):
             _is_expected_ytdlp_download_error(TypeError("video unavailable"))
         )
 
+    def test_deferred_video_screening_runs_in_transcript_worker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media_path = root / "converted.mp4"
+            media_path.write_bytes(b"video")
+            subtitle_path = root / "converted.srt"
+            subtitle_path.write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nclean text\n",
+                encoding="utf-8",
+            )
+            source_path = root / "source.webm"
+            source_path.write_bytes(b"source")
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=str(root)
+            )
+            job = create_job(
+                profile_id="default",
+                job_type="generate_transcript",
+                payload={
+                    "deferred_download_lookup": {
+                        "profile_id": "default",
+                        "source_type": SourceType.YOUTUBE.value,
+                        "source_name": "Test Channel",
+                        "item_uid": "video-1",
+                    },
+                    "deferred_download_defaults": {
+                        "title": "Converted video",
+                        "file_path": str(media_path),
+                        "file_path_relative": "converted.mp4",
+                        "file_ext": "mp4",
+                        "file_size_bytes": media_path.stat().st_size,
+                        "download_status": "downloaded",
+                    },
+                    "deferred_media_path": str(media_path),
+                    "ffmpeg_source_file_paths": [str(source_path)],
+                    "delete_explicit_content": True,
+                    "subtitles": True,
+                },
+                idempotency_key="generate_transcript:default:deferred:video-1",
+            )
+
+            with (
+                patch("workers.handlers.create_subtitles", return_value=subtitle_path),
+                patch("workers.handlers.screen_transcript", return_value=None),
+            ):
+                generate_transcript(job)
+
+            download = Download.objects.get(item_uid="video-1")
+            self.assertEqual(download.file_path, str(media_path))
+            self.assertEqual(download.subtitle_path, str(subtitle_path))
+            self.assertFalse(source_path.exists())
+            self.assertEqual(
+                TranscriptSegment.objects.filter(download=download).count(), 1
+            )
+
+    def test_filtered_video_transcode_queues_transcript_screening(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "source.webm"
+            source_path.write_bytes(b"source")
+            target_path = root / "converted.mp4"
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=str(root)
+            )
+            job = create_job(
+                profile_id="default",
+                job_type="transcode_media",
+                payload={
+                    "source_file_path": str(source_path),
+                    "source_file_paths": [str(source_path)],
+                    "target_file_path": str(target_path),
+                    "output_root": str(root),
+                    "media_type": "video",
+                    "delete_explicit_content": True,
+                    "download_lookup": {
+                        "profile_id": "default",
+                        "source_type": SourceType.YOUTUBE.value,
+                        "source_name": "Test Channel",
+                        "item_uid": "video-2",
+                    },
+                    "download_defaults": {
+                        "title": "Converted video",
+                        "file_path": str(source_path),
+                        "file_ext": "webm",
+                        "file_size_bytes": source_path.stat().st_size,
+                        "download_status": "downloaded",
+                    },
+                    "subtitles": True,
+                },
+                idempotency_key="transcode_media:default:video-2",
+            )
+
+            def fake_run(command, check, capture_output, text):
+                self.assertIn(str(target_path), command)
+                target_path.write_bytes(b"converted")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch("workers.handlers.subprocess.run", side_effect=fake_run),
+                patch("workers.handlers._publish_created_job"),
+                patch(
+                    "workers.handlers._screen_deferred_video_before_insert"
+                ) as screen_deferred,
+            ):
+                transcode_media(job)
+
+            screen_deferred.assert_not_called()
+            self.assertFalse(Download.objects.filter(item_uid="video-2").exists())
+            child = Job.objects.get(
+                job_type="generate_transcript",
+                idempotency_key=(
+                    "generate_transcript:default:deferred:youtube:"
+                    "Test Channel:video-2"
+                ),
+            )
+            self.assertEqual(child.payload["deferred_media_path"], str(target_path))
+            self.assertEqual(
+                child.payload["deferred_download_defaults"]["file_path"],
+                str(target_path),
+            )
+            self.assertEqual(
+                child.payload["ffmpeg_source_file_paths"], [str(source_path)]
+            )
+
     def test_create_claim_and_finish_job(self):
         job = create_job(
             profile_id="default",
