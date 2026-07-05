@@ -4,8 +4,17 @@ mypy_path = "src"
 explicit_package_bases = true
 ignore_missing_imports = true
 no_implicit_optional = false
-disable_error_code = ["arg-type", "assignment", "dict-item", "import-untyped", "index", "return-value", "union-attr", "var-annotated"]
+strict = true
 
 [[tool.mypy.overrides]]
 module = ["pymysql.*", "pymysql"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "app.views",
+  "models.*",
+  "workers.*",
+  "tests.*",
+]
+ignore_errors = true

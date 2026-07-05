@@ -27,7 +27,8 @@ def job_priority(message: dict[str, Any]) -> int:
     work FIFO within each durable RabbitMQ queue.
     """
     job_type = parse_str_enum(JobType, message.get("job_type"))
-    payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+    raw_payload = message.get("payload")
+    payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
 
     if job_type is JobType.DOWNLOAD_SINGLE:
         if _as_bool(payload.get("manual_enqueue")) or _as_bool(

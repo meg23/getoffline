@@ -23,14 +23,14 @@ SERIAL_JOB_TYPES = frozenset({JobType.CHECK_FOR_EPISODES, JobType.UPDATE_DOWNLOA
 DOWNLOAD_JOB_TYPES = frozenset({JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE})
 
 
-def queue_arguments(queue: str) -> dict:
+def queue_arguments(queue: str) -> dict[str, int]:
     """RabbitMQ queue declaration options shared by publishers and consumers."""
     if queue in PRIORITY_QUEUES:
         return {"x-max-priority": MAX_QUEUE_PRIORITY}
     return {}
 
 
-def _download_queue_name(payload: dict | None = None) -> str:
+def _download_queue_name(payload: dict[str, object] | None = None) -> str:
     payload = payload if isinstance(payload, dict) else {}
     source_type = parse_str_enum(SourceType, payload.get("source_type"))
     media_type = parse_str_enum(MediaType, payload.get("media_type"))
@@ -46,7 +46,7 @@ def _download_queue_name(payload: dict | None = None) -> str:
     return YOUTUBE_DOWNLOAD_QUEUE
 
 
-def queue_name(job_type: str, payload: dict | None = None) -> str:
+def queue_name(job_type: str, payload: dict[str, object] | None = None) -> str:
     parsed_job_type = parse_str_enum(JobType, job_type)
     if parsed_job_type in SERIAL_JOB_TYPES:
         return SERIAL_EPISODE_CHECK_QUEUE
