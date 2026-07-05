@@ -30,7 +30,9 @@ $(VENV_BIN)/activate: $(REQ_FILE)
 test: test-compile test-ruff test-mypy test-vulture test-coverage
 	$(MAKE) integration-test
 
-integration-test: integration-test-podcast integration-test-youtube
+integration-test: venv
+	@echo "Running combined Docker Compose integration test..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_compose_pipeline.py
 
 integration-test-youtube: venv
 	@echo "Running Docker Compose YouTube integration test..."

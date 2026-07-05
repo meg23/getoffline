@@ -26,6 +26,7 @@ PROFILE_ID = "integration"
 SOURCE_NAME = "Integration YouTube Runtime"
 DEFAULT_TIMEOUT_SECONDS = 1800
 CONTAINER_DOWNLOAD_ROOT = Path("/app/downloads")
+_WRITABLE_DOWNLOAD_STACKS: set[str] = set()
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -82,9 +83,7 @@ def _compose_up_command(compose: list[str]) -> list[str]:
     return cmd
 
 
-def _start_log_stream(
-    compose: list[str], env: dict[str, str]
-) -> subprocess.Popen[str]:
+def _start_log_stream(compose: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
     print("+ " + " ".join([*compose, "logs", "-f", "--tail", "100"]), flush=True)
     return subprocess.Popen(
         [*compose, "logs", "-f", "--tail", "100"],
@@ -236,6 +235,32 @@ def _queue_download_job() -> int:
     return job.id
 
 
+def _make_downloads_host_writable(
+    compose: list[str], compose_env: dict[str, str]
+) -> None:
+    """Allow host cleanup to remove Docker-created download artifacts once."""
+    project = str(compose_env.get("COMPOSE_PROJECT_NAME") or "")
+    if project in _WRITABLE_DOWNLOAD_STACKS:
+        return
+    _run(
+        [
+            *compose,
+            "exec",
+            "-T",
+            "frontend",
+            "chmod",
+            "-R",
+            "a+rwX",
+            str(CONTAINER_DOWNLOAD_ROOT),
+        ],
+        env=compose_env,
+        timeout=120,
+        check=False,
+    )
+    if project:
+        _WRITABLE_DOWNLOAD_STACKS.add(project)
+
+
 def _host_download_path(raw_path: str | None, host_downloads_dir: Path) -> Path:
     candidate = Path(raw_path or "")
     if candidate.is_absolute():
@@ -256,10 +281,9 @@ def _assert_pipeline_result(
     jobs: list,
 ) -> None:
     from models.domain import JobStatus
+
     active_jobs = [
-        job
-        for job in jobs
-        if job.status in {JobStatus.QUEUED, JobStatus.RUNNING}
+        job for job in jobs if job.status in {JobStatus.QUEUED, JobStatus.RUNNING}
     ]
     if active_jobs:
         details = ", ".join(f"{job.id}:{job.job_type}" for job in active_jobs)
@@ -276,9 +300,7 @@ def _assert_pipeline_result(
             "pipeline did not complete expected job types: "
             + ", ".join(sorted(missing_job_types))
         )
-    _log_check(
-        "expected job types succeeded: " + ", ".join(sorted(required_job_types))
-    )
+    _log_check("expected job types succeeded: " + ", ".join(sorted(required_job_types)))
 
     if download.download_status != "downloaded":
         raise AssertionError(
@@ -307,9 +329,7 @@ def _assert_pipeline_result(
     _log_check(f"transcript segments were saved: count={transcript_count}")
 
 
-def _wait_for_pipeline(
-    job_id: int, deadline: float, host_downloads_dir: Path
-) -> None:
+def _wait_for_pipeline(job_id: int, deadline: float, host_downloads_dir: Path) -> None:
     from models.domain import JobStatus
     from models.models import Download, Job, TranscriptSegment
     from workers.content_filter import screen_transcript
@@ -360,9 +380,7 @@ def _wait_for_pipeline(
                 _log_check("profanity screening completed with clean result")
                 return
         time.sleep(10)
-    raise AssertionError(
-        f"pipeline did not finish within timeout for job_id={job_id}"
-    )
+    raise AssertionError(f"pipeline did not finish within timeout for job_id={job_id}")
 
 
 def main() -> int:
@@ -435,6 +453,7 @@ def main() -> int:
             _wait_for_pipeline(job_id, deadline, downloads_dir)
         finally:
             _stop_log_stream(log_stream)
+            _make_downloads_host_writable(compose, compose_env)
             keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
             if keep_stack.lower() not in {"1", "true", "yes"}:
                 _run(

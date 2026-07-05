@@ -4,13 +4,15 @@ The real YouTube extractor is intentionally bypassed when an integration test se
 ``GETOFFLINE_YTDLP_MODULE=workers.fake_ytdlp``. The fake implements the tiny
 ``YoutubeDL`` surface used by the downloader: context manager support,
 ``extract_info()``, and ``prepare_filename()``. It writes a small media artifact
-and a matching SRT sidecar so the downstream FFmpeg/transcript/profanity pipeline
-can run without making any request to YouTube.
+and a post-conversion SRT sidecar so the downstream FFmpeg/transcript/profanity
+pipeline can run without making any request to YouTube.
 """
 
 from __future__ import annotations
 
+import io
 import re
+import wave
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -43,19 +45,13 @@ class YoutubeDL:
             "upload_date": "20260101",
             "extractor": "youtube",
             "extractor_key": "Youtube",
-            "ext": "mp3",
+            "ext": "m4a",
         }
         media_path = Path(self.prepare_filename(info)).expanduser().resolve()
         if download:
             media_path.parent.mkdir(parents=True, exist_ok=True)
-            media_path.write_bytes(b"ID3\x04\x00\x00\x00\x00\x00\x21GETOFFLINE-FAKE-YTDLP\n")
-            subtitle_path = media_path.with_suffix(".srt")
-            subtitle_path.write_text(
-                "1\n"
-                "00:00:00,000 --> 00:00:02,000\n"
-                "This clean integration transcript was generated offline.\n\n",
-                encoding="utf-8",
-            )
+            media_path.write_bytes(_silent_wav_bytes())
+            _write_subtitle_sidecar(media_path.with_suffix(".converted.srt"))
             for hook in self.opts.get("progress_hooks") or []:
                 hook(
                     {
@@ -74,7 +70,7 @@ class YoutubeDL:
         values = {
             "id": str(info.get("id") or _VIDEO_ID),
             "title": _sanitize_filename(str(info.get("title") or _TITLE)),
-            "ext": str(info.get("ext") or "mp3"),
+            "ext": str(info.get("ext") or "m4a"),
         }
         return _render_outtmpl(outtmpl, values)
 
@@ -90,12 +86,31 @@ def _render_outtmpl(outtmpl: str, values: dict[str, str]) -> str:
             value = value[: int(limit)]
         return value
 
-    rendered = re.sub(
-        r"%\((?P<key>[^)]+)\)(?:\.(?P<limit>\d+)B)?s", replace, outtmpl
-    )
+    rendered = re.sub(r"%\((?P<key>[^)]+)\)(?:\.(?P<limit>\d+)B)?s?", replace, outtmpl)
     return Template(rendered).safe_substitute(values)
 
 
 def _sanitize_filename(value: str) -> str:
     cleaned = re.sub(r"[\\/:*?\"<>|]+", " ", value).strip()
     return re.sub(r"\s+", " ", cleaned) or "download"
+
+
+def _silent_wav_bytes() -> bytes:
+    buffer = io.BytesIO()
+    sample_rate = 8000
+    duration_seconds = 2
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b"\x00\x00" * sample_rate * duration_seconds)
+    return buffer.getvalue()
+
+
+def _write_subtitle_sidecar(path: Path) -> None:
+    path.write_text(
+        "1\n"
+        "00:00:00,000 --> 00:00:02,000\n"
+        "This clean integration transcript was generated offline.\n\n",
+        encoding="utf-8",
+    )
