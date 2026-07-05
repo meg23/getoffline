@@ -1,10 +1,12 @@
 """End-to-end Docker Compose verification for the YouTube download pipeline.
 
-This test intentionally exercises the real runtime stack instead of mocks:
-MySQL, RabbitMQ, the frontend, downloader, FFmpeg, transcript, transfer,
-scheduler, and cleanup services. It queues a real YouTube download and verifies
-that the queued pipeline creates media, generates a transcript, and runs the
-profanity screening path.
+This test intentionally exercises the real runtime stack while replacing only
+the network-facing yt-dlp YouTube extractor with a deterministic local test
+double. MySQL, RabbitMQ, the frontend, downloader, FFmpeg, transcript, transfer,
+scheduler, and cleanup services still run through Docker Compose. It queues a
+YouTube-shaped download and verifies that the queued pipeline creates media,
+generates a transcript, and runs the profanity screening path without contacting
+YouTube.
 """
 
 from __future__ import annotations
@@ -396,6 +398,7 @@ def main() -> int:
                 "GETOFFLINE_DB_PASSWORD": "getoffline",
                 "GETOFFLINE_RABBITMQ_URL": "amqp://guest:guest@rabbitmq:5672/%2F",
                 "GETOFFLINE_RABBITMQ_EXCHANGE": "getoffline",
+                "GETOFFLINE_YTDLP_MODULE": "workers.fake_ytdlp",
             }
         )
         host_env = compose_env.copy()
