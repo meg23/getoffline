@@ -18,7 +18,7 @@ import django  # noqa: E402
 from django.apps import apps  # noqa: E402
 from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
 from django.db import connection
-from django.test import Client  # noqa: E402
+from django.test import Client as DjangoClient  # noqa: E402
 from django.test import TestCase
 from django.utils import timezone
 
@@ -79,7 +79,7 @@ from workers import runner
 from django.contrib.auth.models import User
 
 
-class AuthenticatedClient(Client):
+class AuthenticatedClient(DjangoClient):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         user, created = User.objects.get_or_create(username="default")
@@ -90,6 +90,16 @@ class AuthenticatedClient(Client):
 
 
 Client = AuthenticatedClient
+
+
+def _logged_in_client(username: str, password: str = "pass") -> DjangoClient:
+    user, _ = User.objects.get_or_create(username=username)
+    user.set_password(password)
+    user.save(update_fields=["password"])
+    client = DjangoClient()
+    if not client.login(username=username, password=password):
+        raise AssertionError(f"Could not log in test user {username!r}")
+    return client
 
 
 class SharedDjangoModelTests(TestCase):
@@ -725,6 +735,118 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertAlmostEqual(download.last_position_seconds, 0.0, places=2)
         self.assertTrue(download.played)
+
+    def test_logged_in_user_playback_resume_and_position_are_profile_scoped(self):
+        client = _logged_in_client("alice")
+        other_client = _logged_in_client("bob")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "alice-position.mp3"
+            media.write_text("audio", encoding="utf-8")
+            download = Download.objects.create(
+                profile_id="alice",
+                source_type=SourceType.PODCAST,
+                source_name="Alice Podcast",
+                item_uid="alice-position-1",
+                title="Alice Resume Episode",
+                file_path=str(media),
+                file_ext="mp3",
+                download_status="downloaded",
+                last_position_seconds=12.5,
+                total_listened_seconds=4.0,
+            )
+
+            response = client.get(f"/play/{download.id}/?t=42.125")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn(f"/media/{download.id}/#t=42.125", body)
+        self.assertIn("Alice Resume Episode", body)
+
+        response = client.post(
+            f"/downloads/{download.id}/position/",
+            {"position_seconds": "50.500", "reason": "mini-timeupdate"},
+        )
+        self.assertEqual(response.status_code, 204)
+        download.refresh_from_db()
+        self.assertAlmostEqual(download.last_position_seconds, 50.5, places=2)
+        self.assertAlmostEqual(download.total_listened_seconds, 42.0, places=2)
+        self.assertFalse(download.played)
+        self.assertIsNotNone(download.last_position_updated_at)
+
+        response = other_client.get(f"/play/{download.id}/")
+        self.assertEqual(response.status_code, 404)
+        response = other_client.post(
+            f"/downloads/{download.id}/position/",
+            {"position_seconds": "1", "reason": "timeupdate"},
+        )
+        self.assertEqual(response.status_code, 404)
+        download.refresh_from_db()
+        self.assertAlmostEqual(download.last_position_seconds, 50.5, places=2)
+
+    def test_logged_in_library_exposes_playback_dataset_for_own_profile_only(self):
+        client = _logged_in_client("alice")
+        Download.objects.create(
+            profile_id="bob",
+            source_type=SourceType.YOUTUBE,
+            source_name="Bob Channel",
+            item_uid="bob-hidden-1",
+            title="Bob Hidden Video",
+            file_path="/tmp/bob-hidden.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            last_position_seconds=9.0,
+        )
+        download = Download.objects.create(
+            profile_id="alice",
+            source_type=SourceType.YOUTUBE,
+            source_name="Alice Channel",
+            item_uid="alice-visible-1",
+            title="Alice Visible Video",
+            file_path="/tmp/alice-visible.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            last_position_seconds=33.25,
+        )
+
+        with patch("app.views.publish_job"):
+            response = client.get("/?filter=all")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("Alice Visible Video", body)
+        self.assertIn(f'data-row-id="{download.id}"', body)
+        self.assertIn(f'data-media-url="/media/{download.id}/"', body)
+        self.assertIn('data-resume-seconds="33.25"', body)
+        self.assertIn(f'href="/play/{download.id}/"', body)
+        self.assertNotIn("Bob Hidden Video", body)
+
+    def test_anonymous_users_must_login_before_playback_or_position_updates(self):
+        client = DjangoClient()
+        download = Download.objects.create(
+            profile_id="alice",
+            source_type=SourceType.YOUTUBE,
+            source_name="Alice Channel",
+            item_uid="anonymous-position-1",
+            title="Login Required Video",
+            file_path="/tmp/login-required.mp4",
+            file_ext="mp4",
+            download_status="downloaded",
+            last_position_seconds=7.0,
+        )
+
+        response = client.get(f"/play/{download.id}/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"/login/?next=/play/{download.id}/", response["Location"])
+
+        response = client.post(
+            f"/downloads/{download.id}/position/",
+            {"position_seconds": "99", "reason": "timeupdate"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(
+            f"/login/?next=/downloads/{download.id}/position/", response["Location"]
+        )
+        download.refresh_from_db()
+        self.assertAlmostEqual(download.last_position_seconds, 7.0, places=2)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
