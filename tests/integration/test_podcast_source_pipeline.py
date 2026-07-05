@@ -1,0 +1,238 @@
+"""End-to-end Docker Compose verification for a podcast RSS source.
+
+This test exercises source discovery with a real podcast RSS feed. It adds the
+Kids Short Stories ART19 feed as an enabled podcast source, sets the source max
+downloads to 2, leaves explicit-content deletion disabled, and verifies that the
+runtime only enqueues and downloads two episodes from that source.
+"""
+
+from __future__ import annotations
+
+import os
+import tempfile
+import time
+import uuid
+from pathlib import Path
+
+from tests.integration import test_youtube_pipeline as pipeline
+
+PODCAST_RSS_URL = "https://rss.art19.com/kids-short-stories"
+PROFILE_ID = "integration-podcast"
+SOURCE_NAME = "Integration Kids Short Stories Podcast"
+EXPECTED_DOWNLOADS = 2
+DEFAULT_TIMEOUT_SECONDS = 1800
+
+
+def _queue_episode_check() -> int:
+    from app.queue import publish_job
+    from models.domain import SourceType
+    from models.jobs import create_job
+    from models.models import ProfileConfigValue, SourceConfig
+
+    SourceConfig.objects.filter(profile_id=PROFILE_ID, name=SOURCE_NAME).delete()
+    source = SourceConfig.objects.create(
+        profile_id=PROFILE_ID,
+        source_type=SourceType.PODCAST,
+        name=SOURCE_NAME,
+        url=PODCAST_RSS_URL,
+        media_type="audio",
+        enabled=True,
+        subtitles=True,
+        max_downloads=EXPECTED_DOWNLOADS,
+        delete_explicit_content=False,
+    )
+    for key, value in {
+        "output_root": "/app/downloads/integration-podcast",
+        "audio_format": "mp3",
+        "audio_quality": "5",
+        "subtitle_transcription_mode": "in_process",
+    }.items():
+        ProfileConfigValue.objects.update_or_create(
+            profile_id=PROFILE_ID, key=key, defaults={"value": value}
+        )
+    job = create_job(
+        profile_id=PROFILE_ID,
+        job_type="check_for_episodes",
+        payload={"integration_source_id": source.id},
+        idempotency_key=f"integration-podcast:{uuid.uuid4()}",
+    )
+    publish_job(
+        {
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "profile_id": job.profile_id,
+            "payload": job.payload,
+        }
+    )
+    print(
+        "[integration-test] QUEUED: "
+        f"job_id={job.id} source_id={source.id} url={PODCAST_RSS_URL}",
+        flush=True,
+    )
+    return job.id
+
+
+def _wait_for_podcast_source(
+    job_id: int, deadline: float, host_downloads_dir: Path
+) -> None:
+    from models.domain import JobStatus
+    from models.models import Download, Job, TranscriptSegment
+
+    while time.monotonic() < deadline:
+        parent_job = Job.objects.get(pk=job_id)
+        jobs = list(Job.objects.filter(profile_id=PROFILE_ID).order_by("id"))
+        failed = [job for job in jobs if JobStatus(job.status) is JobStatus.FAILED]
+        if failed:
+            details = "; ".join(
+                f"{job.id}:{job.job_type}:{job.error_message}" for job in failed
+            )
+            raise AssertionError(f"podcast source pipeline job failed: {details}")
+        active_jobs = [
+            job
+            for job in jobs
+            if JobStatus(job.status) in {JobStatus.QUEUED, JobStatus.RUNNING}
+        ]
+        downloads = list(
+            Download.objects.filter(
+                profile_id=PROFILE_ID,
+                source_type="podcast",
+                source_name=SOURCE_NAME,
+                download_status="downloaded",
+            ).order_by("id")
+        )
+        if (
+            JobStatus(parent_job.status) is JobStatus.SUCCEEDED
+            and not active_jobs
+            and len(downloads) == EXPECTED_DOWNLOADS
+        ):
+            download_episode_jobs = [
+                job for job in jobs if job.job_type == "download_episode"
+            ]
+            if len(download_episode_jobs) != EXPECTED_DOWNLOADS:
+                raise AssertionError(
+                    "expected exactly two download episode jobs, got "
+                    f"{len(download_episode_jobs)}"
+                )
+            if any(
+                bool(job.payload.get("delete_explicit_content"))
+                for job in download_episode_jobs
+                if isinstance(job.payload, dict)
+            ):
+                raise AssertionError("podcast source enabled profanity screening")
+            for download in downloads:
+                media_path = pipeline._host_download_path(
+                    download.file_path, host_downloads_dir
+                )
+                if not media_path.exists() or media_path.stat().st_size <= 0:
+                    raise AssertionError(
+                        f"podcast media missing or empty: {media_path}"
+                    )
+                if (download.file_ext or "").lower() != "mp3":
+                    raise AssertionError(
+                        f"expected podcast mp3 artifact, got {download.file_ext!r}"
+                    )
+            transcript_count = TranscriptSegment.objects.filter(
+                download__in=downloads
+            ).count()
+            pipeline._log_check(
+                "podcast source downloaded exactly two episodes with profanity check disabled"
+            )
+            pipeline._log_check(
+                f"podcast transcript segments saved across downloads: count={transcript_count}"
+            )
+            return
+        if len(downloads) > EXPECTED_DOWNLOADS:
+            raise AssertionError(
+                f"podcast source exceeded max downloads: {len(downloads)} > {EXPECTED_DOWNLOADS}"
+            )
+        time.sleep(10)
+    raise AssertionError(
+        f"podcast source pipeline did not finish within timeout for job_id={job_id}"
+    )
+
+
+def main() -> int:
+    timeout_seconds = int(
+        os.getenv("GETOFFLINE_INTEGRATION_TIMEOUT", DEFAULT_TIMEOUT_SECONDS)
+    )
+    compose = pipeline._compose_cmd()
+    with tempfile.TemporaryDirectory(prefix="getoffline-podcast-integration-") as tmp:
+        downloads_dir = Path(tmp) / "downloads"
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        reserved_ports: set[int] = set()
+        frontend_port = pipeline._free_tcp_port(reserved_ports)
+        mysql_port = pipeline._free_tcp_port(reserved_ports)
+        rabbitmq_port = pipeline._free_tcp_port(reserved_ports)
+        rabbitmq_management_port = pipeline._free_tcp_port(reserved_ports)
+        project = f"getoffline-podcast-it-{uuid.uuid4().hex[:8]}"
+        compose_env = os.environ.copy()
+        compose_env.update(
+            {
+                "COMPOSE_PROJECT_NAME": project,
+                "GETOFFLINE_DJANGO_SECRET_KEY": "integration-test-secret",
+                "GETOFFLINE_DOWNLOADS_DIR": str(downloads_dir),
+                "GETOFFLINE_FRONTEND_PUBLISHED_PORT": str(frontend_port),
+                "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
+                "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
+                "GETOFFLINE_RABBITMQ_MANAGEMENT_PUBLISHED_PORT": str(
+                    rabbitmq_management_port
+                ),
+                "GETOFFLINE_DB_HOST": "mysql",
+                "GETOFFLINE_DB_PORT": "3306",
+                "GETOFFLINE_DB_NAME": "getoffline",
+                "GETOFFLINE_DB_USER": "getoffline",
+                "GETOFFLINE_DB_PASSWORD": "getoffline",
+                "GETOFFLINE_RABBITMQ_URL": "amqp://guest:guest@rabbitmq:5672/%2F",
+                "GETOFFLINE_RABBITMQ_EXCHANGE": "getoffline",
+            }
+        )
+        host_env = compose_env.copy()
+        host_env.update(
+            {
+                "GETOFFLINE_DB_HOST": "127.0.0.1",
+                "GETOFFLINE_DB_PORT": str(mysql_port),
+                "GETOFFLINE_RABBITMQ_URL": (
+                    f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
+                ),
+                "DJANGO_SETTINGS_MODULE": "app.settings",
+                "PYTHONPATH": str(pipeline.SRC),
+            }
+        )
+        log_stream = None
+        try:
+            try:
+                pipeline._run(
+                    pipeline._compose_up_command(compose), env=compose_env, timeout=1800
+                )
+            except AssertionError:
+                pipeline._run(
+                    [*compose, "ps"], env=compose_env, timeout=60, check=False
+                )
+                pipeline._run(
+                    [*compose, "logs", "--tail", "200"],
+                    env=compose_env,
+                    timeout=120,
+                    check=False,
+                )
+                raise
+            log_stream = pipeline._start_log_stream(compose, compose_env)
+            deadline = time.monotonic() + timeout_seconds
+            pipeline._wait_for_frontend(deadline, frontend_port)
+            pipeline._django_setup(host_env)
+            job_id = _queue_episode_check()
+            _wait_for_podcast_source(job_id, deadline, downloads_dir)
+        finally:
+            pipeline._stop_log_stream(log_stream)
+            keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
+            if keep_stack.lower() not in {"1", "true", "yes"}:
+                pipeline._run(
+                    [*compose, "down", "-v", "--remove-orphans"],
+                    env=compose_env,
+                    timeout=600,
+                    check=False,
+                )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
