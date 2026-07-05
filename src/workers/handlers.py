@@ -71,7 +71,8 @@ class DownloadedMediaFfmpegRequirement:
 
 
 def _youtube_dl_class():
-    return importlib.import_module("yt_dlp").YoutubeDL
+    module_name = os.getenv("GETOFFLINE_YTDLP_MODULE", "yt_dlp")
+    return importlib.import_module(module_name).YoutubeDL
 
 
 def _touch_active_job(job: Job, *, stage: str, title: str = "") -> None:

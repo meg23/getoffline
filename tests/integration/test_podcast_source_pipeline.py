@@ -245,23 +245,10 @@ def _wait_for_podcast_source(
     )
 
 
-def _make_downloads_host_writable(compose: list[str], compose_env: dict[str, str]) -> None:
-    """Allow host-side Django client checks to delete Docker-created files."""
-    pipeline._run(
-        [
-            *compose,
-            "exec",
-            "-T",
-            "frontend",
-            "chmod",
-            "-R",
-            "a+rwX",
-            str(pipeline.CONTAINER_DOWNLOAD_ROOT),
-        ],
-        env=compose_env,
-        timeout=120,
-        check=False,
-    )
+def _make_downloads_host_writable(
+    compose: list[str], compose_env: dict[str, str]
+) -> None:
+    pipeline._make_downloads_host_writable(compose, compose_env)
 
 
 def _exercise_podcast_library_actions(

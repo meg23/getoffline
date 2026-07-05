@@ -19,7 +19,10 @@ log = get_logger("ytdlp_helpers")
 
 
 def _get_youtubedl():
-    return YoutubeDL or importlib.import_module("yt_dlp").YoutubeDL
+    if YoutubeDL is not None:
+        return YoutubeDL
+    module_name = os.getenv("GETOFFLINE_YTDLP_MODULE", "yt_dlp")
+    return importlib.import_module(module_name).YoutubeDL
 
 
 def _normalize_ytdlp_message(message: str) -> str:
@@ -114,7 +117,9 @@ def enable_youtube_quickjs_remote_component(
     if isinstance(existing_value, list):
         components = existing_value
     elif isinstance(existing_value, str) and existing_value.strip():
-        components = [part.strip() for part in existing_value.split(",") if part.strip()]
+        components = [
+            part.strip() for part in existing_value.split(",") if part.strip()
+        ]
     else:
         components = []
 
