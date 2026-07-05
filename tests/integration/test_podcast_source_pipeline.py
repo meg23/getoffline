@@ -42,7 +42,7 @@ def _queue_episode_check() -> int:
         url=PODCAST_RSS_URL,
         media_type="audio",
         enabled=True,
-        subtitles=True,
+        subtitles=False,
         max_downloads=EXPECTED_DOWNLOADS,
         delete_explicit_content=False,
     )
@@ -80,6 +80,9 @@ def _queue_episode_check() -> int:
 def _wait_for_podcast_source(
     job_id: int, deadline: float, host_downloads_dir: Path
 ) -> None:
+    from django.contrib.auth.models import User
+    from django.test import Client
+
     from models.domain import JobStatus
     from models.models import Download, Job, SourceConfig, TranscriptSegment
 
@@ -199,15 +202,27 @@ def _wait_for_podcast_source(
             transcript_count = TranscriptSegment.objects.filter(
                 download__in=downloads
             ).count()
+            if transcript_count != 0:
+                raise AssertionError(
+                    f"podcast source created transcript segments despite subtitles disabled: {transcript_count}"
+                )
+            if any(str(download.subtitle_path or "").strip() for download in downloads):
+                raise AssertionError(
+                    "podcast source recorded subtitle paths despite subtitles disabled"
+                )
+            _exercise_podcast_library_actions(
+                client=Client(),
+                user_model=User,
+                downloads=downloads,
+                host_downloads_dir=host_downloads_dir,
+            )
             pipeline._log_check(
                 "podcast source saved two RSS item jobs with item metadata"
             )
             pipeline._log_check(
                 "podcast source downloaded exactly two episodes with profanity check disabled"
             )
-            pipeline._log_check(
-                f"podcast transcript segments saved across downloads: count={transcript_count}"
-            )
+            pipeline._log_check("podcast source kept transcripts disabled")
             return
         if len(downloads) > EXPECTED_DOWNLOADS:
             raise AssertionError(
@@ -216,6 +231,65 @@ def _wait_for_podcast_source(
         time.sleep(10)
     raise AssertionError(
         f"podcast source pipeline did not finish within timeout for job_id={job_id}"
+    )
+
+
+def _exercise_podcast_library_actions(
+    *, client, user_model, downloads: list[Download], host_downloads_dir: Path
+) -> None:
+    """Exercise user-facing played/delete/purge actions against podcast items."""
+    from models.models import Download
+
+    user, _created = user_model.objects.get_or_create(username=PROFILE_ID)
+    user.set_password("integration-pass")
+    user.save(update_fields=["password"])
+    if not client.login(username=PROFILE_ID, password="integration-pass"):
+        raise AssertionError("could not log in for podcast library action checks")
+
+    played_download = downloads[0]
+    response = client.post(f"/downloads/{played_download.id}/played/", follow=False)
+    if response.status_code != 302:
+        raise AssertionError(f"mark played returned {response.status_code}")
+    played_download.refresh_from_db()
+    if not played_download.played or played_download.played_at is None:
+        raise AssertionError("podcast item was not marked played")
+    pipeline._log_check(f"podcast item marked played: download_id={played_download.id}")
+
+    deleted_download = downloads[1]
+    deleted_media_path = pipeline._host_download_path(
+        deleted_download.file_path, host_downloads_dir
+    )
+    deleted_download.file_path = str(deleted_media_path)
+    deleted_download.save(update_fields=["file_path"])
+    response = client.post(
+        f"/downloads/{deleted_download.id}/delete-file/", follow=False
+    )
+    if response.status_code != 302:
+        raise AssertionError(f"delete file returned {response.status_code}")
+    deleted_download.refresh_from_db()
+    if deleted_download.download_status != "missing":
+        raise AssertionError(
+            f"podcast delete did not mark item missing: {deleted_download.download_status}"
+        )
+    if deleted_media_path.exists():
+        raise AssertionError(
+            f"podcast delete did not remove media file: {deleted_media_path}"
+        )
+    pipeline._log_check(
+        f"podcast item deleted media and marked missing: download_id={deleted_download.id}"
+    )
+
+    response = client.post(
+        "/batch-update/",
+        {"ids": [str(deleted_download.id)], "batch_action": "purge"},
+        follow=False,
+    )
+    if response.status_code != 302:
+        raise AssertionError(f"purge returned {response.status_code}")
+    if Download.objects.filter(pk=deleted_download.pk).exists():
+        raise AssertionError("podcast purge did not remove download row")
+    pipeline._log_check(
+        f"podcast item purged from database: download_id={deleted_download.id}"
     )
 
 
