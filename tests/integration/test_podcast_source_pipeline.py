@@ -78,6 +78,7 @@ def _wait_for_podcast_source(
     from models.domain import JobStatus
     from models.models import Download, Job, SourceConfig, TranscriptSegment
 
+    logged_item_job_ids: set[int] = set()
     while time.monotonic() < deadline:
         parent_job = Job.objects.get(pk=job_id)
         jobs = list(Job.objects.filter(profile_id=PROFILE_ID).order_by("id"))
@@ -124,6 +125,14 @@ def _wait_for_podcast_source(
             if missing:
                 raise AssertionError(
                     f"podcast item job {item_job.id} is missing item fields: {missing}"
+                )
+            if item_job.id not in logged_item_job_ids:
+                logged_item_job_ids.add(item_job.id)
+                print(
+                    "[integration-test] PODCAST ITEM: "
+                    f"job_id={item_job.id} item_uid={payload['item_uid']} "
+                    f"title={payload['title']} media_url={payload['media_url']}",
+                    flush=True,
                 )
         downloads = list(
             Download.objects.filter(
@@ -176,6 +185,12 @@ def _wait_for_podcast_source(
                     raise AssertionError(
                         f"expected podcast mp3 artifact, got {download.file_ext!r}"
                     )
+                print(
+                    "[integration-test] PODCAST DOWNLOADED: "
+                    f"download_id={download.id} item_uid={download.item_uid} "
+                    f"title={download.title} path={media_path}",
+                    flush=True,
+                )
             transcript_count = TranscriptSegment.objects.filter(
                 download__in=downloads
             ).count()
