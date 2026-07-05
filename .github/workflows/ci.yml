@@ -41,6 +41,24 @@ jobs:
       - name: Run Ruff linting
         run: ruff check src tests
 
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Python virtual environment
+        run: |
+          python3 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r src/requirements.txt mypy
+
+      - name: Run mypy static type checks
+        env:
+          PYTHONPATH: src
+        run: mypy src tests
+
   vulture:
     runs-on: ubuntu-latest
     steps:
