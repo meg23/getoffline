@@ -57,7 +57,7 @@ jobs:
       - name: Run mypy static type checks
         env:
           PYTHONPATH: src
-        run: mypy src tests
+        run: mypy --strict src tests
 
   vulture:
     runs-on: ubuntu-latest

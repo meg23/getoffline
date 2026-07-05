@@ -1,4 +1,5 @@
 import os
+from typing import Any
 from pathlib import Path
 
 import pymysql
@@ -79,6 +80,7 @@ USE_IN_MEMORY_TEST_DB = os.getenv(
     "on",
 }
 
+DATABASES: dict[str, dict[str, Any]]
 if USE_IN_MEMORY_TEST_DB:
     DATABASES = {
         "default": {
