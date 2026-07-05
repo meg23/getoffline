@@ -31,6 +31,7 @@ PROFILE_ID = "integration-podcast"
 SOURCE_NAME = "Integration Kids Short Stories Podcast"
 EXPECTED_DOWNLOADS = 2
 DEFAULT_TIMEOUT_SECONDS = 1800
+_WRITABLE_DOWNLOAD_STACKS: set[str] = set()
 
 
 def _queue_episode_check() -> int:
@@ -245,8 +246,13 @@ def _wait_for_podcast_source(
     )
 
 
-def _make_downloads_host_writable(compose: list[str], compose_env: dict[str, str]) -> None:
-    """Allow host-side Django client checks to delete Docker-created files."""
+def _make_downloads_host_writable(
+    compose: list[str], compose_env: dict[str, str]
+) -> None:
+    """Allow host-side Django client checks to delete Docker-created files once."""
+    project = str(compose_env.get("COMPOSE_PROJECT_NAME") or "")
+    if project in _WRITABLE_DOWNLOAD_STACKS:
+        return
     pipeline._run(
         [
             *compose,
@@ -262,6 +268,8 @@ def _make_downloads_host_writable(compose: list[str], compose_env: dict[str, str
         timeout=120,
         check=False,
     )
+    if project:
+        _WRITABLE_DOWNLOAD_STACKS.add(project)
 
 
 def _exercise_podcast_library_actions(
