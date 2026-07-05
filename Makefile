@@ -29,8 +29,9 @@ $(VENV_BIN)/activate: $(REQ_FILE)
 test: test-compile test-ruff test-vulture test-coverage
 
 integration-test: venv
-	@echo "Running Docker Compose integration test..."
+	@echo "Running Docker Compose integration tests..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_youtube_pipeline.py
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_podcast_source_pipeline.py
 
 test-compile: venv
 	@echo "Compiling Python files..."

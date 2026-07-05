@@ -76,7 +76,7 @@ def _wait_for_podcast_source(
     job_id: int, deadline: float, host_downloads_dir: Path
 ) -> None:
     from models.domain import JobStatus
-    from models.models import Download, Job, TranscriptSegment
+    from models.models import Download, Job, SourceConfig, TranscriptSegment
 
     while time.monotonic() < deadline:
         parent_job = Job.objects.get(pk=job_id)
@@ -92,6 +92,39 @@ def _wait_for_podcast_source(
             for job in jobs
             if JobStatus(job.status) in {JobStatus.QUEUED, JobStatus.RUNNING}
         ]
+        source = SourceConfig.objects.filter(
+            profile_id=PROFILE_ID,
+            source_type="podcast",
+            name=SOURCE_NAME,
+            url=PODCAST_RSS_URL,
+            max_downloads=EXPECTED_DOWNLOADS,
+            delete_explicit_content=False,
+        ).first()
+        if source is None:
+            raise AssertionError("expected podcast source configuration was not saved")
+        download_episode_jobs = [
+            job
+            for job in jobs
+            if job.job_type == "download_episode"
+            and isinstance(job.payload, dict)
+            and int(job.payload.get("source_id") or 0) == source.id
+        ]
+        if len(download_episode_jobs) > EXPECTED_DOWNLOADS:
+            raise AssertionError(
+                "podcast source enqueued more download items than the max: "
+                f"{len(download_episode_jobs)} > {EXPECTED_DOWNLOADS}"
+            )
+        for item_job in download_episode_jobs:
+            payload = item_job.payload
+            missing = [
+                key
+                for key in ("item_uid", "item_url", "media_url", "title")
+                if not str(payload.get(key) or "").strip()
+            ]
+            if missing:
+                raise AssertionError(
+                    f"podcast item job {item_job.id} is missing item fields: {missing}"
+                )
         downloads = list(
             Download.objects.filter(
                 profile_id=PROFILE_ID,
@@ -105,9 +138,6 @@ def _wait_for_podcast_source(
             and not active_jobs
             and len(downloads) == EXPECTED_DOWNLOADS
         ):
-            download_episode_jobs = [
-                job for job in jobs if job.job_type == "download_episode"
-            ]
             if len(download_episode_jobs) != EXPECTED_DOWNLOADS:
                 raise AssertionError(
                     "expected exactly two download episode jobs, got "
@@ -119,7 +149,22 @@ def _wait_for_podcast_source(
                 if isinstance(job.payload, dict)
             ):
                 raise AssertionError("podcast source enabled profanity screening")
+            downloaded_item_uids = {download.item_uid for download in downloads}
+            queued_item_uids = {
+                job.payload["item_uid"] for job in download_episode_jobs
+            }
+            if downloaded_item_uids != queued_item_uids:
+                raise AssertionError(
+                    "downloaded podcast items did not match queued RSS items: "
+                    f"downloaded={sorted(downloaded_item_uids)} queued={sorted(queued_item_uids)}"
+                )
             for download in downloads:
+                if not str(download.item_uid or "").strip():
+                    raise AssertionError("download row is missing item_uid")
+                if not str(download.item_url or "").strip():
+                    raise AssertionError("download row is missing item_url")
+                if not str(download.title or "").strip():
+                    raise AssertionError("download row is missing title")
                 media_path = pipeline._host_download_path(
                     download.file_path, host_downloads_dir
                 )
@@ -134,6 +179,9 @@ def _wait_for_podcast_source(
             transcript_count = TranscriptSegment.objects.filter(
                 download__in=downloads
             ).count()
+            pipeline._log_check(
+                "podcast source saved two RSS item jobs with item metadata"
+            )
             pipeline._log_check(
                 "podcast source downloaded exactly two episodes with profanity check disabled"
             )
