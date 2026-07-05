@@ -806,29 +806,49 @@ def _postprocess_download_with_ffmpeg(
             and media_kind == "video"
             and bool(payload.get("delete_explicit_content", False))
         ):
-            screened_download = _screen_deferred_video_before_insert(
+            child = create_job(
                 profile_id=profile_id,
-                media_path=target_path,
-                download_lookup=deferred_lookup,
-                download_defaults={
-                    **deferred_defaults,
-                    "file_path": str(target_path),
-                    "file_path_relative": (
-                        str(target_path.relative_to(output_root))
-                        if target_path.is_relative_to(output_root)
-                        else None
-                    ),
-                    "file_ext": target_path.suffix.lstrip("."),
-                    "file_size_bytes": output_size,
-                    "download_status": DownloadStatus.DOWNLOADED,
-                    "completed_at": timezone.now(),
-                    "last_seen_at": timezone.now(),
+                job_type="generate_transcript",
+                payload={
+                    "deferred_download_lookup": deferred_lookup,
+                    "deferred_download_defaults": {
+                        **deferred_defaults,
+                        "file_path": str(target_path),
+                        "file_path_relative": (
+                            str(target_path.relative_to(output_root))
+                            if target_path.is_relative_to(output_root)
+                            else None
+                        ),
+                        "file_ext": target_path.suffix.lstrip("."),
+                        "file_size_bytes": output_size,
+                        "download_status": DownloadStatus.DOWNLOADED,
+                        "completed_at": timezone.now().isoformat(),
+                        "last_seen_at": timezone.now().isoformat(),
+                    },
+                    "deferred_media_path": str(target_path),
+                    "ffmpeg_source_file_paths": [str(path) for path in source_paths],
+                    "subtitles": payload.get("subtitles", True),
+                    "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
+                    "source_type": deferred_lookup.get("source_type"),
+                    "media_type": media_kind,
+                    "recent_download": True,
+                    "delete_explicit_content": True,
                 },
-                payload=payload,
-                job_id=parent_job_id,
+                idempotency_key=(
+                    f"generate_transcript:{profile_id}:deferred:"
+                    f"{deferred_lookup.get('source_type')}:"
+                    f"{deferred_lookup.get('source_name')}:"
+                    f"{deferred_lookup.get('item_uid')}"
+                ),
             )
-            _delete_ffmpeg_source_files(source_paths, target_path)
-            return screened_download
+            _publish_created_job(child)
+            log.info(
+                "FFmpeg worker queued deferred transcript screening job parent_job_id=%s child_job_id=%s target=%s",
+                parent_job_id,
+                child.id,
+                target_path,
+            )
+            return None
         if download is None:
             final_defaults = dict(deferred_defaults)
             final_defaults.update(
@@ -2267,6 +2287,53 @@ def _screen_deferred_video_before_insert(
     return download
 
 
+def _generate_deferred_transcript_screening(job: Job, payload: dict) -> None:
+    """Generate/screen subtitles for a converted video before inserting its Download row."""
+    download_lookup = (
+        payload.get("deferred_download_lookup")
+        if isinstance(payload.get("deferred_download_lookup"), dict)
+        else None
+    )
+    download_defaults = (
+        payload.get("deferred_download_defaults")
+        if isinstance(payload.get("deferred_download_defaults"), dict)
+        else None
+    )
+    media_path_value = payload.get("deferred_media_path")
+    if not (download_lookup and download_defaults and media_path_value):
+        log.warning(
+            "Transcript worker skipped deferred screening job with missing payload job_id=%s",
+            job.id,
+        )
+        return
+    media_path = Path(str(media_path_value)).expanduser().resolve()
+    source_paths_payload = (
+        payload.get("ffmpeg_source_file_paths")
+        if isinstance(payload.get("ffmpeg_source_file_paths"), list)
+        else []
+    )
+    source_paths = [
+        Path(str(path)).expanduser().resolve() for path in source_paths_payload
+    ]
+    try:
+        _touch_active_job(
+            job,
+            stage="deferred_transcript_screening",
+            title=str(download_defaults.get("title") or media_path.name),
+        )
+        _screen_deferred_video_before_insert(
+            profile_id=job.profile_id,
+            media_path=media_path,
+            download_lookup=download_lookup,
+            download_defaults=download_defaults,
+            payload=payload,
+            job_id=job.id,
+        )
+    finally:
+        if source_paths:
+            _delete_ffmpeg_source_files(source_paths, media_path)
+
+
 def generate_transcript(job: Job) -> None:
     """Generate Whisper subtitles/transcript segments."""
     log.info(
@@ -2278,6 +2345,11 @@ def generate_transcript(job: Job) -> None:
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
     if not download_id:
+        if payload.get("deferred_download_lookup") and payload.get(
+            "deferred_media_path"
+        ):
+            _generate_deferred_transcript_screening(job, payload)
+            return
         log.warning(
             "Transcript worker skipped job with no download_id job_id=%s", job.id
         )

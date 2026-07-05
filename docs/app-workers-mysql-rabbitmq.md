@@ -148,7 +148,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 
 - `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, an Alpine image with Django, Gunicorn, and nginx for web/database/queue dependencies.
 - updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
-- FFmpeg and transcript workers build from `deploy/docker/worker-transcripts.Dockerfile`, a Debian slim image that installs faster-whisper and CTranslate2 from normal Python wheels to avoid Alpine/native-wheel compatibility issues; the FFmpeg queue can also perform deferred video screening after conversion, so it needs the same Whisper runtime.
+- FFmpeg workers build from `deploy/docker/worker-ffmpeg.Dockerfile`, an Alpine image with only the shared worker dependencies plus the FFmpeg package. Transcript workers build from `deploy/docker/worker-transcripts.Dockerfile`, a Debian slim image that installs faster-whisper and CTranslate2 from normal Python wheels to avoid Alpine/native-wheel compatibility issues; deferred explicit-content screening after FFmpeg conversion is queued back to the transcript worker so the FFmpeg image does not need Whisper.
 - transfer and cleanup workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies.
 - `frontend` publishes host port `8080`, serves static files with bundled nginx, and proxies dynamic requests to the Django app running under Gunicorn WSGI in the same container.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
