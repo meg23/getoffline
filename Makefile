@@ -1,4 +1,4 @@
-.PHONY: test integration-test test-compile test-ruff test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -28,9 +28,15 @@ $(VENV_BIN)/activate: $(REQ_FILE)
 
 test: test-compile test-ruff test-vulture test-coverage
 
-integration-test: venv
-	@echo "Running Docker Compose integration test..."
+integration-test: integration-test-podcast integration-test-youtube
+
+integration-test-youtube: venv
+	@echo "Running Docker Compose YouTube integration test..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_youtube_pipeline.py
+
+integration-test-podcast: venv
+	@echo "Running Docker Compose podcast integration test..."
+	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_podcast_source_pipeline.py
 
 test-compile: venv
 	@echo "Compiling Python files..."
