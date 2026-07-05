@@ -83,7 +83,11 @@ def _queue_episode_check() -> int:
 
 
 def _wait_for_podcast_source(
-    job_id: int, deadline: float, host_downloads_dir: Path
+    job_id: int,
+    deadline: float,
+    host_downloads_dir: Path,
+    compose: list[str],
+    compose_env: dict[str, str],
 ) -> None:
     from django.contrib.auth.models import User
     from django.test import Client
@@ -220,6 +224,8 @@ def _wait_for_podcast_source(
                 user_model=User,
                 downloads=downloads,
                 host_downloads_dir=host_downloads_dir,
+                compose=compose,
+                compose_env=compose_env,
             )
             pipeline._log_check(
                 "podcast source saved two RSS item jobs with item metadata"
@@ -239,8 +245,33 @@ def _wait_for_podcast_source(
     )
 
 
+def _make_downloads_host_writable(compose: list[str], compose_env: dict[str, str]) -> None:
+    """Allow host-side Django client checks to delete Docker-created files."""
+    pipeline._run(
+        [
+            *compose,
+            "exec",
+            "-T",
+            "frontend",
+            "chmod",
+            "-R",
+            "a+rwX",
+            str(pipeline.CONTAINER_DOWNLOAD_ROOT),
+        ],
+        env=compose_env,
+        timeout=120,
+        check=False,
+    )
+
+
 def _exercise_podcast_library_actions(
-    *, client, user_model, downloads: list[Download], host_downloads_dir: Path
+    *,
+    client,
+    user_model,
+    downloads: list[Download],
+    host_downloads_dir: Path,
+    compose: list[str],
+    compose_env: dict[str, str],
 ) -> None:
     """Exercise user-facing played/delete/purge actions against podcast items."""
     from models.models import Download
@@ -259,6 +290,8 @@ def _exercise_podcast_library_actions(
     if not played_download.played or played_download.played_at is None:
         raise AssertionError("podcast item was not marked played")
     pipeline._log_check(f"podcast item marked played: download_id={played_download.id}")
+
+    _make_downloads_host_writable(compose, compose_env)
 
     deleted_download = downloads[1]
     deleted_media_path = pipeline._host_download_path(
@@ -367,9 +400,12 @@ def main() -> int:
             pipeline._wait_for_frontend(deadline, frontend_port)
             pipeline._django_setup(host_env)
             job_id = _queue_episode_check()
-            _wait_for_podcast_source(job_id, deadline, downloads_dir)
+            _wait_for_podcast_source(
+                job_id, deadline, downloads_dir, compose, compose_env
+            )
         finally:
             pipeline._stop_log_stream(log_stream)
+            _make_downloads_host_writable(compose, compose_env)
             keep_stack = os.getenv("GETOFFLINE_INTEGRATION_KEEP_STACK", "0")
             if keep_stack.lower() not in {"1", "true", "yes"}:
                 pipeline._run(

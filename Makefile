@@ -28,6 +28,7 @@ $(VENV_BIN)/activate: $(REQ_FILE)
 	@touch $(VENV_BIN)/activate
 
 test: test-compile test-ruff test-mypy test-vulture test-coverage
+	$(MAKE) integration-test
 
 integration-test: integration-test-podcast integration-test-youtube
 
