@@ -15,7 +15,9 @@ VULTURE := $(VENV_BIN)/vulture
 BANDIT := $(VENV_BIN)/bandit
 MYPY := $(VENV_BIN)/mypy
 COVERAGE := $(VENV_BIN)/coverage
-CI_TOOLS := bandit coverage mypy pex ruff vulture
+MCCABE_MAX_COMPLEXITY := 60
+MCCABE_MIN_COMPLEXITY := 61
+CI_TOOLS := bandit coverage mccabe mypy pex ruff vulture
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache
 PY_FILES := $(shell find src tests -name '*.py' -type f)
 
@@ -52,8 +54,13 @@ test-ruff: venv
 	$(RUFF) check src tests
 
 test-mccabe: venv
-	@echo "Running Ruff McCabe complexity checks..."
-	$(RUFF) check --select C901 src tests
+	@echo "Running McCabe complexity checks..."
+	@output="$$($(PYTHON) -m mccabe --min $(MCCABE_MIN_COMPLEXITY) $(PY_FILES))"; \
+	if [ -n "$$output" ]; then \
+		echo "$$output"; \
+		echo "McCabe complexity exceeds $(MCCABE_MAX_COMPLEXITY)."; \
+		exit 1; \
+	fi
 
 test-mypy: venv
 	@echo "Running mypy static type checks..."

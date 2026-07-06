@@ -57,10 +57,16 @@ jobs:
           python3 -m venv .venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r src/requirements.txt ruff
+          .venv/bin/python -m pip install -r src/requirements.txt mccabe
 
       - name: Run McCabe complexity checks
-        run: ruff check --select C901 src tests
+        run: |
+          output="$(python -m mccabe --min 61 $(git ls-files '*.py'))"
+          if [ -n "$output" ]; then
+            echo "$output"
+            echo "McCabe complexity exceeds 60."
+            exit 1
+          fi
 
   mypy:
     runs-on: ubuntu-latest
