@@ -70,6 +70,7 @@ from workers.handlers import _downloaded_media_requires_ffmpeg
 from workers.handlers import _ffmpeg_video_args
 from workers.handlers import _idempotency_key
 from workers.handlers import _is_expected_ytdlp_download_error
+from workers.handlers import _yt_dlp_download_outtmpl
 from workers.handlers import _youtube_candidates
 from workers.handlers import check_for_episodes
 from workers.handlers import generate_transcript
@@ -136,6 +137,14 @@ class SharedDjangoModelTests(TestCase):
         self.assertFalse(
             _is_expected_ytdlp_download_error(TypeError("video unavailable"))
         )
+
+    def test_ytdlp_outtmpl_bounds_title_and_id_components(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            outtmpl = _yt_dlp_download_outtmpl(Path(tmpdir))
+
+        self.assertIn("%(title).160B", outtmpl)
+        self.assertIn("%(id).48B", outtmpl)
+        self.assertNotIn("[%(id)s]", outtmpl)
 
     def test_deferred_video_screening_runs_in_transcript_worker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
