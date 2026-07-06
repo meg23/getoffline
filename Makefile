@@ -1,4 +1,4 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mypy test-bandit test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -15,7 +15,9 @@ VULTURE := $(VENV_BIN)/vulture
 BANDIT := $(VENV_BIN)/bandit
 MYPY := $(VENV_BIN)/mypy
 COVERAGE := $(VENV_BIN)/coverage
-CI_TOOLS := bandit coverage mypy pex ruff vulture
+MCCABE_MAX_COMPLEXITY := 60
+MCCABE_MIN_COMPLEXITY := 61
+CI_TOOLS := bandit coverage mccabe mypy pex ruff vulture
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache
 PY_FILES := $(shell find src tests -name '*.py' -type f)
 
@@ -28,7 +30,7 @@ $(VENV_BIN)/activate: $(REQ_FILE) Makefile
 	$(PIP) install -r $(REQ_FILE) $(CI_TOOLS)
 	@touch $(VENV_BIN)/activate
 
-test: test-compile test-ruff test-mypy test-bandit test-vulture test-coverage
+test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage
 	$(MAKE) integration-test
 
 integration-test: venv
@@ -50,6 +52,15 @@ test-compile: venv
 test-ruff: venv
 	@echo "Running Ruff linting..."
 	$(RUFF) check src tests
+
+test-mccabe: venv
+	@echo "Running McCabe complexity checks..."
+	@output="$$($(PYTHON) -m mccabe --min $(MCCABE_MIN_COMPLEXITY) $(PY_FILES))"; \
+	if [ -n "$$output" ]; then \
+		echo "$$output"; \
+		echo "McCabe complexity exceeds $(MCCABE_MAX_COMPLEXITY)."; \
+		exit 1; \
+	fi
 
 test-mypy: venv
 	@echo "Running mypy static type checks..."

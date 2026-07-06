@@ -45,6 +45,29 @@ jobs:
       - name: Run Ruff linting
         run: ruff check src tests
 
+  mccabe:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Python virtual environment
+        run: |
+          python3 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r src/requirements.txt mccabe
+
+      - name: Run McCabe complexity checks
+        run: |
+          output="$(python -m mccabe --min 61 $(git ls-files '*.py'))"
+          if [ -n "$output" ]; then
+            echo "$output"
+            echo "McCabe complexity exceeds 60."
+            exit 1
+          fi
+
   mypy:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
@@ -128,6 +151,7 @@ jobs:
     needs:
       - compile
       - ruff
+      - mccabe
       - mypy
       - bandit
       - vulture
