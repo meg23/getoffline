@@ -41,6 +41,9 @@ from workers.ytdlp_helpers import resolve_youtube_source_name
 
 log = get_logger("workers.handlers")
 
+_YTDLP_TITLE_FILENAME_BYTES = 160
+_YTDLP_ID_FILENAME_BYTES = 48
+
 
 @dataclass(frozen=True)
 class SkippedSourceFile:
@@ -156,6 +159,23 @@ def _yt_dlp_base_options(**overrides) -> dict:
     }
     options.update(overrides)
     return options
+
+
+def _yt_dlp_download_outtmpl(output_dir: Path) -> str:
+    """Return a yt-dlp output template that keeps one filename component short.
+
+    Some podcast CDNs expose the entire signed media URL query string as the
+    extractor id.  Including that id unbounded in the output template can push
+    the temporary ``.part`` filename over the common 255-byte filesystem
+    component limit before yt-dlp can finish the download.
+    """
+    return str(
+        output_dir
+        / (
+            f"%(title).{_YTDLP_TITLE_FILENAME_BYTES}B "
+            f"[%(id).{_YTDLP_ID_FILENAME_BYTES}B].%(ext)s"
+        )
+    )
 
 
 def _log_youtube_response(prefix: str, payload: dict) -> None:
@@ -1174,7 +1194,7 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
     output_root = _download_output_root(job.profile_id)
     output_dir = output_root / sanitize_channel_name(source_name)
     output_dir.mkdir(parents=True, exist_ok=True)
-    outtmpl = str(output_dir / "%(title).200B [%(id)s].%(ext)s")
+    outtmpl = _yt_dlp_download_outtmpl(output_dir)
     downloaded_files_from_hooks: list[Path] = []
 
     def remember_finished_download(event: dict) -> None:
