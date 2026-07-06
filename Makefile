@@ -1,4 +1,4 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mypy test-bandit test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -28,7 +28,7 @@ $(VENV_BIN)/activate: $(REQ_FILE) Makefile
 	$(PIP) install -r $(REQ_FILE) $(CI_TOOLS)
 	@touch $(VENV_BIN)/activate
 
-test: test-compile test-ruff test-mypy test-bandit test-vulture test-coverage
+test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage
 	$(MAKE) integration-test
 
 integration-test: venv
@@ -50,6 +50,10 @@ test-compile: venv
 test-ruff: venv
 	@echo "Running Ruff linting..."
 	$(RUFF) check src tests
+
+test-mccabe: venv
+	@echo "Running Ruff McCabe complexity checks..."
+	$(RUFF) check --select C901 src tests
 
 test-mypy: venv
 	@echo "Running mypy static type checks..."

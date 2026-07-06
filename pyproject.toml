@@ -26,3 +26,6 @@ skips = [
   "B603", # Commands use argument lists with shell disabled.
   "B607", # The runtime environment supplies ffmpeg/ffprobe via PATH.
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 60

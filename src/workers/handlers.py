@@ -1041,7 +1041,9 @@ def _youtube_video_url(entry: dict) -> str:
     return webpage_url or raw_url
 
 
-def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
+def _download_request_from_payload(
+    job: Job, payload: dict
+) -> tuple[str, SourceType, str] | None:
     download_url = str(
         payload.get("media_url") or payload.get("item_url") or payload.get("url") or ""
     ).strip()
@@ -1065,19 +1067,9 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
                 exc,
             )
     source_name = source_name or str(payload.get("source_type") or "GetOffline").strip()
-    if source_type is SourceType.YOUTUBE and not _is_youtube_video_url(
-        download_url
-    ):
+    if source_type is SourceType.YOUTUBE and not _is_youtube_video_url(download_url):
         fallback_uid = str(payload.get("item_uid") or "").strip()
-        if len(fallback_uid) == 11:
-            download_url = f"https://www.youtube.com/watch?v={fallback_uid}"
-            log.info(
-                "Downloader converted YouTube item uid to video URL job_id=%s item_uid=%s url=%s",
-                job.id,
-                fallback_uid,
-                download_url,
-            )
-        else:
+        if len(fallback_uid) != 11:
             log.warning(
                 "Download worker skipped non-video YouTube URL job_id=%s url=%s payload=%s",
                 job.id,
@@ -1085,6 +1077,96 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
                 payload,
             )
             return None
+        download_url = f"https://www.youtube.com/watch?v={fallback_uid}"
+        log.info(
+            "Downloader converted YouTube item uid to video URL job_id=%s item_uid=%s url=%s",
+            job.id,
+            fallback_uid,
+            download_url,
+        )
+    return download_url, source_type, source_name
+
+
+def _yt_dlp_options_for_download(
+    *,
+    job: Job,
+    payload: dict,
+    source_type: SourceType,
+    download_url: str,
+    outtmpl: str,
+    progress_hook,
+) -> dict:
+    ydl_opts = _yt_dlp_base_options(
+        outtmpl=outtmpl,
+        continuedl=True,
+        retries=3,
+        fragment_retries=3,
+        noplaylist=True,
+        playlist_items="1",
+        playlistend=1,
+        progress_hooks=[progress_hook],
+    )
+    max_height = _profile_setting(
+        job.profile_id, "ytdlp_video_max_height", "720"
+    ).strip()
+    requested_media_type = (
+        str(
+            payload.get("media_type")
+            or ("audio" if source_type is SourceType.PODCAST else "video")
+        )
+        .strip()
+        .lower()
+    )
+    if (
+        source_type is SourceType.YOUTUBE
+        and requested_media_type != "audio"
+        and max_height.isdigit()
+    ):
+        ydl_opts["format"] = (
+            f"bv*[height<={max_height}]+ba/b[height<={max_height}]/best[height<={max_height}]/best"
+        )
+        # Download selected elementary streams only. Point yt-dlp at a deliberately
+        # absent ffmpeg binary so it downloads separate files and leaves merge/transcode
+        # work to the downloader's FFmpeg post-processing without enabling yt-dlp's unplayable-format mode.
+        ydl_opts["ffmpeg_location"] = "/usr/bin/ffmpeg"
+        ydl_opts["ignoreerrors"] = True
+    if source_type is SourceType.YOUTUBE:
+        _configure_youtube_download_filters(ydl_opts, job, payload)
+    return ydl_opts
+
+
+def _configure_youtube_download_filters(
+    ydl_opts: dict, job: Job, payload: dict
+) -> None:
+    include_shorts = bool(payload.get("include_shorts", False))
+    include_livestreams = bool(payload.get("include_livestreams", False))
+
+    def skip_unwanted_youtube_entries(info_dict, *, incomplete=False):
+        _ = incomplete
+        if not include_livestreams and _is_youtube_livestream_entry(info_dict):
+            return "Skipping YouTube livestream entry from source."
+        if not include_shorts and _is_youtube_short_entry(info_dict):
+            return "Skipping YouTube Shorts entry from source."
+        return None
+
+    ydl_opts["match_filter"] = skip_unwanted_youtube_entries
+    if not include_shorts:
+        ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})[
+            "skip"
+        ] = ["shorts"]
+    enable_youtube_quickjs_remote_component(
+        ydl_opts,
+        f"download job {job.id}",
+        _profile_setting(job.profile_id, "js_runtime_path", "qjs"),
+    )
+    apply_ytdlp_player_js_variant_workaround(ydl_opts)
+
+
+def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
+    download_request = _download_request_from_payload(job, payload)
+    if download_request is None:
+        return None
+    download_url, source_type, source_name = download_request
     output_root = _download_output_root(job.profile_id)
     output_dir = output_root / sanitize_channel_name(source_name)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1113,63 +1195,14 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             if path not in downloaded_files_from_hooks:
                 downloaded_files_from_hooks.append(path)
 
-    ydl_opts = _yt_dlp_base_options(
+    ydl_opts = _yt_dlp_options_for_download(
+        job=job,
+        payload=payload,
+        source_type=source_type,
+        download_url=download_url,
         outtmpl=outtmpl,
-        continuedl=True,
-        retries=3,
-        fragment_retries=3,
-        noplaylist=True,
-        playlist_items="1",
-        playlistend=1,
-        progress_hooks=[remember_finished_download],
+        progress_hook=remember_finished_download,
     )
-    max_height = _profile_setting(
-        job.profile_id, "ytdlp_video_max_height", "720"
-    ).strip()
-    requested_media_type = (
-        str(
-            payload.get("media_type")
-            or ("audio" if source_type is SourceType.PODCAST else "video")
-        )
-        .strip()
-        .lower()
-    )
-    if (
-        source_type is SourceType.YOUTUBE
-        and requested_media_type != "audio"
-        and max_height.isdigit()
-    ):
-        ydl_opts["format"] = (
-            f"bv*[height<={max_height}]+ba/b[height<={max_height}]/best[height<={max_height}]/best"
-        )
-        # Download selected elementary streams only. Point yt-dlp at a deliberately
-        # absent ffmpeg binary so it downloads separate files and leaves merge/transcode
-        # work to the downloader's FFmpeg post-processing without enabling yt-dlp's unplayable-format mode.
-        ydl_opts["ffmpeg_location"] = "/usr/bin/ffmpeg"
-        ydl_opts["ignoreerrors"] = True
-    if source_type is SourceType.YOUTUBE:
-        include_shorts = bool(payload.get("include_shorts", False))
-        include_livestreams = bool(payload.get("include_livestreams", False))
-
-        def skip_unwanted_youtube_entries(info_dict, *, incomplete=False):
-            _ = incomplete
-            if not include_livestreams and _is_youtube_livestream_entry(info_dict):
-                return "Skipping YouTube livestream entry from source."
-            if not include_shorts and _is_youtube_short_entry(info_dict):
-                return "Skipping YouTube Shorts entry from source."
-            return None
-
-        ydl_opts["match_filter"] = skip_unwanted_youtube_entries
-        if not include_shorts:
-            ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})[
-                "skip"
-            ] = ["shorts"]
-        enable_youtube_quickjs_remote_component(
-            ydl_opts,
-            f"download job {job.id}",
-            _profile_setting(job.profile_id, "js_runtime_path", "qjs"),
-        )
-        apply_ytdlp_player_js_variant_workaround(ydl_opts)
 
     log.info(
         "yt-dlp download starting job_id=%s profile_id=%s source_type=%s source_name=%s url=%s output_template=%s options=%s",
