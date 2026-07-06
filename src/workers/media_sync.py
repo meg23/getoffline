@@ -676,8 +676,12 @@ def _write_remote_syncdb(
     finally:
         try:
             local_syncdb_path.unlink(missing_ok=True)
-        except (NameError, OSError):
-            pass
+        except NameError:
+            log.debug(
+                "Android transfer history cleanup skipped before temp file creation"
+            )
+        except OSError as exc:
+            log.debug("Android transfer history cleanup failed: %s", exc)
 
 
 def delete_items_from_android(
@@ -1101,8 +1105,10 @@ def sync_items_to_android(
         finally:
             try:
                 local_playlist_path.unlink(missing_ok=True)
-            except (NameError, OSError):
-                pass
+            except NameError:
+                log.debug("VLC playlist cleanup skipped before temp file creation")
+            except OSError as exc:
+                log.debug("VLC playlist cleanup failed: %s", exc)
 
     if result.failed:
         result.message = (

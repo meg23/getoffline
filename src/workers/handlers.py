@@ -488,7 +488,7 @@ def _ensure_app_config_row(key: str) -> None:
             key=key, defaults={"value": "", "updated_at": timezone.now()}
         )
     except IntegrityError:
-        pass
+        log.debug("App config row already exists for key=%s", key)
 
 
 @contextmanager
@@ -2594,7 +2594,12 @@ def retention_cleanup(job: Job) -> None:
         try:
             media_path.unlink()
         except FileNotFoundError:
-            pass
+            log.debug(
+                "Retention cleanup file already absent job_id=%s download_id=%s path=%s",
+                job.id,
+                download.id,
+                media_path,
+            )
         except OSError as exc:
             log.warning(
                 "Retention cleanup could not delete file job_id=%s download_id=%s path=%s error=%s",

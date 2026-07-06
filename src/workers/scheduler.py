@@ -178,7 +178,7 @@ class DatabaseSlotBackend:
                 key=LOCK_KEY, defaults={"value": "1", "updated_at": timezone.now()}
             )
         except IntegrityError:
-            pass
+            log.debug("CPU slot scheduler lock row already exists")
 
     @staticmethod
     def _expires_at(lease_seconds: float):
