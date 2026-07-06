@@ -1,15 +1,16 @@
+import http.client
 import re
 import shutil
 import subprocess
 import tempfile
-import urllib.request
 from collections.abc import Callable
 from collections.abc import Iterable
 from dataclasses import dataclass
 from dataclasses import field
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
-from xml.sax.saxutils import escape
+from urllib.parse import urlsplit
 
 from workers.logger import get_logger
 
@@ -187,7 +188,7 @@ def build_remote_media_path(destination: str, item: AndroidSyncItem) -> str:
 
 
 def _xml_text(value: object) -> str:
-    return escape(str(value or ""), {"'": "&apos;", '"': "&quot;"})
+    return escape(str(value or ""), quote=True)
 
 
 def _file_uri_for_android_path(remote_path: str) -> str:
@@ -222,14 +223,41 @@ def _append_metadata_args(
         command.extend([prefix, f"{key}={value}"])
 
 
+def _download_artwork_payload(url: str) -> tuple[bytes, str]:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("artwork URL must use http or https")
+
+    connection_cls = (
+        http.client.HTTPSConnection
+        if parsed.scheme == "https"
+        else http.client.HTTPConnection
+    )
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    connection = connection_cls(parsed.hostname, port=parsed.port, timeout=20)
+    try:
+        connection.request("GET", path, headers={"User-Agent": "GetOffline/1.0"})
+        response = connection.getresponse()
+        if response.status >= 400:
+            raise ValueError(f"artwork download returned HTTP {response.status}")
+        payload = response.read(20 * 1024 * 1024 + 1)
+        if len(payload) > 20 * 1024 * 1024:
+            raise ValueError("artwork download exceeded 20 MiB")
+        content_type = str(response.getheader("Content-Type") or "").lower()
+        return payload, content_type
+    finally:
+        connection.close()
+
+
 def _download_artwork(artwork_url: str | None) -> Path | None:
     url = str(artwork_url or "").strip()
     if not url:
         return None
     try:
-        with urllib.request.urlopen(url, timeout=20) as response:
-            payload = response.read(20 * 1024 * 1024)
-            content_type = str(response.headers.get("Content-Type") or "").lower()
+        payload, content_type = _download_artwork_payload(url)
     except Exception as exc:
         log.warning("Media transfer artwork download failed url=%s: %s", url, exc)
         return None
@@ -648,8 +676,12 @@ def _write_remote_syncdb(
     finally:
         try:
             local_syncdb_path.unlink(missing_ok=True)
-        except (NameError, OSError):
-            pass
+        except NameError:
+            log.debug(
+                "Android transfer history cleanup skipped before temp file creation"
+            )
+        except OSError as exc:
+            log.debug("Android transfer history cleanup failed: %s", exc)
 
 
 def delete_items_from_android(
@@ -1073,8 +1105,10 @@ def sync_items_to_android(
         finally:
             try:
                 local_playlist_path.unlink(missing_ok=True)
-            except (NameError, OSError):
-                pass
+            except NameError:
+                log.debug("VLC playlist cleanup skipped before temp file creation")
+            except OSError as exc:
+                log.debug("VLC playlist cleanup failed: %s", exc)
 
     if result.failed:
         result.message = (

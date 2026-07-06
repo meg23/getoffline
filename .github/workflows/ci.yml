@@ -81,6 +81,23 @@ jobs:
       - name: Run Vulture dead-code analysis
         run: vulture src tests --min-confidence 100
 
+  bandit:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Python virtual environment
+        run: |
+          python3 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r src/requirements.txt bandit
+
+      - name: Run Bandit security checks
+        run: bandit -c pyproject.toml -r src
+
   coverage:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
@@ -112,6 +129,7 @@ jobs:
       - compile
       - ruff
       - mypy
+      - bandit
       - vulture
       - coverage
     steps:
