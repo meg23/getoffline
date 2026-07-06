@@ -472,7 +472,8 @@ def _tail_text(value: str | None, *, limit: int = 4000) -> str:
 
 def _transcode_lock_key(profile_id: str, payload: dict) -> str:
     digest = hashlib.sha1(
-        _transcode_idempotency_key(profile_id, payload).encode("utf-8")
+        _transcode_idempotency_key(profile_id, payload).encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()
     return f"transcode_lock:{digest}"
 
@@ -1424,7 +1425,9 @@ def _transcode_idempotency_key(profile_id: str, payload: dict) -> str:
     ]
     key_parts.append(str(payload.get("target_file_path") or ""))
     key_parts.append(str(payload.get("item_uid") or ""))
-    digest = hashlib.sha1("|".join(key_parts).encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(
+        "|".join(key_parts).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
     return f"transcode_media:{profile_id}:file:{digest}"
 
 
@@ -1472,12 +1475,13 @@ def _publish_created_job(job: Job) -> None:
 
 def _fallback_uid(*parts: object) -> str:
     text = "|".join(str(part or "") for part in parts).strip() or "unknown"
-    return f"generated:{hashlib.sha1(text.encode('utf-8')).hexdigest()}"
+    digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"generated:{digest}"
 
 
 def _idempotency_key(*parts: object) -> str:
     text = "|".join(str(part or "") for part in parts).strip() or "unknown"
-    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()
     prefix = ":".join(str(part or "") for part in parts[:3])[:160]
     return f"{prefix}:{digest}"[:255]
 

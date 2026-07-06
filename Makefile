@@ -1,4 +1,4 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mypy test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mypy test-bandit test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -12,22 +12,23 @@ PIP := $(VENV_BIN)/pip
 PEX := $(VENV_BIN)/pex
 RUFF := $(VENV_BIN)/ruff
 VULTURE := $(VENV_BIN)/vulture
+BANDIT := $(VENV_BIN)/bandit
 MYPY := $(VENV_BIN)/mypy
 COVERAGE := $(VENV_BIN)/coverage
-CI_TOOLS := coverage mypy pex ruff vulture
+CI_TOOLS := bandit coverage mypy pex ruff vulture
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache
 PY_FILES := $(shell find src tests -name '*.py' -type f)
 
 venv: $(VENV_BIN)/activate
 
-$(VENV_BIN)/activate: $(REQ_FILE)
+$(VENV_BIN)/activate: $(REQ_FILE) Makefile
 	@echo "Creating virtual environment for $(APP_NAME)..."
 	python3 -m venv $(VENV_DIR)
 	$(PIP) install --upgrade pip
 	$(PIP) install -r $(REQ_FILE) $(CI_TOOLS)
 	@touch $(VENV_BIN)/activate
 
-test: test-compile test-ruff test-mypy test-vulture test-coverage
+test: test-compile test-ruff test-mypy test-bandit test-vulture test-coverage
 	$(MAKE) integration-test
 
 integration-test: venv
@@ -53,6 +54,10 @@ test-ruff: venv
 test-mypy: venv
 	@echo "Running mypy static type checks..."
 	PYTHONPATH=$(SRC_DIR) $(MYPY) src tests
+
+test-bandit: venv
+	@echo "Running Bandit security checks..."
+	$(BANDIT) -c pyproject.toml -r src
 
 test-vulture: venv
 	@echo "Running Vulture dead-code analysis..."

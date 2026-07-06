@@ -18,3 +18,11 @@ module = [
   "tests.*",
 ]
 ignore_errors = true
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = [
+  "B404", # Subprocess imports are required for controlled ffmpeg/ffprobe invocations.
+  "B603", # Commands use argument lists with shell disabled.
+  "B607", # The runtime environment supplies ffmpeg/ffprobe via PATH.
+]

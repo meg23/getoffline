@@ -831,7 +831,7 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> ManualUploadResult:
         destination_path = destination_root / f"{stem}-{counter}{suffix}"
         counter += 1
 
-    hasher = hashlib.sha1()
+    hasher = hashlib.sha1(usedforsecurity=False)
     bytes_written = 0
     with destination_path.open("wb") as destination:
         for chunk in uploaded_file.chunks():
