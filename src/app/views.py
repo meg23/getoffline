@@ -923,7 +923,9 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         or request.headers.get("accept") == "application/json"
     )
     if wants_json:
-        status_query = urlencode({"profile_id": profile_id, "token": completion_token})
+        status_query = urlencode(
+            {"profile_id": profile_id, "token": completion_marker}
+        )
         status_url = f"{reverse('worker_message_status')}?{status_query}"
         return JsonResponse(
             {
