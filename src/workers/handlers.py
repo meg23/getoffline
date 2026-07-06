@@ -1054,7 +1054,9 @@ def _download_request_from_payload(
             payload,
         )
         return None
-    source_type = parse_str_enum(SourceType, payload.get("source_type")) or SourceType.YOUTUBE
+    source_type = (
+        parse_str_enum(SourceType, payload.get("source_type")) or SourceType.YOUTUBE
+    )
     source_name = str(payload.get("source_name") or "").strip()
     if not source_name and source_type is SourceType.YOUTUBE:
         try:
@@ -1066,7 +1068,9 @@ def _download_request_from_payload(
                 download_url,
                 exc,
             )
-    source_name = source_name or str(payload.get("source_type") or "GetOffline").strip()
+    source_name = source_name or str(
+        payload.get("source_type") or "GetOffline"
+    ).strip()
     if source_type is SourceType.YOUTUBE and not _is_youtube_video_url(download_url):
         fallback_uid = str(payload.get("item_uid") or "").strip()
         if len(fallback_uid) != 11:
@@ -1092,7 +1096,6 @@ def _yt_dlp_options_for_download(
     job: Job,
     payload: dict,
     source_type: SourceType,
-    download_url: str,
     outtmpl: str,
     progress_hook,
 ) -> dict:
@@ -1127,7 +1130,8 @@ def _yt_dlp_options_for_download(
         )
         # Download selected elementary streams only. Point yt-dlp at a deliberately
         # absent ffmpeg binary so it downloads separate files and leaves merge/transcode
-        # work to the downloader's FFmpeg post-processing without enabling yt-dlp's unplayable-format mode.
+        # work to the downloader's FFmpeg post-processing without enabling
+        # yt-dlp's unplayable-format mode.
         ydl_opts["ffmpeg_location"] = "/usr/bin/ffmpeg"
         ydl_opts["ignoreerrors"] = True
     if source_type is SourceType.YOUTUBE:
@@ -1199,7 +1203,6 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         job=job,
         payload=payload,
         source_type=source_type,
-        download_url=download_url,
         outtmpl=outtmpl,
         progress_hook=remember_finished_download,
     )
