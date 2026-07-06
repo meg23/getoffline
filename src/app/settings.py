@@ -9,7 +9,7 @@ pymysql.install_as_MySQLdb()
 BASE_DIR = Path(__file__).resolve().parent
 SECRET_KEY = os.getenv(
     "GETOFFLINE_DJANGO_SECRET_KEY",
-    "getoffline-dev-secret",  # nosec B105 - local development fallback only.
+    "getoffline-dev-secret",
 )
 DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
     "1",

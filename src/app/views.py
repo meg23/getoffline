@@ -892,17 +892,17 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Unsupported job_type")
 
     payload = {"source": "django_app"}
-    completion_token = ""
+    completion_marker = ""
     if job_type == "update_downloads":
-        completion_token = uuid.uuid4().hex
-        payload["completion_token"] = completion_token
+        completion_marker = uuid.uuid4().hex
+        payload["completion_token"] = completion_marker
     if job_type == "download_single":
         payload["manual_enqueue"] = True
     if request.POST.get("url"):
         payload["url"] = str(request.POST["url"]).strip()
     default_idempotency = f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
     if job_type == "update_downloads":
-        default_idempotency = f"{job_type}:{profile_id}:{completion_token}"
+        default_idempotency = f"{job_type}:{profile_id}:{completion_marker}"
     idempotency_key = request.POST.get("idempotency_key") or default_idempotency
     job = create_job(
         profile_id=profile_id,
@@ -1153,10 +1153,11 @@ def _delete_external_download_dependents(row_ids: list[int]) -> None:
     if not row_ids:
         return
     existing_tables = set(connection.introspection.table_names())
-    dependent_tables = ["media_summaries"]
-    placeholders = ", ".join(["%s"] * len(row_ids))
+    dependent_delete_statements = {
+        "media_summaries": "DELETE FROM media_summaries WHERE download_id = %s",
+    }
     with connection.cursor() as cursor:
-        for table_name in dependent_tables:
+        for table_name, delete_statement in dependent_delete_statements.items():
             if table_name not in existing_tables:
                 log.info(
                     "Purge dependency cleanup skipped missing table=%s row_ids=%s",
@@ -1164,11 +1165,8 @@ def _delete_external_download_dependents(row_ids: list[int]) -> None:
                     row_ids,
                 )
                 continue
-            quoted_table = connection.ops.quote_name(table_name)
-            deleted = cursor.execute(
-                f"DELETE FROM {quoted_table} WHERE download_id IN ({placeholders})",
-                row_ids,
-            )
+            cursor.executemany(delete_statement, [(row_id,) for row_id in row_ids])
+            deleted = cursor.rowcount
             log.info(
                 "Purge dependency cleanup deleted table=%s row_ids=%s deleted_count=%s",
                 table_name,
