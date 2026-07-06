@@ -30,7 +30,7 @@ class YoutubeDL:
     def __enter__(self) -> "YoutubeDL":
         return self
 
-    def __exit__(self, exc_type, exc, traceback) -> None:  # noqa: ANN001
+    def __exit__(self, exc_type, exc, _traceback) -> None:  # noqa: ANN001
         return None
 
     def extract_info(self, url: str, download: bool = True) -> dict[str, Any]:
