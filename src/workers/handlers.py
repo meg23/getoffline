@@ -2299,6 +2299,23 @@ def _screen_deferred_video_before_insert(
         return None
     if explicit_match is not None:
         deleted_paths = delete_media_artifacts(media_path)
+        filtered_defaults = dict(download_defaults)
+        filtered_defaults.update(
+            {
+                "file_path": None,
+                "file_path_relative": None,
+                "file_size_bytes": None,
+                "subtitle_path": None,
+                "subtitle_path_relative": None,
+                "download_status": DownloadStatus.FILTERED,
+                "completed_at": timezone.now(),
+                "last_seen_at": timezone.now(),
+            }
+        )
+        Download.objects.update_or_create(
+            **download_lookup,
+            defaults=filtered_defaults,
+        )
         log_filtered_deletion(
             source_type=download_lookup.get("source_type"),
             source_name=download_lookup.get("source_name"),
