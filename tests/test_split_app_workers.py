@@ -40,6 +40,7 @@ def _clear_django_test_data():
         model.objects.all().delete()
 
 
+from models.domain import DownloadStatus
 from models.domain import JobStatus
 from models.domain import SourceType
 from app.queue import job_priority  # noqa: E402
@@ -1428,7 +1429,7 @@ class SharedDjangoModelTests(TestCase):
                 TranscriptSegment.objects.filter(download=download).exists()
             )
 
-    def test_video_with_explicit_match_is_not_added_to_database(self):
+    def test_video_with_explicit_match_is_recorded_as_filtered_tombstone(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_root = Path(tmpdir)
             media_file = output_root / "Channel" / "Explicit Video [bad-video].mp4"
@@ -1502,10 +1503,51 @@ class SharedDjangoModelTests(TestCase):
                 result = _download_with_yt_dlp(job, job.payload)
 
             self.assertIsNone(result)
-            self.assertEqual(Download.objects.count(), 0)
+            self.assertEqual(Download.objects.count(), 1)
+            download = Download.objects.get()
+            self.assertEqual(download.item_uid, "bad-video")
+            self.assertEqual(download.item_url, "https://youtube.com/watch?v=bad-video")
+            self.assertEqual(download.title, "Explicit Video")
+            self.assertEqual(download.download_status, DownloadStatus.FILTERED)
+            self.assertIsNone(download.file_path)
+            self.assertIsNone(download.subtitle_path)
             self.assertFalse(media_file.exists())
             self.assertFalse(subtitle_file.exists())
             deletion_log.assert_called_once()
+
+            download_job_count = Job.objects.filter(job_type="download_episode").count()
+            source = SourceConfig.objects.create(
+                profile_id="default",
+                source_type=SourceType.YOUTUBE,
+                name="Channel",
+                url="https://youtube.com/@channel",
+                enabled=True,
+                media_type="video",
+                delete_explicit_content=True,
+            )
+            with patch(
+                "workers.handlers._candidates_for_source",
+                return_value=[
+                    {
+                        "item_uid": "bad-video",
+                        "item_url": "https://youtube.com/watch?v=bad-video",
+                        "media_url": "https://youtube.com/watch?v=bad-video",
+                        "title": "Explicit Video",
+                    }
+                ],
+            ):
+                check_for_episodes(
+                    Job.objects.create(
+                        profile_id="default",
+                        job_type="check_for_episodes",
+                        payload={"source_id": source.id},
+                    )
+                )
+
+            self.assertEqual(
+                Job.objects.filter(job_type="download_episode").count(),
+                download_job_count,
+            )
 
     def test_transcode_media_updates_row_deletes_original_and_queues_transcript(
         self,
