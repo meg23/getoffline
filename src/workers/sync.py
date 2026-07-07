@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from workers.logger import get_logger
 
-log = get_logger("media_sync")
+log = get_logger("sync")
 
 MEDIA_SUBTITLE_EXTENSIONS = {".srt", ".vtt"}
 MEDIA_METADATA_EXTENSIONS = {
@@ -73,6 +73,27 @@ class AndroidSyncResult:
     copied_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     vlc_playlist_path: str | None = None
+
+
+@dataclass(frozen=True)
+class AndroidSyncSession:
+    adb_executable: str
+    device_serial: str
+    destination: str
+
+
+@dataclass(frozen=True)
+class AndroidTransferState:
+    syncdb_paths: set[str]
+    syncdb_changed: bool = False
+    playlist_entries: tuple[tuple[AndroidSyncItem, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedAndroidItem:
+    item: AndroidSyncItem
+    local_path: Path
+    remote_media_path: str
 
 
 def _coerce_bool(value: object) -> bool:
@@ -406,8 +427,7 @@ def build_vlc_xspf(entries: list[tuple[AndroidSyncItem, str]]) -> str:
         creator = _xml_text(item.source_name or "GetOffline")
         location = _xml_text(_file_uri_for_android_path(remote_path))
         annotation = _xml_text(_metadata_comment(item))
-        track_lines.append(
-            f"""    <track>
+        track_lines.append(f"""    <track>
       <location>{location}</location>
       <title>{title}</title>
       <creator>{creator}</creator>
@@ -416,8 +436,7 @@ def build_vlc_xspf(entries: list[tuple[AndroidSyncItem, str]]) -> str:
         <vlc:id>{idx}</vlc:id>
         <vlc:option>start-time={position_seconds}</vlc:option>
       </extension>
-    </track>"""
-        )
+    </track>""")
 
     track_list = "\n".join(track_lines)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -798,41 +817,47 @@ def delete_items_from_android(
     return result
 
 
-def sync_items_to_android(
-    items: Iterable[AndroidSyncItem],
+def select_sync_items(
+    items: Iterable[AndroidSyncItem], config: AndroidSyncConfig
+) -> list[AndroidSyncItem]:
+    return list(items)[: config.max_items]
+
+
+def resolve_adb_executable(adb_path: str) -> str | None:
+    if Path(adb_path).is_absolute():
+        return adb_path
+    return shutil.which(adb_path)
+
+
+def normalize_android_destination(destination: str) -> str:
+    return destination.rstrip("/") or "/sdcard/Movies/GetOffline"
+
+
+def log_android_sync_start(
+    sync_items: list[AndroidSyncItem],
     config: AndroidSyncConfig,
-    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-) -> AndroidSyncResult:
-    result = AndroidSyncResult(message="disabled")
-    if not config.enabled:
-        log.info("Android transfer skipped: disabled")
-        return result
-
-    sync_items = list(items)[: config.max_items]
-    if not sync_items:
-        result.message = "no unplayed media to transfer"
-        log.info("Android transfer skipped: no unplayed media items selected")
-        return result
-
-    adb_executable = (
-        shutil.which(config.adb_path)
-        if not Path(config.adb_path).is_absolute()
-        else config.adb_path
+    session: AndroidSyncSession,
+) -> None:
+    log.info(
+        "Android transfer starting: items=%s destination=%s adb=%s include_subtitles=%s",
+        len(sync_items),
+        session.destination,
+        session.adb_executable,
+        "yes" if config.include_subtitles else "no",
     )
+
+
+def connect_android_sync_session(
+    config: AndroidSyncConfig,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> AndroidSyncSession | None:
+    adb_executable = resolve_adb_executable(config.adb_path)
     if not adb_executable:
         result.message = f"adb not found: {config.adb_path}"
         result.failed += 1
         _append_error(result, result.message)
-        return result
-
-    destination = config.destination.rstrip("/") or "/sdcard/Movies/GetOffline"
-    log.info(
-        "Android transfer starting: items=%s destination=%s adb=%s include_subtitles=%s",
-        len(sync_items),
-        destination,
-        adb_executable,
-        "yes" if config.include_subtitles else "no",
-    )
+        return None
 
     try:
         device_serial = find_connected_device(
@@ -845,37 +870,53 @@ def sync_items_to_android(
         result.message = f"adb device check failed: {exc}"
         result.failed += 1
         _append_error(result, str(exc))
-        return result
+        return None
 
     if not device_serial:
-        if str(config.connection_mode or "usb").strip().lower() == "wifi":
-            result.message = "no authorized Android Wi-Fi device connected"
-            _append_error(
-                result,
-                "no authorized Android Wi-Fi device connected; check the Wi-Fi address and adb pairing",
-            )
-        else:
-            result.message = "no authorized Android device connected"
-            _append_error(
-                result,
-                "no authorized Android device connected; check USB debugging authorization",
-            )
-        return result
+        record_missing_android_device(config, result)
+        return None
 
     result.device_serial = device_serial
-    vlc_playlist_entries: list[tuple[AndroidSyncItem, str]] = []
-    syncdb_paths: set[str] = set()
-    syncdb_changed = False
+    return AndroidSyncSession(
+        adb_executable=adb_executable,
+        device_serial=device_serial,
+        destination=normalize_android_destination(config.destination),
+    )
+
+
+def record_missing_android_device(
+    config: AndroidSyncConfig, result: AndroidSyncResult
+) -> None:
+    if str(config.connection_mode or "usb").strip().lower() == "wifi":
+        result.message = "no authorized Android Wi-Fi device connected"
+        _append_error(
+            result,
+            "no authorized Android Wi-Fi device connected; check the Wi-Fi address and adb pairing",
+        )
+        return
+
+    result.message = "no authorized Android device connected"
+    _append_error(
+        result,
+        "no authorized Android device connected; check USB debugging authorization",
+    )
+
+
+def prepare_android_destination(
+    session: AndroidSyncSession,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> bool:
     try:
         mkdir = _run_adb_command(
             [
-                adb_executable,
+                session.adb_executable,
                 "-s",
-                device_serial,
+                session.device_serial,
                 "shell",
-                f"mkdir -p {_remote_quote(destination)}",
+                f"mkdir -p {_remote_quote(session.destination)}",
             ],
-            description=f"creating Android destination folder {destination}",
+            description=f"creating Android destination folder {session.destination}",
             timeout=30,
             runner=runner,
         )
@@ -883,233 +924,386 @@ def sync_items_to_android(
         result.message = f"unable to prepare Android folder: {exc}"
         result.failed += 1
         _append_error(result, str(exc))
-        return result
-    if int(getattr(mkdir, "returncode", 1) or 0) != 0:
-        output = _combined_output(mkdir) or "no output"
-        result.message = f"unable to prepare Android folder: {output}"
-        result.failed += 1
-        _append_error(result, result.message)
-        return result
+        return False
 
-    syncdb_paths = _read_remote_syncdb(
-        adb_executable, device_serial, destination, runner
+    if int(getattr(mkdir, "returncode", 1) or 0) == 0:
+        return True
+
+    output = _combined_output(mkdir) or "no output"
+    result.message = f"unable to prepare Android folder: {output}"
+    result.failed += 1
+    _append_error(result, result.message)
+    return False
+
+
+def load_android_transfer_state(
+    session: AndroidSyncSession, runner: Callable[..., subprocess.CompletedProcess]
+) -> AndroidTransferState:
+    return AndroidTransferState(
+        syncdb_paths=_read_remote_syncdb(
+            session.adb_executable, session.device_serial, session.destination, runner
+        )
     )
 
-    for item in sync_items:
-        result.attempted += 1
-        local_path = item.file_path.expanduser().resolve()
-        if not local_path.exists() or not local_path.is_file():
-            result.failed += 1
-            _append_error(
-                result, f"missing local file for row {item.row_id}: {local_path}"
-            )
-            continue
 
-        remote_media_path = build_remote_media_path(destination, item)
-        log.info(
-            "Android transfer item starting: row_id=%s local=%s remote=%s size_bytes=%s",
-            item.row_id,
-            local_path,
-            remote_media_path,
-            local_path.stat().st_size,
+def prepare_item_for_android_sync(
+    item: AndroidSyncItem, destination: str, result: AndroidSyncResult
+) -> PreparedAndroidItem | None:
+    result.attempted += 1
+    local_path = item.file_path.expanduser().resolve()
+    if not local_path.exists() or not local_path.is_file():
+        result.failed += 1
+        _append_error(result, f"missing local file for row {item.row_id}: {local_path}")
+        return None
+
+    remote_media_path = build_remote_media_path(destination, item)
+    log.info(
+        "Android transfer item starting: row_id=%s local=%s remote=%s size_bytes=%s",
+        item.row_id,
+        local_path,
+        remote_media_path,
+        local_path.stat().st_size,
+    )
+    return PreparedAndroidItem(item, local_path, remote_media_path)
+
+
+def add_playlist_entry(
+    state: AndroidTransferState, item: AndroidSyncItem, remote_media_path: str
+) -> AndroidTransferState:
+    return AndroidTransferState(
+        syncdb_paths=state.syncdb_paths,
+        syncdb_changed=state.syncdb_changed,
+        playlist_entries=(*state.playlist_entries, (item, remote_media_path)),
+    )
+
+
+def mark_remote_path_synced(
+    state: AndroidTransferState, remote_media_path: str
+) -> AndroidTransferState:
+    return AndroidTransferState(
+        syncdb_paths={*state.syncdb_paths, remote_media_path},
+        syncdb_changed=True,
+        playlist_entries=state.playlist_entries,
+    )
+
+
+def mark_item_skipped_from_history(
+    prepared: PreparedAndroidItem,
+    state: AndroidTransferState,
+    result: AndroidSyncResult,
+) -> AndroidTransferState:
+    result.skipped += 1
+    next_state = add_playlist_entry(state, prepared.item, prepared.remote_media_path)
+    log.info(
+        "Android transfer item skipped: row_id=%s remote path already recorded in transferdb.txt",
+        prepared.item.row_id,
+    )
+    return next_state
+
+
+def remote_media_file_exists(
+    prepared: PreparedAndroidItem,
+    session: AndroidSyncSession,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> bool | None:
+    try:
+        exists = _run_adb_command(
+            [
+                session.adb_executable,
+                "-s",
+                session.device_serial,
+                "shell",
+                f"test -f {_remote_quote(prepared.remote_media_path)}",
+            ],
+            description=f"checking existing Android file for row {prepared.item.row_id}",
+            timeout=15,
+            runner=runner,
         )
-        if remote_media_path in syncdb_paths:
-            result.skipped += 1
-            vlc_playlist_entries.append((item, remote_media_path))
-            log.info(
-                "Android transfer item skipped: row_id=%s remote path already recorded in transferdb.txt",
-                item.row_id,
-            )
-            continue
-
-        remote_exists = False
-        try:
-            exists = _run_adb_command(
-                [
-                    adb_executable,
-                    "-s",
-                    device_serial,
-                    "shell",
-                    f"test -f {_remote_quote(remote_media_path)}",
-                ],
-                description=f"checking existing Android file for row {item.row_id}",
-                timeout=15,
-                runner=runner,
-            )
-        except RuntimeError as exc:
-            result.failed += 1
-            _append_error(
-                result,
-                f"unable to check existing Android file for row {item.row_id}: {exc}",
-            )
-            continue
-        if int(getattr(exists, "returncode", 1) or 0) == 0:
-            remote_exists = True
-
-        push_source_path = _copy_with_embedded_metadata(local_path, item, runner)
-        if remote_exists and push_source_path == local_path:
-            result.skipped += 1
-            syncdb_paths.add(remote_media_path)
-            syncdb_changed = True
-            vlc_playlist_entries.append((item, remote_media_path))
-            log.info(
-                "Android transfer item skipped: row_id=%s remote file already exists and metadata refresh is unavailable",
-                item.row_id,
-            )
-            continue
-        if remote_exists:
-            log.info(
-                "Android transfer item refreshing metadata on existing remote file: row_id=%s",
-                item.row_id,
-            )
-        try:
-            pushed = _run_adb_command(
-                [
-                    adb_executable,
-                    "-s",
-                    device_serial,
-                    "push",
-                    str(push_source_path),
-                    remote_media_path,
-                ],
-                description=f"pushing media row {item.row_id}",
-                timeout=300,
-                runner=runner,
-            )
-        except RuntimeError as exc:
-            result.failed += 1
-            _append_error(result, f"push failed for row {item.row_id}: {exc}")
-            if push_source_path != local_path:
-                push_source_path.unlink(missing_ok=True)
-            continue
-        if push_source_path != local_path:
-            push_source_path.unlink(missing_ok=True)
-        if int(getattr(pushed, "returncode", 1) or 0) != 0:
-            result.failed += 1
-            _append_error(
-                result,
-                _combined_output(pushed)
-                or f"push failed for row {item.row_id}: {local_path}",
-            )
-            continue
-
-        _rescan_android_media(adb_executable, device_serial, remote_media_path, runner)
-        result.copied += 1
-        result.copied_files.append(remote_media_path)
-        syncdb_paths.add(remote_media_path)
-        syncdb_changed = True
-        vlc_playlist_entries.append((item, remote_media_path))
-        log.info(
-            "Android transfer item copied: row_id=%s remote=%s",
-            item.row_id,
-            remote_media_path,
+    except RuntimeError as exc:
+        result.failed += 1
+        _append_error(
+            result,
+            f"unable to check existing Android file for row {prepared.item.row_id}: {exc}",
         )
+        return None
+    return int(getattr(exists, "returncode", 1) or 0) == 0
 
-        if not config.include_subtitles or not item.subtitle_path:
-            continue
 
-        subtitle_path = item.subtitle_path.expanduser().resolve()
-        if not subtitle_path.exists():
-            log.info(
-                "Android transfer subtitle skipped: row_id=%s subtitle missing path=%s",
-                item.row_id,
-                subtitle_path,
-            )
-            continue
-        if subtitle_path.suffix.lower() not in MEDIA_SUBTITLE_EXTENSIONS:
-            log.info(
-                "Android transfer subtitle skipped: row_id=%s unsupported extension path=%s",
-                item.row_id,
-                subtitle_path,
-            )
-            continue
+def skip_existing_item_without_metadata_refresh(
+    prepared: PreparedAndroidItem,
+    state: AndroidTransferState,
+    result: AndroidSyncResult,
+) -> AndroidTransferState:
+    result.skipped += 1
+    next_state = mark_remote_path_synced(state, prepared.remote_media_path)
+    next_state = add_playlist_entry(
+        next_state, prepared.item, prepared.remote_media_path
+    )
+    log.info(
+        "Android transfer item skipped: row_id=%s remote file already exists and metadata refresh is unavailable",
+        prepared.item.row_id,
+    )
+    return next_state
 
-        remote_subtitle_path = str(
-            Path(remote_media_path).with_suffix(subtitle_path.suffix)
-        ).replace("\\", "/")
-        try:
-            subtitle_push = _run_adb_command(
-                [
-                    adb_executable,
-                    "-s",
-                    device_serial,
-                    "push",
-                    str(subtitle_path),
-                    remote_subtitle_path,
-                ],
-                description=f"pushing subtitle for row {item.row_id}",
-                timeout=120,
-                runner=runner,
-            )
-        except RuntimeError as exc:
-            _append_error(result, f"subtitle push failed for row {item.row_id}: {exc}")
-            continue
-        if int(getattr(subtitle_push, "returncode", 1) or 0) != 0:
-            _append_error(
-                result,
-                _combined_output(subtitle_push)
-                or f"subtitle push failed for row {item.row_id}: {subtitle_path}",
-            )
-        else:
-            log.info(
-                "Android transfer subtitle copied: row_id=%s remote=%s",
-                item.row_id,
+
+def push_media_to_android(
+    prepared: PreparedAndroidItem,
+    push_source_path: Path,
+    session: AndroidSyncSession,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> bool:
+    try:
+        pushed = _run_adb_command(
+            [
+                session.adb_executable,
+                "-s",
+                session.device_serial,
+                "push",
+                str(push_source_path),
+                prepared.remote_media_path,
+            ],
+            description=f"pushing media row {prepared.item.row_id}",
+            timeout=300,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        result.failed += 1
+        _append_error(result, f"push failed for row {prepared.item.row_id}: {exc}")
+        return False
+
+    if int(getattr(pushed, "returncode", 1) or 0) == 0:
+        return True
+
+    result.failed += 1
+    _append_error(
+        result,
+        _combined_output(pushed)
+        or f"push failed for row {prepared.item.row_id}: {prepared.local_path}",
+    )
+    return False
+
+
+def record_copied_android_item(
+    prepared: PreparedAndroidItem,
+    session: AndroidSyncSession,
+    state: AndroidTransferState,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> AndroidTransferState:
+    _rescan_android_media(
+        session.adb_executable,
+        session.device_serial,
+        prepared.remote_media_path,
+        runner,
+    )
+    result.copied += 1
+    result.copied_files.append(prepared.remote_media_path)
+    next_state = mark_remote_path_synced(state, prepared.remote_media_path)
+    next_state = add_playlist_entry(
+        next_state, prepared.item, prepared.remote_media_path
+    )
+    log.info(
+        "Android transfer item copied: row_id=%s remote=%s",
+        prepared.item.row_id,
+        prepared.remote_media_path,
+    )
+    return next_state
+
+
+def copy_subtitle_to_android(
+    prepared: PreparedAndroidItem,
+    session: AndroidSyncSession,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> None:
+    if not prepared.item.subtitle_path:
+        return
+
+    subtitle_path = prepared.item.subtitle_path.expanduser().resolve()
+    if not subtitle_path.exists():
+        log.info(
+            "Android transfer subtitle skipped: row_id=%s subtitle missing path=%s",
+            prepared.item.row_id,
+            subtitle_path,
+        )
+        return
+    if subtitle_path.suffix.lower() not in MEDIA_SUBTITLE_EXTENSIONS:
+        log.info(
+            "Android transfer subtitle skipped: row_id=%s unsupported extension path=%s",
+            prepared.item.row_id,
+            subtitle_path,
+        )
+        return
+
+    remote_subtitle_path = str(
+        Path(prepared.remote_media_path).with_suffix(subtitle_path.suffix)
+    ).replace("\\", "/")
+    try:
+        subtitle_push = _run_adb_command(
+            [
+                session.adb_executable,
+                "-s",
+                session.device_serial,
+                "push",
+                str(subtitle_path),
                 remote_subtitle_path,
-            )
+            ],
+            description=f"pushing subtitle for row {prepared.item.row_id}",
+            timeout=120,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        _append_error(
+            result, f"subtitle push failed for row {prepared.item.row_id}: {exc}"
+        )
+        return
 
-    if syncdb_changed or not syncdb_paths:
-        _write_remote_syncdb(
-            adb_executable, device_serial, destination, syncdb_paths, result, runner
+    if int(getattr(subtitle_push, "returncode", 1) or 0) != 0:
+        _append_error(
+            result,
+            _combined_output(subtitle_push)
+            or f"subtitle push failed for row {prepared.item.row_id}: {subtitle_path}",
+        )
+        return
+
+    log.info(
+        "Android transfer subtitle copied: row_id=%s remote=%s",
+        prepared.item.row_id,
+        remote_subtitle_path,
+    )
+
+
+def sync_one_item_to_android(
+    item: AndroidSyncItem,
+    config: AndroidSyncConfig,
+    session: AndroidSyncSession,
+    state: AndroidTransferState,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> AndroidTransferState:
+    prepared = prepare_item_for_android_sync(item, session.destination, result)
+    if prepared is None:
+        return state
+
+    if prepared.remote_media_path in state.syncdb_paths:
+        return mark_item_skipped_from_history(prepared, state, result)
+
+    remote_exists = remote_media_file_exists(prepared, session, result, runner)
+    if remote_exists is None:
+        return state
+
+    push_source_path = _copy_with_embedded_metadata(prepared.local_path, item, runner)
+    if remote_exists and push_source_path == prepared.local_path:
+        return skip_existing_item_without_metadata_refresh(prepared, state, result)
+
+    if remote_exists:
+        log.info(
+            "Android transfer item refreshing metadata on existing remote file: row_id=%s",
+            item.row_id,
         )
 
-    if vlc_playlist_entries:
-        remote_playlist_path = f"{destination}/GetOffline.xspf"
-        playlist_content = build_vlc_xspf(vlc_playlist_entries)
-        try:
-            with tempfile.NamedTemporaryFile(
-                "w", encoding="utf-8", suffix=".xspf", delete=False
-            ) as handle:
-                handle.write(playlist_content)
-                local_playlist_path = Path(handle.name)
-            playlist_push = _run_adb_command(
-                [
-                    adb_executable,
-                    "-s",
-                    device_serial,
-                    "push",
-                    str(local_playlist_path),
-                    remote_playlist_path,
-                ],
-                description="pushing VLC playlist metadata",
-                timeout=120,
-                runner=runner,
-            )
-        except RuntimeError as exc:
-            _append_error(result, f"VLC playlist metadata push failed: {exc}")
-        except OSError as exc:
-            _append_error(result, f"VLC playlist metadata generation failed: {exc}")
-        else:
-            if int(getattr(playlist_push, "returncode", 1) or 0) != 0:
-                _append_error(
-                    result,
-                    _combined_output(playlist_push)
-                    or "VLC playlist metadata push failed",
-                )
-            else:
-                result.vlc_playlist_path = remote_playlist_path
-                log.info(
-                    "Android transfer VLC playlist metadata copied: remote=%s entries=%s",
-                    remote_playlist_path,
-                    len(vlc_playlist_entries),
-                )
-        finally:
-            try:
-                local_playlist_path.unlink(missing_ok=True)
-            except NameError:
-                log.debug("VLC playlist cleanup skipped before temp file creation")
-            except OSError as exc:
-                log.debug("VLC playlist cleanup failed: %s", exc)
+    pushed = push_media_to_android(prepared, push_source_path, session, result, runner)
+    if push_source_path != prepared.local_path:
+        push_source_path.unlink(missing_ok=True)
+    if not pushed:
+        return state
 
+    next_state = record_copied_android_item(prepared, session, state, result, runner)
+    if config.include_subtitles:
+        copy_subtitle_to_android(prepared, session, result, runner)
+    return next_state
+
+
+def sync_all_items_to_android(
+    sync_items: list[AndroidSyncItem],
+    config: AndroidSyncConfig,
+    session: AndroidSyncSession,
+    state: AndroidTransferState,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> AndroidTransferState:
+    for item in sync_items:
+        state = sync_one_item_to_android(item, config, session, state, result, runner)
+    return state
+
+
+def save_android_transfer_history(
+    state: AndroidTransferState,
+    session: AndroidSyncSession,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> None:
+    if not state.syncdb_changed and state.syncdb_paths:
+        return
+    _write_remote_syncdb(
+        session.adb_executable,
+        session.device_serial,
+        session.destination,
+        state.syncdb_paths,
+        result,
+        runner,
+    )
+
+
+def push_vlc_playlist_to_android(
+    state: AndroidTransferState,
+    session: AndroidSyncSession,
+    result: AndroidSyncResult,
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> None:
+    if not state.playlist_entries:
+        return
+
+    remote_playlist_path = f"{session.destination}/GetOffline.xspf"
+    playlist_content = build_vlc_xspf(list(state.playlist_entries))
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".xspf", delete=False
+        ) as handle:
+            handle.write(playlist_content)
+            local_playlist_path = Path(handle.name)
+        playlist_push = _run_adb_command(
+            [
+                session.adb_executable,
+                "-s",
+                session.device_serial,
+                "push",
+                str(local_playlist_path),
+                remote_playlist_path,
+            ],
+            description="pushing VLC playlist metadata",
+            timeout=120,
+            runner=runner,
+        )
+    except RuntimeError as exc:
+        _append_error(result, f"VLC playlist metadata push failed: {exc}")
+    except OSError as exc:
+        _append_error(result, f"VLC playlist metadata generation failed: {exc}")
+    else:
+        if int(getattr(playlist_push, "returncode", 1) or 0) != 0:
+            _append_error(
+                result,
+                _combined_output(playlist_push) or "VLC playlist metadata push failed",
+            )
+        else:
+            result.vlc_playlist_path = remote_playlist_path
+            log.info(
+                "Android transfer VLC playlist metadata copied: remote=%s entries=%s",
+                remote_playlist_path,
+                len(state.playlist_entries),
+            )
+    finally:
+        try:
+            local_playlist_path.unlink(missing_ok=True)
+        except NameError:
+            log.debug("VLC playlist cleanup skipped before temp file creation")
+        except OSError as exc:
+            log.debug("VLC playlist cleanup failed: %s", exc)
+
+
+def summarize_android_sync_result(result: AndroidSyncResult) -> AndroidSyncResult:
     if result.failed:
         result.message = (
             f"copied {result.copied}, skipped {result.skipped}, failed {result.failed}"
@@ -1127,82 +1321,37 @@ def sync_items_to_android(
     return result
 
 
-def _copy_item_to_directory(
-    item: AndroidSyncItem,
-    destination_path: Path,
-    result: AndroidSyncResult,
-    runner: Callable[..., subprocess.CompletedProcess],
-) -> bool:
-    source_path = item.file_path.expanduser().resolve()
-    if not source_path.is_file():
-        result.failed += 1
-        _append_error(
-            result,
-            f"missing local file for row {item.row_id}: {source_path}",
-            "Directory transfer",
-        )
-        return False
-    if (
-        destination_path.is_file()
-        and destination_path.stat().st_size == source_path.stat().st_size
-    ):
-        result.skipped += 1
-        return True
-    copy_source = _copy_with_embedded_metadata(source_path, item, runner)
-    try:
-        shutil.copy2(copy_source, destination_path)
-        result.copied += 1
-        result.copied_files.append(str(destination_path))
-        return True
-    except OSError as exc:
-        result.failed += 1
-        _append_error(
-            result, f"copy failed for row {item.row_id}: {exc}", "Directory transfer"
-        )
-        return False
-    finally:
-        if copy_source != source_path:
-            copy_source.unlink(missing_ok=True)
+def sync_items_to_android(
+    items: Iterable[AndroidSyncItem],
+    config: AndroidSyncConfig,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> AndroidSyncResult:
+    result = AndroidSyncResult(message="disabled")
+    if not config.enabled:
+        log.info("Android transfer skipped: disabled")
+        return result
 
+    sync_items = select_sync_items(items, config)
+    if not sync_items:
+        result.message = "no unplayed media to transfer"
+        log.info("Android transfer skipped: no unplayed media items selected")
+        return result
 
-def _copy_subtitle_to_directory(
-    item: AndroidSyncItem, destination_path: Path, result: AndroidSyncResult
-) -> None:
-    if not item.subtitle_path:
-        return
-    subtitle_source = item.subtitle_path.expanduser().resolve()
-    if not subtitle_source.is_file():
-        return
-    subtitle_destination = destination_path.with_suffix(subtitle_source.suffix)
-    try:
-        if (
-            not subtitle_destination.is_file()
-            or subtitle_destination.stat().st_size != subtitle_source.stat().st_size
-        ):
-            shutil.copy2(subtitle_source, subtitle_destination)
-    except OSError as exc:
-        result.failed += 1
-        _append_error(
-            result,
-            f"subtitle copy failed for row {item.row_id}: {exc}",
-            "Directory transfer",
-        )
+    session = connect_android_sync_session(config, result, runner)
+    if session is None:
+        return result
 
+    log_android_sync_start(sync_items, config, session)
+    if not prepare_android_destination(session, result, runner):
+        return result
 
-def _write_directory_playlist(
-    destination: Path,
-    entries: list[tuple[AndroidSyncItem, str]],
-    result: AndroidSyncResult,
-) -> None:
-    if not entries:
-        return
-    playlist_path = destination / "GetOffline.xspf"
-    try:
-        playlist_path.write_text(build_vlc_xspf(entries), encoding="utf-8")
-        result.vlc_playlist_path = str(playlist_path)
-    except OSError as exc:
-        result.failed += 1
-        _append_error(result, f"VLC playlist write failed: {exc}", "Directory transfer")
+    state = load_android_transfer_state(session, runner)
+    state = sync_all_items_to_android(
+        sync_items, config, session, state, result, runner
+    )
+    save_android_transfer_history(state, session, result, runner)
+    push_vlc_playlist_to_android(state, session, result, runner)
+    return summarize_android_sync_result(result)
 
 
 def sync_items(
