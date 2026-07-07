@@ -53,11 +53,13 @@ from .routing import TRANSFER_QUEUE
 from .routing import YOUTUBE_DOWNLOAD_QUEUE
 from .routing import queue_name
 
-ALLOWED_JOB_TYPES = frozenset({
-    JobType.UPDATE_DOWNLOADS,
-    JobType.DOWNLOAD_SINGLE,
-    JobType.TRANSFER_MEDIA,
-})
+ALLOWED_JOB_TYPES = frozenset(
+    {
+        JobType.UPDATE_DOWNLOADS,
+        JobType.DOWNLOAD_SINGLE,
+        JobType.TRANSFER_MEDIA,
+    }
+)
 DOWNLOAD_STATUSES = [
     DownloadStatus.DOWNLOADED,
     DownloadStatus.MISSING,
@@ -97,6 +99,39 @@ class ManualUploadResult:
     def __iter__(self):
         yield self.download
         yield self.path
+
+
+@dataclass(frozen=True)
+class LibraryPageData:
+    downloads: list[Download]
+    jobs: list[Job]
+    profile_id: str
+    profile_name: str
+    show_all_downloads: bool
+    listened_seconds: float
+
+
+@dataclass(frozen=True)
+class PlaybackUpdate:
+    position: float
+    reason: str
+    completed: bool
+    listened_delta: float
+
+
+@dataclass(frozen=True)
+class SourceFormData:
+    name: str
+    url: str
+    media_type: str | None
+    enabled: bool
+    subtitles: bool
+    subtitle_offset_seconds: float | None
+    max_downloads: int | None
+    delete_explicit_content: bool
+    include_shorts: bool
+    include_livestreams: bool
+    title_exclude: str
 
 
 log = logging.getLogger(__name__)
@@ -159,7 +194,9 @@ def _decorate_download(item: Download) -> Download:
     download_status = parse_str_enum(DownloadStatus, item.download_status)
     if download_status in {DownloadStatus.MISSING, DownloadStatus.RETENTION_DELETED}:
         item.status_label = (
-            "REMOVED" if download_status is DownloadStatus.RETENTION_DELETED else "MISSING"
+            "REMOVED"
+            if download_status is DownloadStatus.RETENTION_DELETED
+            else "MISSING"
         )
         item.status_class = "status-missing"
 
@@ -291,13 +328,8 @@ def _supersede_active_transcript_job(profile_id: str, download_id: int) -> None:
     )
 
 
-@login_required
-def library(request: HttpRequest) -> HttpResponse:
-    total_start = time.perf_counter()
-    profile_id = _profile_id(request)
-
-    setup_start = time.perf_counter()
-    downloads_qs = (
+def _library_download_query(profile_id: str):
+    return (
         Download.objects.filter(
             profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES
         )
@@ -323,69 +355,88 @@ def library(request: HttpRequest) -> HttpResponse:
             "total_listened_seconds",
         )
     )
-    setup_elapsed = time.perf_counter() - setup_start
 
-    show_all_downloads = request.GET.get("filter") == "all"
 
-    rows_start = time.perf_counter()
+def _library_filter_requested(request: HttpRequest) -> bool:
+    return request.GET.get("filter") == "all"
+
+
+def _library_visible_downloads(
+    downloads_qs, show_all_downloads: bool
+) -> list[Download]:
     ordered_downloads = downloads_qs.order_by("-last_seen_at", "-id")
     if not show_all_downloads:
         ordered_downloads = ordered_downloads[:LIBRARY_PREVIEW_LIMIT]
-    downloads = [_decorate_download(item) for item in ordered_downloads]
-    rows_elapsed = time.perf_counter() - rows_start
+    return [_decorate_download(item) for item in ordered_downloads]
 
-    stats_start = time.perf_counter()
-    played_count = sum(1 for item in downloads if item.played)
-    favorite_count = sum(1 for item in downloads if item.favorite)
-    listened_seconds = (
-        downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
-    )
-    stats_elapsed = time.perf_counter() - stats_start
 
-    jobs_start = time.perf_counter()
-    recent_jobs = list(
+def _library_listened_seconds(downloads_qs) -> float:
+    return downloads_qs.aggregate(total=Sum("total_listened_seconds")).get("total") or 0
+
+
+def _recent_jobs(profile_id: str) -> list[Job]:
+    return list(
         Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[:10]
     )
-    jobs_elapsed = time.perf_counter() - jobs_start
 
-    profile_name = request.user.get_username() or profile_id
 
-    render_start = time.perf_counter()
-    response = render(
-        request,
-        "app/library.html",
-        {
-            "downloads": downloads,
-            "jobs": recent_jobs,
-            "profile_id": profile_id,
-            "profile_name": profile_name,
-            "profile_initial": (profile_name[:1] or "U").upper(),
-            "library_filter_mode": "all" if show_all_downloads else "unplayed",
-            "stats": {
-                "visible": len(downloads),
-                "played": played_count,
-                "new": max(len(downloads) - played_count, 0),
-                "favorites": favorite_count,
-                "listened": _human_duration(listened_seconds),
-            },
-        },
+def _library_page_data(request: HttpRequest) -> LibraryPageData:
+    profile_id = _profile_id(request)
+    downloads_qs = _library_download_query(profile_id)
+    show_all_downloads = _library_filter_requested(request)
+    downloads = _library_visible_downloads(downloads_qs, show_all_downloads)
+    return LibraryPageData(
+        downloads=downloads,
+        jobs=_recent_jobs(profile_id),
+        profile_id=profile_id,
+        profile_name=request.user.get_username() or profile_id,
+        show_all_downloads=show_all_downloads,
+        listened_seconds=_library_listened_seconds(downloads_qs),
     )
-    render_elapsed = time.perf_counter() - render_start
-    total_elapsed = time.perf_counter() - total_start
 
+
+def _library_stats(page: LibraryPageData) -> dict[str, object]:
+    played_count = sum(1 for item in page.downloads if item.played)
+    return {
+        "visible": len(page.downloads),
+        "played": played_count,
+        "new": max(len(page.downloads) - played_count, 0),
+        "favorites": sum(1 for item in page.downloads if item.favorite),
+        "listened": _human_duration(page.listened_seconds),
+    }
+
+
+def _library_context(page: LibraryPageData) -> dict[str, object]:
+    return {
+        "downloads": page.downloads,
+        "jobs": page.jobs,
+        "profile_id": page.profile_id,
+        "profile_name": page.profile_name,
+        "profile_initial": (page.profile_name[:1] or "U").upper(),
+        "library_filter_mode": "all" if page.show_all_downloads else "unplayed",
+        "stats": _library_stats(page),
+    }
+
+
+def _log_library_render(
+    profile_id: str, visible_downloads: int, elapsed: float
+) -> None:
     log.info(
-        "Library rendered profile_id=%s setup=%.3fs rows=%.3fs stats=%.3fs "
-        "jobs=%.3fs render=%.3fs total=%.3fs visible_downloads=%s",
+        "Library rendered profile_id=%s total=%.3fs visible_downloads=%s",
         profile_id,
-        setup_elapsed,
-        rows_elapsed,
-        stats_elapsed,
-        jobs_elapsed,
-        render_elapsed,
-        total_elapsed,
-        len(downloads),
+        elapsed,
+        visible_downloads,
     )
 
+
+@login_required
+def library(request: HttpRequest) -> HttpResponse:
+    started_at = time.perf_counter()
+    page = _library_page_data(request)
+    response = render(request, "app/library.html", _library_context(page))
+    _log_library_render(
+        page.profile_id, len(page.downloads), time.perf_counter() - started_at
+    )
     return response
 
 
@@ -461,7 +512,10 @@ def _job_still_needs_work(job: Job) -> bool:
         )
         return not (has_transcript or has_subtitle_file)
     if job.job_type in {"download_episode", "download_single"}:
-        return parse_str_enum(DownloadStatus, download.download_status) is not DownloadStatus.DOWNLOADED
+        return (
+            parse_str_enum(DownloadStatus, download.download_status)
+            is not DownloadStatus.DOWNLOADED
+        )
     return True
 
 
@@ -514,7 +568,8 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.resolved_subtitle_path = (
         _resolve_subtitle_path(item)
-        if parse_str_enum(DownloadStatus, item.download_status) is DownloadStatus.DOWNLOADED
+        if parse_str_enum(DownloadStatus, item.download_status)
+        is DownloadStatus.DOWNLOADED
         else None
     )
     item.has_subtitles = item.resolved_subtitle_path is not None
@@ -656,6 +711,79 @@ def _profile_settings(profile_id: str) -> dict[str, str]:
 
 def _checked(settings: dict[str, str], key: str) -> bool:
     return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _posted_bool(request: HttpRequest, key: str, default: str = "") -> bool:
+    return request.POST.get(key, default) in {"1", "true", "yes", "on"}
+
+
+def _source_form_data(
+    request: HttpRequest, source_type: SourceType | str, prefix: str = ""
+) -> SourceFormData:
+    parsed_source_type = parse_str_enum(SourceType, source_type)
+    is_youtube = parsed_source_type is SourceType.YOUTUBE
+    return SourceFormData(
+        name=str(request.POST.get(prefix + "name") or "").strip(),
+        url=str(request.POST.get(prefix + "url") or "").strip(),
+        media_type=(
+            str(request.POST.get(prefix + "media_type") or "audio").strip().lower()
+            if is_youtube
+            else None
+        ),
+        enabled=_posted_bool(request, prefix + "enabled", "1"),
+        subtitles=_posted_bool(request, prefix + "subtitles", "1"),
+        subtitle_offset_seconds=_optional_float(
+            request.POST.get(prefix + "subtitle_offset_seconds")
+        ),
+        max_downloads=_optional_int(request.POST.get(prefix + "max_downloads")),
+        delete_explicit_content=_posted_bool(
+            request, prefix + "delete_explicit_content"
+        ),
+        include_shorts=is_youtube and _posted_bool(request, prefix + "include_shorts"),
+        include_livestreams=is_youtube
+        and _posted_bool(request, prefix + "include_livestreams"),
+        title_exclude=str(request.POST.get(prefix + "title_exclude") or "").strip(),
+    )
+
+
+def _source_update_fields(*, include_enabled: bool = True) -> list[str]:
+    fields = [
+        "name",
+        "url",
+        "media_type",
+        "enabled",
+        "subtitles",
+        "subtitle_offset_seconds",
+        "max_downloads",
+        "delete_explicit_content",
+        "title_exclude",
+        "include_shorts",
+        "include_livestreams",
+        "updated_at",
+    ]
+    if not include_enabled:
+        fields.remove("enabled")
+    return fields
+
+
+def _apply_source_form_data(
+    source: SourceConfig, form: SourceFormData, *, now, include_enabled: bool = True
+) -> SourceConfig:
+    source.name = form.name or source.name
+    source.url = form.url or source.url
+    if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
+        source.media_type = form.media_type or source.media_type or "audio"
+        source.include_shorts = form.include_shorts
+        source.include_livestreams = form.include_livestreams
+    if include_enabled:
+        source.enabled = form.enabled
+    source.subtitles = form.subtitles
+    source.subtitle_offset_seconds = form.subtitle_offset_seconds
+    source.max_downloads = form.max_downloads
+    source.delete_explicit_content = form.delete_explicit_content
+    source.title_exclude = form.title_exclude
+    source.updated_at = now
+    return source
 
 
 def _sync_update_downloads_schedule(
@@ -923,9 +1051,7 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         or request.headers.get("accept") == "application/json"
     )
     if wants_json:
-        status_query = urlencode(
-            {"profile_id": profile_id, "token": completion_marker}
-        )
+        status_query = urlencode({"profile_id": profile_id, "token": completion_marker})
         status_url = f"{reverse('worker_message_status')}?{status_query}"
         return JsonResponse(
             {
@@ -1075,40 +1201,65 @@ def unfavorite(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     return _redirect_back(request)
 
 
-@login_required
-@require_POST
-def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
-    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
+def _playback_update_from_request(
+    request: HttpRequest, item: Download
+) -> PlaybackUpdate | None:
     try:
         position = max(0.0, float(request.POST.get("position_seconds") or 0.0))
     except (TypeError, ValueError):
-        return HttpResponse(status=400)
+        return None
     reason = str(request.POST.get("reason") or "").strip().lower()
     completed = reason in {"ended", "mini-ended"}
-    delta = max(0.0, position - float(item.last_position_seconds or 0.0))
-    item.last_position_seconds = 0.0 if completed else position
-    item.total_listened_seconds = float(item.total_listened_seconds or 0.0) + delta
-    item.last_position_updated_at = timezone.now()
-    item.last_seen_at = timezone.now()
+    previous_position = float(item.last_position_seconds or 0.0)
+    return PlaybackUpdate(
+        position=position,
+        reason=reason,
+        completed=completed,
+        listened_delta=max(0.0, position - previous_position),
+    )
+
+
+def _apply_playback_update(item: Download, update: PlaybackUpdate, *, now) -> list[str]:
+    item.last_position_seconds = 0.0 if update.completed else update.position
+    item.total_listened_seconds = (
+        float(item.total_listened_seconds or 0.0) + update.listened_delta
+    )
+    item.last_position_updated_at = now
+    item.last_seen_at = now
     update_fields = [
         "last_position_seconds",
         "total_listened_seconds",
         "last_position_updated_at",
         "last_seen_at",
     ]
-    log.info(
-        "player save_position download_id=%s position=%.3f reason=%s completed=%s previous=%.3f delta=%.3f",
-        item.id,
-        position,
-        reason or "unknown",
-        completed,
-        float(item.last_position_seconds or 0.0),
-        delta,
-    )
-    if completed:
+    if update.completed:
         item.played = True
-        item.played_at = timezone.now()
+        item.played_at = now
         update_fields.extend(["played", "played_at"])
+    return update_fields
+
+
+def _log_playback_update(item: Download, update: PlaybackUpdate) -> None:
+    log.info(
+        "player save_position download_id=%s position=%.3f reason=%s completed=%s delta=%.3f",
+        item.id,
+        update.position,
+        update.reason or "unknown",
+        update.completed,
+        update.listened_delta,
+    )
+
+
+@login_required
+@require_POST
+def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
+    item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
+    update = _playback_update_from_request(request, item)
+    if update is None:
+        return HttpResponse(status=400)
+
+    update_fields = _apply_playback_update(item, update, now=timezone.now())
+    _log_playback_update(item, update)
     item.save(update_fields=update_fields)
     return HttpResponse(status=204)
 
@@ -1294,41 +1445,38 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
     source_type = parse_str_enum(SourceType, request.POST.get("source_type"))
     if source_type not in {SourceType.YOUTUBE, SourceType.PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
+
     profile_id = _profile_id(request)
-    position = (
+    form = _source_form_data(request, source_type)
+    position = _next_source_position(profile_id, source_type)
+    SourceConfig.objects.create(
+        profile_id=profile_id,
+        source_type=source_type,
+        position=position,
+        name=form.name,
+        url=form.url,
+        media_type=form.media_type,
+        enabled=True,
+        subtitles=form.subtitles,
+        subtitle_offset_seconds=form.subtitle_offset_seconds,
+        max_downloads=form.max_downloads,
+        delete_explicit_content=form.delete_explicit_content,
+        include_shorts=form.include_shorts,
+        include_livestreams=form.include_livestreams,
+        title_exclude=form.title_exclude,
+        updated_at=timezone.now(),
+    )
+    return HttpResponseRedirect(reverse("settings"))
+
+
+def _next_source_position(profile_id: str, source_type: SourceType) -> int:
+    return (
         SourceConfig.objects.filter(profile_id=profile_id, source_type=source_type)
         .order_by("-position")
         .values_list("position", flat=True)
         .first()
         or -1
     ) + 1
-    SourceConfig.objects.create(
-        profile_id=profile_id,
-        source_type=source_type,
-        position=position,
-        name=str(request.POST.get("name") or "").strip(),
-        url=str(request.POST.get("url") or "").strip(),
-        media_type=(
-            str(request.POST.get("media_type") or "audio").strip().lower()
-            if source_type is SourceType.YOUTUBE
-            else None
-        ),
-        enabled=True,
-        subtitles=request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"},
-        subtitle_offset_seconds=_optional_float(
-            request.POST.get("subtitle_offset_seconds")
-        ),
-        max_downloads=_optional_int(request.POST.get("max_downloads")),
-        delete_explicit_content=request.POST.get("delete_explicit_content")
-        in {"1", "true", "yes", "on"},
-        include_shorts=source_type is SourceType.YOUTUBE
-        and request.POST.get("include_shorts") in {"1", "true", "yes", "on"},
-        include_livestreams=source_type is SourceType.YOUTUBE
-        and request.POST.get("include_livestreams") in {"1", "true", "yes", "on"},
-        title_exclude=str(request.POST.get("title_exclude") or "").strip(),
-        updated_at=timezone.now(),
-    )
-    return HttpResponseRedirect(reverse("settings"))
 
 
 @login_required
@@ -1337,55 +1485,9 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     source = get_object_or_404(
         SourceConfig, pk=source_id, profile_id=_profile_id(request)
     )
-    source.name = str(request.POST.get("name") or source.name).strip()
-    source.url = str(request.POST.get("url") or source.url).strip()
-    if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
-        source.media_type = (
-            str(request.POST.get("media_type") or source.media_type or "audio")
-            .strip()
-            .lower()
-        )
-    source.subtitles = request.POST.get("subtitles", "1") in {"1", "true", "yes", "on"}
-    source.subtitle_offset_seconds = _optional_float(
-        request.POST.get("subtitle_offset_seconds")
-    )
-    source.max_downloads = _optional_int(request.POST.get("max_downloads"))
-    source.title_exclude = str(request.POST.get("title_exclude") or "").strip()
-    source.delete_explicit_content = request.POST.get("delete_explicit_content") in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
-        source.include_shorts = request.POST.get("include_shorts") in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        source.include_livestreams = request.POST.get("include_livestreams") in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-    source.updated_at = timezone.now()
-    source.save(
-        update_fields=[
-            "name",
-            "url",
-            "media_type",
-            "subtitles",
-            "subtitle_offset_seconds",
-            "max_downloads",
-            "delete_explicit_content",
-            "title_exclude",
-            "include_shorts",
-            "include_livestreams",
-            "updated_at",
-        ]
-    )
+    form = _source_form_data(request, source.source_type)
+    _apply_source_form_data(source, form, now=timezone.now(), include_enabled=False)
+    source.save(update_fields=_source_update_fields(include_enabled=False))
     return HttpResponseRedirect(reverse("settings"))
 
 
@@ -1395,85 +1497,44 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
     source_type = str(source_type or "").strip().lower()
     if source_type not in {SourceType.YOUTUBE, SourceType.PODCAST}:
         return HttpResponseBadRequest("Invalid source_type")
+
     profile_id = _profile_id(request)
-    source_ids = [
-        int(value)
-        for value in request.POST.getlist("source_ids")
-        if str(value).isdigit()
-    ]
-    sources = SourceConfig.objects.filter(
-        pk__in=source_ids, profile_id=profile_id, source_type=source_type
-    )
-    sources_by_id = {source.id: source for source in sources}
+    source_ids = _posted_source_ids(request)
+    sources_by_id = _editable_sources_by_id(profile_id, source_type, source_ids)
     now = timezone.now()
     for source_id in source_ids:
         source = sources_by_id.get(source_id)
         if source is None:
             continue
-        prefix = f"source_{source_id}__"
-        if request.POST.get(prefix + "delete") in {"1", "true", "yes", "on"}:
-            source.delete()
-            continue
-        source.name = str(request.POST.get(prefix + "name") or source.name).strip()
-        source.url = str(request.POST.get(prefix + "url") or source.url).strip()
-        if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
-            source.media_type = (
-                str(
-                    request.POST.get(prefix + "media_type")
-                    or source.media_type
-                    or "audio"
-                )
-                .strip()
-                .lower()
-            )
-        source.enabled = request.POST.get(prefix + "enabled", "1") in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        source.subtitles = request.POST.get(prefix + "subtitles", "1") in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        source.subtitle_offset_seconds = _optional_float(
-            request.POST.get(prefix + "subtitle_offset_seconds")
-        )
-        source.max_downloads = _optional_int(request.POST.get(prefix + "max_downloads"))
-        source.title_exclude = str(request.POST.get(prefix + "title_exclude") or "").strip()
-        source.delete_explicit_content = request.POST.get(
-            prefix + "delete_explicit_content"
-        ) in {"1", "true", "yes", "on"}
-        if parse_str_enum(SourceType, source.source_type) is SourceType.YOUTUBE:
-            source.include_shorts = request.POST.get(prefix + "include_shorts") in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
-            source.include_livestreams = request.POST.get(
-                prefix + "include_livestreams"
-            ) in {"1", "true", "yes", "on"}
-        source.updated_at = now
-        source.save(
-            update_fields=[
-                "name",
-                "url",
-                "media_type",
-                "enabled",
-                "subtitles",
-                "subtitle_offset_seconds",
-                "max_downloads",
-                "delete_explicit_content",
-                "title_exclude",
-                "include_shorts",
-                "include_livestreams",
-                "updated_at",
-            ]
-        )
+        _save_source_row(request, source, now=now)
     return HttpResponseRedirect(reverse("settings"))
+
+
+def _posted_source_ids(request: HttpRequest) -> list[int]:
+    return [
+        int(value)
+        for value in request.POST.getlist("source_ids")
+        if str(value).isdigit()
+    ]
+
+
+def _editable_sources_by_id(
+    profile_id: str, source_type: str, source_ids: list[int]
+) -> dict[int, SourceConfig]:
+    sources = SourceConfig.objects.filter(
+        pk__in=source_ids, profile_id=profile_id, source_type=source_type
+    )
+    return {source.id: source for source in sources}
+
+
+def _save_source_row(request: HttpRequest, source: SourceConfig, *, now) -> None:
+    prefix = f"source_{source.id}__"
+    if _posted_bool(request, prefix + "delete"):
+        source.delete()
+        return
+    form = _source_form_data(request, source.source_type, prefix=prefix)
+    _apply_source_form_data(source, form, now=now)
+    source.save(update_fields=_source_update_fields())
 
 
 @login_required
@@ -1565,7 +1626,9 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
                 deleted_by_model,
             )
         else:
-            log.info("Purge batch action matched no downloads profile_id=%s", profile_id)
+            log.info(
+                "Purge batch action matched no downloads profile_id=%s", profile_id
+            )
     elif action == "edit-metadata":
         return _redirect_back(request)
     elif action == "download":
