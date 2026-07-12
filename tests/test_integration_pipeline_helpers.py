@@ -26,6 +26,12 @@ class IntegrationPipelineHelperTests(unittest.TestCase):
         self.assertIn("GETOFFLINE_API_GUNICORN_WORKERS:-3", command)
         self.assertIn("GETOFFLINE_GUNICORN_TIMEOUT:-300", command)
 
+    def test_api_healthcheck_uses_public_health_endpoint(self):
+        compose = yaml.safe_load((pipeline.ROOT / "docker-compose.yml").read_text())
+        healthcheck = compose["services"]["api"]["healthcheck"]["test"]
+
+        self.assertIn("http://localhost:8000/api/health", healthcheck[-1])
+
     def test_host_download_path_maps_container_downloads_to_host_mount(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             host_root = Path(tmpdir)

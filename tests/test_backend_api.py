@@ -42,6 +42,12 @@ class BackendApiTests(unittest.TestCase):
         self.client = Client()
         self.client.force_login(self.user)
 
+    def test_health_endpoint_is_public_for_container_readiness(self):
+        response = Client(enforce_csrf_checks=True).get(reverse("api_health"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "service": "api"})
+
     def test_library_returns_episode_json(self):
         Download.objects.create(
             profile_id="api-user",

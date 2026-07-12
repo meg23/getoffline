@@ -162,7 +162,7 @@ def _wait_for_frontend(deadline: float, frontend_port: int) -> None:
 
 
 def _wait_for_api(deadline: float, api_port: int) -> None:
-    _wait_for_service(deadline, f"http://127.0.0.1:{api_port}/api/user", "api")
+    _wait_for_service(deadline, f"http://127.0.0.1:{api_port}/api/health", "api")
 
 
 def _verify_profanity_model() -> None:

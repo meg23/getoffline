@@ -32,6 +32,10 @@ def _json_body(request: HttpRequest) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def health(request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"ok": True, "service": "api"})
+
+
 @api_login_required
 @require_GET
 def search(request: HttpRequest) -> JsonResponse:
