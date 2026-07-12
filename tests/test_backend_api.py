@@ -1,0 +1,86 @@
+# ruff: noqa: E402
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+
+import django
+
+django.setup()
+
+from django.apps import apps
+from django.contrib.auth.models import User
+from django.db import connection
+from django.test import Client
+from django.urls import reverse
+from django.utils import timezone
+
+from models.domain import DownloadStatus
+from models.models import Download
+
+
+class BackendApiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        existing_tables = set(connection.introspection.table_names())
+        with connection.schema_editor() as schema_editor:
+            for model in apps.get_models():
+                if model._meta.db_table not in existing_tables:
+                    schema_editor.create_model(model)
+                    existing_tables.add(model._meta.db_table)
+
+    def setUp(self):
+        for model in reversed(apps.get_models()):
+            model.objects.all().delete()
+        self.user = User.objects.create_user(username="api-user", password="pw")
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def test_library_returns_episode_json(self):
+        Download.objects.create(
+            profile_id="api-user",
+            item_uid="ep-1",
+            source_type="podcast",
+            source_name="Feed",
+            title="Episode One",
+            description="A test episode",
+            download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse("api_library"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["episodes"][0]["title"], "Episode One")
+        self.assertIn("stream_url", payload["episodes"][0])
+
+    def test_playback_progress_updates_episode_state(self):
+        download = Download.objects.create(
+            profile_id="api-user",
+            item_uid="ep-2",
+            source_type="podcast",
+            source_name="Feed",
+            title="Episode Two",
+            download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("api_playback_progress"),
+            data={"episode_id": download.id, "position_seconds": "12.5", "reason": "timeupdate"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        download.refresh_from_db()
+        self.assertEqual(download.last_position_seconds, 12.5)
+        self.assertFalse(download.played)
+
+
+if __name__ == "__main__":
+    unittest.main()
