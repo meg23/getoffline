@@ -1,4 +1,5 @@
 # ruff: noqa: E402
+import base64
 import os
 import sys
 import unittest
@@ -60,8 +61,8 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(payload["episodes"][0]["title"], "Episode One")
         self.assertIn("stream_url", payload["episodes"][0])
 
-    def test_playback_progress_updates_episode_state(self):
-        download = Download.objects.create(
+    def _create_download(self) -> Download:
+        return Download.objects.create(
             profile_id="api-user",
             item_uid="ep-2",
             source_type="podcast",
@@ -71,15 +72,65 @@ class BackendApiTests(unittest.TestCase):
             last_seen_at=timezone.now(),
         )
 
+    def test_playback_progress_updates_episode_state(self):
+        download = self._create_download()
+
         response = self.client.post(
             reverse("api_playback_progress"),
-            data={"episode_id": download.id, "position_seconds": "12.5", "reason": "timeupdate"},
+            data={
+                "episode_id": download.id,
+                "position_seconds": "12.5",
+                "reason": "timeupdate",
+            },
         )
 
         self.assertEqual(response.status_code, 200)
         download.refresh_from_db()
         self.assertEqual(download.last_position_seconds, 12.5)
         self.assertFalse(download.played)
+
+    def test_session_api_post_requires_csrf_when_checks_are_enforced(self):
+        download = self._create_download()
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+
+        response = client.post(
+            reverse("api_playback_progress"),
+            data={"episode_id": download.id, "position_seconds": "12.5"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_session_api_post_accepts_explicit_csrf_token(self):
+        download = self._create_download()
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        token = client.get(reverse("api_csrf")).json()["csrf_token"]
+
+        response = client.post(
+            reverse("api_playback_progress"),
+            data={"episode_id": download.id, "position_seconds": "12.5"},
+            HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        download.refresh_from_db()
+        self.assertEqual(download.last_position_seconds, 12.5)
+
+    def test_basic_auth_api_post_does_not_require_csrf_token(self):
+        download = self._create_download()
+        client = Client(enforce_csrf_checks=True)
+        credentials = base64.b64encode(b"api-user:pw").decode("ascii")
+
+        response = client.post(
+            reverse("api_playback_progress"),
+            data={"episode_id": download.id, "position_seconds": "12.5"},
+            HTTP_AUTHORIZATION=f"Basic {credentials}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        download.refresh_from_db()
+        self.assertEqual(download.last_position_seconds, 12.5)
 
 
 if __name__ == "__main__":

@@ -14,5 +14,6 @@ urlpatterns = [
     path("download", views.download, name="api_download"),
     path("downloads", views.downloads, name="api_downloads"),
     path("user", views.user, name="api_user"),
+    path("csrf", views.csrf, name="api_csrf"),
     path("stream/<int:episode_id>", views.stream, name="api_stream"),
 ]
