@@ -1,4 +1,5 @@
 """Thin JSON controllers for non-browser Get Offline clients."""
+# mypy: disable-error-code=untyped-decorator
 
 from __future__ import annotations
 

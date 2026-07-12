@@ -21,9 +21,13 @@ class PlaybackUpdate:
     listened_delta: float
 
 
-def build_update(position_seconds: object, reason_value: object, item: Download) -> PlaybackUpdate | None:
+def build_update(
+    position_seconds: object,
+    reason_value: object,
+    item: Download,
+) -> PlaybackUpdate | None:
     try:
-        position = max(0.0, float(position_seconds or 0.0))
+        position = max(0.0, float(str(position_seconds or 0.0)))
     except (TypeError, ValueError):
         return None
     reason = str(reason_value or "").strip().lower()
@@ -32,7 +36,7 @@ def build_update(position_seconds: object, reason_value: object, item: Download)
     return PlaybackUpdate(position=position, reason=reason, completed=completed, listened_delta=max(0.0, position - previous_position))
 
 
-def apply_update(item: Download, update: PlaybackUpdate, *, now=None) -> PlaybackState:
+def apply_update(item: Download, update: PlaybackUpdate, *, now: object = None) -> PlaybackState:
     now = now or timezone.now()
     item.last_position_seconds = 0.0 if update.completed else update.position
     item.total_listened_seconds = float(item.total_listened_seconds or 0.0) + update.listened_delta

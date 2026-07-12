@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from django.db.models import Sum
+from django.db.models import QuerySet, Sum
 from django.urls import reverse
 
 from models.domain import DownloadStatus, parse_str_enum
@@ -59,7 +59,7 @@ def decorate_download(item: Download) -> Download:
     return item
 
 
-def library_download_query(profile_id: str):
+def library_download_query(profile_id: str) -> QuerySet[Download, Download]:
     return Download.objects.filter(profile_id=profile_id, download_status__in=DOWNLOAD_STATUSES).only(
         "id", "profile_id", "source_type", "source_name", "title", "description", "file_path",
         "file_path_relative", "file_ext", "file_size_bytes", "subtitle_path", "subtitle_path_relative",

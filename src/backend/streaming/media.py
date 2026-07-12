@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
@@ -74,7 +75,7 @@ def resolve_subtitle_path(item: Download) -> Path | None:
     return None
 
 
-def file_range_iterator(path: Path, start: int, length: int):
+def file_range_iterator(path: Path, start: int, length: int) -> Iterator[bytes]:
     with path.open("rb") as handle:
         handle.seek(start)
         remaining = length
@@ -93,10 +94,12 @@ def media_response(path: Path, range_header: str = "") -> HttpResponse:
         start_text, _, end_text = range_header.removeprefix("bytes=").partition("-")
         try:
             if start_text:
-                start = int(start_text); requested_end = int(end_text) if end_text else None
+                start = int(start_text)
+                requested_end = int(end_text) if end_text else None
             else:
                 suffix_length = int(end_text) if end_text else file_size
-                start = max(file_size - suffix_length, 0); requested_end = file_size - 1
+                start = max(file_size - suffix_length, 0)
+                requested_end = file_size - 1
         except ValueError:
             start, requested_end = 0, None
         start = max(0, min(start, file_size - 1))
