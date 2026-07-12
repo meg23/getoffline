@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     environment: &getoffline-env
       GETOFFLINE_DJANGO_DEBUG: "0"
-      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,frontend}
+      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,frontend,api}
       GETOFFLINE_CSRF_TRUSTED_ORIGINS: ${GETOFFLINE_CSRF_TRUSTED_ORIGINS:-http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080}
       GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
       GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:-mysql}
@@ -63,6 +63,34 @@ services:
       mysql:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+    restart: unless-stopped
+    environment: *getoffline-env
+    command: >
+      gunicorn app.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers $${GETOFFLINE_API_GUNICORN_WORKERS:-3}
+      --timeout $${GETOFFLINE_GUNICORN_TIMEOUT:-300}
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    ports:
+      - "${GETOFFLINE_API_PUBLISHED_PORT:-8081}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/user || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      frontend:
         condition: service_healthy
 
   worker-updates:
