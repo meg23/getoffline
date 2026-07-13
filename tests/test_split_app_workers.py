@@ -887,6 +887,11 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("status_url", payload)
 
+    def test_quick_add_form_returns_to_library_after_queueing_download(self):
+        template = Path("src/app/templates/app/library.html").read_text()
+
+        self.assertIn("name=\"next\" value=\"{% url 'library' %}\"", template)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
