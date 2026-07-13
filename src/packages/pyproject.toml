@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "getoffline-sdk"
+version = "0.1.0"
+description = "Python SDK for the GetOffline API"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "GetOffline" }]
+dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+django = ["Django>=5.0"]
+
+[tool.setuptools]
+packages = ["getoffline_sdk"]
+
+[tool.setuptools.package-data]
+getoffline_sdk = ["py.typed"]

@@ -9,9 +9,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from django.test import Client as DjangoClient
-from django.urls import reverse
-
 
 @dataclass(frozen=True)
 class Response:
@@ -33,7 +30,7 @@ class Transport(Protocol):
     def request(
         self,
         method: str,
-        route_name: str,
+        target: str,
         args: tuple[object, ...] = (),
         *,
         query: Mapping[str, object] | None = None,
@@ -42,16 +39,33 @@ class Transport(Protocol):
     ) -> Response: ...
 
 
+class DjangoResponseLike(Protocol):
+    status_code: int
+
+    def items(self) -> Iterable[tuple[str, str]]: ...
+
+
+class DjangoTestClient(Protocol):
+    def get(
+        self, path: str, data: object | None = None, **extra: object
+    ) -> DjangoResponseLike: ...
+
+    def post(
+        self, path: str, data: object | None = None, **extra: object
+    ) -> DjangoResponseLike: ...
+
+
 class DjangoTransport:
     """In-process transport for tests and monolith deployments."""
 
-    def __init__(self, client: DjangoClient) -> None:
+    def __init__(self, client: DjangoTestClient, *, api_prefix: str = "/api") -> None:
         self.client = client
+        self.api_prefix = api_prefix.rstrip("/")
 
     def request(
         self,
         method: str,
-        route_name: str,
+        target: str,
         args: tuple[object, ...] = (),
         *,
         query: Mapping[str, object] | None = None,
@@ -59,7 +73,7 @@ class DjangoTransport:
         headers: Mapping[str, str] | None = None,
     ) -> Response:
         django_headers = _django_headers(headers or {})
-        path = reverse(route_name, args=args)
+        path = _django_path(target, args, self.api_prefix)
         if method.upper() == "POST":
             response = self.client.post(path, data=data or {}, **django_headers)
         else:
@@ -82,14 +96,14 @@ class HttpTransport:
     def request(
         self,
         method: str,
-        route_name: str,
+        target: str,
         args: tuple[object, ...] = (),
         *,
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> Response:
-        url = self._url(route_name, args, query if method.upper() == "GET" else None)
+        url = self._url(target, args, query if method.upper() == "GET" else None)
         body, content_type = _encoded_body(data)
         request_headers = dict(headers or {})
         if body is not None and "Content-Type" not in request_headers:
@@ -109,22 +123,42 @@ class HttpTransport:
 
     def _url(
         self,
-        route_name: str,
+        target: str,
         args: tuple[object, ...],
         query: Mapping[str, object] | None,
     ) -> str:
-        api_path = reverse(route_name, args=args).removeprefix("/api")
+        api_path = _api_path(target, args)
         url = f"{self.base_url}{api_path}"
         if query:
             return f"{url}?{urllib.parse.urlencode(query, doseq=True)}"
         return url
 
 
+def _api_path(target: str, args: tuple[object, ...]) -> str:
+    if target.startswith("/"):
+        suffix = "/".join(str(arg).strip("/") for arg in args)
+        path = target if not suffix else f"{target.rstrip('/')}/{suffix}"
+        return path if path.startswith("/") else f"/{path}"
+    return _reverse_route(target, args).removeprefix("/api")
+
+
+def _django_path(target: str, args: tuple[object, ...], api_prefix: str) -> str:
+    if target.startswith("/"):
+        return f"{api_prefix}{_api_path(target, args)}"
+    return _reverse_route(target, args)
+
+
+def _reverse_route(target: str, args: tuple[object, ...]) -> str:
+    from django.urls import reverse
+
+    return str(reverse(target, args=args))
+
 
 def _django_response_content(response: object) -> bytes:
     if hasattr(response, "streaming_content"):
         return b"".join(cast(Any, response).streaming_content)
     return bytes(cast(Any, response).content)
+
 
 def _django_headers(headers: Mapping[str, str]) -> dict[str, str]:
     converted: dict[str, str] = {}

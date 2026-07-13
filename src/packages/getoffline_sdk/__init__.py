@@ -1,6 +1,14 @@
 """Python SDK for the GetOffline API."""
 
-from packages.getoffline_sdk.client import GetOfflineClient
-from packages.getoffline_sdk.transports import DjangoTransport, HttpTransport, Response
+from .client import GetOfflineClient
+from .transports import DjangoTransport, HttpTransport, Response
 
-__all__ = ["DjangoTransport", "GetOfflineClient", "HttpTransport", "Response"]
+__version__ = "0.1.0"
+
+__all__ = [
+    "DjangoTransport",
+    "GetOfflineClient",
+    "HttpTransport",
+    "Response",
+    "__version__",
+]
