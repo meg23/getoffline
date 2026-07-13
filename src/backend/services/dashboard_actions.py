@@ -1,3 +1,10 @@
+"""Dashboard/settings action services used by the API layer.
+
+This module owns the database, filesystem, and queue-touching operations that
+used to live in the browser-facing app views. The frontend calls API endpoints;
+API controllers delegate stateful work here.
+"""
+
 import hashlib
 import logging
 import mimetypes

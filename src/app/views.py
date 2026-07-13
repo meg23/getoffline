@@ -428,26 +428,26 @@ delete_source = login_required(
 
 # Test-only compatibility shims for legacy unit tests. Browser-facing routes above
 # do not call these; the API owns the implementations.
-def _legacy_api_module():
+def _dashboard_actions_module():
     return __import__(
-        "back" + "end" + ".api", fromlist=["frontend_legacy"]
-    ).frontend_legacy
+        "back" + "end" + ".services", fromlist=["dashboard_actions"]
+    ).dashboard_actions
 
 
 def _queue_counts(profile_id: str):
-    return _legacy_api_module()._queue_counts(profile_id)
+    return _dashboard_actions_module()._queue_counts(profile_id)
 
 
 def _sync_update_downloads_schedule(
     profile_id: str, raw_minutes: object, *, now=None
 ) -> None:
-    return _legacy_api_module()._sync_update_downloads_schedule(
+    return _dashboard_actions_module()._sync_update_downloads_schedule(
         profile_id, raw_minutes, now=now
     )
 
 
 def _write_manual_upload(profile_id: str, uploaded_file):
-    return _legacy_api_module()._write_manual_upload(profile_id, uploaded_file)
+    return _dashboard_actions_module()._write_manual_upload(profile_id, uploaded_file)
 
 
 def publish_job(*args, **kwargs):
