@@ -194,7 +194,7 @@ def _api_proxy(
         headers["Range"] = request.headers["Range"]
     req = urllib.request.Request(url, data=body, headers=headers, method=request.method)
     try:
-        upstream = urllib.request.urlopen(
+        upstream = urllib.request.urlopen(  # nosec B310 - URL is built from configured HTTP(S) API base URL.
             req, timeout=float(os.getenv("GETOFFLINE_FRONTEND_API_TIMEOUT", "30"))
         )
         return _upstream_response(upstream.status, upstream.headers, upstream.read())

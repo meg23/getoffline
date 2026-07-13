@@ -150,12 +150,14 @@ def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
     return subtitle_response(path)
 
 
-def _dashboard_view(name: str, request: HttpRequest, *args, **kwargs):
+def _dashboard_view(
+    name: str, request: HttpRequest, *args: object, **kwargs: object
+) -> HttpResponse:
     from app import views as frontend_views
     from backend.services import dashboard_actions
 
     # Keep legacy test mocks working while the API owns the implementation.
-    dashboard_actions.publish_job = frontend_views.publish_job
+    setattr(dashboard_actions, "publish_job", frontend_views.publish_job)
     legacy = getattr(dashboard_actions, f"_legacy_{name}", None) or getattr(
         dashboard_actions, name
     )
