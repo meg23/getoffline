@@ -328,6 +328,7 @@ def main() -> int:
         downloads_dir.mkdir(parents=True, exist_ok=True)
         reserved_ports: set[int] = set()
         frontend_port = pipeline._free_tcp_port(reserved_ports)
+        api_port = pipeline._free_tcp_port(reserved_ports)
         mysql_port = pipeline._free_tcp_port(reserved_ports)
         rabbitmq_port = pipeline._free_tcp_port(reserved_ports)
         rabbitmq_management_port = pipeline._free_tcp_port(reserved_ports)
@@ -339,6 +340,7 @@ def main() -> int:
                 "GETOFFLINE_DJANGO_SECRET_KEY": "integration-test-secret",
                 "GETOFFLINE_DOWNLOADS_DIR": str(downloads_dir),
                 "GETOFFLINE_FRONTEND_PUBLISHED_PORT": str(frontend_port),
+                "GETOFFLINE_API_PUBLISHED_PORT": str(api_port),
                 "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
                 "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
                 "GETOFFLINE_RABBITMQ_MANAGEMENT_PUBLISHED_PORT": str(
@@ -385,6 +387,7 @@ def main() -> int:
             log_stream = pipeline._start_log_stream(compose, compose_env)
             deadline = time.monotonic() + timeout_seconds
             pipeline._wait_for_frontend(deadline, frontend_port)
+            pipeline._wait_for_api(deadline, api_port)
             pipeline._django_setup(host_env)
             job_id = _queue_episode_check()
             _wait_for_podcast_source(

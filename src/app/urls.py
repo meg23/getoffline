@@ -1,4 +1,5 @@
 from django.contrib.auth import views as auth_views
+from django.urls import include
 from django.urls import path
 
 from . import views
@@ -10,6 +11,7 @@ urlpatterns = [
         name="login",
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("api/", include("backend.api.urls")),
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
     path(

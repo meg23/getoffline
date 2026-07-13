@@ -34,6 +34,7 @@ COMPOSE_SERVICES = (
     "rabbitmq",
     "mysql",
     "frontend",
+    "api",
     "worker-updates",
     "worker-downloader-youtube",
     "worker-downloader-podcast",
@@ -141,21 +142,27 @@ def _free_tcp_port(excluded: set[int]) -> int:
             return port
 
 
-def _wait_for_frontend(deadline: float, frontend_port: int) -> None:
+def _wait_for_service(deadline: float, url: str, name: str) -> None:
     import urllib.request
 
     last_error = None
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{frontend_port}/", timeout=5
-            ) as response:
+            with urllib.request.urlopen(url, timeout=5) as response:
                 if response.status < 500:
                     return
         except Exception as exc:  # noqa: BLE001 - diagnostic polling
             last_error = exc
         time.sleep(5)
-    raise AssertionError(f"frontend did not become reachable: {last_error}")
+    raise AssertionError(f"{name} did not become reachable: {last_error}")
+
+
+def _wait_for_frontend(deadline: float, frontend_port: int) -> None:
+    _wait_for_service(deadline, f"http://127.0.0.1:{frontend_port}/", "frontend")
+
+
+def _wait_for_api(deadline: float, api_port: int) -> None:
+    _wait_for_service(deadline, f"http://127.0.0.1:{api_port}/api/health", "api")
 
 
 def _verify_profanity_model() -> None:
@@ -393,6 +400,7 @@ def main() -> int:
         downloads_dir.mkdir(parents=True, exist_ok=True)
         reserved_ports: set[int] = set()
         frontend_port = _free_tcp_port(reserved_ports)
+        api_port = _free_tcp_port(reserved_ports)
         mysql_port = _free_tcp_port(reserved_ports)
         rabbitmq_port = _free_tcp_port(reserved_ports)
         rabbitmq_management_port = _free_tcp_port(reserved_ports)
@@ -404,6 +412,7 @@ def main() -> int:
                 "GETOFFLINE_DJANGO_SECRET_KEY": "integration-test-secret",
                 "GETOFFLINE_DOWNLOADS_DIR": str(downloads_dir),
                 "GETOFFLINE_FRONTEND_PUBLISHED_PORT": str(frontend_port),
+                "GETOFFLINE_API_PUBLISHED_PORT": str(api_port),
                 "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
                 "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
                 "GETOFFLINE_RABBITMQ_MANAGEMENT_PUBLISHED_PORT": str(
@@ -447,6 +456,7 @@ def main() -> int:
             log_stream = _start_log_stream(compose, compose_env)
             deadline = time.monotonic() + timeout_seconds
             _wait_for_frontend(deadline, frontend_port)
+            _wait_for_api(deadline, api_port)
             _django_setup(host_env)
             _verify_profanity_model()
             job_id = _queue_download_job()
