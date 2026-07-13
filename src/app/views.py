@@ -162,6 +162,7 @@ def _api_proxy(
     if (
         os.getenv("GETOFFLINE_TEST_IN_MEMORY_DB")
         or os.getenv("GETOFFLINE_FRONTEND_API_TRANSPORT") == "django"
+        or not os.getenv("GETOFFLINE_API_BASE_URL")
     ):
         client = _test_api_client(request)
         data = (
