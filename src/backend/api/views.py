@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
@@ -12,11 +13,22 @@ from django.views.decorators.http import require_GET, require_POST
 
 from backend.api.auth import api_login_required
 from backend.playback.service import apply_update, build_update, start
-from backend.services.library import episode_to_summary, list_downloads
+from backend.services.library import (
+    episode_to_summary,
+    human_duration,
+    listened_seconds,
+    list_downloads,
+    recent_jobs,
+)
 from backend.services.profiles import profile_id_for_request
-from backend.streaming.media import media_response, resolve_media_path
+from backend.streaming.media import (
+    media_response,
+    resolve_media_path,
+    resolve_subtitle_path,
+    subtitle_response,
+)
 from models.jobs import create_job
-from models.models import Download, SourceConfig
+from models.models import Download, Job, SourceConfig
 from app.queue import publish_job
 
 
@@ -30,6 +42,226 @@ def _json_body(request: HttpRequest) -> dict[str, object]:
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _episode_for_frontend(item: Download) -> dict[str, object]:
+    data = episode_to_summary(item)
+    data.update(
+        {
+            "display_size": getattr(item, "display_size", "—"),
+            "display_type": getattr(item, "display_type", "?"),
+            "display_kind": getattr(item, "display_kind", "audio"),
+            "status_label": getattr(item, "status_label", "UNPLAYED"),
+            "status_class": getattr(item, "status_class", "status-unplayed"),
+            "has_subtitles": bool(getattr(item, "has_subtitles", False)),
+        }
+    )
+    return data
+
+
+def _job_to_dict(job: Job) -> dict[str, object]:
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "error_message": job.error_message or "",
+        "created_at": job.created_at.isoformat() if job.created_at else "",
+        "updated_at": job.updated_at.isoformat() if job.updated_at else "",
+    }
+
+
+@api_login_required
+@require_GET
+def frontend_library(request: HttpRequest) -> JsonResponse:
+    profile_id = profile_id_for_request(request)
+    show_all = request.GET.get("filter") == "all"
+    episodes = list_downloads(profile_id, show_all=show_all)
+    played_count = sum(1 for item in episodes if item.played)
+    profile_name = request.user.get_username() or profile_id
+    return JsonResponse(
+        {
+            "downloads": [_episode_for_frontend(item) for item in episodes],
+            "jobs": [_job_to_dict(job) for job in recent_jobs(profile_id)],
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "profile_initial": (profile_name[:1] or "U").upper(),
+            "library_filter_mode": "all" if show_all else "unplayed",
+            "stats": {
+                "visible": len(episodes),
+                "played": played_count,
+                "new": max(len(episodes) - played_count, 0),
+                "favorites": sum(1 for item in episodes if item.favorite),
+                "listened": human_duration(listened_seconds(profile_id)),
+            },
+        }
+    )
+
+
+@api_login_required
+@require_GET
+def frontend_jobs(request: HttpRequest) -> JsonResponse:
+    profile_id = profile_id_for_request(request)
+    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[
+        :100
+    ]
+    return JsonResponse(
+        {"profile_id": profile_id, "jobs": [_job_to_dict(job) for job in rows]}
+    )
+
+
+@api_login_required
+@require_GET
+def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
+    item = get_object_or_404(
+        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+    )
+    summary = episode_to_summary(item)
+    has_subtitles = False
+    try:
+        has_subtitles = resolve_subtitle_path(item) is not None
+    except Exception:
+        has_subtitles = False
+    try:
+        requested_seek = float(request.GET.get("t") or 0.0)
+    except (TypeError, ValueError):
+        requested_seek = 0.0
+    seek = max(float(item.last_position_seconds or 0.0), requested_seek)
+    media_ext = (
+        item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")
+    ).lower()
+    media_kind = "video" if media_ext in {"mp4", "mkv", "webm", "mov"} else "audio"
+    summary["has_subtitles"] = has_subtitles
+    return JsonResponse(
+        {"item": summary, "seek_seconds": seek, "media_kind": media_kind}
+    )
+
+
+@api_login_required
+@require_GET
+def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
+    item = get_object_or_404(
+        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+    )
+    path = resolve_subtitle_path(item)
+    if path is None:
+        from django.http import Http404
+
+        raise Http404("Subtitle unavailable")
+    return subtitle_response(path)
+
+
+def _dashboard_view(
+    name: str, request: HttpRequest, *args: object, **kwargs: object
+) -> HttpResponse:
+    from app import views as frontend_views
+    from backend.services import dashboard_actions
+
+    # Keep legacy test mocks working while the API owns the implementation.
+    setattr(dashboard_actions, "publish_job", frontend_views.publish_job)
+    legacy = getattr(dashboard_actions, f"_legacy_{name}", None) or getattr(
+        dashboard_actions, name
+    )
+    return legacy(request, *args, **kwargs)
+
+
+@api_login_required
+def dashboard_active_pipeline_status(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("active_pipeline_status", request)
+
+
+@api_login_required
+def dashboard_enqueue_job(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("enqueue_job", request)
+
+
+@api_login_required
+def dashboard_worker_message_status(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("worker_message_status", request)
+
+
+@api_login_required
+def dashboard_batch_update(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("batch_update", request)
+
+
+@api_login_required
+def dashboard_transcript_search(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("transcript_search", request)
+
+
+@api_login_required
+def dashboard_manual_upload(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("manual_upload", request)
+
+
+@api_login_required
+def dashboard_edit_metadata(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("edit_metadata", request)
+
+
+@api_login_required
+def dashboard_mark_played(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("mark_played", request, download_id)
+
+
+@api_login_required
+def dashboard_mark_unplayed(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("mark_unplayed", request, download_id)
+
+
+@api_login_required
+def dashboard_favorite(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("favorite", request, download_id)
+
+
+@api_login_required
+def dashboard_unfavorite(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("unfavorite", request, download_id)
+
+
+@api_login_required
+def dashboard_save_position(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("save_position", request, download_id)
+
+
+@api_login_required
+def dashboard_delete_file(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("delete_file", request, download_id)
+
+
+@api_login_required
+def frontend_settings(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("settings_page", request)
+
+
+@api_login_required
+def settings_save_config(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("save_config", request)
+
+
+@api_login_required
+def settings_add_source(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("add_source", request)
+
+
+@api_login_required
+def settings_save_sources(request: HttpRequest, source_type: str) -> HttpResponse:
+    return _dashboard_view("save_sources", request, source_type)
+
+
+@api_login_required
+def settings_update_source(request: HttpRequest, source_id: int) -> HttpResponse:
+    return _dashboard_view("update_source", request, source_id)
+
+
+@api_login_required
+def settings_toggle_source(request: HttpRequest, source_id: int) -> HttpResponse:
+    return _dashboard_view("toggle_source", request, source_id)
+
+
+@api_login_required
+def settings_delete_source(request: HttpRequest, source_id: int) -> HttpResponse:
+    return _dashboard_view("delete_source", request, source_id)
 
 
 def health(request: HttpRequest) -> JsonResponse:
