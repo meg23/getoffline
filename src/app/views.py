@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from django.contrib.auth.decorators import login_required
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.test import Client as DjangoClient
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
@@ -192,12 +192,20 @@ def _api_proxy(
         data=data,
         headers=_request_headers(request),
     )
-    return _upstream_response(response.status_code, response.headers, response.content)
+    return _upstream_response(
+        response.status_code,
+        response.headers,
+        response.content,
+        streaming=response.streaming,
+    )
 
 
-def _upstream_response(status: int, headers, content: bytes) -> HttpResponse:
-    response = HttpResponse(
-        content,
+def _upstream_response(
+    status: int, headers, content: bytes, *, streaming: bool = False
+) -> HttpResponse:
+    response_class = StreamingHttpResponse if streaming else HttpResponse
+    response = response_class(
+        [content] if response_class is StreamingHttpResponse else content,
         status=status,
         content_type=headers.get("Content-Type", "application/octet-stream"),
     )

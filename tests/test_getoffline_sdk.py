@@ -15,12 +15,14 @@ django.setup()
 from django.apps import apps
 from django.contrib.auth.models import User
 from django.db import connection
+from django.http import StreamingHttpResponse
 from django.test import Client
 from django.utils import timezone
 
 from models.domain import DownloadStatus
 from models.models import Download
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient
+from packages.getoffline_sdk.transports import Response
 
 
 class GetOfflineSdkTests(unittest.TestCase):
@@ -79,6 +81,23 @@ class GetOfflineSdkTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"service": "api"', response.content)
+
+
+class StreamingDjangoTransportTests(unittest.TestCase):
+    def test_transport_reads_streaming_response_content(self):
+        class StreamingClient:
+            def get(self, *args, **kwargs):
+                response = StreamingHttpResponse([b"abc", b"def"], status=206)
+                response["Content-Range"] = "bytes 0-5/6"
+                return response
+
+        response = DjangoTransport(StreamingClient()).request("GET", "api_health")
+
+        self.assertIsInstance(response, Response)
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, b"abcdef")
+        self.assertEqual(response.headers["Content-Range"], "bytes 0-5/6")
+        self.assertTrue(response.streaming)
 
 
 if __name__ == "__main__":

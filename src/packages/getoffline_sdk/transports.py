@@ -20,6 +20,7 @@ class Response:
     status_code: int
     content: bytes
     headers: Mapping[str, str] = field(default_factory=dict)
+    streaming: bool = False
 
     @property
     def ok(self) -> bool:
@@ -65,8 +66,9 @@ class DjangoTransport:
             response = self.client.get(path, data=query or {}, **django_headers)
         return Response(
             status_code=response.status_code,
-            content=bytes(response.content),
+            content=_django_response_content(response),
             headers={key: value for key, value in response.items()},
+            streaming=bool(getattr(response, "streaming", False)),
         )
 
 
@@ -117,6 +119,12 @@ class HttpTransport:
             return f"{url}?{urllib.parse.urlencode(query, doseq=True)}"
         return url
 
+
+
+def _django_response_content(response: object) -> bytes:
+    if hasattr(response, "streaming_content"):
+        return b"".join(cast(Any, response).streaming_content)
+    return bytes(cast(Any, response).content)
 
 def _django_headers(headers: Mapping[str, str]) -> dict[str, str]:
     converted: dict[str, str] = {}
