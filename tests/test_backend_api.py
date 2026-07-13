@@ -78,6 +78,24 @@ class BackendApiTests(unittest.TestCase):
             last_seen_at=timezone.now(),
         )
 
+    def test_frontend_player_falls_back_to_file_path_extension_for_video_kind(self):
+        download = Download.objects.create(
+            profile_id="api-user",
+            item_uid="ep-video",
+            source_type="manual",
+            source_name="Imports",
+            title="Imported Video",
+            file_path="/media/imported-video.webm",
+            file_ext="",
+            download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse("api_frontend_player", args=[download.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["media_kind"], "video")
+
     def test_playback_progress_updates_episode_state(self):
         download = self._create_download()
 

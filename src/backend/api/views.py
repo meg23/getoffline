@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
@@ -125,11 +126,10 @@ def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
     except (TypeError, ValueError):
         requested_seek = 0.0
     seek = max(float(item.last_position_seconds or 0.0), requested_seek)
-    media_kind = (
-        "video"
-        if str(item.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"}
-        else "audio"
-    )
+    media_ext = (
+        item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")
+    ).lower()
+    media_kind = "video" if media_ext in {"mp4", "mkv", "webm", "mov"} else "audio"
     summary["has_subtitles"] = has_subtitles
     return JsonResponse(
         {"item": summary, "seek_seconds": seek, "media_kind": media_kind}
