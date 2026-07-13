@@ -12,11 +12,22 @@ from django.views.decorators.http import require_GET, require_POST
 
 from backend.api.auth import api_login_required
 from backend.playback.service import apply_update, build_update, start
-from backend.services.library import episode_to_summary, list_downloads
+from backend.services.library import (
+    episode_to_summary,
+    human_duration,
+    listened_seconds,
+    list_downloads,
+    recent_jobs,
+)
 from backend.services.profiles import profile_id_for_request
-from backend.streaming.media import media_response, resolve_media_path
+from backend.streaming.media import (
+    media_response,
+    resolve_media_path,
+    resolve_subtitle_path,
+    subtitle_response,
+)
 from models.jobs import create_job
-from models.models import Download, SourceConfig
+from models.models import Download, Job, SourceConfig
 from app.queue import publish_job
 
 
@@ -30,6 +41,113 @@ def _json_body(request: HttpRequest) -> dict[str, object]:
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _episode_for_frontend(item: Download) -> dict[str, object]:
+    data = episode_to_summary(item)
+    data.update(
+        {
+            "display_size": getattr(item, "display_size", "—"),
+            "display_type": getattr(item, "display_type", "?"),
+            "display_kind": getattr(item, "display_kind", "audio"),
+            "status_label": getattr(item, "status_label", "UNPLAYED"),
+            "status_class": getattr(item, "status_class", "status-unplayed"),
+            "has_subtitles": bool(getattr(item, "has_subtitles", False)),
+        }
+    )
+    return data
+
+
+def _job_to_dict(job: Job) -> dict[str, object]:
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "error_message": job.error_message or "",
+        "created_at": job.created_at.isoformat() if job.created_at else "",
+        "updated_at": job.updated_at.isoformat() if job.updated_at else "",
+    }
+
+
+@api_login_required
+@require_GET
+def frontend_library(request: HttpRequest) -> JsonResponse:
+    profile_id = profile_id_for_request(request)
+    show_all = request.GET.get("filter") == "all"
+    episodes = list_downloads(profile_id, show_all=show_all)
+    played_count = sum(1 for item in episodes if item.played)
+    profile_name = request.user.get_username() or profile_id
+    return JsonResponse(
+        {
+            "downloads": [_episode_for_frontend(item) for item in episodes],
+            "jobs": [_job_to_dict(job) for job in recent_jobs(profile_id)],
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "profile_initial": (profile_name[:1] or "U").upper(),
+            "library_filter_mode": "all" if show_all else "unplayed",
+            "stats": {
+                "visible": len(episodes),
+                "played": played_count,
+                "new": max(len(episodes) - played_count, 0),
+                "favorites": sum(1 for item in episodes if item.favorite),
+                "listened": human_duration(listened_seconds(profile_id)),
+            },
+        }
+    )
+
+
+@api_login_required
+@require_GET
+def frontend_jobs(request: HttpRequest) -> JsonResponse:
+    profile_id = profile_id_for_request(request)
+    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[
+        :100
+    ]
+    return JsonResponse(
+        {"profile_id": profile_id, "jobs": [_job_to_dict(job) for job in rows]}
+    )
+
+
+@api_login_required
+@require_GET
+def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
+    item = get_object_or_404(
+        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+    )
+    summary = episode_to_summary(item)
+    has_subtitles = False
+    try:
+        has_subtitles = resolve_subtitle_path(item) is not None
+    except Exception:
+        has_subtitles = False
+    try:
+        requested_seek = float(request.GET.get("t") or 0.0)
+    except (TypeError, ValueError):
+        requested_seek = 0.0
+    seek = max(float(item.last_position_seconds or 0.0), requested_seek)
+    media_kind = (
+        "video"
+        if str(item.file_ext or "").lower() in {"mp4", "mkv", "webm", "mov"}
+        else "audio"
+    )
+    summary["has_subtitles"] = has_subtitles
+    return JsonResponse(
+        {"item": summary, "seek_seconds": seek, "media_kind": media_kind}
+    )
+
+
+@api_login_required
+@require_GET
+def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
+    item = get_object_or_404(
+        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+    )
+    path = resolve_subtitle_path(item)
+    if path is None:
+        from django.http import Http404
+
+        raise Http404("Subtitle unavailable")
+    return subtitle_response(path)
 
 
 def health(request: HttpRequest) -> JsonResponse:

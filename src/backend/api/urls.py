@@ -4,6 +4,13 @@ from . import views
 
 urlpatterns = [
     path("health", views.health, name="api_health"),
+    path("frontend/library", views.frontend_library, name="api_frontend_library"),
+    path("frontend/jobs", views.frontend_jobs, name="api_frontend_jobs"),
+    path(
+        "frontend/player/<int:episode_id>",
+        views.frontend_player,
+        name="api_frontend_player",
+    ),
     path("search", views.search, name="api_search"),
     path("podcasts", views.podcasts, name="api_podcasts"),
     path("episodes/<int:episode_id>", views.episode_detail, name="api_episode_detail"),
@@ -17,4 +24,5 @@ urlpatterns = [
     path("user", views.user, name="api_user"),
     path("csrf", views.csrf, name="api_csrf"),
     path("stream/<int:episode_id>", views.stream, name="api_stream"),
+    path("subtitle/<int:episode_id>", views.subtitle, name="api_subtitle"),
 ]

@@ -6,6 +6,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from types import SimpleNamespace as _SimpleNamespace
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlencode
@@ -24,6 +25,7 @@ from django.http import JsonResponse
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.shortcuts import render
+from django.test import Client as _DjangoClient
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -430,7 +432,7 @@ def _log_library_render(
 
 
 @login_required
-def library(request: HttpRequest) -> HttpResponse:
+def _legacy_library(request: HttpRequest) -> HttpResponse:
     started_at = time.perf_counter()
     page = _library_page_data(request)
     response = render(request, "app/library.html", _library_context(page))
@@ -555,7 +557,7 @@ def active_pipeline_status(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
-def jobs(request: HttpRequest) -> HttpResponse:
+def _legacy_jobs(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
     rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[
         :100
@@ -564,7 +566,7 @@ def jobs(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def player(request: HttpRequest, download_id: int) -> HttpResponse:
+def _legacy_player(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     item.resolved_subtitle_path = (
         _resolve_subtitle_path(item)
@@ -613,7 +615,7 @@ def _file_range_iterator(path: Path, start: int, length: int):
 
 
 @login_required
-def media(request: HttpRequest, download_id: int) -> HttpResponse:
+def _legacy_media(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     path = _resolve_media_path(item)
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
@@ -652,7 +654,7 @@ def media(request: HttpRequest, download_id: int) -> HttpResponse:
 
 
 @login_required
-def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
+def _legacy_subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
     item = get_object_or_404(Download, pk=download_id, profile_id=_profile_id(request))
     path = _resolve_subtitle_path(item)
     if path is None:
@@ -1656,3 +1658,104 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
                 }
             )
     return _redirect_back(request)
+
+
+# Frontend HTTP boundary: browser-facing page views below intentionally fetch
+# JSON/streaming resources from the API URL space instead of querying models or
+# calling backend services directly. Legacy helper functions above remain for
+# backwards-compatible tests and for API/service code that has not yet moved.
+def _frontend_api_client(request: HttpRequest) -> _DjangoClient:
+    client = _DjangoClient()
+    if getattr(request, "user", None) is not None and request.user.is_authenticated:
+        client.force_login(request.user)
+    return client
+
+
+def _namespace(value):
+    if isinstance(value, dict):
+        return _SimpleNamespace(
+            **{key: _namespace(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return [_namespace(item) for item in value]
+    return value
+
+
+def _api_get_json(
+    request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
+) -> dict[str, object]:
+    response = _frontend_api_client(request).get(
+        reverse(name, args=args), data=query or {}
+    )
+    if response.status_code == 404:
+        raise Http404("API resource unavailable")
+    if response.status_code >= 400:
+        return {}
+    return response.json()
+
+
+@login_required
+def library(request: HttpRequest) -> HttpResponse:
+    started_at = time.perf_counter()
+    payload = _api_get_json(
+        request, "api_frontend_library", query={"filter": request.GET.get("filter", "")}
+    )
+    context = {key: _namespace(value) for key, value in payload.items()}
+    response = render(request, "app/library.html", context)
+    _log_library_render(
+        str(payload.get("profile_id") or ""),
+        len(payload.get("downloads") or []),
+        time.perf_counter() - started_at,
+    )
+    return response
+
+
+@login_required
+def jobs(request: HttpRequest) -> HttpResponse:
+    payload = _api_get_json(request, "api_frontend_jobs")
+    return render(
+        request,
+        "app/jobs.html",
+        {
+            "jobs": _namespace(payload.get("jobs") or []),
+            "profile_id": payload.get("profile_id", ""),
+        },
+    )
+
+
+@login_required
+def player(request: HttpRequest, download_id: int) -> HttpResponse:
+    payload = _api_get_json(
+        request,
+        "api_frontend_player",
+        download_id,
+        query={"t": request.GET.get("t", "")},
+    )
+    if not payload:
+        raise Http404("Player item unavailable")
+    return render(
+        request,
+        "app/player.html",
+        {
+            "item": _namespace(payload["item"]),
+            "seek_seconds": payload["seek_seconds"],
+            "media_kind": payload["media_kind"],
+        },
+    )
+
+
+@login_required
+def media(request: HttpRequest, download_id: int) -> HttpResponse:
+    headers = {}
+    if request.headers.get("Range"):
+        headers["HTTP_RANGE"] = request.headers["Range"]
+    return _frontend_api_client(request).get(
+        reverse("api_stream", args=[download_id]), **headers
+    )
+
+
+@login_required
+def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _frontend_api_client(request).get(
+        reverse("api_subtitle", args=[download_id])
+    )
