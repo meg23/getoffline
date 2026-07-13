@@ -173,6 +173,10 @@ def _request_headers(request: HttpRequest) -> dict[str, str]:
         headers["X-CSRFToken"] = request.headers["X-CSRFToken"]
     if request.headers.get("Range"):
         headers["Range"] = request.headers["Range"]
+    if request.headers.get("Accept"):
+        headers["Accept"] = request.headers["Accept"]
+    if request.headers.get("X-Requested-With"):
+        headers["X-Requested-With"] = request.headers["X-Requested-With"]
     return headers
 
 

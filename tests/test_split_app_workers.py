@@ -870,6 +870,23 @@ class SharedDjangoModelTests(TestCase):
         self.assertNotIn("function returnToLibrary", script)
         self.assertNotIn("HTMLFormElement.prototype.submit.call(form)", script)
 
+    def test_enqueue_job_ajax_proxy_preserves_json_headers(self):
+        client = Client()
+
+        with patch("app.views.publish_job"):
+            response = client.post(
+                "/jobs/enqueue/",
+                {"job_type": "update_downloads", "next": "/"},
+                HTTP_ACCEPT="application/json",
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("status_url", payload)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
