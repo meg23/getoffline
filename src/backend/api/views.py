@@ -150,6 +150,77 @@ def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
     return subtitle_response(path)
 
 
+def _dashboard_view(name: str, request: HttpRequest, *args, **kwargs):
+    from app import views as frontend_views
+
+    return getattr(frontend_views, f"_legacy_{name}")(request, *args, **kwargs)
+
+
+@api_login_required
+def dashboard_active_pipeline_status(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("active_pipeline_status", request)
+
+
+@api_login_required
+def dashboard_enqueue_job(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("enqueue_job", request)
+
+
+@api_login_required
+def dashboard_worker_message_status(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("worker_message_status", request)
+
+
+@api_login_required
+def dashboard_batch_update(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("batch_update", request)
+
+
+@api_login_required
+def dashboard_transcript_search(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("transcript_search", request)
+
+
+@api_login_required
+def dashboard_manual_upload(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("manual_upload", request)
+
+
+@api_login_required
+def dashboard_edit_metadata(request: HttpRequest) -> JsonResponse:
+    return _dashboard_view("edit_metadata", request)
+
+
+@api_login_required
+def dashboard_mark_played(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("mark_played", request, download_id)
+
+
+@api_login_required
+def dashboard_mark_unplayed(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("mark_unplayed", request, download_id)
+
+
+@api_login_required
+def dashboard_favorite(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("favorite", request, download_id)
+
+
+@api_login_required
+def dashboard_unfavorite(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("unfavorite", request, download_id)
+
+
+@api_login_required
+def dashboard_save_position(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("save_position", request, download_id)
+
+
+@api_login_required
+def dashboard_delete_file(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("delete_file", request, download_id)
+
+
 def health(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True, "service": "api"})
 

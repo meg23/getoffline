@@ -1684,14 +1684,14 @@ def _namespace(value):
 def _api_get_json(
     request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
 ) -> dict[str, object]:
-    response = _frontend_api_client(request).get(
-        reverse(name, args=args), data=query or {}
-    )
+    response = _api_proxy(request, name, *args, query=query)
     if response.status_code == 404:
         raise Http404("API resource unavailable")
     if response.status_code >= 400:
         return {}
-    return response.json()
+    import json as _json
+
+    return _json.loads(response.content.decode("utf-8"))
 
 
 @login_required
@@ -1746,16 +1746,210 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
 
 @login_required
 def media(request: HttpRequest, download_id: int) -> HttpResponse:
-    headers = {}
-    if request.headers.get("Range"):
-        headers["HTTP_RANGE"] = request.headers["Range"]
-    return _frontend_api_client(request).get(
-        reverse("api_stream", args=[download_id]), **headers
-    )
+    return _api_proxy(request, "api_stream", download_id)
 
 
 @login_required
 def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
-    return _frontend_api_client(request).get(
-        reverse("api_subtitle", args=[download_id])
+    return _api_proxy(request, "api_subtitle", download_id)
+
+
+# Preserve legacy implementations for the API service. Browser-facing routes below
+# only know the API endpoints they proxy to.
+_legacy_active_pipeline_status = active_pipeline_status
+_legacy_enqueue_job = enqueue_job
+_legacy_worker_message_status = worker_message_status
+_legacy_batch_update = batch_update
+_legacy_transcript_search = transcript_search
+_legacy_manual_upload = manual_upload
+_legacy_edit_metadata = edit_metadata
+_legacy_mark_played = mark_played
+_legacy_mark_unplayed = mark_unplayed
+_legacy_favorite = favorite
+_legacy_unfavorite = unfavorite
+_legacy_save_position = save_position
+_legacy_delete_file = delete_file
+
+
+def _api_proxy(
+    request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
+) -> HttpResponse:
+    """Proxy a browser-facing request to an API endpoint.
+
+    The production path uses a real HTTP request to GETOFFLINE_API_BASE_URL; tests
+    may opt into Django's in-process transport to avoid binding a socket.
+    """
+    if (
+        os.getenv("GETOFFLINE_TEST_IN_MEMORY_DB")
+        or os.getenv("GETOFFLINE_FRONTEND_API_TRANSPORT") == "django"
+    ):
+        client = _frontend_api_client(request)
+        path = reverse(name, args=args)
+        data = (
+            query
+            if request.method == "GET"
+            else {key: request.POST.getlist(key) for key in request.POST}
+        )
+        if request.method == "POST" and request.FILES:
+            data.update({key: request.FILES.getlist(key) for key in request.FILES})
+        headers = {}
+        if request.headers.get("Range"):
+            headers["HTTP_RANGE"] = request.headers["Range"]
+        if request.method == "POST":
+            return client.post(path, data=data, **headers)
+        return client.get(path, data=data or {}, **headers)
+
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    base_url = os.getenv("GETOFFLINE_API_BASE_URL", "http://api:8000/api").rstrip("/")
+    api_path = reverse(name, args=args).removeprefix("/api")
+    url = f"{base_url}{api_path}"
+    params = query if request.method == "GET" else None
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+    body = None
+    headers = {"Cookie": request.headers.get("Cookie", "")}
+    if request.method == "POST":
+        if request.FILES:
+            boundary = "----getoffline-frontend-api-boundary"
+            chunks: list[bytes] = []
+            for key in request.POST:
+                for value in request.POST.getlist(key):
+                    chunks.extend(
+                        [
+                            f"--{boundary}\r\n".encode("utf-8"),
+                            f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(
+                                "utf-8"
+                            ),
+                            str(value).encode("utf-8"),
+                            b"\r\n",
+                        ]
+                    )
+            for key in request.FILES:
+                for uploaded in request.FILES.getlist(key):
+                    filename = getattr(uploaded, "name", "upload")
+                    content_type = (
+                        getattr(uploaded, "content_type", None)
+                        or "application/octet-stream"
+                    )
+                    chunks.extend(
+                        [
+                            f"--{boundary}\r\n".encode("utf-8"),
+                            (
+                                f'Content-Disposition: form-data; name="{key}"; filename="{filename}"\r\n'
+                                f"Content-Type: {content_type}\r\n\r\n"
+                            ).encode("utf-8"),
+                        ]
+                    )
+                    for file_chunk in uploaded.chunks():
+                        chunks.append(file_chunk)
+                    chunks.append(b"\r\n")
+            chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+            body = b"".join(chunks)
+            headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        else:
+            body = urllib.parse.urlencode(request.POST, doseq=True).encode("utf-8")
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        if request.headers.get("X-CSRFToken"):
+            headers["X-CSRFToken"] = request.headers["X-CSRFToken"]
+    if request.headers.get("Range"):
+        headers["Range"] = request.headers["Range"]
+    req = urllib.request.Request(url, data=body, headers=headers, method=request.method)
+    try:
+        upstream = urllib.request.urlopen(
+            req, timeout=float(os.getenv("GETOFFLINE_FRONTEND_API_TIMEOUT", "30"))
+        )
+        content = upstream.read()
+        response = HttpResponse(
+            content,
+            status=upstream.status,
+            content_type=upstream.headers.get(
+                "Content-Type", "application/octet-stream"
+            ),
+        )
+        for header in ("Content-Length", "Content-Range", "Accept-Ranges", "Location"):
+            if upstream.headers.get(header):
+                response[header] = upstream.headers[header]
+        return response
+    except urllib.error.HTTPError as exc:
+        content = exc.read()
+        return HttpResponse(
+            content,
+            status=exc.code,
+            content_type=exc.headers.get("Content-Type", "text/plain"),
+        )
+
+
+@login_required
+def active_pipeline_status(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_active_pipeline_status")
+
+
+@login_required
+def enqueue_job(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_enqueue_job")
+
+
+@login_required
+def worker_message_status(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(
+        request,
+        "api_dashboard_worker_message_status",
+        query={"token": request.GET.get("token", "")},
     )
+
+
+@login_required
+def batch_update(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_batch_update")
+
+
+@login_required
+def transcript_search(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(
+        request,
+        "api_dashboard_transcript_search",
+        query={"q": request.GET.get("q", "")},
+    )
+
+
+@login_required
+def manual_upload(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_manual_upload")
+
+
+@login_required
+def edit_metadata(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_edit_metadata")
+
+
+@login_required
+def mark_played(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_mark_played", download_id)
+
+
+@login_required
+def mark_unplayed(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_mark_unplayed", download_id)
+
+
+@login_required
+def favorite(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_favorite", download_id)
+
+
+@login_required
+def unfavorite(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_unfavorite", download_id)
+
+
+@login_required
+def save_position(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_save_position", download_id)
+
+
+@login_required
+def delete_file(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_dashboard_delete_file", download_id)

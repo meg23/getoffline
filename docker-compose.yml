@@ -50,6 +50,7 @@ services:
       GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
       GETOFFLINE_YTDLP_MODULE: ${GETOFFLINE_YTDLP_MODULE:-yt_dlp}
       GETOFFLINE_CPU_SCHEDULER_SLOTS: ${GETOFFLINE_CPU_SCHEDULER_SLOTS:-3}
+      GETOFFLINE_API_BASE_URL: ${GETOFFLINE_API_BASE_URL:-http://api:8000/api}
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     ports:
@@ -63,6 +64,8 @@ services:
       mysql:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      api:
         condition: service_healthy
 
   api:
@@ -89,8 +92,6 @@ services:
       mysql:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
-      frontend:
         condition: service_healthy
 
   worker-updates:
