@@ -8,9 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +15,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.test import Client as DjangoClient
-from django.urls import reverse
+from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
 
 def _human_size(size: int | None) -> str:
@@ -156,86 +153,46 @@ def _test_api_client(request: HttpRequest) -> DjangoClient:
     return client
 
 
-def _api_proxy(
-    request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
-) -> HttpResponse:
+def _sdk_client(request: HttpRequest) -> GetOfflineClient:
     if (
         os.getenv("GETOFFLINE_TEST_IN_MEMORY_DB")
         or os.getenv("GETOFFLINE_FRONTEND_API_TRANSPORT") == "django"
         or not os.getenv("GETOFFLINE_API_BASE_URL")
     ):
-        client = _test_api_client(request)
-        data = (
-            query
-            if request.method == "GET"
-            else {key: request.POST.getlist(key) for key in request.POST}
-        )
-        if request.method == "POST" and request.FILES:
-            data.update({key: request.FILES.getlist(key) for key in request.FILES})
-        headers = {}
-        if request.headers.get("Range"):
-            headers["HTTP_RANGE"] = request.headers["Range"]
-        if request.method == "POST":
-            return client.post(reverse(name, args=args), data=data, **headers)
-        return client.get(reverse(name, args=args), data=data or {}, **headers)
+        return GetOfflineClient(DjangoTransport(_test_api_client(request)))
+    base_url = os.getenv("GETOFFLINE_API_BASE_URL", "http://api:8000/api")
+    timeout = float(os.getenv("GETOFFLINE_FRONTEND_API_TIMEOUT", "30"))
+    return GetOfflineClient(HttpTransport(base_url, timeout_seconds=timeout))
 
-    base_url = os.getenv("GETOFFLINE_API_BASE_URL", "http://api:8000/api").rstrip("/")
-    api_path = reverse(name, args=args).removeprefix("/api")
-    url = f"{base_url}{api_path}"
-    if request.method == "GET" and query:
-        url = f"{url}?{urllib.parse.urlencode(query, doseq=True)}"
-    body = None
-    headers = {"Cookie": request.headers.get("Cookie", "")}
-    if request.method == "POST":
-        body, content_type = _encoded_post_body(request)
-        headers["Content-Type"] = content_type
-        if request.headers.get("X-CSRFToken"):
-            headers["X-CSRFToken"] = request.headers["X-CSRFToken"]
+
+def _request_headers(request: HttpRequest) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if request.headers.get("Cookie"):
+        headers["Cookie"] = request.headers["Cookie"]
+    if request.headers.get("X-CSRFToken"):
+        headers["X-CSRFToken"] = request.headers["X-CSRFToken"]
     if request.headers.get("Range"):
         headers["Range"] = request.headers["Range"]
-    req = urllib.request.Request(url, data=body, headers=headers, method=request.method)
-    try:
-        upstream = urllib.request.urlopen(  # nosec B310 - URL is built from configured HTTP(S) API base URL.
-            req, timeout=float(os.getenv("GETOFFLINE_FRONTEND_API_TIMEOUT", "30"))
-        )
-        return _upstream_response(upstream.status, upstream.headers, upstream.read())
-    except urllib.error.HTTPError as exc:
-        return _upstream_response(exc.code, exc.headers, exc.read())
+    return headers
 
 
-def _encoded_post_body(request: HttpRequest) -> tuple[bytes, str]:
-    if not request.FILES:
-        return urllib.parse.urlencode(request.POST, doseq=True).encode(
-            "utf-8"
-        ), "application/x-www-form-urlencoded"
-    boundary = "----getoffline-frontend-api-boundary"
-    chunks: list[bytes] = []
-    for key in request.POST:
-        for value in request.POST.getlist(key):
-            chunks.extend(
-                [
-                    f"--{boundary}\r\n".encode(),
-                    f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
-                    str(value).encode(),
-                    b"\r\n",
-                ]
-            )
-    for key in request.FILES:
-        for uploaded in request.FILES.getlist(key):
-            filename = getattr(uploaded, "name", "upload")
-            content_type = (
-                getattr(uploaded, "content_type", None) or "application/octet-stream"
-            )
-            chunks.extend(
-                [
-                    f"--{boundary}\r\n".encode(),
-                    f'Content-Disposition: form-data; name="{key}"; filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'.encode(),
-                ]
-            )
-            chunks.extend(uploaded.chunks())
-            chunks.append(b"\r\n")
-    chunks.append(f"--{boundary}--\r\n".encode())
-    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+def _api_proxy(
+    request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
+) -> HttpResponse:
+    data = None
+    if request.method == "POST":
+        data = {key: request.POST.getlist(key) for key in request.POST}
+        if request.FILES:
+            data.update({key: request.FILES.getlist(key) for key in request.FILES})
+    response = _sdk_client(request).raw_request(
+        request.method,
+        name,
+        *args,
+        query=query,
+        data=data,
+        headers=_request_headers(request),
+    )
+    return _upstream_response(response.status_code, response.headers, response.content)
 
 
 def _upstream_response(status: int, headers, content: bytes) -> HttpResponse:
