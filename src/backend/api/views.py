@@ -152,8 +152,14 @@ def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
 
 def _dashboard_view(name: str, request: HttpRequest, *args, **kwargs):
     from app import views as frontend_views
+    from backend.api import frontend_legacy
 
-    return getattr(frontend_views, f"_legacy_{name}")(request, *args, **kwargs)
+    # Keep legacy test mocks working while the API owns the implementation.
+    frontend_legacy.publish_job = frontend_views.publish_job
+    legacy = getattr(frontend_legacy, f"_legacy_{name}", None) or getattr(
+        frontend_legacy, name
+    )
+    return legacy(request, *args, **kwargs)
 
 
 @api_login_required
@@ -219,6 +225,41 @@ def dashboard_save_position(request: HttpRequest, download_id: int) -> HttpRespo
 @api_login_required
 def dashboard_delete_file(request: HttpRequest, download_id: int) -> HttpResponse:
     return _dashboard_view("delete_file", request, download_id)
+
+
+@api_login_required
+def frontend_settings(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("settings_page", request)
+
+
+@api_login_required
+def settings_save_config(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("save_config", request)
+
+
+@api_login_required
+def settings_add_source(request: HttpRequest) -> HttpResponse:
+    return _dashboard_view("add_source", request)
+
+
+@api_login_required
+def settings_save_sources(request: HttpRequest, source_type: str) -> HttpResponse:
+    return _dashboard_view("save_sources", request, source_type)
+
+
+@api_login_required
+def settings_update_source(request: HttpRequest, source_id: int) -> HttpResponse:
+    return _dashboard_view("update_source", request, source_id)
+
+
+@api_login_required
+def settings_toggle_source(request: HttpRequest, source_id: int) -> HttpResponse:
+    return _dashboard_view("toggle_source", request, source_id)
+
+
+@api_login_required
+def settings_delete_source(request: HttpRequest, source_id: int) -> HttpResponse:
+    return _dashboard_view("delete_source", request, source_id)
 
 
 def health(request: HttpRequest) -> JsonResponse:

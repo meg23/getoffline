@@ -70,6 +70,33 @@ urlpatterns = [
         views.dashboard_delete_file,
         name="api_dashboard_delete_file",
     ),
+    path("frontend/settings", views.frontend_settings, name="api_frontend_settings"),
+    path("settings/save", views.settings_save_config, name="api_settings_save_config"),
+    path(
+        "settings/sources/add",
+        views.settings_add_source,
+        name="api_settings_add_source",
+    ),
+    path(
+        "settings/sources/<str:source_type>/save",
+        views.settings_save_sources,
+        name="api_settings_save_sources",
+    ),
+    path(
+        "settings/sources/<int:source_id>/update",
+        views.settings_update_source,
+        name="api_settings_update_source",
+    ),
+    path(
+        "settings/sources/<int:source_id>/toggle",
+        views.settings_toggle_source,
+        name="api_settings_toggle_source",
+    ),
+    path(
+        "settings/sources/<int:source_id>/delete",
+        views.settings_delete_source,
+        name="api_settings_delete_source",
+    ),
     path("frontend/jobs", views.frontend_jobs, name="api_frontend_jobs"),
     path(
         "frontend/player/<int:episode_id>",
