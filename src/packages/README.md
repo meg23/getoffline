@@ -1,6 +1,6 @@
 # getoffline-sdk
 
-Python SDK for the GetOffline API.
+Python 3.11+ SDK for the GetOffline API.
 
 ## Install from a wheel
 
