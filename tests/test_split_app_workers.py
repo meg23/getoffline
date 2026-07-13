@@ -858,15 +858,17 @@ class SharedDjangoModelTests(TestCase):
         download.refresh_from_db()
         self.assertAlmostEqual(download.last_position_seconds, 7.0, places=2)
 
-    def test_library_update_button_returns_to_library_while_polling_callback(self):
+    def test_library_update_button_stays_on_library_while_polling_callback(self):
         script = Path("src/app/static/app/dashboard.js").read_text()
 
         self.assertIn("getoffline:update-downloads-status-url", script)
-        self.assertIn("function returnToLibrary(statusUrl)", script)
-        self.assertIn("window.location.href = libraryRedirectUrl();", script)
+        self.assertIn("function startPolling(statusUrl)", script)
         self.assertIn("const storedStatusUrl = rememberedStatusUrl();", script)
-        self.assertIn("pollUntilDone(storedStatusUrl)", script)
+        self.assertIn("startPolling(storedStatusUrl);", script)
+        self.assertIn("startPolling(payload.status_url);", script)
         self.assertIn("forgetStatusUrl();", script)
+        self.assertNotIn("function returnToLibrary", script)
+        self.assertNotIn("HTMLFormElement.prototype.submit.call(form)", script)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()

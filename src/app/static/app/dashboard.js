@@ -158,7 +158,7 @@
     try {
       window.sessionStorage?.setItem(updateStatusStorageKey, statusUrl);
     } catch (_) {
-      // Ignore storage failures; the non-JS redirect still returns to the library.
+      // Ignore storage failures; polling still works for the current page.
     }
   }
 
@@ -178,17 +178,10 @@
     }
   }
 
-  function libraryRedirectUrl() {
-    return (
-      form?.querySelector('[name="next"]')?.value ||
-      window.location.pathname ||
-      "/"
-    );
-  }
-
-  function returnToLibrary(statusUrl) {
+  function startPolling(statusUrl) {
     rememberStatusUrl(statusUrl);
-    window.location.href = libraryRedirectUrl();
+    setLoading(true);
+    pollUntilDone(statusUrl).catch(() => schedulePoll(statusUrl));
   }
 
   async function pollUntilDone(statusUrl) {
@@ -228,16 +221,15 @@
     return body;
   }
 
-  function submitNormally() {
-    window.clearTimeout(pollTimer);
+  function showQueueError(message) {
     setLoading(false);
-    HTMLFormElement.prototype.submit.call(form);
+    window.clearTimeout(pollTimer);
+    window.alert(message || "Failed to queue updates.");
   }
 
   const storedStatusUrl = rememberedStatusUrl();
   if (storedStatusUrl) {
-    setLoading(true);
-    pollUntilDone(storedStatusUrl).catch(() => schedulePoll(storedStatusUrl));
+    startPolling(storedStatusUrl);
   }
 
   form?.addEventListener("submit", async (event) => {
@@ -258,9 +250,9 @@
       if (!response.ok) throw new Error("Transfer request failed.");
       const payload = await response.json();
       if (!payload.status_url) throw new Error("Missing transfer status URL.");
-      returnToLibrary(payload.status_url);
-    } catch (_) {
-      submitNormally();
+      startPolling(payload.status_url);
+    } catch (error) {
+      showQueueError(error.message);
     }
   });
 })();
