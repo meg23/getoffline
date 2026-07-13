@@ -144,6 +144,7 @@
     form?.querySelector("[name=csrfmiddlewaretoken]")?.value ||
     decodeURIComponent(readCookie("csrftoken") || "");
   const doneStatuses = new Set(["succeeded", "failed"]);
+  const updateStatusStorageKey = "getoffline:update-downloads-status-url";
   let pollTimer = 0;
 
   function setLoading(loading) {
@@ -151,6 +152,43 @@
     button.classList.toggle("is-pulsing", loading);
     button.disabled = loading;
     button.setAttribute("aria-busy", loading ? "true" : "false");
+  }
+
+  function rememberStatusUrl(statusUrl) {
+    try {
+      window.sessionStorage?.setItem(updateStatusStorageKey, statusUrl);
+    } catch (_) {
+      // Ignore storage failures; the non-JS redirect still returns to the library.
+    }
+  }
+
+  function forgetStatusUrl() {
+    try {
+      window.sessionStorage?.removeItem(updateStatusStorageKey);
+    } catch (_) {
+      // Ignore storage failures.
+    }
+  }
+
+  function rememberedStatusUrl() {
+    try {
+      return window.sessionStorage?.getItem(updateStatusStorageKey) || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function libraryRedirectUrl() {
+    return (
+      form?.querySelector('[name="next"]')?.value ||
+      window.location.pathname ||
+      "/"
+    );
+  }
+
+  function returnToLibrary(statusUrl) {
+    rememberStatusUrl(statusUrl);
+    window.location.href = libraryRedirectUrl();
   }
 
   async function pollUntilDone(statusUrl) {
@@ -162,9 +200,12 @@
     if (!response.ok) throw new Error("Unable to check transfer status.");
     const payload = await response.json();
     if (payload.finished || doneStatuses.has(String(payload.status || ""))) {
+      forgetStatusUrl();
       setLoading(false);
       if (payload.status === "failed") {
-        window.alert(payload.error_message || "Transfer failed while looking for updates.");
+        window.alert(
+          payload.error_message || "Transfer failed while looking for updates.",
+        );
       } else {
         window.location.reload();
       }
@@ -193,6 +234,12 @@
     HTMLFormElement.prototype.submit.call(form);
   }
 
+  const storedStatusUrl = rememberedStatusUrl();
+  if (storedStatusUrl) {
+    setLoading(true);
+    pollUntilDone(storedStatusUrl).catch(() => schedulePoll(storedStatusUrl));
+  }
+
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!form || !button || button.disabled) return;
@@ -211,7 +258,7 @@
       if (!response.ok) throw new Error("Transfer request failed.");
       const payload = await response.json();
       if (!payload.status_url) throw new Error("Missing transfer status URL.");
-      pollUntilDone(payload.status_url).catch(() => schedulePoll(payload.status_url));
+      returnToLibrary(payload.status_url);
     } catch (_) {
       submitNormally();
     }
