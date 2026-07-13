@@ -1,0 +1,3 @@
+# The SDK has no required runtime dependencies for HTTP API usage.
+# Install Django only when using getoffline_sdk.DjangoTransport:
+#   pip install "getoffline-sdk[django]"
