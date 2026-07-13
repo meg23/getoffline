@@ -204,6 +204,7 @@
         <h2 id="quick-add-title">Add YouTube link</h2>
         <form method="post" action="{% url 'enqueue_job' %}" class="modal-form">
           {% csrf_token %}
+          <input type="hidden" name="next" value="{% url 'library' %}" />
           <label for="quick-add-url">URL</label>
           <input id="quick-add-url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
           <div class="modal-actions">
