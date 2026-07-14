@@ -49,8 +49,10 @@
     row.dataset.title = item.title || "";
     row.dataset.kind = item.display_kind || "audio";
     row.dataset.downloadStatus = item.download_status || "";
-    row.dataset.mediaUrl = item.media_url || rowUrl("media", id);
-    row.dataset.subtitleUrl = item.subtitles_url || "";
+    row.dataset.mediaUrl = item.stream_url || `/api/stream/${id}`;
+    row.dataset.subtitleUrl = item.has_subtitles
+      ? item.api_subtitles_url || `/api/subtitle/${id}`
+      : "";
     row.dataset.resumeSeconds = String(item.last_position_seconds || 0);
 
     const channel = renderCell(
