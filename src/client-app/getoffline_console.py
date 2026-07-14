@@ -40,7 +40,7 @@ from getoffline_sdk import GetOfflineClient, HttpTransport, Response
 APP_NAME = "getoffline-console"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
-PLAYER_CANDIDATES = ("mpv", "ffplay", "cvlc", "vlc")
+PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
@@ -283,8 +283,13 @@ class GetOfflineConsole:
 
     def _reap_player(self) -> None:
         if self.playback_session is not None and not self.playback.is_running(self.playback_session):
-            self._save_progress("ended")
-            self.message = "Playback ended"
+            # A local player process can disappear because the user closed the
+            # player window/terminal controls, not only because media reached
+            # EOF.  Saving this as ``ended`` clears the resume position on the
+            # server, so treat unexpected process exits as a stopped session and
+            # preserve the estimated resume point.
+            self._save_progress("stopped")
+            self.message = "Playback stopped"
             self.playback_session = None
             self.playing_id = None
             self.refresh()

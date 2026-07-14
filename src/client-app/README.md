@@ -2,7 +2,7 @@
 
 `getoffline_console.py` is a dependency-light ncurses client for GetOffline. It uses
 the `getoffline-sdk` package for API communication and delegates audio playback
-to either a terminal-friendly local player (`mpv`, `ffplay`, `cvlc`, or `vlc`) or a generic HTTP audio bridge.
+to either a terminal-friendly local player (`mpv`, `cvlc`, `vlc`, or `ffplay`) or a generic HTTP audio bridge.
 
 ## Run
 
@@ -35,7 +35,9 @@ Credentials and optional playback defaults are stored in `$XDG_CONFIG_HOME/getof
 
 The app is intentionally console music-player-like: the terminal UI is always available while an
 external player or bridge handles media decoding. Playback progress is periodically saved
-through the SDK while playback is running and once again when playback stops.
+through the SDK while playback is running and once again when playback stops. The local
+player auto-detection prefers `mpv` or VLC before falling back to `ffplay`, because
+`ffplay` can consume noticeably more CPU during startup/seeking on some systems.
 
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
 the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,
