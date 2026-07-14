@@ -24,7 +24,8 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 REPO_SRC = Path(__file__).resolve().parents[1]
 SDK_SRC = REPO_SRC / "packages"
@@ -57,11 +58,11 @@ class Credentials:
         return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
-class AuthenticatedTransport(HttpTransport):
+class AuthenticatedTransport:
     """HTTP transport that attaches Basic auth to every SDK request."""
 
     def __init__(self, credentials: Credentials, *, timeout_seconds: float = 30.0) -> None:
-        super().__init__(credentials.api_url, timeout_seconds=timeout_seconds)
+        self.transport = HttpTransport(credentials.api_url, timeout_seconds=timeout_seconds)
         self.credentials = credentials
 
     def request(
@@ -70,12 +71,12 @@ class AuthenticatedTransport(HttpTransport):
         target: str,
         args: tuple[object, ...] = (),
         *,
-        query: dict[str, object] | None = None,
+        query: Mapping[str, object] | None = None,
         data: object | None = None,
-        headers: dict[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> Response:
         merged = {"Authorization": self.credentials.auth_header, **(headers or {})}
-        return super().request(method, target, args, query=query, data=data, headers=merged)
+        return self.transport.request(method, target, args, query=query, data=data, headers=merged)
 
 
 class GetOfflineConsole:
@@ -338,7 +339,7 @@ def prompt(stdscr: Any, label: str) -> str:
     stdscr.refresh()
     value = stdscr.getstr(height - 1, len(label) + 2, max(width - len(label) - 3, 1))
     curses.noecho()
-    return value.decode("utf-8").strip()
+    return cast(str, value.decode("utf-8")).strip()
 
 
 def load_credentials() -> Credentials | None:
