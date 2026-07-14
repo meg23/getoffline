@@ -310,7 +310,7 @@ class GetOfflineConsole:
         height, width = stdscr.getmaxyx()
         header = f" getoffline | {self.credentials.username}@{self.credentials.base_url} | filter: {self.filter_mode} "
         safe_addnstr(stdscr, 0, 0, header, curses.A_REVERSE)
-        controls = " Move: ↑/↓ or j/k  Play: Enter/p  Stop: s  Search: /  Add: a  Favorite: f  Quit: q "
+        controls = " Move: j/k  Play: Enter/p  Stop: s  Search: /  Add: a  Favorite: f  Quit: q "
         filters = " Mark: m played, u unplayed  Filters: 1 unplayed, 2 played, 3 favorites, 4 all  Refresh: r "
         safe_addnstr(stdscr, 1, 0, controls, curses.A_BOLD)
         safe_addnstr(stdscr, 2, 0, filters, curses.A_DIM)
