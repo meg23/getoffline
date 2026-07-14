@@ -114,6 +114,7 @@ class GetOfflineConsole:
         self.play_start_position = 0.0
         self.playback_session: PlaybackSession | None = None
         self.last_progress_at = 0.0
+        self._shut_down = False
 
     def refresh(self) -> None:
         payload = self.client.frontend_library(filter_mode=self.filter_mode)
@@ -123,21 +124,23 @@ class GetOfflineConsole:
         self.message = f"Loaded {len(self.episodes)} {self.filter_mode} item(s)"
 
     def run(self, stdscr: Any) -> None:
-        curses.curs_set(0)
-        stdscr.nodelay(True)
-        stdscr.timeout(200)
-        self.refresh()
-        while True:
-            self._reap_player()
-            self._send_periodic_progress()
-            self._draw(stdscr)
-            key = stdscr.getch()
-            if key == -1:
-                continue
-            if key in (ord("q"), 27):
-                self.stop(reason="quit")
-                return
-            self._handle_key(stdscr, key)
+        try:
+            curses.curs_set(0)
+            stdscr.nodelay(True)
+            stdscr.timeout(200)
+            self.refresh()
+            while True:
+                self._reap_player()
+                self._send_periodic_progress()
+                self._draw(stdscr)
+                key = stdscr.getch()
+                if key == -1:
+                    continue
+                if key in (ord("q"), 27):
+                    return
+                self._handle_key(stdscr, key)
+        finally:
+            self.shutdown()
 
     def _handle_key(self, stdscr: Any, key: int) -> None:
         if key in (curses.KEY_UP, ord("k")):
@@ -215,6 +218,14 @@ class GetOfflineConsole:
         self._save_progress(reason)
         self.playback_session = None
         self.playing_id = None
+
+    def shutdown(self) -> None:
+        """Stop any active playback before the console app exits."""
+
+        if self._shut_down:
+            return
+        self._shut_down = True
+        self.stop(reason="quit")
 
     def mark_selected(self, played: bool) -> None:
         episode = self.current_episode()
@@ -416,20 +427,51 @@ class LocalProcessPlaybackBackend:
         if not self.player:
             raise PlaybackError(self.unavailable_message)
         command = player_command(self.player, stream_url, auth_header, seek)
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        popen_kwargs: dict[str, Any] = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if os.name == "posix":
+            # Place the player in its own process group so stopping the console
+            # also stops any helper processes spawned by the player.
+            popen_kwargs["start_new_session"] = True
+        process = subprocess.Popen(command, **popen_kwargs)
         return PlaybackSession(process=process)
 
     def stop(self, session: PlaybackSession) -> None:
         if session.process and session.process.poll() is None:
-            session.process.terminate()
+            self._terminate_process(session.process)
             try:
                 session.process.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                session.process.kill()
+                self._kill_process(session.process)
+                session.process.wait(timeout=3)
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
         return bool(session.active and session.process is not None and session.process.poll() is None)
+
+    def _terminate_process(self, process: subprocess.Popen[bytes]) -> None:
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
+        process.terminate()
+
+    def _kill_process(self, process: subprocess.Popen[bytes]) -> None:
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+                return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
+        process.kill()
 
 
 class AudioBridgePlaybackBackend:
@@ -635,7 +677,10 @@ def main() -> int:
         bridge_url=args.bridge_url,
         bridge_stop_url=args.bridge_stop_url,
     )
-    curses.wrapper(app.run)
+    try:
+        curses.wrapper(app.run)
+    finally:
+        app.shutdown()
     return 0
 
 
