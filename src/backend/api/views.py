@@ -18,6 +18,7 @@ from backend.services.library import (
     human_duration,
     listened_seconds,
     list_downloads,
+    library_filter_counts,
     normalize_library_filter,
     recent_jobs,
 )
@@ -78,6 +79,7 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
     filter_mode = normalize_library_filter(request.GET.get("filter"))
     episodes = list_downloads(profile_id, filter_mode=filter_mode)
     played_count = sum(1 for item in episodes if item.played)
+    filter_counts = library_filter_counts(profile_id)
     profile_name = request.user.get_username() or profile_id
     return JsonResponse(
         {
@@ -93,6 +95,7 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
                 "new": max(len(episodes) - played_count, 0),
                 "favorites": sum(1 for item in episodes if item.favorite),
                 "listened": human_duration(listened_seconds(profile_id)),
+                "filters": filter_counts,
             },
         }
     )

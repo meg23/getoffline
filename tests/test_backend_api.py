@@ -107,6 +107,9 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(payload["library_filter_mode"], "unplayed")
         self.assertEqual([item["id"] for item in payload["downloads"]], [unplayed.id])
         self.assertNotIn(played.id, [item["id"] for item in payload["downloads"]])
+        self.assertEqual(payload["stats"]["filters"]["all"], 2)
+        self.assertEqual(payload["stats"]["filters"]["unplayed"], 1)
+        self.assertEqual(payload["stats"]["filters"]["played"], 1)
 
     def test_frontend_library_honors_filter_modes(self):
         played = Download.objects.create(

@@ -117,6 +117,22 @@ def list_downloads(
     return [decorate_download(item) for item in rows]
 
 
+def library_filter_counts(profile_id: str) -> dict[str, int]:
+    rows = library_download_query(profile_id)
+    downloaded = rows.filter(download_status=DownloadStatus.DOWNLOADED)
+    return {
+        "all": rows.count(),
+        "downloaded": downloaded.count(),
+        "unplayed": downloaded.filter(played=False).count(),
+        "played": downloaded.filter(played=True).count(),
+        "favorites": downloaded.filter(favorite=True).count(),
+        "missing": rows.filter(download_status=DownloadStatus.MISSING).count(),
+        "retention_deleted": rows.filter(
+            download_status=DownloadStatus.RETENTION_DELETED
+        ).count(),
+    }
+
+
 def listened_seconds(profile_id: str) -> float:
     return (
         library_download_query(profile_id)
