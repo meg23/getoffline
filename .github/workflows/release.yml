@@ -15,17 +15,9 @@ permissions:
   contents: write
 
 jobs:
-  build-wheels:
-    name: Build wheel packages
+  build-artifacts:
+    name: Build release artifacts
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - name: sdk
-            path: src/packages
-          - name: client-app
-            path: src/client-app
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,24 +28,47 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tooling
-        run: python -m pip install --upgrade pip setuptools wheel
+        run: python -m pip install --upgrade pip setuptools wheel pex
 
-      - name: Build wheel
-        run: python -m pip wheel --no-deps --wheel-dir "${{ github.workspace }}/dist/${{ matrix.package.name }}" "${{ matrix.package.path }}"
+      - name: Build package wheels
+        run: |
+          mkdir -p dist/wheels
+          python -m pip wheel --no-deps --wheel-dir dist/wheels src/packages
+          python -m pip wheel --no-deps --wheel-dir dist/wheels src/client-app
 
-      - name: Upload wheel artifact
+      - name: Build standalone client PEX
+        run: |
+          mkdir -p dist/pex
+          python -m pex \
+            --no-pypi \
+            --find-links dist/wheels \
+            getoffline-client-app==0.1.0 \
+            getoffline-sdk==0.1.0 \
+            --console-script getoffline-console \
+            --python-shebang '/usr/bin/env python3' \
+            --output-file dist/pex/getoffline-console.pex
+          chmod +x dist/pex/getoffline-console.pex
+
+      - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.package.name }}-wheel
-          path: dist/${{ matrix.package.name }}/*.whl
+          name: sdk-wheel
+          path: dist/wheels/getoffline_sdk-*.whl
+          if-no-files-found: error
+
+      - name: Upload client PEX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-app-pex
+          path: dist/pex/getoffline-console.pex
           if-no-files-found: error
 
   github-release:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: build-wheels
+    needs: build-artifacts
     steps:
-      - name: Download wheel artifacts
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -75,11 +90,13 @@ jobs:
         run: |
           notes_file="${RUNNER_TEMP}/release-notes.md"
           cat > "$notes_file" <<'NOTES'
-          Python wheel packages for the GetOffline SDK and console client app.
+          Release artifacts:
+          - getoffline-console.pex: standalone console client app with the GetOffline SDK bundled.
+          - getoffline_sdk-*.whl: Python SDK wheel.
           NOTES
 
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release upload "$TAG_NAME" dist/*.whl --clobber
+            gh release upload "$TAG_NAME" dist/* --clobber
           else
-            gh release create "$TAG_NAME" dist/*.whl --title "$TAG_NAME" --notes-file "$notes_file"
+            gh release create "$TAG_NAME" dist/* --title "$TAG_NAME" --notes-file "$notes_file"
           fi
