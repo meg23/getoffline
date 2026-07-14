@@ -265,9 +265,9 @@ class GetOfflineConsole:
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         header = f" GetOffline Console | {self.credentials.username}@{self.credentials.base_url} | filter: {self.filter_mode} "
-        stdscr.addnstr(0, 0, header.ljust(width), width, curses.A_REVERSE)
+        safe_addnstr(stdscr, 0, 0, header, curses.A_REVERSE)
         help_text = "↑/↓ j/k move  Enter/p play  s stop  / search  a add  m/u played  f fav  1-4 filters  r refresh  q quit"
-        stdscr.addnstr(1, 0, help_text.ljust(width), width, curses.A_DIM)
+        safe_addnstr(stdscr, 1, 0, help_text, curses.A_DIM)
         list_top = 3
         list_height = max(height - 7, 1)
         if self.selected < self.offset:
@@ -285,13 +285,30 @@ class GetOfflineConsole:
             marker = "▶" if self.playing_id == episode.get("id") else " "
             line = f"{marker}{status} {played} {source[:24]:24} {title}"
             attr = curses.A_REVERSE if absolute == self.selected else curses.A_NORMAL
-            stdscr.addnstr(row, 0, line.ljust(width), width, attr)
+            safe_addnstr(stdscr, row, 0, line, attr)
         footer = f" {self.message} "
         if self.playing_id:
             footer += f"| position ~{int(self.estimated_position())}s "
-        stdscr.addnstr(height - 2, 0, footer.ljust(width), width, curses.A_REVERSE)
-        stdscr.addnstr(height - 1, 0, f" Jobs: {format_jobs(self.jobs)}".ljust(width), width, curses.A_DIM)
+        safe_addnstr(stdscr, height - 2, 0, footer, curses.A_REVERSE)
+        safe_addnstr(stdscr, height - 1, 0, f" Jobs: {format_jobs(self.jobs)}", curses.A_DIM)
         stdscr.refresh()
+
+
+def safe_addnstr(window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL) -> None:
+    """Draw text without failing on curses implementations that reject bottom-right writes."""
+
+    height, width = window.getmaxyx()
+    if y < 0 or y >= height or x < 0 or x >= width:
+        return
+    available = max(width - x - 1, 0)
+    if available <= 0:
+        return
+    try:
+        window.addnstr(y, x, text.ljust(available), available, attr)
+    except curses.error:
+        # Some terminals return ERR when drawing near the lower-right cell even
+        # when truncating. Leave that cell blank rather than crashing the UI.
+        return
 
 
 def detect_player() -> str | None:
@@ -317,7 +334,7 @@ def format_jobs(jobs: list[dict[str, Any]]) -> str:
 def prompt(stdscr: Any, label: str) -> str:
     curses.echo()
     height, width = stdscr.getmaxyx()
-    stdscr.addnstr(height - 1, 0, (label + ": ").ljust(width), width, curses.A_REVERSE)
+    safe_addnstr(stdscr, height - 1, 0, label + ": ", curses.A_REVERSE)
     stdscr.refresh()
     value = stdscr.getstr(height - 1, len(label) + 2, max(width - len(label) - 3, 1))
     curses.noecho()
