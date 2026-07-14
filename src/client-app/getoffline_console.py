@@ -3,9 +3,9 @@
 """console music-player-style ncurses client for GetOffline.
 
 The app intentionally keeps dependencies to the Python standard library plus the
-GetOffline SDK. Playback is delegated to a console-friendly media player such as
-mpv, ffplay, or vlc so terminal rendering remains responsive while the API state
-is updated through the SDK.
+GetOffline SDK. Playback is delegated to a console-friendly media player or a generic HTTP
+audio bridge so terminal rendering remains responsive while the API state is
+updated through the SDK.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Mapping
@@ -40,6 +42,8 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
 PLAYER_CANDIDATES = ("mpv", "ffplay", "cvlc", "vlc")
 PROGRESS_INTERVAL_SECONDS = 5.0
+DEFAULT_PLAYBACK_BACKEND = "local"
+BRIDGE_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass
@@ -47,6 +51,9 @@ class Credentials:
     base_url: str
     username: str
     password: str
+    playback_backend: str = DEFAULT_PLAYBACK_BACKEND
+    bridge_url: str = ""
+    bridge_stop_url: str = ""
 
     @property
     def api_url(self) -> str:
@@ -80,10 +87,22 @@ class AuthenticatedTransport:
 
 
 class GetOfflineConsole:
-    def __init__(self, credentials: Credentials, player: str | None = None) -> None:
+    def __init__(
+        self,
+        credentials: Credentials,
+        player: str | None = None,
+        playback_backend: str | None = None,
+        bridge_url: str | None = None,
+        bridge_stop_url: str | None = None,
+    ) -> None:
         self.credentials = credentials
         self.client = GetOfflineClient(AuthenticatedTransport(credentials))
-        self.player = player or detect_player()
+        self.playback = build_playback_backend(
+            playback_backend or credentials.playback_backend,
+            player=player,
+            bridge_url=bridge_url or credentials.bridge_url,
+            bridge_stop_url=bridge_stop_url or credentials.bridge_stop_url,
+        )
         self.filter_mode = "unplayed"
         self.episodes: list[dict[str, Any]] = []
         self.jobs: list[dict[str, Any]] = []
@@ -93,7 +112,7 @@ class GetOfflineConsole:
         self.playing_id: int | None = None
         self.play_started_at = 0.0
         self.play_start_position = 0.0
-        self.process: subprocess.Popen[bytes] | None = None
+        self.playback_session: PlaybackSession | None = None
         self.last_progress_at = 0.0
 
     def refresh(self) -> None:
@@ -164,8 +183,8 @@ class GetOfflineConsole:
         if not episode:
             self.message = "No episode selected"
             return
-        if not self.player:
-            self.message = "No player found: install mpv, ffplay, or vlc"
+        if not self.playback.available:
+            self.message = self.playback.unavailable_message
             return
         self.stop(reason="switch")
         episode_id = int(episode["id"])
@@ -174,8 +193,16 @@ class GetOfflineConsole:
         seek = float(player_payload.get("seek_seconds") or item.get("last_position_seconds") or 0.0)
         self.client.playback_start(episode_id)
         url = self.stream_url(episode_id)
-        command = player_command(self.player, url, self.credentials.auth_header, seek)
-        self.process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            self.playback_session = self.playback.start(
+                item=item,
+                stream_url=url,
+                auth_header=self.credentials.auth_header,
+                seek=seek,
+            )
+        except PlaybackError as exc:
+            self.message = f"Playback failed: {exc}"
+            return
         self.playing_id = episode_id
         self.play_start_position = seek
         self.play_started_at = time.monotonic()
@@ -183,14 +210,10 @@ class GetOfflineConsole:
         self.message = f"Playing: {item.get('title') or episode.get('title') or episode_id}"
 
     def stop(self, *, reason: str) -> None:
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
+        if self.playback_session is not None:
+            self.playback.stop(self.playback_session)
         self._save_progress(reason)
-        self.process = None
+        self.playback_session = None
         self.playing_id = None
 
     def mark_selected(self, played: bool) -> None:
@@ -247,7 +270,11 @@ class GetOfflineConsole:
         self.client.playback_progress(self.playing_id, self.estimated_position(), reason=reason)
 
     def _send_periodic_progress(self) -> None:
-        if self.playing_id is None or self.process is None or self.process.poll() is not None:
+        if (
+            self.playing_id is None
+            or self.playback_session is None
+            or not self.playback.is_running(self.playback_session)
+        ):
             return
         now = time.monotonic()
         if now - self.last_progress_at >= PROGRESS_INTERVAL_SECONDS:
@@ -255,10 +282,10 @@ class GetOfflineConsole:
             self._save_progress("timeupdate")
 
     def _reap_player(self) -> None:
-        if self.process is not None and self.process.poll() is not None:
+        if self.playback_session is not None and not self.playback.is_running(self.playback_session):
             self._save_progress("ended")
             self.message = "Playback ended"
-            self.process = None
+            self.playback_session = None
             self.playing_id = None
             self.refresh()
 
@@ -316,6 +343,170 @@ def detect_player() -> str | None:
     return next((name for name in PLAYER_CANDIDATES if shutil.which(name)), None)
 
 
+class PlaybackError(RuntimeError):
+    """Raised when a playback backend cannot start or stop playback."""
+
+
+@dataclass
+class PlaybackSession:
+    process: subprocess.Popen[bytes] | None = None
+    session_id: str = ""
+    active: bool = True
+
+
+class LocalProcessPlaybackBackend:
+    def __init__(self, player: str | None = None) -> None:
+        self.player = player or detect_player()
+
+    @property
+    def available(self) -> bool:
+        return bool(self.player)
+
+    @property
+    def unavailable_message(self) -> str:
+        return "No player found: install mpv, ffplay, or vlc"
+
+    def start(
+        self,
+        *,
+        item: Mapping[str, Any],
+        stream_url: str,
+        auth_header: str,
+        seek: float,
+    ) -> PlaybackSession:
+        del item
+        if not self.player:
+            raise PlaybackError(self.unavailable_message)
+        command = player_command(self.player, stream_url, auth_header, seek)
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return PlaybackSession(process=process)
+
+    def stop(self, session: PlaybackSession) -> None:
+        if session.process and session.process.poll() is None:
+            session.process.terminate()
+            try:
+                session.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                session.process.kill()
+        session.active = False
+
+    def is_running(self, session: PlaybackSession) -> bool:
+        return bool(session.active and session.process is not None and session.process.poll() is None)
+
+
+class AudioBridgePlaybackBackend:
+    """Generic HTTP audio bridge backend.
+
+    The bridge receives the authenticated GetOffline stream URL and decides how
+    to present playback to its downstream device. The console client does not
+    know what type of device is behind the bridge.
+    """
+
+    def __init__(
+        self,
+        bridge_url: str,
+        *,
+        bridge_stop_url: str = "",
+        timeout_seconds: float = BRIDGE_TIMEOUT_SECONDS,
+    ) -> None:
+        self.bridge_url = bridge_url.strip()
+        self.bridge_stop_url = bridge_stop_url.strip()
+        self.timeout_seconds = timeout_seconds
+
+    @property
+    def available(self) -> bool:
+        return bool(self.bridge_url)
+
+    @property
+    def unavailable_message(self) -> str:
+        return "Audio bridge is not configured: pass --bridge-url"
+
+    def start(
+        self,
+        *,
+        item: Mapping[str, Any],
+        stream_url: str,
+        auth_header: str,
+        seek: float,
+    ) -> PlaybackSession:
+        if not self.bridge_url:
+            raise PlaybackError(self.unavailable_message)
+        payload = {
+            "url": stream_url,
+            "headers": {"Authorization": auth_header},
+            "seek_seconds": seek,
+            "title": str(item.get("title") or ""),
+            "media_kind": str(item.get("media_kind") or item.get("display_kind") or "audio"),
+            "episode_id": item.get("id"),
+        }
+        response = self._post_json(self.bridge_url, payload)
+        session_id = str(response.get("session_id") or "")
+        return PlaybackSession(session_id=session_id)
+
+    def stop(self, session: PlaybackSession) -> None:
+        if not session.active:
+            return
+        stop_url = self.bridge_stop_url or default_bridge_stop_url(self.bridge_url)
+        try:
+            self._post_json(stop_url, {"session_id": session.session_id})
+        except PlaybackError:
+            # The bridge may intentionally be fire-and-forget. Local progress is
+            # still saved even if the bridge does not expose a working stop URL.
+            pass
+        session.active = False
+
+    def is_running(self, session: PlaybackSession) -> bool:
+        return session.active
+
+    def _post_json(self, url: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            response = urllib.request.urlopen(  # nosec B310 - bridge URL is user configured.
+                request, timeout=self.timeout_seconds
+            )
+            content = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise PlaybackError(f"bridge returned HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise PlaybackError(f"bridge request failed: {exc.reason}") from exc
+        if not content:
+            return {}
+        decoded = json.loads(content.decode("utf-8"))
+        return decoded if isinstance(decoded, dict) else {}
+
+
+def default_bridge_stop_url(bridge_url: str) -> str:
+    parsed = urllib.parse.urlsplit(bridge_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/play"):
+        path = path[: -len("/play")] + "/stop"
+    else:
+        path = f"{path}/stop"
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment))
+
+
+def build_playback_backend(
+    playback_backend: str,
+    *,
+    player: str | None = None,
+    bridge_url: str = "",
+    bridge_stop_url: str = "",
+) -> LocalProcessPlaybackBackend | AudioBridgePlaybackBackend:
+    normalized = (playback_backend or DEFAULT_PLAYBACK_BACKEND).strip().lower()
+    if normalized == "bridge":
+        return AudioBridgePlaybackBackend(bridge_url, bridge_stop_url=bridge_stop_url)
+    if normalized == "local":
+        return LocalProcessPlaybackBackend(player)
+    raise SystemExit(f"Unsupported playback backend: {playback_backend!r}. Expected 'local' or 'bridge'.")
+
+
 def player_command(player: str, url: str, auth_header: str, seek: float) -> list[str]:
     if player == "mpv":
         return ["mpv", "--no-video", f"--start={seek:.3f}", f"--http-header-fields=Authorization: {auth_header}", url]
@@ -346,7 +537,14 @@ def load_credentials() -> Credentials | None:
     if not CONFIG_FILE.exists():
         return None
     data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    return Credentials(base_url=str(data["base_url"]), username=str(data["username"]), password=str(data["password"]))
+    return Credentials(
+        base_url=str(data["base_url"]),
+        username=str(data["username"]),
+        password=str(data["password"]),
+        playback_backend=str(data.get("playback_backend") or DEFAULT_PLAYBACK_BACKEND),
+        bridge_url=str(data.get("bridge_url") or ""),
+        bridge_stop_url=str(data.get("bridge_stop_url") or ""),
+    )
 
 
 def save_credentials(credentials: Credentials) -> None:
@@ -376,6 +574,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", help="GetOffline web base URL, without /api")
     parser.add_argument("--username", help="GetOffline username")
     parser.add_argument("--player", help="media player command to use (default: auto-detect mpv/ffplay/vlc)")
+    parser.add_argument(
+        "--playback-backend",
+        choices=("local", "bridge"),
+        help="playback backend to use (default: stored config or local)",
+    )
+    parser.add_argument("--bridge-url", help="generic audio bridge play endpoint URL")
+    parser.add_argument("--bridge-stop-url", help="generic audio bridge stop endpoint URL")
     return parser.parse_args()
 
 
@@ -385,7 +590,13 @@ def main() -> int:
     credentials = login(args.base_url, args.username) if args.login else load_credentials()
     if credentials is None:
         credentials = login(args.base_url, args.username)
-    app = GetOfflineConsole(credentials, player=args.player)
+    app = GetOfflineConsole(
+        credentials,
+        player=args.player,
+        playback_backend=args.playback_backend,
+        bridge_url=args.bridge_url,
+        bridge_stop_url=args.bridge_stop_url,
+    )
     curses.wrapper(app.run)
     return 0
 
