@@ -315,12 +315,8 @@ class GetOfflineConsole:
             absolute = self.offset + idx
             title = str(episode.get("title") or "Untitled")
             source = str(episode.get("source_name") or episode.get("source_type") or "")
-            favorite = "♥" if episode.get("favorite") else " "
             played = "played" if episode.get("played") else "new"
-            marker = "▶" if self.playing_id == episode.get("id") else " "
             line = format_episode_row(
-                marker=marker,
-                favorite=favorite,
                 played=played,
                 source=source,
                 title=title,
@@ -354,8 +350,6 @@ def safe_addnstr(window: Any, y: int, x: int, text: str, attr: int = curses.A_NO
 
 def format_episode_row(
     *,
-    marker: str,
-    favorite: str,
     played: str,
     source: str,
     title: str,
@@ -363,14 +357,13 @@ def format_episode_row(
 ) -> str:
     """Format one library row with stable columns that fit the terminal."""
 
-    chrome_width = 2 + 1 + 8 + 1 + 2  # marker/favorite, separator spaces, played column, source/title gap.
+    chrome_width = 1 + 8 + 1 + 2  # left inset, played column, source/title gap.
     source_width = min(24, max(10, width // 4))
     title_width = max(width - chrome_width - source_width, 10)
     clean_source = " ".join(source.split())
     clean_title = " ".join(title.split())
     return (
-        f"{marker}{favorite} "
-        f"{played[:8]:8} "
+        f" {played[:8]:8} "
         f"{truncate(clean_source, source_width):{source_width}}  "
         f"{truncate(clean_title, title_width)}"
     )

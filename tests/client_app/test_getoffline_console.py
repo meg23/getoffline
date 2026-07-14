@@ -39,8 +39,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
 class ConsolePlaybackTests(unittest.TestCase):
     def test_episode_row_uses_stable_columns_and_truncates_long_titles(self):
         row = console.format_episode_row(
-            marker="▶",
-            favorite="♥",
             played="new",
             source="Very Long Source Name",
             title="An Extremely Long Episode Title That Should Not Push Columns Around",
@@ -48,7 +46,7 @@ class ConsolePlaybackTests(unittest.TestCase):
         )
 
         self.assertEqual(len(row), 48)
-        self.assertIn("new     ", row)
+        self.assertTrue(row.startswith(" new     "))
         self.assertIn("Very Long S…", row)
         self.assertTrue(row.endswith("…"))
 
