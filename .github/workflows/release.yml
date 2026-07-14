@@ -1,0 +1,103 @@
+name: Release Python packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to create or update. Defaults to the current ref name."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-artifacts:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip setuptools wheel pex
+
+      - name: Build package wheels
+        run: |
+          mkdir -p dist/wheels
+          python -m pip wheel --no-deps --wheel-dir dist/wheels src/packages
+          python -m pip wheel --no-deps --wheel-dir dist/wheels src/client-app
+
+      - name: Build standalone client PEX
+        run: |
+          mkdir -p dist/pex
+          python -m pex \
+            --no-pypi \
+            --find-links dist/wheels \
+            getoffline-client-app==0.1.0 \
+            getoffline-sdk==0.1.0 \
+            --console-script getoffline-console \
+            --python-shebang '/usr/bin/env python3' \
+            --output-file dist/pex/getoffline-console.pex
+          chmod +x dist/pex/getoffline-console.pex
+
+      - name: Upload SDK wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-wheel
+          path: dist/wheels/getoffline_sdk-*.whl
+          if-no-files-found: error
+
+      - name: Upload client PEX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-app-pex
+          path: dist/pex/getoffline-console.pex
+          if-no-files-found: error
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: build-artifacts
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: release-tag
+        run: |
+          tag_name="${{ inputs.tag_name }}"
+          if [ -z "$tag_name" ]; then
+            tag_name="${GITHUB_REF_NAME}"
+          fi
+          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ steps.release-tag.outputs.tag_name }}
+        run: |
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+          cat > "$notes_file" <<'NOTES'
+          Release artifacts:
+          - getoffline-console.pex: standalone console client app with the GetOffline SDK bundled.
+          - getoffline_sdk-*.whl: Python SDK wheel.
+          NOTES
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/* --clobber
+          else
+            gh release create "$TAG_NAME" dist/* --title "$TAG_NAME" --notes-file "$notes_file"
+          fi

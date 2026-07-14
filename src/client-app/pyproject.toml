@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "getoffline-client-app"
+version = "0.1.0"
+description = "Console client app for GetOffline"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "GetOffline" }]
+dependencies = ["getoffline-sdk==0.1.0"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console :: Curses",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+getoffline-console = "app:main"
+
+[tool.setuptools]
+py-modules = ["app"]
