@@ -18,6 +18,7 @@ from backend.services.library import (
     human_duration,
     listened_seconds,
     list_downloads,
+    normalize_library_filter,
     recent_jobs,
 )
 from backend.services.profiles import profile_id_for_request
@@ -74,8 +75,8 @@ def _job_to_dict(job: Job) -> dict[str, object]:
 @require_GET
 def frontend_library(request: HttpRequest) -> JsonResponse:
     profile_id = profile_id_for_request(request)
-    show_all = request.GET.get("filter") == "all"
-    episodes = list_downloads(profile_id, show_all=show_all)
+    filter_mode = normalize_library_filter(request.GET.get("filter"))
+    episodes = list_downloads(profile_id, filter_mode=filter_mode)
     played_count = sum(1 for item in episodes if item.played)
     profile_name = request.user.get_username() or profile_id
     return JsonResponse(
@@ -85,7 +86,7 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "profile_initial": (profile_name[:1] or "U").upper(),
-            "library_filter_mode": "all" if show_all else "unplayed",
+            "library_filter_mode": filter_mode,
             "stats": {
                 "visible": len(episodes),
                 "played": played_count,
@@ -315,7 +316,7 @@ def episode_detail(request: HttpRequest, episode_id: int) -> JsonResponse:
 @require_GET
 def library(request: HttpRequest) -> JsonResponse:
     rows = list_downloads(
-        profile_id_for_request(request), show_all=request.GET.get("filter") == "all"
+        profile_id_for_request(request), filter_mode=request.GET.get("filter")
     )
     return JsonResponse({"episodes": [episode_to_summary(item) for item in rows]})
 

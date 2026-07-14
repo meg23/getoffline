@@ -78,6 +78,86 @@ class BackendApiTests(unittest.TestCase):
             last_seen_at=timezone.now(),
         )
 
+    def test_frontend_library_defaults_to_unplayed_filter_on_server(self):
+        played = Download.objects.create(
+            profile_id="api-user",
+            item_uid="played-ep",
+            source_type="podcast",
+            source_name="Feed",
+            title="Played Episode",
+            download_status=DownloadStatus.DOWNLOADED,
+            played=True,
+            last_seen_at=timezone.now(),
+        )
+        unplayed = Download.objects.create(
+            profile_id="api-user",
+            item_uid="unplayed-ep",
+            source_type="podcast",
+            source_name="Feed",
+            title="Unplayed Episode",
+            download_status=DownloadStatus.DOWNLOADED,
+            played=False,
+            last_seen_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse("api_frontend_library"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["library_filter_mode"], "unplayed")
+        self.assertEqual([item["id"] for item in payload["downloads"]], [unplayed.id])
+        self.assertNotIn(played.id, [item["id"] for item in payload["downloads"]])
+
+    def test_frontend_library_honors_filter_modes(self):
+        played = Download.objects.create(
+            profile_id="api-user",
+            item_uid="played-ep",
+            source_type="podcast",
+            source_name="Feed",
+            title="Played Episode",
+            download_status=DownloadStatus.DOWNLOADED,
+            played=True,
+            last_seen_at=timezone.now(),
+        )
+        favorite = Download.objects.create(
+            profile_id="api-user",
+            item_uid="favorite-ep",
+            source_type="podcast",
+            source_name="Feed",
+            title="Favorite Episode",
+            download_status=DownloadStatus.DOWNLOADED,
+            favorite=True,
+            last_seen_at=timezone.now(),
+        )
+
+        played_response = self.client.get(
+            reverse("api_frontend_library"), {"filter": "played"}
+        )
+        favorite_response = self.client.get(
+            reverse("api_frontend_library"), {"filter": "favorites"}
+        )
+        all_response = self.client.get(
+            reverse("api_frontend_library"), {"filter": "all"}
+        )
+
+        self.assertEqual(played_response.status_code, 200)
+        self.assertEqual(played_response.json()["library_filter_mode"], "played")
+        self.assertEqual(
+            [item["id"] for item in played_response.json()["downloads"]], [played.id]
+        )
+        self.assertEqual(favorite_response.status_code, 200)
+        self.assertEqual(favorite_response.json()["library_filter_mode"], "favorites")
+        self.assertEqual(
+            [item["id"] for item in favorite_response.json()["downloads"]],
+            [favorite.id],
+        )
+        self.assertEqual(all_response.status_code, 200)
+        self.assertEqual(all_response.json()["library_filter_mode"], "all")
+        self.assertCountEqual(
+            [item["id"] for item in all_response.json()["downloads"]],
+            [played.id, favorite.id],
+        )
+
     def test_frontend_player_falls_back_to_file_path_extension_for_video_kind(self):
         download = Download.objects.create(
             profile_id="api-user",

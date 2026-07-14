@@ -55,14 +55,13 @@
     if (!filterMode) return false;
     const serverMode = filterMode.dataset.serverMode || "unplayed";
     const selectedMode = filterMode.value || "unplayed";
-    if (selectedMode !== "all" && serverMode !== "all") return false;
     if (selectedMode === serverMode) return false;
 
     const url = new URL(window.location.href);
-    if (selectedMode === "all") {
-      url.searchParams.set("filter", "all");
-    } else {
+    if (selectedMode === "unplayed") {
       url.searchParams.delete("filter");
+    } else {
+      url.searchParams.set("filter", selectedMode);
     }
     window.location.href = url.toString();
     return true;
