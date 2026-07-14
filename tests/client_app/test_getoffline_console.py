@@ -142,6 +142,44 @@ class StoppedPlaybackBackend:
         return False
 
 
+class RunningPlaybackBackend:
+    available = True
+    unavailable_message = ""
+
+    def __init__(self) -> None:
+        self.stopped_sessions: list[console.PlaybackSession] = []
+
+    def stop(self, session: console.PlaybackSession) -> None:
+        self.stopped_sessions.append(session)
+        session.active = False
+
+    def is_running(self, session: console.PlaybackSession) -> bool:
+        return session.active
+
+
+class QuitWindow:
+    def nodelay(self, value: bool) -> None:
+        self.nodelay_value = value
+
+    def timeout(self, value: int) -> None:
+        self.timeout_value = value
+
+    def getmaxyx(self) -> tuple[int, int]:
+        return (24, 80)
+
+    def erase(self) -> None:
+        return
+
+    def refresh(self) -> None:
+        return
+
+    def addnstr(self, *_args: Any) -> None:
+        return
+
+    def getch(self) -> int:
+        return ord("q")
+
+
 class ConsoleProgressTests(unittest.TestCase):
     def test_reaping_closed_player_preserves_resume_position(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
@@ -171,6 +209,58 @@ class ConsoleProgressTests(unittest.TestCase):
             console.PLAYER_CANDIDATES.index("ffplay"),
             console.PLAYER_CANDIDATES.index("vlc"),
         )
+
+    def test_shutdown_stops_active_playback_and_saves_quit_progress_once(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.client = FakeClient()
+        app.playback = RunningPlaybackBackend()
+        session = console.PlaybackSession(process=None)
+        app.playback_session = session
+        app.playing_id = 42
+        app.play_start_position = 120.0
+        app.play_started_at = console.time.monotonic()
+        app._shut_down = False
+
+        app.shutdown()
+        app.shutdown()
+
+        self.assertEqual(app.playback.stopped_sessions, [session])
+        self.assertIsNone(app.playback_session)
+        self.assertIsNone(app.playing_id)
+        self.assertEqual(len(app.client.progress_calls), 1)
+        self.assertEqual(app.client.progress_calls[0][0], 42)
+        self.assertEqual(app.client.progress_calls[0][2], "quit")
+
+    def test_run_stops_active_playback_when_quitting(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.client = FakeClient()
+        app.playback = RunningPlaybackBackend()
+        session = console.PlaybackSession(process=None)
+        app.playback_session = session
+        app.playing_id = 42
+        app.play_start_position = 120.0
+        app.play_started_at = console.time.monotonic()
+        app.last_progress_at = console.time.monotonic()
+        app.filter_mode = "unplayed"
+        app.episodes = []
+        app.jobs = []
+        app.selected = 0
+        app.offset = 0
+        app.message = "Playing"
+        app._shut_down = False
+
+        original_curs_set = console.curses.curs_set
+        try:
+            console.curses.curs_set = lambda _value: None
+            app.run(QuitWindow())
+        finally:
+            console.curses.curs_set = original_curs_set
+
+        self.assertEqual(app.playback.stopped_sessions, [session])
+        self.assertIsNone(app.playback_session)
+        self.assertIsNone(app.playing_id)
+        self.assertEqual(app.client.progress_calls[0][2], "quit")
 
 
 if __name__ == "__main__":
