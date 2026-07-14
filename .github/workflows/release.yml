@@ -1,0 +1,85 @@
+name: Release Python packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to create or update. Defaults to the current ref name."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-wheels:
+    name: Build wheel packages
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - name: sdk
+            path: src/packages
+          - name: client-app
+            path: src/client-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      - name: Build wheel
+        run: python -m pip wheel --no-deps --wheel-dir "${{ github.workspace }}/dist/${{ matrix.package.name }}" "${{ matrix.package.path }}"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package.name }}-wheel
+          path: dist/${{ matrix.package.name }}/*.whl
+          if-no-files-found: error
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: build-wheels
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: release-tag
+        run: |
+          tag_name="${{ inputs.tag_name }}"
+          if [ -z "$tag_name" ]; then
+            tag_name="${GITHUB_REF_NAME}"
+          fi
+          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release-tag.outputs.tag_name }}
+        run: |
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+          cat > "$notes_file" <<'NOTES'
+          Python wheel packages for the GetOffline SDK and console client app.
+          NOTES
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/*.whl --clobber
+          else
+            gh release create "$TAG_NAME" dist/*.whl --title "$TAG_NAME" --notes-file "$notes_file"
+          fi
