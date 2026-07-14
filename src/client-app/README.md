@@ -1,6 +1,6 @@
 # GetOffline Console client
 
-`getoffline_console.py` is a dependency-light ncurses client for GetOffline. It uses
+`app.py` is a dependency-light ncurses client for GetOffline. It uses
 the `getoffline-sdk` package for API communication and delegates audio playback
 to either a terminal-friendly local player (`mpv`, `cvlc`, `vlc`, or `ffplay`) or a generic HTTP audio bridge.
 
@@ -9,9 +9,9 @@ to either a terminal-friendly local player (`mpv`, `cvlc`, `vlc`, or `ffplay`) o
 From this repository:
 
 ```bash
-PYTHONPATH=../packages:.. python getoffline_console.py --login --base-url http://localhost:8000
-PYTHONPATH=../packages:.. python getoffline_console.py
-PYTHONPATH=../packages:.. python getoffline_console.py --playback-backend bridge --bridge-url http://bridge.local/play
+PYTHONPATH=../packages:.. python app.py --login --base-url http://localhost:8000
+PYTHONPATH=../packages:.. python app.py
+PYTHONPATH=../packages:.. python app.py --playback-backend bridge --bridge-url http://bridge.local/play
 ```
 
 If `getoffline-sdk` is installed in your environment, `PYTHONPATH` is not needed.
