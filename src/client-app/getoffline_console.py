@@ -297,12 +297,14 @@ class GetOfflineConsole:
     def _draw(self, stdscr: Any) -> None:
         stdscr.erase()
         height, width = stdscr.getmaxyx()
-        header = f" GetOffline Console | {self.credentials.username}@{self.credentials.base_url} | filter: {self.filter_mode} "
+        header = f" getoffline | {self.credentials.username}@{self.credentials.base_url} | filter: {self.filter_mode} "
         safe_addnstr(stdscr, 0, 0, header, curses.A_REVERSE)
-        help_text = "↑/↓ j/k move  Enter/p play  s stop  / search  a add  m/u played  f fav  1-4 filters  r refresh  q quit"
-        safe_addnstr(stdscr, 1, 0, help_text, curses.A_DIM)
-        list_top = 3
-        list_height = max(height - 7, 1)
+        controls = " Move: ↑/↓ or j/k  Play: Enter/p  Stop: s  Search: /  Add: a  Favorite: f  Quit: q "
+        filters = " Mark: m played, u unplayed  Filters: 1 unplayed, 2 played, 3 favorites, 4 all  Refresh: r "
+        safe_addnstr(stdscr, 1, 0, controls, curses.A_BOLD)
+        safe_addnstr(stdscr, 2, 0, filters, curses.A_DIM)
+        list_top = 4
+        list_height = max(height - 6, 1)
         if self.selected < self.offset:
             self.offset = self.selected
         if self.selected >= self.offset + list_height:
@@ -313,17 +315,23 @@ class GetOfflineConsole:
             absolute = self.offset + idx
             title = str(episode.get("title") or "Untitled")
             source = str(episode.get("source_name") or episode.get("source_type") or "")
-            status = "♥" if episode.get("favorite") else " "
-            played = "P" if episode.get("played") else "N"
+            favorite = "♥" if episode.get("favorite") else " "
+            played = "played" if episode.get("played") else "new"
             marker = "▶" if self.playing_id == episode.get("id") else " "
-            line = f"{marker}{status} {played} {source[:24]:24} {title}"
+            line = format_episode_row(
+                marker=marker,
+                favorite=favorite,
+                played=played,
+                source=source,
+                title=title,
+                width=width,
+            )
             attr = curses.A_REVERSE if absolute == self.selected else curses.A_NORMAL
             safe_addnstr(stdscr, row, 0, line, attr)
         footer = f" {self.message} "
         if self.playing_id:
             footer += f"| position ~{int(self.estimated_position())}s "
-        safe_addnstr(stdscr, height - 2, 0, footer, curses.A_REVERSE)
-        safe_addnstr(stdscr, height - 1, 0, f" Jobs: {format_jobs(self.jobs)}", curses.A_DIM)
+        safe_addnstr(stdscr, height - 1, 0, footer, curses.A_REVERSE)
         stdscr.refresh()
 
 
@@ -342,6 +350,38 @@ def safe_addnstr(window: Any, y: int, x: int, text: str, attr: int = curses.A_NO
         # Some terminals return ERR when drawing near the lower-right cell even
         # when truncating. Leave that cell blank rather than crashing the UI.
         return
+
+
+def format_episode_row(
+    *,
+    marker: str,
+    favorite: str,
+    played: str,
+    source: str,
+    title: str,
+    width: int,
+) -> str:
+    """Format one library row with stable columns that fit the terminal."""
+
+    chrome_width = 2 + 1 + 8 + 1 + 2  # marker/favorite, separator spaces, played column, source/title gap.
+    source_width = min(24, max(10, width // 4))
+    title_width = max(width - chrome_width - source_width, 10)
+    clean_source = " ".join(source.split())
+    clean_title = " ".join(title.split())
+    return (
+        f"{marker}{favorite} "
+        f"{played[:8]:8} "
+        f"{truncate(clean_source, source_width):{source_width}}  "
+        f"{truncate(clean_title, title_width)}"
+    )
+
+
+def truncate(value: str, max_width: int) -> str:
+    if len(value) <= max_width:
+        return value
+    if max_width <= 1:
+        return value[:max_width]
+    return value[: max_width - 1] + "…"
 
 
 def detect_player() -> str | None:
