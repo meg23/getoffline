@@ -36,6 +36,15 @@ jobs:
           python -m pip wheel --no-deps --wheel-dir dist/wheels src/packages
           python -m pip wheel --no-deps --wheel-dir dist/wheels src/client-app
 
+      - name: Download PEX bootstrap wheels
+        run: |
+          python -m pip download \
+            --only-binary=:all: \
+            --dest dist/wheels \
+            pip==23.2 \
+            setuptools==68.0.0 \
+            wheel==0.40.0
+
       - name: Build standalone client PEX
         run: |
           mkdir -p dist/pex
