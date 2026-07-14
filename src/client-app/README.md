@@ -2,7 +2,7 @@
 
 `getoffline_console.py` is a dependency-light ncurses client for GetOffline. It uses
 the `getoffline-sdk` package for API communication and delegates audio playback
-to a terminal-friendly player (`mpv`, `ffplay`, `cvlc`, or `vlc`).
+to either a terminal-friendly local player (`mpv`, `ffplay`, `cvlc`, or `vlc`) or a generic HTTP audio bridge.
 
 ## Run
 
@@ -11,10 +11,11 @@ From this repository:
 ```bash
 PYTHONPATH=../packages:.. python getoffline_console.py --login --base-url http://localhost:8000
 PYTHONPATH=../packages:.. python getoffline_console.py
+PYTHONPATH=../packages:.. python getoffline_console.py --playback-backend bridge --bridge-url http://bridge.local/play
 ```
 
 If `getoffline-sdk` is installed in your environment, `PYTHONPATH` is not needed.
-Credentials are stored in `$XDG_CONFIG_HOME/getoffline-console/credentials.json` or
+Credentials and optional playback defaults are stored in `$XDG_CONFIG_HOME/getoffline-console/credentials.json` or
 `~/.config/getoffline-console/credentials.json` with `0600` permissions.
 
 ## Keys
@@ -33,6 +34,11 @@ Credentials are stored in `$XDG_CONFIG_HOME/getoffline-console/credentials.json`
 ## Notes
 
 The app is intentionally console music-player-like: the terminal UI is always available while an
-external player handles media decoding. Playback progress is periodically saved
-through the SDK while the player process is running and once again when playback
-stops.
+external player or bridge handles media decoding. Playback progress is periodically saved
+through the SDK while playback is running and once again when playback stops.
+
+The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
+the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,
+`media_kind`, and `episode_id`. If no `--bridge-stop-url` is provided, the client
+posts stop requests to a sibling `/stop` endpoint, so `http://bridge.local/play`
+defaults to `http://bridge.local/stop`.
