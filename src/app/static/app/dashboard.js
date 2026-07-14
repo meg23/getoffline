@@ -1,7 +1,8 @@
 (() => {
-  const rows = Array.from(
+  let rows = Array.from(
     document.querySelectorAll("#downloads-table-body tr[data-row-id]"),
   );
+  const tableBody = document.getElementById("downloads-table-body");
   const filterInput = document.getElementById("library-filter");
   const filterMode = document.getElementById("library-filter-mode");
   const clearButton = document.getElementById("library-filter-clear");
@@ -13,6 +14,121 @@
 
   const visibleRows = () => rows.filter((row) => row.style.display !== "none");
 
+  function refreshRows() {
+    rows = Array.from(
+      document.querySelectorAll("#downloads-table-body tr[data-row-id]"),
+    );
+  }
+
+  function bindSelector(input) {
+    if (!input || input.dataset.libraryBound === "1") return;
+    input.dataset.libraryBound = "1";
+    input.addEventListener("change", updateBatchState);
+  }
+
+  function rowUrl(name, id) {
+    const suffix = name === "player" ? `play/${id}/` : `${name}/${id}/`;
+    return `/${suffix}`;
+  }
+
+  function renderCell(row, className, text) {
+    const cell = document.createElement("td");
+    cell.className = className;
+    cell.textContent = text || "";
+    row.appendChild(cell);
+    return cell;
+  }
+
+  function itemRow(item) {
+    const row = document.createElement("tr");
+    const id = String(item.id || "");
+    row.dataset.rowId = id;
+    row.dataset.played = item.played ? "1" : "0";
+    row.dataset.favorite = item.favorite ? "1" : "0";
+    row.dataset.channel = item.source_name || "";
+    row.dataset.title = item.title || "";
+    row.dataset.kind = item.display_kind || "audio";
+    row.dataset.downloadStatus = item.download_status || "";
+    row.dataset.mediaUrl = item.media_url || rowUrl("media", id);
+    row.dataset.subtitleUrl = item.subtitles_url || "";
+    row.dataset.resumeSeconds = String(item.last_position_seconds || 0);
+
+    const channel = renderCell(
+      row,
+      "channel-col",
+      item.source_name || item.source_type || "",
+    );
+    channel.title = item.source_name || "";
+
+    const episode = document.createElement("td");
+    episode.className = "episode-col";
+    const link = document.createElement("a");
+    link.className = "episode-link";
+    link.href = rowUrl("player", id);
+    link.dataset.rowId = id;
+    link.dataset.kind = item.display_kind || "audio";
+    link.dataset.source = item.source_name || item.source_type || "";
+    link.dataset.hasSubtitles = item.has_subtitles ? "1" : "0";
+    link.dataset.resumeSeconds = String(item.last_position_seconds || 0);
+    link.dataset.title = item.title || "Untitled";
+    link.dataset.playLink = "1";
+    link.textContent = item.title || "Untitled";
+    episode.appendChild(link);
+    row.appendChild(episode);
+
+    const source = renderCell(row, "source-col", "");
+    const sourcePill = document.createElement("span");
+    sourcePill.className = "pill status-new";
+    sourcePill.textContent = String(item.source_type || "").toUpperCase();
+    source.appendChild(sourcePill);
+
+    const type = renderCell(row, "type-col", "");
+    const typePill = document.createElement("span");
+    typePill.className = "pill";
+    typePill.textContent = item.display_type || "?";
+    type.appendChild(typePill);
+
+    renderCell(row, "size-col", item.display_size || "—");
+
+    const status = renderCell(row, "status-col", "");
+    const statusPill = document.createElement("span");
+    statusPill.className = `pill ${item.status_class || "status-unplayed"}`;
+    statusPill.textContent = item.status_label || "UNPLAYED";
+    status.appendChild(statusPill);
+
+    const selection = document.createElement("td");
+    selection.className = "selection-cell";
+    const checkbox = document.createElement("input");
+    checkbox.setAttribute("form", "batch-form");
+    checkbox.type = "checkbox";
+    checkbox.className = "row-selector";
+    checkbox.name = "ids";
+    checkbox.value = id;
+    checkbox.setAttribute("aria-label", `Select ${item.title || "item"}`);
+    selection.appendChild(checkbox);
+    row.appendChild(selection);
+    bindSelector(checkbox);
+
+    return row;
+  }
+
+  async function hydrateEmptyLibraryFromApi() {
+    if (!tableBody || rows.length > 0) return;
+    const url = new URL("/api/frontend/library", window.location.origin);
+    const mode = filterMode?.value || "unplayed";
+    if (mode !== "unplayed") url.searchParams.set("filter", mode);
+    const response = await fetch(url, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const downloads = Array.isArray(payload.downloads) ? payload.downloads : [];
+    if (!downloads.length) return;
+    tableBody.replaceChildren(...downloads.map(itemRow));
+    refreshRows();
+  }
 
   function applyFilters() {
     const term = (filterInput?.value || "").trim().toLowerCase();
@@ -76,9 +192,7 @@
     if (filterMode) filterMode.value = "unplayed";
     if (!syncServerFilterMode()) applyFilters();
   });
-  selectors().forEach((input) =>
-    input.addEventListener("change", updateBatchState),
-  );
+  selectors().forEach(bindSelector);
   batchAction?.addEventListener("change", updateBatchState);
   selectAll?.addEventListener("change", () => {
     visibleRows().forEach((row) => {
@@ -122,7 +236,7 @@
     if (event.key === "Escape") closeModals();
   });
 
-  applyFilters();
+  hydrateEmptyLibraryFromApi().finally(applyFilters);
 })();
 
 
