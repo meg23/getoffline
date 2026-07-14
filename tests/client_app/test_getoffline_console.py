@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 
-MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "client-app" / "getoffline_console.py"
-spec = importlib.util.spec_from_file_location("getoffline_console", MODULE_PATH)
+MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "client-app" / "app.py"
+spec = importlib.util.spec_from_file_location("client_app", MODULE_PATH)
 assert spec is not None and spec.loader is not None
 console = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = console
