@@ -1444,6 +1444,21 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
         _sync_update_downloads_schedule(
             profile_id, request.POST.get("config__auto_update_minutes"), now=now
         )
+    if "config__android_sync_destination" in request.POST:
+        job = create_job(
+            profile_id=profile_id,
+            job_type=JobType.TRANSFER_MEDIA,
+            payload={"source": "django_settings_save", "force_android_sync": True},
+            idempotency_key=f"transfer_media:{profile_id}:settings:{uuid.uuid4().hex}",
+        )
+        publish_job(
+            {
+                "job_id": job.id,
+                "job_type": job.job_type,
+                "profile_id": job.profile_id,
+                "attempt": 1,
+            }
+        )
     return HttpResponseRedirect(reverse("settings"))
 
 

@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
@@ -2830,6 +2831,30 @@ def _android_transfer_items(
     return items
 
 
+def _transfer_job_forces_android_enabled(job: Job) -> bool:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    source = str(payload.get("source") or "").strip().lower()
+    if str(payload.get("force_android_sync") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+    return source not in {"scheduler", "test-scheduler"}
+
+
+def _android_transfer_config_for_job(job: Job) -> AndroidSyncConfig:
+    config = config_from_defaults(profile_settings(job.profile_id))
+    if not config.enabled and _transfer_job_forces_android_enabled(job):
+        log.info(
+            "Transfer worker forcing Android sync enabled for manual job job_id=%s profile_id=%s",
+            job.id,
+            job.profile_id,
+        )
+        return replace(config, enabled=True)
+    return config
+
 def transfer_media(job: Job) -> None:
     log.info(
         "Transfer worker started job_id=%s profile_id=%s payload=%s",
@@ -2837,7 +2862,7 @@ def transfer_media(job: Job) -> None:
         job.profile_id,
         job.payload,
     )
-    config = config_from_defaults(profile_settings(job.profile_id))
+    config = _android_transfer_config_for_job(job)
     items = _android_transfer_items(job.profile_id, config)
     log.info(
         "Transfer worker prepared Android sync job_id=%s profile_id=%s items=%s enabled=%s destination=%s",

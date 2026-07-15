@@ -337,6 +337,31 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(item.position_seconds, 42.5)
             self.assertEqual(item.artwork_url, "https://example.test/art.jpg")
 
+    def test_transfer_media_manual_job_forces_android_sync_enabled(self):
+        ProfileConfigValue.objects.create(
+            profile_id="default", key="android_sync_enabled", value="0"
+        )
+        job = create_job(
+            profile_id="default",
+            job_type="transfer_media",
+            payload={"source": "manual-worker-container"},
+        )
+
+        with patch("workers.handlers.sync_items") as sync_mock:
+            sync_mock.return_value = SimpleNamespace(
+                message="no unplayed media to transfer",
+                attempted=0,
+                copied=0,
+                skipped=0,
+                failed=0,
+                device_serial=None,
+                errors=[],
+            )
+            transfer_media(job)
+
+        _, config = sync_mock.call_args.args
+        self.assertTrue(config.enabled)
+
     def test_transfer_media_raises_when_android_sync_reports_errors(self):
         ProfileConfigValue.objects.create(
             profile_id="default", key="android_sync_enabled", value="1"
@@ -569,6 +594,33 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertTrue(schedule.enabled)
         self.assertEqual(schedule.interval_seconds, 420)
+
+    def test_save_android_config_enqueues_manual_transfer_for_logged_in_user(self):
+        client = Client()
+        User.objects.create_user(username="alice", password="pass")
+        self.assertTrue(client.login(username="alice", password="pass"))
+
+        with patch("app.views.publish_job") as publish:
+            response = client.post(
+                "/settings/save/",
+                {
+                    "config__android_sync_destination": "/sdcard/Music/GetOffline",
+                    "config__android_sync_enabled": "0",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get(profile_id="alice", job_type="transfer_media")
+        self.assertEqual(job.payload["source"], "django_settings_save")
+        self.assertTrue(job.payload["force_android_sync"])
+        publish.assert_called_once_with(
+            {
+                "job_id": job.id,
+                "job_type": "transfer_media",
+                "profile_id": "alice",
+                "attempt": 1,
+            }
+        )
 
     def test_retention_cleanup_deletes_expired_non_favorite_content(self):
         with tempfile.TemporaryDirectory() as tmpdir:
