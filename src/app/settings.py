@@ -20,7 +20,12 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(
-        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
+        # The Docker/nginx frontend is commonly reached from another device on the
+        # local network (for example http://192.168.x.x:8080). Django validates
+        # the Host header before routing requests, so the default must accept
+        # those LAN addresses unless deployments opt into a stricter allow-list.
+        "GETOFFLINE_DJANGO_ALLOWED_HOSTS",
+        "*",
     ).split(",")
     if host.strip()
 ]
