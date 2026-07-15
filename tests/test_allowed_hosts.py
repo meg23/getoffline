@@ -21,5 +21,9 @@ def test_default_allowed_hosts_accept_lan_addresses() -> None:
     assert "*" in _load_allowed_hosts(None)
 
 
-def test_explicit_allowed_hosts_remain_strict() -> None:
+def test_compose_default_allowed_hosts_accept_lan_addresses() -> None:
+    assert "*" in _load_allowed_hosts("localhost,127.0.0.1,frontend,api")
+
+
+def test_custom_allowed_hosts_remain_strict() -> None:
     assert _load_allowed_hosts("localhost,127.0.0.1") == ["localhost", "127.0.0.1"]

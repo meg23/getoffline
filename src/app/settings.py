@@ -20,10 +20,18 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(
-        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver,*"
+        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
     ).split(",")
     if host.strip()
 ]
+
+
+default_compose_hosts = ["localhost", "127.0.0.1", "frontend", "api"]
+if (
+    not os.getenv("GETOFFLINE_DJANGO_ALLOWED_HOSTS")
+    or ALLOWED_HOSTS == default_compose_hosts
+) and "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
