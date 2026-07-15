@@ -156,6 +156,13 @@ def _combined_output(completed: object) -> str:
     return stdout or stderr
 
 
+def _output_for_log(completed: object, limit: int = 1200) -> str:
+    output = _combined_output(completed) or "none"
+    if len(output) <= limit:
+        return output
+    return f"{output[:limit]}… (truncated, {len(output)} chars)"
+
+
 def _append_error(
     result: AndroidSyncResult, message: str, sync_name: str = "Android transfer"
 ) -> None:
@@ -171,7 +178,8 @@ def _run_adb_command(
     runner: Callable[..., subprocess.CompletedProcess],
     log_context: str = "Android transfer adb command",
 ) -> subprocess.CompletedProcess:
-    log.debug("%s starting: %s (%s)", log_context, description, _command_for_log(args))
+    command_text = _command_for_log(args)
+    log.info("%s starting: %s command=%s", log_context, description, command_text)
     try:
         completed = runner(
             args,
@@ -190,13 +198,12 @@ def _run_adb_command(
         log.warning("%s failed during %s: %s", log_context, description, exc)
         raise RuntimeError(f"{description} failed: {exc}") from exc
 
-    output = _combined_output(completed)
-    log.debug(
+    log.info(
         "%s finished: %s returncode=%s output=%s",
         log_context,
         description,
         getattr(completed, "returncode", "unknown"),
-        output or "none",
+        _output_for_log(completed),
     )
     return completed
 
@@ -1326,6 +1333,13 @@ def sync_items_to_android(
     config: AndroidSyncConfig,
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> AndroidSyncResult:
+    log.info(
+        "Android transfer requested: enabled=%s mode=%s destination=%s max_items=%s",
+        "yes" if config.enabled else "no",
+        config.connection_mode or "usb",
+        normalize_android_destination(config.destination),
+        config.max_items,
+    )
     result = AndroidSyncResult(message="disabled")
     if not config.enabled:
         log.info("Android transfer skipped: disabled")
