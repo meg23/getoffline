@@ -121,6 +121,16 @@ To configure Android transfer:
 
 To transfer over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each transfer/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
 
+When running with Docker Compose, `adb` is installed in the `worker-transfer` container and its pairing keys are kept in the `adb-data` volume. Pair from inside that same container so the worker can reuse the key later:
+
+```bash
+docker compose exec worker-transfer adb pair PHONE_IP:PAIRING_PORT
+docker compose exec worker-transfer adb connect PHONE_IP:5555
+docker compose exec worker-transfer adb devices
+```
+
+Use the **Wireless debugging** screen on Android for the temporary pairing port and code. The pairing port is usually different from the later `5555` connection port. If `adb devices` shows `unauthorized`, accept the authorization prompt on the phone or pair again from the container. USB debugging from containers requires passing the host USB bus into the container (for example `/dev/bus/usb`) and may require privileged device access, so Wi-Fi debugging is the simpler container setup.
+
 When enabled, GetOffline periodically transfers to the selected destination using the same interval as automatic download checks, and it also attempts a transfer after new downloads finish. The **Save and transfer** button in Settings persists the configuration and starts a transfer immediately. Completed destination paths are recorded in `transferdb.txt` and skipped on later runs. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android transfer also asks the device's media scanner to rescan pushed files. Each transfer writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
 Clean up generated files:

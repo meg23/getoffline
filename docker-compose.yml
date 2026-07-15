@@ -195,6 +195,9 @@ services:
     restart: unless-stopped
     environment: *getoffline-env
     command: python -m workers transfer
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+      - adb-data:/root/.android
     depends_on:
       mysql:
         condition: service_healthy
@@ -238,3 +241,4 @@ services:
 volumes:
   mysql-data:
   rabbitmq-data:
+  adb-data:
