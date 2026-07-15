@@ -1059,7 +1059,12 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         or request.headers.get("accept") == "application/json"
     )
     if wants_json:
-        status_query = urlencode({"profile_id": profile_id, "token": completion_marker})
+        status_params = {"profile_id": profile_id}
+        if completion_marker:
+            status_params["token"] = completion_marker
+        else:
+            status_params["job_id"] = str(job.id)
+        status_query = urlencode(status_params)
         status_url = f"{reverse('worker_message_status')}?{status_query}"
         return JsonResponse(
             {
@@ -1081,6 +1086,19 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
 def worker_message_status(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
     token = str(request.GET.get("token") or "").strip()
+    job_id = str(request.GET.get("job_id") or "").strip()
+    if not token and job_id:
+        job = Job.objects.filter(profile_id=profile_id, id=job_id).first()
+        if job is None:
+            return JsonResponse({"finished": False, "ok": True, "status": "pending"})
+        return JsonResponse(
+            {
+                "finished": job.status in {JobStatus.SUCCEEDED, JobStatus.FAILED},
+                "ok": job.status is not JobStatus.FAILED,
+                "status": job.status,
+                "error_message": job.error_message or "",
+            }
+        )
     if not token:
         return JsonResponse(
             {
