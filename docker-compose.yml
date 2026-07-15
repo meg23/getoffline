@@ -195,6 +195,8 @@ services:
     restart: unless-stopped
     environment: *getoffline-env
     command: python -m workers transfer
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     depends_on:
       mysql:
         condition: service_healthy
