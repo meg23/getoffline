@@ -17,6 +17,7 @@ from pathlib import Path
 
 from django.db import IntegrityError
 from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 
 from backend.services.settings import profile_output_root
@@ -2789,28 +2790,67 @@ def _artwork_url_from_download(download: Download) -> str | None:
     return None
 
 
+def _log_available_download_profiles() -> None:
+    profile_counts = list(
+        Download.objects.filter(download_status=DownloadStatus.DOWNLOADED)
+        .values("profile_id")
+        .annotate(count=Count("id"))
+        .order_by("profile_id")[:10]
+    )
+    if not profile_counts:
+        log.info("Android transfer selection found no downloaded media in any profile")
+        return
+    log.info(
+        "Android transfer selection available downloaded profiles: %s",
+        ", ".join(
+            f"{row['profile_id']}={row['count']}" for row in profile_counts
+        ),
+    )
+
+
 def _android_transfer_items(
     profile_id: str, config: AndroidSyncConfig
 ) -> list[AndroidSyncItem]:
     exclude_pattern = _android_transfer_exclude_pattern(config)
+    base_downloads = Download.objects.filter(
+        profile_id=profile_id,
+        download_status=DownloadStatus.DOWNLOADED,
+    )
+    downloaded_count = base_downloads.count()
     downloads = (
-        Download.objects.filter(
-            profile_id=profile_id,
-            download_status=DownloadStatus.DOWNLOADED,
-        )
-        .exclude(file_path__isnull=True, file_path_relative__isnull=True)
+        base_downloads.exclude(file_path__isnull=True, file_path_relative__isnull=True)
         .order_by("played", "-last_seen_at", "id")
     )
+    path_candidate_count = downloads.count()
+    skip_counts = {
+        "played": 0,
+        "started": 0,
+        "unplayed": 0,
+        "excluded": 0,
+        "missing_path": 0,
+    }
     items: list[AndroidSyncItem] = []
     for download in downloads:
+        bucket = _download_playback_bucket(download)
+        if bucket == "played" and not config.include_played:
+            skip_counts["played"] += 1
+            continue
+        if bucket == "started" and not config.include_started:
+            skip_counts["started"] += 1
+            continue
+        if bucket == "unplayed" and not config.include_unplayed:
+            skip_counts["unplayed"] += 1
+            continue
         if not _download_selected_for_android_transfer(
             download, config, exclude_pattern
         ):
+            skip_counts["excluded"] += 1
             continue
         media_path = _path_from_download_fields(
             download.profile_id, download.file_path, download.file_path_relative
         )
         if media_path is None:
+            skip_counts["missing_path"] += 1
             continue
         subtitle_path = _path_from_download_fields(
             download.profile_id,
@@ -2828,6 +2868,20 @@ def _android_transfer_items(
                 artwork_url=_artwork_url_from_download(download),
             )
         )
+    log.info(
+        "Android transfer selection summary: profile_id=%s downloaded=%s path_candidates=%s selected=%s skipped_played=%s skipped_started=%s skipped_unplayed=%s skipped_excluded=%s skipped_missing_path=%s",
+        profile_id,
+        downloaded_count,
+        path_candidate_count,
+        len(items),
+        skip_counts["played"],
+        skip_counts["started"],
+        skip_counts["unplayed"],
+        skip_counts["excluded"],
+        skip_counts["missing_path"],
+    )
+    if downloaded_count == 0:
+        _log_available_download_profiles()
     return items
 
 

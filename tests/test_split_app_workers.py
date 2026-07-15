@@ -362,6 +362,45 @@ class SharedDjangoModelTests(TestCase):
         _, config = sync_mock.call_args.args
         self.assertTrue(config.enabled)
 
+
+    def test_transfer_media_logs_available_profiles_when_profile_has_no_downloads(self):
+        media = Path(tempfile.gettempdir()) / "other-profile-transfer-test.mp3"
+        media.write_text("media", encoding="utf-8")
+        self.addCleanup(lambda: media.unlink(missing_ok=True))
+        Download.objects.create(
+            profile_id="bob",
+            source_type=SourceType.PODCAST,
+            source_name="Other Feed",
+            title="Other Episode",
+            file_path=str(media),
+            download_status=DownloadStatus.DOWNLOADED,
+        )
+        job = create_job(
+            profile_id="default",
+            job_type="transfer_media",
+            payload={"source": "manual-worker-container"},
+        )
+
+        with (
+            patch("workers.handlers.sync_items") as sync_mock,
+            patch("workers.handlers.log.info") as info,
+        ):
+            sync_mock.return_value = SimpleNamespace(
+                message="no unplayed media to transfer",
+                attempted=0,
+                copied=0,
+                skipped=0,
+                failed=0,
+                device_serial=None,
+                errors=[],
+            )
+            transfer_media(job)
+
+        rendered = [str(call.args[0]) for call in info.call_args_list]
+        self.assertIn(
+            "Android transfer selection available downloaded profiles: %s", rendered
+        )
+
     def test_transfer_media_raises_when_android_sync_reports_errors(self):
         ProfileConfigValue.objects.create(
             profile_id="default", key="android_sync_enabled", value="1"
