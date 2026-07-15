@@ -26,11 +26,10 @@ ALLOWED_HOSTS = [
 ]
 
 
-default_compose_hosts = ["localhost", "127.0.0.1", "frontend", "api"]
-if (
-    not os.getenv("GETOFFLINE_DJANGO_ALLOWED_HOSTS")
-    or ALLOWED_HOSTS == default_compose_hosts
-) and "*" not in ALLOWED_HOSTS:
+STRICT_ALLOWED_HOSTS = os.getenv(
+    "GETOFFLINE_DJANGO_STRICT_ALLOWED_HOSTS", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+if not STRICT_ALLOWED_HOSTS and "*" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("*")
 
 CSRF_TRUSTED_ORIGINS = [
