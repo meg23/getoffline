@@ -43,6 +43,13 @@ def _allowed_hosts() -> list[str]:
 
 ALLOWED_HOSTS = _allowed_hosts()
 
+
+STRICT_ALLOWED_HOSTS = os.getenv(
+    "GETOFFLINE_DJANGO_STRICT_ALLOWED_HOSTS", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+if not STRICT_ALLOWED_HOSTS and "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
+
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
