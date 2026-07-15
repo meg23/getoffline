@@ -1,5 +1,6 @@
 import hashlib
 import importlib
+import json
 import os
 import re
 import subprocess
@@ -17,6 +18,8 @@ from django.db import IntegrityError
 from django.db import transaction
 from django.utils import timezone
 
+from backend.services.settings import profile_output_root
+from backend.services.settings import profile_settings
 from models.domain import DownloadStatus
 from models.domain import JobStatus
 from models.domain import SourceType
@@ -34,6 +37,10 @@ from workers.content_filter import log_filtered_deletion
 from workers.content_filter import screen_transcript
 from workers.logger import get_logger
 from workers.subtitles import create_subtitles
+from workers.sync import AndroidSyncConfig
+from workers.sync import AndroidSyncItem
+from workers.sync import config_from_defaults
+from workers.sync import sync_items
 from workers.utils import sanitize_channel_name
 from workers.ytdlp_helpers import apply_ytdlp_player_js_variant_workaround
 from workers.ytdlp_helpers import enable_youtube_quickjs_remote_component
@@ -2697,15 +2704,162 @@ def retention_cleanup(job: Job) -> None:
     )
 
 
+def _path_from_download_fields(
+    profile_id: str, absolute_path: str | None, relative_path: str | None
+) -> Path | None:
+    if relative_path:
+        return profile_output_root(profile_id) / str(relative_path)
+    if absolute_path:
+        return Path(str(absolute_path))
+    return None
+
+
+def _download_playback_bucket(download: Download) -> str:
+    if download.played:
+        return "played"
+    if float(download.last_position_seconds or 0.0) > 0:
+        return "started"
+    return "unplayed"
+
+
+def _download_selected_for_android_transfer(
+    download: Download,
+    config: AndroidSyncConfig,
+    exclude_pattern: re.Pattern[str] | None,
+) -> bool:
+    bucket = _download_playback_bucket(download)
+    if bucket == "played" and not config.include_played:
+        return False
+    if bucket == "started" and not config.include_started:
+        return False
+    if bucket == "unplayed" and not config.include_unplayed:
+        return False
+
+    if exclude_pattern is None:
+        return True
+    haystack = "\n".join(
+        str(value or "")
+        for value in (
+            download.title,
+            download.source_name,
+            download.file_path,
+            download.file_path_relative,
+        )
+    )
+    return exclude_pattern.search(haystack) is None
+
+
+def _android_transfer_exclude_pattern(
+    config: AndroidSyncConfig,
+) -> re.Pattern[str] | None:
+    if not config.exclude_regex:
+        return None
+    try:
+        return re.compile(config.exclude_regex, re.IGNORECASE)
+    except re.error as exc:
+        log.warning(
+            "Android transfer exclude regex ignored: pattern=%r error=%s",
+            config.exclude_regex,
+            exc,
+        )
+        return None
+
+
+def _artwork_url_from_download(download: Download) -> str | None:
+    if not download.raw_metadata_json:
+        return None
+    try:
+        metadata = json.loads(download.raw_metadata_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("thumbnail", "thumbnail_url", "artwork_url", "image"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    thumbnails = metadata.get("thumbnails")
+    if isinstance(thumbnails, list):
+        for thumbnail in reversed(thumbnails):
+            if isinstance(thumbnail, dict):
+                value = thumbnail.get("url")
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
+
+
+def _android_transfer_items(
+    profile_id: str, config: AndroidSyncConfig
+) -> list[AndroidSyncItem]:
+    exclude_pattern = _android_transfer_exclude_pattern(config)
+    downloads = (
+        Download.objects.filter(
+            profile_id=profile_id,
+            download_status=DownloadStatus.DOWNLOADED,
+        )
+        .exclude(file_path__isnull=True, file_path_relative__isnull=True)
+        .order_by("played", "-last_seen_at", "id")
+    )
+    items: list[AndroidSyncItem] = []
+    for download in downloads:
+        if not _download_selected_for_android_transfer(
+            download, config, exclude_pattern
+        ):
+            continue
+        media_path = _path_from_download_fields(
+            download.profile_id, download.file_path, download.file_path_relative
+        )
+        if media_path is None:
+            continue
+        subtitle_path = _path_from_download_fields(
+            download.profile_id,
+            download.subtitle_path,
+            download.subtitle_path_relative,
+        )
+        items.append(
+            AndroidSyncItem(
+                row_id=download.id,
+                title=download.title or media_path.stem,
+                source_name=download.source_name or "GetOffline",
+                file_path=media_path,
+                subtitle_path=subtitle_path,
+                position_seconds=float(download.last_position_seconds or 0.0),
+                artwork_url=_artwork_url_from_download(download),
+            )
+        )
+    return items
+
+
 def transfer_media(job: Job) -> None:
     log.info(
-        "Transfer worker placeholder started job_id=%s profile_id=%s payload=%s",
+        "Transfer worker started job_id=%s profile_id=%s payload=%s",
         job.id,
         job.profile_id,
         job.payload,
     )
-    log.info("Transfer worker placeholder finished job_id=%s", job.id)
-    return None
+    config = config_from_defaults(profile_settings(job.profile_id))
+    items = _android_transfer_items(job.profile_id, config)
+    log.info(
+        "Transfer worker prepared Android sync job_id=%s profile_id=%s items=%s enabled=%s destination=%s",
+        job.id,
+        job.profile_id,
+        len(items),
+        "yes" if config.enabled else "no",
+        config.destination,
+    )
+    result = sync_items(items, config)
+    log.info(
+        "Transfer worker finished job_id=%s message=%s attempted=%s copied=%s skipped=%s failed=%s device=%s",
+        job.id,
+        result.message,
+        result.attempted,
+        result.copied,
+        result.skipped,
+        result.failed,
+        result.device_serial or "none",
+    )
+    if result.errors:
+        raise RuntimeError("; ".join(result.errors))
 
 
 HANDLERS = {

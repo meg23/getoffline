@@ -77,6 +77,7 @@ from workers.handlers import check_for_episodes
 from workers.handlers import generate_transcript
 from workers.handlers import retention_cleanup
 from workers.handlers import transcode_media
+from workers.handlers import transfer_media
 from workers import runner
 from django.contrib.auth.models import User
 
@@ -270,6 +271,96 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(
                 child.payload["ffmpeg_source_file_paths"], [str(source_path)]
             )
+
+    def test_transfer_media_invokes_android_sync_with_profile_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            subtitle = root / "episode.srt"
+            media.write_text("media", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
+            ProfileConfigValue.objects.bulk_create(
+                [
+                    ProfileConfigValue(
+                        profile_id="default", key="output_root", value=str(root)
+                    ),
+                    ProfileConfigValue(
+                        profile_id="default", key="android_sync_enabled", value="1"
+                    ),
+                    ProfileConfigValue(
+                        profile_id="default",
+                        key="android_sync_destination",
+                        value="/sdcard/Music/GetOffline",
+                    ),
+                ]
+            )
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceType.PODCAST,
+                source_name="Test Feed",
+                title="Episode 1",
+                file_path_relative="episode.mp3",
+                subtitle_path_relative="episode.srt",
+                download_status=DownloadStatus.DOWNLOADED,
+                last_position_seconds=42.5,
+                raw_metadata_json='{"thumbnail": "https://example.test/art.jpg"}',
+            )
+            job = create_job(
+                profile_id="default",
+                job_type="transfer_media",
+                payload={"source": "test"},
+            )
+
+            with patch("workers.handlers.sync_items") as sync_mock:
+                sync_mock.return_value = SimpleNamespace(
+                    message="copied 1, skipped 0",
+                    attempted=1,
+                    copied=1,
+                    skipped=0,
+                    failed=0,
+                    device_serial="device-1",
+                    errors=[],
+                )
+                transfer_media(job)
+
+            sync_mock.assert_called_once()
+            items, config = sync_mock.call_args.args
+            self.assertTrue(config.enabled)
+            self.assertEqual(config.destination, "/sdcard/Music/GetOffline")
+            self.assertEqual(len(items), 1)
+            item = items[0]
+            self.assertEqual(item.row_id, download.id)
+            self.assertEqual(item.title, "Episode 1")
+            self.assertEqual(item.source_name, "Test Feed")
+            self.assertEqual(item.file_path, media)
+            self.assertEqual(item.subtitle_path, subtitle)
+            self.assertEqual(item.position_seconds, 42.5)
+            self.assertEqual(item.artwork_url, "https://example.test/art.jpg")
+
+    def test_transfer_media_raises_when_android_sync_reports_errors(self):
+        ProfileConfigValue.objects.create(
+            profile_id="default", key="android_sync_enabled", value="1"
+        )
+        job = create_job(
+            profile_id="default",
+            job_type="transfer_media",
+            payload={"source": "test"},
+        )
+
+        with patch("workers.handlers.sync_items") as sync_mock:
+            sync_mock.return_value = SimpleNamespace(
+                message="no authorized Android device connected",
+                attempted=0,
+                copied=0,
+                skipped=0,
+                failed=0,
+                device_serial=None,
+                errors=["no authorized Android device connected"],
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "no authorized Android device connected"
+            ):
+                transfer_media(job)
 
     def test_create_claim_and_finish_job(self):
         job = create_job(
