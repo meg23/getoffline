@@ -32,7 +32,7 @@
           <form id="transfer-form" method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
             {% csrf_token %}
             <input type="hidden" name="next" value="{% url 'library' %}" />
-            <input type="hidden" name="job_type" value="update_downloads" />
+            <input type="hidden" name="job_type" value="transfer_media" />
             <button id="transfer-button" class="icon-button icon-button-primary" type="submit" title="Transfer downloads" aria-label="Transfer downloads">
               <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M12 3v11m0 0 4-4m-4 4-4-4" />

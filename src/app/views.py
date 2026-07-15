@@ -306,7 +306,10 @@ def worker_message_status(request: HttpRequest) -> HttpResponse:
     return _api_proxy(
         request,
         "api_dashboard_worker_message_status",
-        query={"token": request.GET.get("token", "")},
+        query={
+            "token": request.GET.get("token", ""),
+            "job_id": request.GET.get("job_id", ""),
+        },
     )
 
 
