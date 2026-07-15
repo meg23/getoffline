@@ -17,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
+RUN apk add --no-cache android-tools ca-certificates
 RUN python -m venv /opt/venv
 COPY deploy/requirements/worker-base.txt /tmp/requirements.txt
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \

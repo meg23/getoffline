@@ -114,7 +114,7 @@ Android transfer uses Android Debug Bridge (`adb`), which is more automation-fri
 
 To configure Android transfer:
 
-1. Install Android platform tools so `adb` is available on the computer running GetOffline.
+1. Install Android platform tools so `adb` is available on the computer running GetOffline. Docker Compose worker images include `adb`; rebuild the workers after pulling updates so the binary is present in `worker-transfer`.
 2. Enable Developer options and USB debugging on the phone, then authorize the computer when Android prompts you.
 3. Open `http://127.0.0.1:8080/settings`, choose **Android device**, and optionally enable automatic transfer after downloads.
 4. Choose the phone folder, for example `/sdcard/Movies/GetOffline`, and the maximum number of unplayed items to copy each transfer.
