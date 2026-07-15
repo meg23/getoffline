@@ -5,6 +5,7 @@ from unittest.mock import patch
 from workers.sync import AndroidSyncConfig
 from workers.sync import AndroidSyncItem
 from workers.sync import _run_adb_command
+from workers.sync import find_connected_device
 from workers.sync import sync_items_to_android
 
 
@@ -23,6 +24,35 @@ def test_adb_command_logs_at_info_level():
     messages = [call.args[0] for call in info.call_args_list]
     assert any("%s starting" in message for message in messages)
     assert any("%s finished" in message for message in messages)
+
+
+def test_wifi_connect_starts_adb_server_before_connect():
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        if args[1:] == ["start-server"]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if args[1:] == ["connect", "192.168.1.25:5555"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="connected to 192.168.1.25:5555", stderr=""
+            )
+        if args[1:] == ["devices"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="List of devices attached\n192.168.1.25:5555 device\n", stderr=""
+            )
+        raise AssertionError(f"unexpected command: {args}")
+
+    serial = find_connected_device(
+        "/usr/bin/adb",
+        runner=runner,
+        connection_mode="wifi",
+        wifi_address="192.168.1.25",
+    )
+
+    assert serial == "192.168.1.25:5555"
+    assert calls[0] == ["/usr/bin/adb", "start-server"]
+    assert calls[1] == ["/usr/bin/adb", "connect", "192.168.1.25:5555"]
 
 
 def test_android_sync_logs_request_before_early_exit():

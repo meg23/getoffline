@@ -478,6 +478,17 @@ def _connect_adb_wifi(
         )
         return None
 
+    server = _run_adb_command(
+        [adb_executable, "start-server"],
+        description="starting adb server before Wi-Fi connect",
+        timeout=30,
+        runner=runner,
+    )
+    if int(getattr(server, "returncode", 1) or 0) != 0:
+        raise RuntimeError(
+            f"adb start-server failed: {_combined_output(server) or 'no output'}"
+        )
+
     completed = _run_adb_command(
         [adb_executable, "connect", target],
         description=f"connecting to paired Android device over Wi-Fi at {target}",
