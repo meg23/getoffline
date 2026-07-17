@@ -44,3 +44,7 @@ the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,
 `media_kind`, and `episode_id`. If no `--bridge-stop-url` is provided, the client
 posts stop requests to a sibling `/stop` endpoint, so `http://bridge.local/play`
 defaults to `http://bridge.local/stop`.
+If the bridge needs to download or transcode media before a device such as a Kindle can
+play PCM audio, the play response may include `status_url`, `status`, `message`, and
+`progress` fields. The ncurses UI polls `status_url` and displays that bridge-side
+preparation state instead of claiming the client-app itself is downloading the bytes.

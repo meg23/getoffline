@@ -45,6 +45,7 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
 PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
 PROGRESS_INTERVAL_SECONDS = 5.0
+BRIDGE_STATUS_INTERVAL_SECONDS = 1.5
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
 DOWNLOAD_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -139,6 +140,7 @@ class GetOfflineConsole:
         self.playing_title = ""
         self.playback_session: PlaybackSession | None = None
         self.last_progress_at = 0.0
+        self.last_bridge_status_at = 0.0
         self._shut_down = False
 
     def refresh(self) -> None:
@@ -157,6 +159,7 @@ class GetOfflineConsole:
             while True:
                 self._reap_player()
                 self._send_periodic_progress()
+                self._poll_bridge_status()
                 self._draw(stdscr)
                 key = stdscr.getch()
                 if key == -1:
@@ -237,6 +240,7 @@ class GetOfflineConsole:
         self.playing_title = str(item.get("title") or episode.get("title") or episode_id)
         self.play_started_at = time.monotonic()
         self.last_progress_at = 0.0
+        self.last_bridge_status_at = 0.0
         self.message = f"Playing: {self.playing_title}"
 
     def stop(self, *, reason: str) -> None:
@@ -352,7 +356,19 @@ class GetOfflineConsole:
         percent = self.download_progress_percent()
         meter = self.playback_session.download_meter if self.playback_session else None
         if meter is None:
-            return f" {spinner} External bridge streaming: {title} | client-app is not downloading bytes "
+            status = self.playback_session.bridge_status if self.playback_session else {}
+            label = str(status.get("message") or status.get("status") or "preparing PCM stream")
+            percent_value = status.get("progress") or status.get("percent")
+            try:
+                bridge_percent = float(percent_value) if percent_value is not None else None
+            except (TypeError, ValueError):
+                bridge_percent = None
+            prefix = f" {spinner} Bridge preparing for Kindle: {title} "
+            if bridge_percent is None:
+                return f"{prefix}| {label} | client-app handed off the URL "
+            suffix = f" {bridge_percent:5.1f}% | {label} "
+            bar_width = max(width - len(prefix) - len(suffix), 8)
+            return prefix + progress_bar(bridge_percent, bar_width) + suffix
         downloaded = format_bytes(meter.bytes_downloaded)
         total = format_bytes(meter.total_bytes) if meter.total_bytes else "unknown size"
         prefix = f" {spinner} Client downloading media: {title} "
@@ -361,6 +377,23 @@ class GetOfflineConsole:
         suffix = f" {percent:5.1f}% | {downloaded}/{total} "
         bar_width = max(width - len(prefix) - len(suffix), 8)
         return prefix + progress_bar(percent, bar_width) + suffix
+
+    def _poll_bridge_status(self) -> None:
+        session = self.playback_session
+        if session is None or not session.bridge_status_url:
+            return
+        now = time.monotonic()
+        if now - self.last_bridge_status_at < BRIDGE_STATUS_INTERVAL_SECONDS:
+            return
+        self.last_bridge_status_at = now
+        try:
+            request = urllib.request.Request(session.bridge_status_url, method="GET")
+            with urllib.request.urlopen(request, timeout=2.0) as response:  # nosec B310 - bridge URL is user configured.
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return
+        if isinstance(payload, dict):
+            session.bridge_status = payload
 
     def _draw(self, stdscr: Any) -> None:
         stdscr.erase()
@@ -480,6 +513,8 @@ class PlaybackSession:
     active: bool = True
     download_meter: DownloadMeter | None = None
     proxy_server: "StreamingProxyServer | None" = None
+    bridge_status_url: str = ""
+    bridge_status: dict[str, Any] | None = None
 
 
 class StreamingProxyServer:
@@ -689,7 +724,23 @@ class AudioBridgePlaybackBackend:
         }
         response = self._post_json(self.bridge_url, payload)
         session_id = str(response.get("session_id") or "")
-        return PlaybackSession(session_id=session_id)
+        status_url = str(response.get("status_url") or "")
+        if status_url:
+            status_url = urllib.parse.urljoin(self.bridge_url, status_url)
+        bridge_status = {
+            "status": str(response.get("status") or "preparing"),
+            "message": str(
+                response.get("message")
+                or "Kindle bridge is downloading/transcoding audio for PCM playback"
+            ),
+        }
+        if "progress" in response:
+            bridge_status["progress"] = response["progress"]
+        return PlaybackSession(
+            session_id=session_id,
+            bridge_status_url=status_url,
+            bridge_status=bridge_status,
+        )
 
     def stop(self, session: PlaybackSession) -> None:
         if not session.active:
