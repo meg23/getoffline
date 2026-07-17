@@ -60,6 +60,16 @@ class ConsolePlaybackTests(unittest.TestCase):
             "http://bridge.local/api/audio/stop",
         )
 
+    def test_default_bridge_volume_url_uses_sibling_volume_endpoint(self):
+        self.assertEqual(
+            console.default_bridge_volume_url("http://bridge.local/play"),
+            "http://bridge.local/volume",
+        )
+        self.assertEqual(
+            console.default_bridge_volume_url("http://bridge.local/api/audio"),
+            "http://bridge.local/api/audio/volume",
+        )
+
     def test_load_credentials_accepts_legacy_credentials_file(self):
         original = console.CONFIG_FILE
         try:
@@ -97,7 +107,9 @@ class ConsolePlaybackTests(unittest.TestCase):
                 stream_url="http://getoffline.local/api/stream/7",
                 auth_header="Basic abc123",
                 seek=42.5,
+                volume=0.75,
             )
+            backend.set_volume(session, 0.5)
             backend.stop(session)
         finally:
             server.shutdown()
@@ -115,9 +127,32 @@ class ConsolePlaybackTests(unittest.TestCase):
                 "title": "Example",
                 "media_kind": "audio",
                 "episode_id": 7,
+                "volume": 0.75,
             },
         )
-        self.assertEqual(BridgeHandler.requests[1], ("/stop", {"session_id": "session-123"}))
+        self.assertEqual(BridgeHandler.requests[1], ("/volume", {"session_id": "session-123", "volume": 0.5}))
+        self.assertEqual(BridgeHandler.requests[2], ("/stop", {"session_id": "session-123"}))
+
+    def test_adjust_volume_clamps_and_posts_for_active_session(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.volume = 0.95
+        app.message = ""
+        app.playback_session = console.PlaybackSession(session_id="session-123")
+
+        class VolumeBackend:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, float]] = []
+
+            def set_volume(self, session: console.PlaybackSession, volume: float) -> None:
+                self.calls.append((session.session_id, volume))
+
+        app.playback = VolumeBackend()
+
+        app.adjust_volume(0.1)
+
+        self.assertEqual(app.volume, 1.0)
+        self.assertEqual(app.playback.calls, [("session-123", 1.0)])
+        self.assertEqual(app.message, "Volume: 100%")
 
 
 class FakeClient:
@@ -249,6 +284,7 @@ class ConsoleProgressTests(unittest.TestCase):
         app.offset = 0
         app.message = "Playing"
         app._shut_down = False
+        app.volume = 1.0
 
         original_curs_set = console.curses.curs_set
         try:
