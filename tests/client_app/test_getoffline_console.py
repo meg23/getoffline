@@ -62,6 +62,31 @@ class ConsolePlaybackTests(unittest.TestCase):
             "http://bridge.local/api/audio/stop",
         )
 
+    def test_local_player_commands_do_not_include_http_headers_for_downloaded_files(
+        self,
+    ):
+        filename = "/Users/alice/Music/Fresh Audio.mp3"
+
+        self.assertEqual(
+            console.player_command("mpv", filename, "Basic abc123", 12.25),
+            ["mpv", "--no-video", "--start=12.250", filename],
+        )
+        self.assertEqual(
+            console.player_command("ffplay", filename, "Basic abc123", 12.25),
+            ["ffplay", "-nodisp", "-autoexit", "-ss", "12.250", filename],
+        )
+        self.assertEqual(
+            console.player_command("vlc", filename, "Basic abc123", 12.25),
+            ["vlc", "--intf", "ncurses", "--start-time=12", filename],
+        )
+
+    def test_remote_player_commands_still_include_http_headers_for_stream_urls(self):
+        command = console.player_command(
+            "mpv", "https://getoffline.test/api/stream/7", "Basic abc123", 12.25
+        )
+
+        self.assertIn("--http-header-fields=Authorization: Basic abc123", command)
+
     def test_load_credentials_accepts_legacy_credentials_file(self):
         original = console.CONFIG_FILE
         try:

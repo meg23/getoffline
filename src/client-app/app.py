@@ -696,6 +696,28 @@ def build_playback_backend(
 
 
 def player_command(player: str, url: str, auth_header: str, seek: float) -> list[str]:
+    if is_http_url(url):
+        return remote_player_command(player, url, auth_header, seek)
+    return local_player_command(player, url, seek)
+
+
+def is_http_url(value: str) -> bool:
+    return urllib.parse.urlsplit(value).scheme in {"http", "https"}
+
+
+def local_player_command(player: str, filename: str, seek: float) -> list[str]:
+    if player == "mpv":
+        return ["mpv", "--no-video", f"--start={seek:.3f}", filename]
+    if player == "ffplay":
+        return ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}", filename]
+    if player in {"vlc", "cvlc"}:
+        return [player, "--intf", "ncurses", f"--start-time={int(seek)}", filename]
+    return [player, filename]
+
+
+def remote_player_command(
+    player: str, url: str, auth_header: str, seek: float
+) -> list[str]:
     if player == "mpv":
         return [
             "mpv",
