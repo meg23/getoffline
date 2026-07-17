@@ -40,7 +40,8 @@ from getoffline_sdk import GetOfflineClient, HttpTransport, Response
 APP_NAME = "getoffline-console"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
-PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
+DEFAULT_MACOS_VLC_PATH = "/Applications/VLC.app/Contents/MacOS/VLC"
+PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", DEFAULT_MACOS_VLC_PATH, "ffplay")
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
@@ -415,6 +416,10 @@ def detect_player() -> str | None:
     return next((name for name in PLAYER_CANDIDATES if shutil.which(name)), None)
 
 
+def player_name(player: str) -> str:
+    return Path(player).name.lower()
+
+
 def clamp_volume(volume: float) -> float:
     return max(0.0, min(float(volume), 1.0))
 
@@ -445,7 +450,7 @@ class LocalProcessPlaybackBackend:
 
     @property
     def unavailable_message(self) -> str:
-        return "No player found: install mpv, ffplay, or vlc"
+        return "No player found: install mpv, ffplay, vlc, or VLC.app"
 
     def start(
         self,
@@ -644,12 +649,25 @@ def build_playback_backend(
 
 
 def player_command(player: str, url: str, auth_header: str, seek: float) -> list[str]:
-    if player == "mpv":
-        return ["mpv", "--no-video", f"--start={seek:.3f}", f"--http-header-fields=Authorization: {auth_header}", url]
-    if player == "ffplay":
-        return ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}", "-headers", f"Authorization: {auth_header}\r\n", url]
-    if player in {"vlc", "cvlc"}:
-        return [player, "--intf", "ncurses", f"--start-time={int(seek)}", f"--http-header=Authorization: {auth_header}", url]
+    name = player_name(player)
+    if name == "mpv":
+        return [player, "--no-video", f"--start={seek:.3f}", f"--http-header-fields=Authorization: {auth_header}", url]
+    if name == "ffplay":
+        return [player, "-nodisp", "-autoexit", "-ss", f"{seek:.3f}", "-headers", f"Authorization: {auth_header}\r\n", url]
+    if name in {"vlc", "cvlc"}:
+        command = [player]
+        if name == "cvlc":
+            command.extend(["--intf", "ncurses"])
+        command.extend(
+            [
+                "--no-video",
+                "--play-and-exit",
+                f"--start-time={int(seek)}",
+                f"--http-header=Authorization: {auth_header}",
+                url,
+            ]
+        )
+        return command
     return [player, url]
 
 

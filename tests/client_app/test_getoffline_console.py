@@ -245,6 +245,21 @@ class ConsoleProgressTests(unittest.TestCase):
             console.PLAYER_CANDIDATES.index("vlc"),
         )
 
+    def test_macos_vlc_app_path_gets_vlc_headers_and_playback_flags(self):
+        command = console.player_command(
+            "/Applications/VLC.app/Contents/MacOS/VLC",
+            "http://getoffline.local/api/stream/7",
+            "Basic abc123",
+            42.5,
+        )
+
+        self.assertEqual(command[0], "/Applications/VLC.app/Contents/MacOS/VLC")
+        self.assertIn("--no-video", command)
+        self.assertIn("--play-and-exit", command)
+        self.assertIn("--start-time=42", command)
+        self.assertIn("--http-header=Authorization: Basic abc123", command)
+        self.assertEqual(command[-1], "http://getoffline.local/api/stream/7")
+
     def test_shutdown_stops_active_playback_and_saves_quit_progress_once(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
         app.client = FakeClient()
