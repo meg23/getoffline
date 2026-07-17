@@ -17,22 +17,27 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
     "yes",
     "on",
 }
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv(
-        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
-    ).split(",")
-    if host.strip()
-]
 
-CSRF_TRUSTED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "GETOFFLINE_CSRF_TRUSTED_ORIGINS",
-        "http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080",
-    ).split(",")
-    if origin.strip()
-]
+
+def _csv_env(name: str, default: str) -> list[str]:
+    return [
+        value.strip() for value in os.getenv(name, default).split(",") if value.strip()
+    ]
+
+
+# GetOffline is commonly opened from another device on a private LAN (for
+# example, http://192.168.x.x:8080). The Docker image cannot know that address
+# ahead of time, so the default accepts any Host header. Deployments that expose
+# the app beyond a trusted network can still lock this down by setting
+# GETOFFLINE_DJANGO_ALLOWED_HOSTS explicitly.
+ALLOWED_HOSTS = _csv_env(
+    "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver,*"
+)
+
+CSRF_TRUSTED_ORIGINS = _csv_env(
+    "GETOFFLINE_CSRF_TRUSTED_ORIGINS",
+    "http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080",
+)
 CSRF_COOKIE_SECURE = os.getenv(
     "GETOFFLINE_CSRF_COOKIE_SECURE", "0"
 ).strip().lower() in {"1", "true", "yes", "on"}
