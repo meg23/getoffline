@@ -17,40 +17,22 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
     "yes",
     "on",
 }
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
+    ).split(",")
+    if host.strip()
+]
 
-
-def _csv_env(name: str, default: str) -> list[str]:
-    return [
-        value.strip() for value in os.getenv(name, default).split(",") if value.strip()
-    ]
-
-
-INTERNAL_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver", "frontend", "api"]
-
-
-def _allowed_hosts() -> list[str]:
-    # GetOffline is commonly opened from another device on a private LAN (for
-    # example, http://192.168.x.x:8080). The Docker image cannot know that address
-    # ahead of time, so the default accepts any Host header. Deployments that expose
-    # the app beyond a trusted network can still lock this down by setting
-    # GETOFFLINE_DJANGO_ALLOWED_HOSTS explicitly.
-    configured_hosts = _csv_env("GETOFFLINE_DJANGO_ALLOWED_HOSTS", "*")
-    hosts = [*configured_hosts]
-    # Split frontend/API deployments call the API by its internal Docker DNS name.
-    # Keep these service names allowed even when operators provide a restrictive
-    # external host allow-list, otherwise browser pages proxy to API 400s.
-    for host in INTERNAL_ALLOWED_HOSTS:
-        if host not in hosts:
-            hosts.append(host)
-    return hosts
-
-
-ALLOWED_HOSTS = _allowed_hosts()
-
-CSRF_TRUSTED_ORIGINS = _csv_env(
-    "GETOFFLINE_CSRF_TRUSTED_ORIGINS",
-    "http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080",
-)
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "GETOFFLINE_CSRF_TRUSTED_ORIGINS",
+        "http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080",
+    ).split(",")
+    if origin.strip()
+]
 CSRF_COOKIE_SECURE = os.getenv(
     "GETOFFLINE_CSRF_COOKIE_SECURE", "0"
 ).strip().lower() in {"1", "true", "yes", "on"}
@@ -74,7 +56,6 @@ INSTALLED_APPS = [
     "app",
 ]
 MIDDLEWARE = [
-    "app.middleware.RequestDiagnosticsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",

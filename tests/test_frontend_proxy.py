@@ -12,7 +12,9 @@ import django
 
 django.setup()
 
-from app.views import _upstream_response
+from django.test import RequestFactory
+
+from app.views import _request_headers, _upstream_response
 
 
 class FrontendProxyTests(unittest.TestCase):
@@ -28,6 +30,18 @@ class FrontendProxyTests(unittest.TestCase):
         self.assertEqual(response.cookies["csrftoken"].value, "abc123")
         self.assertEqual(response.cookies["csrftoken"]["path"], "/")
         self.assertEqual(response.cookies["csrftoken"]["samesite"], "Lax")
+
+    def test_proxy_forwards_browser_host_to_api(self):
+        request = RequestFactory().get(
+            "/settings/",
+            HTTP_HOST="192.168.86.26:8080",
+            HTTP_COOKIE="sessionid=abc",
+        )
+
+        headers = _request_headers(request)
+
+        self.assertEqual(headers["Host"], "192.168.86.26:8080")
+        self.assertEqual(headers["Cookie"], "sessionid=abc")
 
 
 if __name__ == "__main__":
