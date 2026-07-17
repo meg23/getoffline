@@ -13,7 +13,6 @@ from models.models import Download
 from backend.services.settings import profile_output_root
 
 MEDIA_RANGE_CHUNK_SIZE = 64 * 1024
-MEDIA_INITIAL_RANGE_SIZE = 1024 * 1024
 
 
 def safe_path(raw_path: str | None) -> Path:
@@ -103,7 +102,11 @@ def media_response(path: Path, range_header: str = "") -> HttpResponse:
         except ValueError:
             start, requested_end = 0, None
         start = max(0, min(start, file_size - 1))
-        end = min(start + MEDIA_INITIAL_RANGE_SIZE - 1, file_size - 1) if requested_end is None else max(start, min(requested_end, file_size - 1))
+        end = (
+            file_size - 1
+            if requested_end is None
+            else max(start, min(requested_end, file_size - 1))
+        )
         length = end - start + 1
         response = StreamingHttpResponse(file_range_iterator(path, start, length), status=206, content_type=content_type)
         response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
