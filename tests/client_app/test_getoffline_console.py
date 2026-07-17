@@ -244,7 +244,7 @@ class ConsoleProgressTests(unittest.TestCase):
         self.assertEqual(app.client.progress_calls[0][0], 42)
         self.assertGreaterEqual(app.client.progress_calls[0][1], 149.0)
         self.assertEqual(app.client.progress_calls[0][2], "stopped")
-        self.assertEqual(app.message, "Loaded 0 unplayed item(s)")
+        self.assertEqual(app.message, "Playback stopped")
 
     def test_local_player_detection_only_uses_ffplay(self):
         self.assertEqual(console.PLAYER_CANDIDATES, ("ffplay",))

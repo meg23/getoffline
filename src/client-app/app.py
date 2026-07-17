@@ -40,6 +40,7 @@ from getoffline_sdk import GetOfflineClient, HttpTransport, Response
 APP_NAME = "getoffline-console"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
+PLAYER_LOG_FILE = CONFIG_DIR / "player.log"
 PLAYER_CANDIDATES = ("ffplay",)
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
@@ -323,11 +324,12 @@ class GetOfflineConsole:
             # server, so treat unexpected process exits as a stopped session and
             # preserve the estimated resume point.
             self._save_progress("stopped")
+            exit_detail = self.playback_session.error_message
             self.playback.stop(self.playback_session)
-            self.message = "Playback stopped"
             self.playback_session = None
             self.playing_id = None
             self.refresh()
+            self.message = exit_detail or "Playback stopped"
 
     def _draw(self, stdscr: Any) -> None:
         stdscr.erase()
@@ -428,6 +430,28 @@ def format_volume(volume: float) -> str:
     return f"{int(round(clamp_volume(volume) * 100))}%"
 
 
+def prepare_player_log() -> Path:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    PLAYER_LOG_FILE.write_text("", encoding="utf-8")
+    return PLAYER_LOG_FILE
+
+
+def tail_text(path: Path, *, limit: int = 1000) -> str:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return data[-limit:].decode("utf-8", errors="replace").strip()
+
+
+def player_exit_message(session: "PlaybackSession") -> str:
+    code = session.process.poll() if session.process is not None else "unknown"
+    detail = tail_text(session.log_path) if session.log_path is not None else ""
+    if detail:
+        return f"Player exited ({code}); see {session.log_path}: {detail}"
+    return f"Player exited ({code}); see {session.log_path or PLAYER_LOG_FILE}"
+
+
 class PlaybackError(RuntimeError):
     """Raised when a playback backend cannot start or stop playback."""
 
@@ -438,6 +462,8 @@ class PlaybackSession:
     session_id: str = ""
     active: bool = True
     volume: float = 1.0
+    log_path: Path | None = None
+    error_message: str = ""
 
 
 class LocalProcessPlaybackBackend:
@@ -465,9 +491,11 @@ class LocalProcessPlaybackBackend:
         if not self.player:
             raise PlaybackError(self.unavailable_message)
         command = player_command(self.player, stream_url, auth_header, seek, volume)
+        log_path = prepare_player_log()
+        log_file = log_path.open("ab")
         popen_kwargs: dict[str, Any] = {
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
+            "stdout": log_file,
+            "stderr": subprocess.STDOUT,
         }
         if os.name == "posix":
             # Place the player in its own process group so stopping the console
@@ -476,8 +504,13 @@ class LocalProcessPlaybackBackend:
         try:
             process = subprocess.Popen(command, **popen_kwargs)
         except OSError as exc:
+            log_file.close()
             raise PlaybackError(f"unable to launch player {self.player!r}: {exc}") from exc
-        return PlaybackSession(process=process, volume=clamp_volume(volume))
+        finally:
+            log_file.close()
+        session = PlaybackSession(process=process, volume=clamp_volume(volume), log_path=log_path)
+        self._raise_if_process_exited_immediately(session)
+        return session
 
     def set_volume(self, session: PlaybackSession, volume: float) -> None:
         session.volume = clamp_volume(volume)
@@ -493,7 +526,23 @@ class LocalProcessPlaybackBackend:
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
-        return bool(session.active and session.process is not None and session.process.poll() is None)
+        if not session.active or session.process is None:
+            return False
+        if session.process.poll() is None:
+            return True
+        session.error_message = player_exit_message(session)
+        return False
+
+    def _raise_if_process_exited_immediately(self, session: PlaybackSession) -> None:
+        if session.process is None:
+            return
+        try:
+            session.process.wait(timeout=0.75)
+        except subprocess.TimeoutExpired:
+            return
+        session.error_message = player_exit_message(session)
+        session.active = False
+        raise PlaybackError(session.error_message)
 
     def _terminate_process(self, process: subprocess.Popen[bytes]) -> None:
         if os.name == "posix":
@@ -656,6 +705,9 @@ def player_command(player: str, url: str, auth_header: str, seek: float, volume:
         return [player, url]
     return [
         player,
+        "-hide_banner",
+        "-loglevel",
+        "warning",
         "-nodisp",
         "-autoexit",
         "-ss",

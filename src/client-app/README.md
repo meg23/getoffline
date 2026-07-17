@@ -38,7 +38,10 @@ The app is intentionally console music-player-like: the terminal UI is always av
 external player or bridge handles media decoding. Playback progress is periodically saved
 through the SDK while playback is running and once again when playback stops. Local
 playback uses `ffplay`, including the GetOffline authorization header and the
-configured initial volume.
+configured initial volume. Player output is written to
+`$XDG_CONFIG_HOME/getoffline-console/player.log` or
+`~/.config/getoffline-console/player.log` so ffplay/auth/audio-device failures
+are visible when playback exits immediately.
 
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
 the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,
