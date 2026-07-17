@@ -6,7 +6,9 @@ route names. Dashboard data and actions are owned by the API service.
 
 from __future__ import annotations
 
+from http.cookies import SimpleCookie
 import json
+import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +18,9 @@ from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpRespons
 from django.shortcuts import render
 from django.test import Client as DjangoClient
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
+
+
+log = logging.getLogger("app.proxy")
 
 
 def _human_size(size: int | None) -> str:
@@ -167,6 +172,12 @@ def _sdk_client(request: HttpRequest) -> GetOfflineClient:
 
 def _request_headers(request: HttpRequest) -> dict[str, str]:
     headers: dict[str, str] = {}
+    # Preserve the browser-facing host when the frontend proxies to the API.
+    # Deployments commonly set GETOFFLINE_DJANGO_ALLOWED_HOSTS to the LAN host,
+    # not Docker's internal "api" DNS name; without this, API requests arrive as
+    # Host: api:8000 and can be rejected with Bad Request (400).
+    if request.headers.get("Host"):
+        headers["Host"] = request.headers["Host"]
     if request.headers.get("Cookie"):
         headers["Cookie"] = request.headers["Cookie"]
     if request.headers.get("X-CSRFToken"):
@@ -178,6 +189,12 @@ def _request_headers(request: HttpRequest) -> dict[str, str]:
     if request.headers.get("X-Requested-With"):
         headers["X-Requested-With"] = request.headers["X-Requested-With"]
     return headers
+
+
+def _response_snippet(content: bytes) -> str:
+    if not content:
+        return ""
+    return " ".join(content[:500].decode("utf-8", errors="replace").split())
 
 
 def _api_proxy(
@@ -196,16 +213,33 @@ def _api_proxy(
         data=data,
         headers=_request_headers(request),
     )
+    if response.status_code >= 400:
+        log.warning(
+            "API proxy returned error method=%s frontend_path=%s target=%s "
+            "status=%s host=%s body=%r",
+            request.method,
+            request.get_full_path(),
+            name,
+            response.status_code,
+            request.headers.get("Host", ""),
+            _response_snippet(response.content),
+        )
     return _upstream_response(
         response.status_code,
         response.headers,
         response.content,
+        cookies=response.cookies,
         streaming=response.streaming,
     )
 
 
 def _upstream_response(
-    status: int, headers, content: bytes, *, streaming: bool = False
+    status: int,
+    headers,
+    content: bytes,
+    *,
+    cookies: tuple[str, ...] = (),
+    streaming: bool = False,
 ) -> HttpResponse:
     response_class = StreamingHttpResponse if streaming else HttpResponse
     response = response_class(
@@ -216,6 +250,11 @@ def _upstream_response(
     for header in ("Content-Length", "Content-Range", "Accept-Ranges", "Location"):
         if headers.get(header):
             response[header] = headers[header]
+    for cookie_header in cookies:
+        upstream_cookies = SimpleCookie()
+        upstream_cookies.load(cookie_header)
+        for name, morsel in upstream_cookies.items():
+            response.cookies[name] = morsel
     return response
 
 
