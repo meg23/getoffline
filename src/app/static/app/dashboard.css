@@ -685,6 +685,41 @@ tbody tr:nth-child(even) td {
   background: #1a2748;
   overflow: hidden;
 }
+.mini-player-download-status {
+  color: #b4c2e3;
+  font-size: 0.84rem;
+}
+.mini-player-download-status[hidden] {
+  display: none;
+}
+.mini-player-download-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin-bottom: 0.25rem;
+}
+#mini-player-download-percent {
+  color: #e8efff;
+  font-variant-numeric: tabular-nums;
+}
+.mini-player-download-progress {
+  width: 100%;
+  height: 0.45rem;
+  overflow: hidden;
+  border-radius: 999px;
+  appearance: none;
+  background: #1a2748;
+}
+.mini-player-download-progress::-webkit-progress-bar {
+  background: #1a2748;
+}
+.mini-player-download-progress::-webkit-progress-value {
+  background: linear-gradient(90deg, #6387ff, #58d5ff);
+}
+.mini-player-download-progress::-moz-progress-bar {
+  background: linear-gradient(90deg, #6387ff, #58d5ff);
+}
 .mini-player-transcript-wrap {
   margin-top: 0.2rem;
   display: none;

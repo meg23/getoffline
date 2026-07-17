@@ -492,11 +492,52 @@
   const audio = document.getElementById("mini-player-audio");
   const video = document.getElementById("mini-player-video");
   const transcript = document.getElementById("mini-player-transcript");
+  const downloadStatus = document.getElementById("mini-player-download-status");
+  const downloadLabel = document.getElementById("mini-player-download-label");
+  const downloadPercent = document.getElementById("mini-player-download-percent");
+  const downloadProgress = document.getElementById("mini-player-download-progress");
   const settingsKey = "getofflineMediaElementSettings";
   const stateKey = "getofflineMiniPlayerState";
   let lastPersisted = -9999;
   let lastActiveCue = null;
   let transcriptReady = false;
+
+
+  function bufferedPercent(media) {
+    if (
+      !media ||
+      !Number.isFinite(media.duration) ||
+      media.duration <= 0 ||
+      !media.buffered?.length
+    )
+      return 0;
+    let bufferedUntil = 0;
+    for (let index = 0; index < media.buffered.length; index += 1) {
+      bufferedUntil = Math.max(bufferedUntil, media.buffered.end(index));
+    }
+    return Math.max(0, Math.min(100, (bufferedUntil / media.duration) * 100));
+  }
+  function updateDownloadProgress(media, label = "Downloading media…") {
+    if (!downloadStatus || !downloadLabel || !downloadPercent || !downloadProgress)
+      return;
+    const percent = bufferedPercent(media);
+    const rounded = Math.round(percent);
+    downloadStatus.hidden = false;
+    downloadLabel.textContent = percent >= 99 ? "Media download complete" : label;
+    downloadPercent.textContent = `${rounded}%`;
+    downloadProgress.value = rounded;
+    if (percent >= 99) {
+      window.setTimeout(() => {
+        downloadStatus.hidden = true;
+      }, 1200);
+    }
+  }
+  function resetDownloadProgress() {
+    if (downloadStatus) downloadStatus.hidden = true;
+    if (downloadLabel) downloadLabel.textContent = "Preparing media download…";
+    if (downloadPercent) downloadPercent.textContent = "0%";
+    if (downloadProgress) downloadProgress.value = 0;
+  }
 
   function saveMediaSettings(media) {
     localStorage.setItem(
@@ -625,6 +666,7 @@
       el.onended = null;
     });
     clearTranscript();
+    resetDownloadProgress();
   }
   function setExpanded(expanded) {
     const isExpanded = !!expanded;
@@ -690,9 +732,14 @@
     media.style.display = "block";
     media.classList.add("is-active");
     applyMediaSettings(media);
+    media.addEventListener("loadstart", () => updateDownloadProgress(media, "Starting media download…"));
+    media.addEventListener("progress", () => updateDownloadProgress(media, "Downloading media…"));
+    media.addEventListener("waiting", () => updateDownloadProgress(media, "Buffering media…"));
+    media.addEventListener("canplaythrough", () => updateDownloadProgress(media, "Media download complete"));
     media.addEventListener(
       "loadedmetadata",
       () => {
+        updateDownloadProgress(media, "Downloading media…");
         applyMediaSettings(media);
         applyMiniResume();
         if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay after metadata failed", { rowId: state.rowId, err }));
