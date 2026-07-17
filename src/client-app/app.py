@@ -14,12 +14,15 @@ import argparse
 import base64
 import curses
 import getpass
+import http.server
 import json
 import os
 import shutil
 import signal
+import socketserver
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.error
@@ -45,6 +48,7 @@ PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
 DOWNLOAD_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+PROXY_CHUNK_SIZE = 64 * 1024
 
 
 @dataclass
@@ -64,6 +68,24 @@ class Credentials:
     def auth_header(self) -> str:
         raw = f"{self.username}:{self.password}".encode("utf-8")
         return "Basic " + base64.b64encode(raw).decode("ascii")
+
+
+@dataclass
+class DownloadMeter:
+    """Tracks bytes that actually pass through the console client's proxy."""
+
+    bytes_downloaded: int = 0
+    total_bytes: int | None = None
+    active: bool = False
+    error: str = ""
+
+    def percent(self) -> float | None:
+        if not self.total_bytes:
+            return None
+        return max(0.0, min(100.0, (self.bytes_downloaded / self.total_bytes) * 100.0))
+
+    def add_bytes(self, size: int) -> None:
+        self.bytes_downloaded += max(size, 0)
 
 
 class AuthenticatedTransport:
@@ -307,6 +329,8 @@ class GetOfflineConsole:
             # server, so treat unexpected process exits as a stopped session and
             # preserve the estimated resume point.
             self._save_progress("stopped")
+            if self.playback_session.proxy_server is not None:
+                self.playback_session.proxy_server.stop()
             self.message = "Playback stopped"
             self.playback_session = None
             self.playing_id = None
@@ -315,9 +339,9 @@ class GetOfflineConsole:
             self.refresh()
 
     def download_progress_percent(self) -> float | None:
-        if self.playing_id is None or self.play_duration_seconds <= 0:
+        if self.playback_session is None or self.playback_session.download_meter is None:
             return None
-        return max(0.0, min(100.0, (self.estimated_position() / self.play_duration_seconds) * 100.0))
+        return self.playback_session.download_meter.percent()
 
     def download_status_line(self, width: int) -> str:
         if self.playing_id is None:
@@ -326,10 +350,15 @@ class GetOfflineConsole:
         spinner = DOWNLOAD_SPINNER[int(elapsed * 8) % len(DOWNLOAD_SPINNER)]
         title = truncate(self.playing_title or str(self.playing_id), max(width // 3, 12))
         percent = self.download_progress_percent()
+        meter = self.playback_session.download_meter if self.playback_session else None
+        if meter is None:
+            return f" {spinner} External bridge streaming: {title} | client-app is not downloading bytes "
+        downloaded = format_bytes(meter.bytes_downloaded)
+        total = format_bytes(meter.total_bytes) if meter.total_bytes else "unknown size"
         prefix = f" {spinner} Client downloading media: {title} "
         if percent is None:
-            return f"{prefix}| streaming {int(elapsed)}s "
-        suffix = f" {percent:5.1f}% | position ~{int(self.estimated_position())}s "
+            return f"{prefix}| {downloaded} of {total} | streaming {int(elapsed)}s "
+        suffix = f" {percent:5.1f}% | {downloaded}/{total} "
         bar_width = max(width - len(prefix) - len(suffix), 8)
         return prefix + progress_bar(percent, bar_width) + suffix
 
@@ -425,6 +454,17 @@ def progress_bar(percent: float, width: int) -> str:
     return "[" + "#" * filled + "-" * (bounded_width - filled) + "]"
 
 
+def format_bytes(value: int | None) -> str:
+    if value is None:
+        return "unknown"
+    amount = float(max(value, 0))
+    for unit in ("B", "KB", "MB", "GB"):
+        if amount < 1024 or unit == "GB":
+            return f"{int(amount)} B" if unit == "B" else f"{amount:.1f} {unit}"
+        amount /= 1024
+    return f"{amount:.1f} GB"
+
+
 def detect_player() -> str | None:
     return next((name for name in PLAYER_CANDIDATES if shutil.which(name)), None)
 
@@ -438,6 +478,88 @@ class PlaybackSession:
     process: subprocess.Popen[bytes] | None = None
     session_id: str = ""
     active: bool = True
+    download_meter: DownloadMeter | None = None
+    proxy_server: "StreamingProxyServer | None" = None
+
+
+class StreamingProxyServer:
+    """Small local proxy that lets the ncurses UI meter real player downloads."""
+
+    def __init__(self, upstream_url: str, auth_header: str, meter: DownloadMeter) -> None:
+        self.upstream_url = upstream_url
+        self.auth_header = auth_header
+        self.meter = meter
+        proxy = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_HEAD(self) -> None:  # noqa: N802 - stdlib handler API
+                self._proxy(stream_body=False)
+
+            def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+                self._proxy(stream_body=True)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def _proxy(self, *, stream_body: bool) -> None:
+                headers = {"Authorization": proxy.auth_header}
+                range_header = self.headers.get("Range")
+                if range_header:
+                    headers["Range"] = range_header
+                request = urllib.request.Request(proxy.upstream_url, headers=headers, method="GET")
+                try:
+                    with urllib.request.urlopen(request) as upstream:  # nosec B310 - upstream is the configured GetOffline server.
+                        proxy.meter.active = True
+                        proxy.update_total(dict(upstream.headers.items()))
+                        self.send_response(upstream.status)
+                        for key, value in upstream.headers.items():
+                            if key.lower() not in {"connection", "transfer-encoding"}:
+                                self.send_header(key, value)
+                        self.end_headers()
+                        if not stream_body:
+                            return
+                        while True:
+                            chunk = upstream.read(PROXY_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            proxy.meter.add_bytes(len(chunk))
+                            self.wfile.write(chunk)
+                except Exception as exc:  # pragma: no cover - depends on media player disconnect timing.
+                    proxy.meter.error = str(exc)
+                    if not self.wfile.closed:
+                        try:
+                            self.send_error(502, "Unable to proxy media")
+                        except OSError:
+                            pass
+                finally:
+                    proxy.meter.active = False
+
+        self.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    @property
+    def url(self) -> str:
+        host, port = self.httpd.server_address
+        return f"http://{host}:{port}/media"
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def update_total(self, headers: Mapping[str, str]) -> None:
+        content_range = headers.get("Content-Range") or headers.get("content-range") or ""
+        if "/" in content_range:
+            total_text = content_range.rsplit("/", 1)[-1]
+            if total_text.isdigit():
+                self.meter.total_bytes = int(total_text)
+                return
+        content_length = headers.get("Content-Length") or headers.get("content-length")
+        if content_length and content_length.isdigit() and self.meter.total_bytes is None:
+            self.meter.total_bytes = int(content_length)
 
 
 class LocalProcessPlaybackBackend:
@@ -463,7 +585,10 @@ class LocalProcessPlaybackBackend:
         del item
         if not self.player:
             raise PlaybackError(self.unavailable_message)
-        command = player_command(self.player, stream_url, auth_header, seek)
+        meter = DownloadMeter()
+        proxy = StreamingProxyServer(stream_url, auth_header, meter)
+        proxy.start()
+        command = player_command(self.player, proxy.url, auth_header, seek)
         popen_kwargs: dict[str, Any] = {
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
@@ -472,8 +597,12 @@ class LocalProcessPlaybackBackend:
             # Place the player in its own process group so stopping the console
             # also stops any helper processes spawned by the player.
             popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(command, **popen_kwargs)
-        return PlaybackSession(process=process)
+        try:
+            process = subprocess.Popen(command, **popen_kwargs)
+        except Exception:
+            proxy.stop()
+            raise
+        return PlaybackSession(process=process, download_meter=meter, proxy_server=proxy)
 
     def stop(self, session: PlaybackSession) -> None:
         if session.process and session.process.poll() is None:
@@ -483,6 +612,8 @@ class LocalProcessPlaybackBackend:
             except subprocess.TimeoutExpired:
                 self._kill_process(session.process)
                 session.process.wait(timeout=3)
+        if session.proxy_server is not None:
+            session.proxy_server.stop()
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
