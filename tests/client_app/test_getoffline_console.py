@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import email.message
 import json
 import sys
 import tempfile
@@ -217,6 +218,71 @@ class ConsolePlaybackTests(unittest.TestCase):
                     urlopen.call_args.args[0].headers["Authorization"],
                     "Basic YWxpY2U6c2VjcmV0",
                 )
+            finally:
+                console.DOWNLOAD_DIR = original
+
+    def test_download_media_file_uses_response_content_type_extension(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        class Response:
+            def __init__(self) -> None:
+                self.headers = email.message.Message()
+                self.headers["Content-Type"] = "audio/mp4"
+
+            def __enter__(self) -> "Response":
+                self.chunks = [b"\x00\x00\x00 ftypM4A ", b"audio", b""]
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self, _size: int) -> bytes:
+                return self.chunks.pop(0)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                with mock.patch.object(
+                    console.urllib.request, "urlopen", return_value=Response()
+                ):
+                    path = app.download_media_file(
+                        9,
+                        {"title": "M4A Audio", "media_kind": "audio"},
+                        "http://example.test/api/stream/9",
+                    )
+                self.assertEqual(path.name, "9-M4A-Audio.m4a")
+                self.assertEqual(path.read_bytes(), b"\x00\x00\x00 ftypM4A audio")
+            finally:
+                console.DOWNLOAD_DIR = original
+
+    def test_existing_cached_file_with_mp4_signature_is_renamed_before_reuse(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                legacy = console.media_download_path(
+                    10, {"title": "Legacy M4A", "media_kind": "audio"}
+                )
+                legacy.parent.mkdir(parents=True, exist_ok=True)
+                legacy.write_bytes(b"\x00\x00\x00 ftypM4A audio")
+
+                with mock.patch.object(console.urllib.request, "urlopen") as urlopen:
+                    path = app.download_media_file(
+                        10,
+                        {"title": "Legacy M4A", "media_kind": "audio"},
+                        "http://example.test/api/stream/10",
+                    )
+                self.assertEqual(path.name, "10-Legacy-M4A.m4a")
+                self.assertFalse(legacy.exists())
+                self.assertEqual(path.read_bytes(), b"\x00\x00\x00 ftypM4A audio")
+                urlopen.assert_not_called()
             finally:
                 console.DOWNLOAD_DIR = original
 

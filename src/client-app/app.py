@@ -15,6 +15,7 @@ import base64
 import curses
 import getpass
 import json
+import mimetypes
 import os
 import shutil
 import signal
@@ -313,15 +314,17 @@ class GetOfflineConsole:
         *,
         stdscr: Any | None = None,
     ) -> Path:
-        path = media_download_path(episode_id, item)
-        if path.exists() and path.is_file():
+        path = existing_media_download_path(episode_id, item)
+        if path is not None:
+            path = normalize_cached_media_extension(path)
             self.message = f"Using downloaded file: {path.name}"
             return path
-        path.parent.mkdir(parents=True, exist_ok=True)
+        download_stem = media_download_stem(episode_id, item)
+        download_stem.parent.mkdir(parents=True, exist_ok=True)
         self.message = f"Downloading file: {item.get('title') or episode_id}"
         if stdscr is not None:
             self._draw(stdscr)
-        tmp_path = path.with_name(path.name + ".part")
+        tmp_path = download_stem.with_name(download_stem.name + ".part")
         request = urllib.request.Request(
             stream_url, headers={"Authorization": self.credentials.auth_header}
         )
@@ -335,9 +338,11 @@ class GetOfflineConsole:
                     if not chunk:
                         break
                     handle.write(chunk)
+                extension = media_extension_from_response(response)
         except (OSError, urllib.error.URLError) as exc:
             tmp_path.unlink(missing_ok=True)
             raise PlaybackError(f"download failed: {exc}") from exc
+        path = download_stem.with_suffix(extension)
         tmp_path.replace(path)
         return path
 
@@ -649,12 +654,75 @@ class AudioBridgePlaybackBackend:
 
 
 def media_download_path(episode_id: int, item: Mapping[str, Any]) -> Path:
+    return media_download_stem(episode_id, item).with_suffix(
+        default_media_extension(item)
+    )
+
+
+def media_download_stem(episode_id: int, item: Mapping[str, Any]) -> Path:
     title = str(item.get("title") or f"episode-{episode_id}")
+    return DOWNLOAD_DIR / f"{episode_id}-{safe_filename(title)}"
+
+
+def existing_media_download_path(
+    episode_id: int, item: Mapping[str, Any]
+) -> Path | None:
+    stem = media_download_stem(episode_id, item)
+    if stem.with_suffix(default_media_extension(item)).is_file():
+        return stem.with_suffix(default_media_extension(item))
+    return next(
+        (path for path in sorted(stem.parent.glob(stem.name + ".*")) if path.is_file()),
+        None,
+    )
+
+
+def default_media_extension(item: Mapping[str, Any]) -> str:
     media_kind = str(
         item.get("media_kind") or item.get("display_kind") or "audio"
     ).lower()
-    extension = ".mp4" if media_kind == "video" else ".mp3"
-    return DOWNLOAD_DIR / f"{episode_id}-{safe_filename(title)}{extension}"
+    return ".mp4" if media_kind == "video" else ".mp3"
+
+
+def media_extension_from_response(response: Any) -> str:
+    headers = getattr(response, "headers", None)
+    content_type = ""
+    if headers is not None:
+        get_content_type = getattr(headers, "get_content_type", None)
+        if callable(get_content_type):
+            content_type = str(get_content_type())
+        else:
+            content_type = str(headers.get("Content-Type", "")).partition(";")[0]
+    extension = mimetypes.guess_extension(content_type) if content_type else None
+    if content_type == "audio/mp4":
+        return ".m4a"
+    return extension or ".mp3"
+
+
+def normalize_cached_media_extension(path: Path) -> Path:
+    extension = media_extension_from_file(path)
+    if extension == path.suffix.lower() or not extension:
+        return path
+    renamed = path.with_suffix(extension)
+    if renamed.exists():
+        return path
+    path.replace(renamed)
+    return renamed
+
+
+def media_extension_from_file(path: Path) -> str:
+    with path.open("rb") as handle:
+        header = handle.read(16)
+    if header.startswith(b"ID3") or header[:2] in {
+        b"\xff\xfb",
+        b"\xff\xf3",
+        b"\xff\xf2",
+    }:
+        return ".mp3"
+    if header.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm"
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        return ".m4a"
+    return ""
 
 
 def safe_filename(value: str) -> str:
