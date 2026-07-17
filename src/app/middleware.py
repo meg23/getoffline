@@ -31,6 +31,7 @@ class RequestDiagnosticsMiddleware:
                 request,
                 "request returned error response",
                 status_code=response.status_code,
+                response_body=self._response_body(response),
             )
         return response
 
@@ -41,6 +42,7 @@ class RequestDiagnosticsMiddleware:
         *,
         status_code: int | None = None,
         exc_info: bool = False,
+        response_body: str = "",
     ) -> None:
         user = getattr(request, "user", None)
         username = (
@@ -48,7 +50,7 @@ class RequestDiagnosticsMiddleware:
         )
         log.warning(
             "%s method=%s path=%s status=%s host=%s forwarded_host=%s origin=%s "
-            "referer=%s remote_addr=%s user=%s content_type=%s",
+            "referer=%s remote_addr=%s user=%s content_type=%s response_body=%r",
             message,
             request.method,
             request.get_full_path(),
@@ -60,5 +62,18 @@ class RequestDiagnosticsMiddleware:
             request.META.get("REMOTE_ADDR", ""),
             username,
             request.META.get("CONTENT_TYPE", ""),
+            response_body,
             exc_info=exc_info,
         )
+
+    def _response_body(self, response: HttpResponse) -> str:
+        if getattr(response, "streaming", False):
+            return "<streaming>"
+        content = getattr(response, "content", b"")
+        if not content:
+            return ""
+        try:
+            decoded = content[:500].decode("utf-8", errors="replace")
+        except Exception:
+            return "<unreadable>"
+        return " ".join(decoded.split())
