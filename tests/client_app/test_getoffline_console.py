@@ -171,14 +171,21 @@ class ConsolePlaybackTests(unittest.TestCase):
             original = console.DOWNLOAD_DIR
             try:
                 console.DOWNLOAD_DIR = Path(temp_dir)
-                with mock.patch.object(
-                    console.urllib.request, "urlopen", return_value=Response()
-                ) as urlopen:
+                with (
+                    mock.patch.object(
+                        console.urllib.request, "urlopen", return_value=Response()
+                    ) as urlopen,
+                    mock.patch.object(app, "_draw") as draw,
+                ):
+                    window = object()
                     path = app.download_media_file(
                         8,
                         {"title": "Fresh Audio", "media_kind": "audio"},
                         "http://example.test/api/stream/8",
+                        stdscr=window,
                     )
+                draw.assert_called_once_with(window)
+                self.assertEqual(app.message, "Downloading file: Fresh Audio")
                 self.assertEqual(path.name, "8-Fresh-Audio.mp3")
                 self.assertEqual(path.read_bytes(), b"new audio")
                 self.assertEqual(

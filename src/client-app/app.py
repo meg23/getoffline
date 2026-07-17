@@ -162,7 +162,7 @@ class GetOfflineConsole:
         elif key == curses.KEY_PPAGE:
             self.selected = max(0, self.selected - 10)
         elif key in (ord("\n"), curses.KEY_ENTER, ord("p")):
-            self.play_selected()
+            self.play_selected(stdscr)
         elif key == ord("s"):
             self.stop(reason="stop")
         elif key == ord("r"):
@@ -191,7 +191,7 @@ class GetOfflineConsole:
             return None
         return self.episodes[self.selected]
 
-    def play_selected(self) -> None:
+    def play_selected(self, stdscr: Any | None = None) -> None:
         episode = self.current_episode()
         if not episode:
             self.message = "No episode selected"
@@ -211,7 +211,7 @@ class GetOfflineConsole:
         self.client.playback_start(episode_id)
         url = self.stream_url(episode_id)
         try:
-            media_file = self.download_media_file(episode_id, item, url)
+            media_file = self.download_media_file(episode_id, item, url, stdscr=stdscr)
             self.playback_session = self.playback.start(
                 item=item,
                 stream_url=str(media_file),
@@ -306,14 +306,21 @@ class GetOfflineConsole:
         )
 
     def download_media_file(
-        self, episode_id: int, item: Mapping[str, Any], stream_url: str
+        self,
+        episode_id: int,
+        item: Mapping[str, Any],
+        stream_url: str,
+        *,
+        stdscr: Any | None = None,
     ) -> Path:
         path = media_download_path(episode_id, item)
         if path.exists() and path.is_file():
             self.message = f"Using downloaded file: {path.name}"
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.message = f"Downloading: {item.get('title') or episode_id}"
+        self.message = f"Downloading file: {item.get('title') or episode_id}"
+        if stdscr is not None:
+            self._draw(stdscr)
         tmp_path = path.with_name(path.name + ".part")
         request = urllib.request.Request(
             stream_url, headers={"Authorization": self.credentials.auth_header}
