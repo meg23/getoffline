@@ -2,7 +2,7 @@
 
 `app.py` is a dependency-light ncurses client for GetOffline. It uses
 the `getoffline-sdk` package for API communication and delegates audio playback
-to either a terminal-friendly local player (`mpv`, `cvlc`, `vlc`, VLC.app on macOS, or `ffplay`) or a generic HTTP audio bridge.
+to either `ffplay` for local playback or a generic HTTP audio bridge.
 
 ## Run
 
@@ -36,14 +36,9 @@ Credentials and optional playback defaults are stored in `$XDG_CONFIG_HOME/getof
 
 The app is intentionally console music-player-like: the terminal UI is always available while an
 external player or bridge handles media decoding. Playback progress is periodically saved
-through the SDK while playback is running and once again when playback stops. The local
-player auto-detection prefers `mpv` or VLC before falling back to `ffplay`, because
-`ffplay` can consume noticeably more CPU during startup/seeking on some systems.
-On macOS, the client also checks the standard VLC.app binary at
-`/Applications/VLC.app/Contents/MacOS/VLC`; you can pass that path with `--player`
-if your shell cannot find it automatically. VLC/VLC.app playback uses a temporary
-localhost proxy so the client can add the GetOffline authorization header before
-VLC reads the stream.
+through the SDK while playback is running and once again when playback stops. Local
+playback uses `ffplay`, including the GetOffline authorization header and the
+configured initial volume.
 
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
 the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,

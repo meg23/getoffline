@@ -246,39 +246,28 @@ class ConsoleProgressTests(unittest.TestCase):
         self.assertEqual(app.client.progress_calls[0][2], "stopped")
         self.assertEqual(app.message, "Loaded 0 unplayed item(s)")
 
-    def test_local_player_detection_prefers_vlc_before_ffplay(self):
-        self.assertGreater(
-            console.PLAYER_CANDIDATES.index("ffplay"),
-            console.PLAYER_CANDIDATES.index("vlc"),
-        )
+    def test_local_player_detection_only_uses_ffplay(self):
+        self.assertEqual(console.PLAYER_CANDIDATES, ("ffplay",))
 
-    def test_macos_vlc_app_path_gets_vlc_headers_and_playback_flags(self):
+    def test_ffplay_command_gets_headers_seek_and_initial_volume(self):
         command = console.player_command(
-            "/Applications/VLC.app/Contents/MacOS/VLC",
+            "ffplay",
             "http://getoffline.local/api/stream/7",
             "Basic abc123",
             42.5,
+            0.75,
         )
 
-        self.assertEqual(command[0], "/Applications/VLC.app/Contents/MacOS/VLC")
-        self.assertIn("--no-video", command)
-        self.assertIn("--play-and-exit", command)
-        self.assertIn("--start-time=42", command)
-        self.assertIn("--http-header=Authorization: Basic abc123", command)
+        self.assertEqual(command[0], "ffplay")
+        self.assertIn("-nodisp", command)
+        self.assertIn("-autoexit", command)
+        self.assertIn("-ss", command)
+        self.assertIn("42.500", command)
+        self.assertIn("-volume", command)
+        self.assertIn("75", command)
+        self.assertIn("-headers", command)
+        self.assertIn("Authorization: Basic abc123\r\n", command)
         self.assertEqual(command[-1], "http://getoffline.local/api/stream/7")
-
-    def test_vlc_uses_auth_proxy_without_header_flag_for_local_playback(self):
-        self.assertTrue(console.player_needs_auth_proxy("/Applications/VLC.app/Contents/MacOS/VLC"))
-
-        command = console.player_command(
-            "/Applications/VLC.app/Contents/MacOS/VLC",
-            "http://127.0.0.1:12345/stream",
-            "",
-            0.0,
-        )
-
-        self.assertNotIn("--http-header=Authorization: ", command)
-        self.assertEqual(command[-1], "http://127.0.0.1:12345/stream")
 
     def test_shutdown_stops_active_playback_and_saves_quit_progress_once(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
