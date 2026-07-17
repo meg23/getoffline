@@ -612,7 +612,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(body.startswith("WEBVTT"))
         self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
-    def test_media_endpoint_limits_open_ended_range_for_fast_video_start(self):
+    def test_media_endpoint_honors_open_ended_range_to_eof(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -636,12 +636,12 @@ class SharedDjangoModelTests(TestCase):
             body = b"".join(response.streaming_content)
 
         self.assertEqual(response.status_code, 206)
-        self.assertEqual(response["Content-Length"], str(1024 * 1024))
+        self.assertEqual(response["Content-Length"], str(2 * 1024 * 1024))
         self.assertEqual(
             response["Content-Range"],
-            f"bytes 0-{1024 * 1024 - 1}/{2 * 1024 * 1024}",
+            f"bytes 0-{2 * 1024 * 1024 - 1}/{2 * 1024 * 1024}",
         )
-        self.assertEqual(len(body), 1024 * 1024)
+        self.assertEqual(len(body), 2 * 1024 * 1024)
 
     def test_media_endpoint_honors_explicit_range_end(self):
         client = Client()

@@ -144,7 +144,6 @@ class SourceFormData:
 
 log = logging.getLogger(__name__)
 MEDIA_RANGE_CHUNK_SIZE = 64 * 1024
-MEDIA_INITIAL_RANGE_SIZE = 1024 * 1024
 
 
 def _optional_int(value: object) -> int | None:
@@ -640,10 +639,11 @@ def _legacy_media(request: HttpRequest, download_id: int) -> HttpResponse:
         except ValueError:
             start, requested_end = 0, None
         start = max(0, min(start, file_size - 1))
-        if requested_end is None:
-            end = min(start + MEDIA_INITIAL_RANGE_SIZE - 1, file_size - 1)
-        else:
-            end = max(start, min(requested_end, file_size - 1))
+        end = (
+            file_size - 1
+            if requested_end is None
+            else max(start, min(requested_end, file_size - 1))
+        )
         length = end - start + 1
         response = StreamingHttpResponse(
             _file_range_iterator(path, start, length),
