@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tempfile
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -110,6 +112,7 @@ class ConsolePlaybackTests(unittest.TestCase):
             BridgeHandler.requests[0][1],
             {
                 "url": "http://getoffline.local/api/stream/7",
+                "filename": "http://getoffline.local/api/stream/7",
                 "headers": {"Authorization": "Basic abc123"},
                 "seek_seconds": 42.5,
                 "title": "Example",
@@ -117,7 +120,73 @@ class ConsolePlaybackTests(unittest.TestCase):
                 "episode_id": 7,
             },
         )
-        self.assertEqual(BridgeHandler.requests[1], ("/stop", {"session_id": "session-123"}))
+        self.assertEqual(
+            BridgeHandler.requests[1], ("/stop", {"session_id": "session-123"})
+        )
+
+    def test_download_media_file_reuses_existing_file_without_request(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                existing = console.media_download_path(
+                    7, {"title": "Example", "media_kind": "audio"}
+                )
+                existing.parent.mkdir(parents=True, exist_ok=True)
+                existing.write_bytes(b"already here")
+
+                with mock.patch.object(console.urllib.request, "urlopen") as urlopen:
+                    path = app.download_media_file(
+                        7,
+                        {"title": "Example", "media_kind": "audio"},
+                        "http://example.test/api/stream/7",
+                    )
+                self.assertEqual(path, existing)
+                self.assertEqual(path.read_bytes(), b"already here")
+                urlopen.assert_not_called()
+            finally:
+                console.DOWNLOAD_DIR = original
+
+    def test_download_media_file_writes_downloaded_stream(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        class Response:
+            def __enter__(self) -> "Response":
+                self.chunks = [b"new ", b"audio", b""]
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self, _size: int) -> bytes:
+                return self.chunks.pop(0)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                with mock.patch.object(
+                    console.urllib.request, "urlopen", return_value=Response()
+                ) as urlopen:
+                    path = app.download_media_file(
+                        8,
+                        {"title": "Fresh Audio", "media_kind": "audio"},
+                        "http://example.test/api/stream/8",
+                    )
+                self.assertEqual(path.name, "8-Fresh-Audio.mp3")
+                self.assertEqual(path.read_bytes(), b"new audio")
+                self.assertEqual(
+                    urlopen.call_args.args[0].headers["Authorization"],
+                    "Basic YWxpY2U6c2VjcmV0",
+                )
+            finally:
+                console.DOWNLOAD_DIR = original
 
 
 class FakeClient:
@@ -125,7 +194,9 @@ class FakeClient:
         self.progress_calls: list[tuple[int, float, str]] = []
         self.refreshed = False
 
-    def playback_progress(self, episode_id: int, position_seconds: float, *, reason: str = "timeupdate") -> dict[str, Any]:
+    def playback_progress(
+        self, episode_id: int, position_seconds: float, *, reason: str = "timeupdate"
+    ) -> dict[str, Any]:
         self.progress_calls.append((episode_id, position_seconds, reason))
         return {"ok": True}
 

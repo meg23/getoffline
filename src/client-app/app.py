@@ -40,6 +40,10 @@ from getoffline_sdk import GetOfflineClient, HttpTransport, Response
 APP_NAME = "getoffline-console"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
+DOWNLOAD_DIR = Path(
+    os.environ.get("GETOFFLINE_CONSOLE_DOWNLOAD_DIR", CONFIG_DIR / "downloads")
+)
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
@@ -68,8 +72,12 @@ class Credentials:
 class AuthenticatedTransport:
     """HTTP transport that attaches Basic auth to every SDK request."""
 
-    def __init__(self, credentials: Credentials, *, timeout_seconds: float = 30.0) -> None:
-        self.transport = HttpTransport(credentials.api_url, timeout_seconds=timeout_seconds)
+    def __init__(
+        self, credentials: Credentials, *, timeout_seconds: float = 30.0
+    ) -> None:
+        self.transport = HttpTransport(
+            credentials.api_url, timeout_seconds=timeout_seconds
+        )
         self.credentials = credentials
 
     def request(
@@ -83,7 +91,9 @@ class AuthenticatedTransport:
         headers: Mapping[str, str] | None = None,
     ) -> Response:
         merged = {"Authorization": self.credentials.auth_header, **(headers or {})}
-        return self.transport.request(method, target, args, query=query, data=data, headers=merged)
+        return self.transport.request(
+            method, target, args, query=query, data=data, headers=merged
+        )
 
 
 class GetOfflineConsole:
@@ -193,13 +203,18 @@ class GetOfflineConsole:
         episode_id = int(episode["id"])
         player_payload = self.client.frontend_player(episode_id)
         item = dict(player_payload.get("item") or episode)
-        seek = float(player_payload.get("seek_seconds") or item.get("last_position_seconds") or 0.0)
+        seek = float(
+            player_payload.get("seek_seconds")
+            or item.get("last_position_seconds")
+            or 0.0
+        )
         self.client.playback_start(episode_id)
         url = self.stream_url(episode_id)
         try:
+            media_file = self.download_media_file(episode_id, item, url)
             self.playback_session = self.playback.start(
                 item=item,
-                stream_url=url,
+                stream_url=str(media_file),
                 auth_header=self.credentials.auth_header,
                 seek=seek,
             )
@@ -210,7 +225,9 @@ class GetOfflineConsole:
         self.play_start_position = seek
         self.play_started_at = time.monotonic()
         self.last_progress_at = 0.0
-        self.message = f"Playing: {item.get('title') or episode.get('title') or episode_id}"
+        self.message = (
+            f"Playing: {item.get('title') or episode.get('title') or episode_id}"
+        )
 
     def stop(self, *, reason: str) -> None:
         if self.playback_session is not None:
@@ -231,9 +248,15 @@ class GetOfflineConsole:
         episode = self.current_episode()
         if not episode:
             return
-        target = "/dashboard/downloads/{}/{}".format(episode["id"], "played" if played else "unplayed")
+        target = "/dashboard/downloads/{}/{}".format(
+            episode["id"], "played" if played else "unplayed"
+        )
         response = self.client.raw_request("POST", target)
-        self.message = "Updated playback status" if response.ok else f"Update failed ({response.status_code})"
+        self.message = (
+            "Updated playback status"
+            if response.ok
+            else f"Update failed ({response.status_code})"
+        )
         self.refresh()
 
     def toggle_favorite(self) -> None:
@@ -241,8 +264,14 @@ class GetOfflineConsole:
         if not episode:
             return
         action = "unfavorite" if episode.get("favorite") else "favorite"
-        response = self.client.raw_request("POST", f"/dashboard/downloads/{episode['id']}/{action}")
-        self.message = "Updated favorite" if response.ok else f"Favorite failed ({response.status_code})"
+        response = self.client.raw_request(
+            "POST", f"/dashboard/downloads/{episode['id']}/{action}"
+        )
+        self.message = (
+            "Updated favorite"
+            if response.ok
+            else f"Favorite failed ({response.status_code})"
+        )
         self.refresh()
 
     def add_download(self, stdscr: Any) -> None:
@@ -250,7 +279,11 @@ class GetOfflineConsole:
         if not url:
             return
         payload = self.client.download(url)
-        self.message = "Queued download" if payload.get("ok") else f"Queue failed: {payload.get('error', 'unknown')}"
+        self.message = (
+            "Queued download"
+            if payload.get("ok")
+            else f"Queue failed: {payload.get('error', 'unknown')}"
+        )
         self.refresh()
 
     def search(self, stdscr: Any) -> None:
@@ -268,17 +301,52 @@ class GetOfflineConsole:
         self.refresh()
 
     def stream_url(self, episode_id: int) -> str:
-        return f"{self.credentials.api_url}/stream/{urllib.parse.quote(str(episode_id))}"
+        return (
+            f"{self.credentials.api_url}/stream/{urllib.parse.quote(str(episode_id))}"
+        )
+
+    def download_media_file(
+        self, episode_id: int, item: Mapping[str, Any], stream_url: str
+    ) -> Path:
+        path = media_download_path(episode_id, item)
+        if path.exists() and path.is_file():
+            self.message = f"Using downloaded file: {path.name}"
+            return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.message = f"Downloading: {item.get('title') or episode_id}"
+        tmp_path = path.with_name(path.name + ".part")
+        request = urllib.request.Request(
+            stream_url, headers={"Authorization": self.credentials.auth_header}
+        )
+        try:
+            with (
+                urllib.request.urlopen(request, timeout=60) as response,
+                tmp_path.open("wb") as handle,
+            ):  # nosec B310 - GetOffline URL is user configured.
+                while True:
+                    chunk = response.read(DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+        except (OSError, urllib.error.URLError) as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise PlaybackError(f"download failed: {exc}") from exc
+        tmp_path.replace(path)
+        return path
 
     def estimated_position(self) -> float:
         if self.playing_id is None:
             return 0.0
-        return self.play_start_position + max(time.monotonic() - self.play_started_at, 0.0)
+        return self.play_start_position + max(
+            time.monotonic() - self.play_started_at, 0.0
+        )
 
     def _save_progress(self, reason: str) -> None:
         if self.playing_id is None:
             return
-        self.client.playback_progress(self.playing_id, self.estimated_position(), reason=reason)
+        self.client.playback_progress(
+            self.playing_id, self.estimated_position(), reason=reason
+        )
 
     def _send_periodic_progress(self) -> None:
         if (
@@ -293,7 +361,9 @@ class GetOfflineConsole:
             self._save_progress("timeupdate")
 
     def _reap_player(self) -> None:
-        if self.playback_session is not None and not self.playback.is_running(self.playback_session):
+        if self.playback_session is not None and not self.playback.is_running(
+            self.playback_session
+        ):
             # A local player process can disappear because the user closed the
             # player window/terminal controls, not only because media reached
             # EOF.  Saving this as ``ended`` clears the resume position on the
@@ -342,7 +412,9 @@ class GetOfflineConsole:
         stdscr.refresh()
 
 
-def safe_addnstr(window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL) -> None:
+def safe_addnstr(
+    window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL
+) -> None:
     """Draw text without failing on curses implementations that reject bottom-right writes."""
 
     height, width = window.getmaxyx()
@@ -449,7 +521,11 @@ class LocalProcessPlaybackBackend:
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
-        return bool(session.active and session.process is not None and session.process.poll() is None)
+        return bool(
+            session.active
+            and session.process is not None
+            and session.process.poll() is None
+        )
 
     def _terminate_process(self, process: subprocess.Popen[bytes]) -> None:
         if os.name == "posix":
@@ -477,7 +553,7 @@ class LocalProcessPlaybackBackend:
 class AudioBridgePlaybackBackend:
     """Generic HTTP audio bridge backend.
 
-    The bridge receives the authenticated GetOffline stream URL and decides how
+    The bridge receives a locally downloaded media filename and decides how
     to present playback to its downstream device. The console client does not
     know what type of device is behind the bridge.
     """
@@ -513,10 +589,13 @@ class AudioBridgePlaybackBackend:
             raise PlaybackError(self.unavailable_message)
         payload = {
             "url": stream_url,
+            "filename": stream_url,
             "headers": {"Authorization": auth_header},
             "seek_seconds": seek,
             "title": str(item.get("title") or ""),
-            "media_kind": str(item.get("media_kind") or item.get("display_kind") or "audio"),
+            "media_kind": str(
+                item.get("media_kind") or item.get("display_kind") or "audio"
+            ),
             "episode_id": item.get("id"),
         }
         response = self._post_json(self.bridge_url, payload)
@@ -562,6 +641,24 @@ class AudioBridgePlaybackBackend:
         return decoded if isinstance(decoded, dict) else {}
 
 
+def media_download_path(episode_id: int, item: Mapping[str, Any]) -> Path:
+    title = str(item.get("title") or f"episode-{episode_id}")
+    media_kind = str(
+        item.get("media_kind") or item.get("display_kind") or "audio"
+    ).lower()
+    extension = ".mp4" if media_kind == "video" else ".mp3"
+    return DOWNLOAD_DIR / f"{episode_id}-{safe_filename(title)}{extension}"
+
+
+def safe_filename(value: str) -> str:
+    cleaned = "".join(
+        character if character.isalnum() or character in "._- " else "-"
+        for character in value
+    )
+    cleaned = "-".join(cleaned.split())
+    return (cleaned.strip(".-") or "media")[:120]
+
+
 def default_bridge_stop_url(bridge_url: str) -> str:
     parsed = urllib.parse.urlsplit(bridge_url)
     path = parsed.path.rstrip("/")
@@ -569,7 +666,9 @@ def default_bridge_stop_url(bridge_url: str) -> str:
         path = path[: -len("/play")] + "/stop"
     else:
         path = f"{path}/stop"
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment))
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment)
+    )
 
 
 def build_playback_backend(
@@ -584,16 +683,40 @@ def build_playback_backend(
         return AudioBridgePlaybackBackend(bridge_url, bridge_stop_url=bridge_stop_url)
     if normalized == "local":
         return LocalProcessPlaybackBackend(player)
-    raise SystemExit(f"Unsupported playback backend: {playback_backend!r}. Expected 'local' or 'bridge'.")
+    raise SystemExit(
+        f"Unsupported playback backend: {playback_backend!r}. Expected 'local' or 'bridge'."
+    )
 
 
 def player_command(player: str, url: str, auth_header: str, seek: float) -> list[str]:
     if player == "mpv":
-        return ["mpv", "--no-video", f"--start={seek:.3f}", f"--http-header-fields=Authorization: {auth_header}", url]
+        return [
+            "mpv",
+            "--no-video",
+            f"--start={seek:.3f}",
+            f"--http-header-fields=Authorization: {auth_header}",
+            url,
+        ]
     if player == "ffplay":
-        return ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}", "-headers", f"Authorization: {auth_header}\r\n", url]
+        return [
+            "ffplay",
+            "-nodisp",
+            "-autoexit",
+            "-ss",
+            f"{seek:.3f}",
+            "-headers",
+            f"Authorization: {auth_header}\r\n",
+            url,
+        ]
     if player in {"vlc", "cvlc"}:
-        return [player, "--intf", "ncurses", f"--start-time={int(seek)}", f"--http-header=Authorization: {auth_header}", url]
+        return [
+            player,
+            "--intf",
+            "ncurses",
+            f"--start-time={int(seek)}",
+            f"--http-header=Authorization: {auth_header}",
+            url,
+        ]
     return [player, url]
 
 
@@ -635,7 +758,9 @@ def save_credentials(credentials: Credentials) -> None:
 
 def login(base_url: str | None = None, username: str | None = None) -> Credentials:
     print("GetOffline login")
-    resolved_base = base_url or input("Base URL (for example http://localhost:8000): ").strip()
+    resolved_base = (
+        base_url or input("Base URL (for example http://localhost:8000): ").strip()
+    )
     resolved_user = username or input("Username: ").strip()
     password = getpass.getpass("Password: ")
     credentials = Credentials(resolved_base, resolved_user, password)
@@ -649,25 +774,38 @@ def login(base_url: str | None = None, username: str | None = None) -> Credentia
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="console music-player-style ncurses client for GetOffline")
-    parser.add_argument("--login", action="store_true", help="prompt for credentials and store them locally")
+    parser = argparse.ArgumentParser(
+        description="console music-player-style ncurses client for GetOffline"
+    )
+    parser.add_argument(
+        "--login",
+        action="store_true",
+        help="prompt for credentials and store them locally",
+    )
     parser.add_argument("--base-url", help="GetOffline web base URL, without /api")
     parser.add_argument("--username", help="GetOffline username")
-    parser.add_argument("--player", help="media player command to use (default: auto-detect mpv/ffplay/vlc)")
+    parser.add_argument(
+        "--player",
+        help="media player command to use (default: auto-detect mpv/ffplay/vlc)",
+    )
     parser.add_argument(
         "--playback-backend",
         choices=("local", "bridge"),
         help="playback backend to use (default: stored config or local)",
     )
     parser.add_argument("--bridge-url", help="generic audio bridge play endpoint URL")
-    parser.add_argument("--bridge-stop-url", help="generic audio bridge stop endpoint URL")
+    parser.add_argument(
+        "--bridge-stop-url", help="generic audio bridge stop endpoint URL"
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     args = parse_args()
-    credentials = login(args.base_url, args.username) if args.login else load_credentials()
+    credentials = (
+        login(args.base_url, args.username) if args.login else load_credentials()
+    )
     if credentials is None:
         credentials = login(args.base_url, args.username)
     app = GetOfflineConsole(

@@ -39,8 +39,12 @@ through the SDK while playback is running and once again when playback stops. Th
 player auto-detection prefers `mpv` or VLC before falling back to `ffplay`, because
 `ffplay` can consume noticeably more CPU during startup/seeking on some systems.
 
+Before starting playback, the client downloads the selected media into
+`$GETOFFLINE_CONSOLE_DOWNLOAD_DIR` or `~/.config/getoffline-console/downloads` and reuses
+that file on future plays if it already exists.
+
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
-the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,
-`media_kind`, and `episode_id`. If no `--bridge-stop-url` is provided, the client
+the downloaded media filename in `url` and `filename`, an `Authorization` header for
+legacy bridge compatibility, `seek_seconds`, `title`, `media_kind`, and `episode_id`. If no `--bridge-stop-url` is provided, the client
 posts stop requests to a sibling `/stop` endpoint, so `http://bridge.local/play`
 defaults to `http://bridge.local/stop`.
