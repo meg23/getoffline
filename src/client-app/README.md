@@ -41,7 +41,9 @@ playback uses `ffplay`, including the GetOffline authorization header and the
 configured initial volume. Player output is written to
 `$XDG_CONFIG_HOME/getoffline-console/player.log` or
 `~/.config/getoffline-console/player.log` so ffplay/auth/audio-device failures
-are visible when playback exits immediately.
+are visible when playback exits immediately. If ffplay exits cleanly right after
+starting from a saved resume position, the client retries once from the
+beginning of the item.
 
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
 the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,

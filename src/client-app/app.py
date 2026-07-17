@@ -436,6 +436,11 @@ def prepare_player_log() -> Path:
     return PLAYER_LOG_FILE
 
 
+def append_player_log(path: Path, message: str) -> None:
+    with path.open("ab") as handle:
+        handle.write(message.encode("utf-8", errors="replace"))
+
+
 def tail_text(path: Path, *, limit: int = 1000) -> str:
     try:
         data = path.read_bytes()
@@ -490,26 +495,19 @@ class LocalProcessPlaybackBackend:
         del item
         if not self.player:
             raise PlaybackError(self.unavailable_message)
-        command = player_command(self.player, stream_url, auth_header, seek, volume)
         log_path = prepare_player_log()
-        log_file = log_path.open("ab")
-        popen_kwargs: dict[str, Any] = {
-            "stdout": log_file,
-            "stderr": subprocess.STDOUT,
-        }
-        if os.name == "posix":
-            # Place the player in its own process group so stopping the console
-            # also stops any helper processes spawned by the player.
-            popen_kwargs["start_new_session"] = True
-        try:
-            process = subprocess.Popen(command, **popen_kwargs)
-        except OSError as exc:
-            log_file.close()
-            raise PlaybackError(f"unable to launch player {self.player!r}: {exc}") from exc
-        finally:
-            log_file.close()
+        command = player_command(self.player, stream_url, auth_header, seek, volume)
+        process = self._launch_player(command, log_path)
         session = PlaybackSession(process=process, volume=clamp_volume(volume), log_path=log_path)
-        self._raise_if_process_exited_immediately(session)
+        if self._process_exited_immediately(session):
+            if session.process is not None and session.process.returncode == 0 and seek > 0:
+                append_player_log(log_path, f"\nRetrying from the beginning because ffplay exited immediately after seek {seek:.3f}s.\n")
+                retry_command = player_command(self.player, stream_url, auth_header, 0.0, volume)
+                retry_process = self._launch_player(retry_command, log_path)
+                session = PlaybackSession(process=retry_process, volume=clamp_volume(volume), log_path=log_path)
+                if not self._process_exited_immediately(session):
+                    return session
+            raise PlaybackError(session.error_message)
         return session
 
     def set_volume(self, session: PlaybackSession, volume: float) -> None:
@@ -533,16 +531,33 @@ class LocalProcessPlaybackBackend:
         session.error_message = player_exit_message(session)
         return False
 
-    def _raise_if_process_exited_immediately(self, session: PlaybackSession) -> None:
+    def _launch_player(self, command: list[str], log_path: Path) -> subprocess.Popen[bytes]:
+        log_file = log_path.open("ab")
+        popen_kwargs: dict[str, Any] = {
+            "stdout": log_file,
+            "stderr": subprocess.STDOUT,
+        }
+        if os.name == "posix":
+            # Place the player in its own process group so stopping the console
+            # also stops any helper processes spawned by the player.
+            popen_kwargs["start_new_session"] = True
+        try:
+            return subprocess.Popen(command, **popen_kwargs)
+        except OSError as exc:
+            raise PlaybackError(f"unable to launch player {self.player!r}: {exc}") from exc
+        finally:
+            log_file.close()
+
+    def _process_exited_immediately(self, session: PlaybackSession) -> bool:
         if session.process is None:
-            return
+            return False
         try:
             session.process.wait(timeout=0.75)
         except subprocess.TimeoutExpired:
-            return
+            return False
         session.error_message = player_exit_message(session)
         session.active = False
-        raise PlaybackError(session.error_message)
+        return True
 
     def _terminate_process(self, process: subprocess.Popen[bytes]) -> None:
         if os.name == "posix":

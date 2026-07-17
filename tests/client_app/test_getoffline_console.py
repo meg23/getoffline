@@ -269,6 +269,55 @@ class ConsoleProgressTests(unittest.TestCase):
         self.assertIn("Authorization: Basic abc123\r\n", command)
         self.assertEqual(command[-1], "http://getoffline.local/api/stream/7")
 
+    def test_ffplay_retries_from_beginning_when_seek_exits_cleanly(self):
+        class ExitedProcess:
+            returncode = 0
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 0
+
+            def poll(self) -> int:
+                return 0
+
+        class RunningProcess:
+            returncode = None
+
+            def wait(self, timeout: float | None = None) -> int:
+                raise console.subprocess.TimeoutExpired(["ffplay"], timeout or 0)
+
+            def poll(self) -> None:
+                return None
+
+        commands: list[list[str]] = []
+
+        def fake_popen(command: list[str], **_kwargs: Any) -> object:
+            commands.append(command)
+            return ExitedProcess() if len(commands) == 1 else RunningProcess()
+
+        original_popen = console.subprocess.Popen
+        original_log = console.PLAYER_LOG_FILE
+        log_path = Path(self.id().replace(".", "_") + ".log")
+        try:
+            console.subprocess.Popen = fake_popen
+            console.PLAYER_LOG_FILE = log_path
+            backend = console.LocalProcessPlaybackBackend("ffplay")
+            session = backend.start(
+                item={},
+                stream_url="http://getoffline.local/api/stream/7",
+                auth_header="Basic abc123",
+                seek=42.5,
+                volume=1.0,
+            )
+        finally:
+            console.subprocess.Popen = original_popen
+            console.PLAYER_LOG_FILE = original_log
+            log_path.unlink(missing_ok=True)
+
+        self.assertIsNotNone(session.process)
+        self.assertEqual(len(commands), 2)
+        self.assertIn("42.500", commands[0])
+        self.assertIn("0.000", commands[1])
+
     def test_shutdown_stops_active_playback_and_saves_quit_progress_once(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
         app.client = FakeClient()
