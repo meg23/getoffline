@@ -88,6 +88,41 @@ class ConsolePlaybackTests(unittest.TestCase):
 
         self.assertIn("--http-header-fields=Authorization: Basic abc123", command)
 
+    def test_parse_args_accepts_download_dir_override(self):
+        original_argv = console.sys.argv
+        try:
+            console.sys.argv = ["app.py", "--download-dir", "~/Downloads/getoffline"]
+            args = console.parse_args()
+        finally:
+            console.sys.argv = original_argv
+
+        self.assertEqual(args.download_dir, "~/Downloads/getoffline")
+
+    def test_download_media_file_uses_instance_download_dir(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app.download_dir = Path(temp_dir)
+            existing = console.media_download_path(
+                11,
+                {"title": "Custom Dir", "media_kind": "audio"},
+                download_dir=app.download_dir,
+            )
+            existing.parent.mkdir(parents=True, exist_ok=True)
+            existing.write_bytes(b"already here")
+
+            with mock.patch.object(console.urllib.request, "urlopen") as urlopen:
+                path = app.download_media_file(
+                    11,
+                    {"title": "Custom Dir", "media_kind": "audio"},
+                    "http://example.test/api/stream/11",
+                )
+
+            self.assertEqual(path, existing)
+            urlopen.assert_not_called()
+
     def test_load_credentials_accepts_legacy_credentials_file(self):
         original = console.CONFIG_FILE
         try:

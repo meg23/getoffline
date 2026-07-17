@@ -105,8 +105,12 @@ class GetOfflineConsole:
         playback_backend: str | None = None,
         bridge_url: str | None = None,
         bridge_stop_url: str | None = None,
+        download_dir: str | Path | None = None,
     ) -> None:
         self.credentials = credentials
+        self.download_dir = (
+            Path(download_dir).expanduser() if download_dir else DOWNLOAD_DIR
+        )
         self.client = GetOfflineClient(AuthenticatedTransport(credentials))
         self.playback = build_playback_backend(
             playback_backend or credentials.playback_backend,
@@ -314,12 +318,13 @@ class GetOfflineConsole:
         *,
         stdscr: Any | None = None,
     ) -> Path:
-        path = existing_media_download_path(episode_id, item)
+        download_dir = getattr(self, "download_dir", DOWNLOAD_DIR)
+        path = existing_media_download_path(episode_id, item, download_dir=download_dir)
         if path is not None:
             path = normalize_cached_media_extension(path)
             self.message = f"Using downloaded file: {path.name}"
             return path
-        download_stem = media_download_stem(episode_id, item)
+        download_stem = media_download_stem(episode_id, item, download_dir=download_dir)
         download_stem.parent.mkdir(parents=True, exist_ok=True)
         self.message = f"Downloading file: {item.get('title') or episode_id}"
         if stdscr is not None:
@@ -653,21 +658,25 @@ class AudioBridgePlaybackBackend:
         return decoded if isinstance(decoded, dict) else {}
 
 
-def media_download_path(episode_id: int, item: Mapping[str, Any]) -> Path:
-    return media_download_stem(episode_id, item).with_suffix(
+def media_download_path(
+    episode_id: int, item: Mapping[str, Any], *, download_dir: Path | None = None
+) -> Path:
+    return media_download_stem(episode_id, item, download_dir=download_dir).with_suffix(
         default_media_extension(item)
     )
 
 
-def media_download_stem(episode_id: int, item: Mapping[str, Any]) -> Path:
+def media_download_stem(
+    episode_id: int, item: Mapping[str, Any], *, download_dir: Path | None = None
+) -> Path:
     title = str(item.get("title") or f"episode-{episode_id}")
-    return DOWNLOAD_DIR / f"{episode_id}-{safe_filename(title)}"
+    return (download_dir or DOWNLOAD_DIR) / f"{episode_id}-{safe_filename(title)}"
 
 
 def existing_media_download_path(
-    episode_id: int, item: Mapping[str, Any]
+    episode_id: int, item: Mapping[str, Any], *, download_dir: Path | None = None
 ) -> Path | None:
-    stem = media_download_stem(episode_id, item)
+    stem = media_download_stem(episode_id, item, download_dir=download_dir)
     if stem.with_suffix(default_media_extension(item)).is_file():
         return stem.with_suffix(default_media_extension(item))
     return next(
@@ -892,6 +901,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--bridge-url", help="generic audio bridge play endpoint URL")
     parser.add_argument(
+        "--download-dir",
+        help=(
+            "directory for downloaded media cache "
+            "(default: GETOFFLINE_CONSOLE_DOWNLOAD_DIR or ~/.config/getoffline-console/downloads)"
+        ),
+    )
+    parser.add_argument(
         "--bridge-stop-url", help="generic audio bridge stop endpoint URL"
     )
     return parser.parse_args()
@@ -911,6 +927,7 @@ def main() -> int:
         playback_backend=args.playback_backend,
         bridge_url=args.bridge_url,
         bridge_stop_url=args.bridge_stop_url,
+        download_dir=args.download_dir,
     )
     try:
         curses.wrapper(app.run)

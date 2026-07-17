@@ -12,6 +12,7 @@ From this repository:
 PYTHONPATH=../packages:.. python app.py --login --base-url http://localhost:8000
 PYTHONPATH=../packages:.. python app.py
 PYTHONPATH=../packages:.. python app.py --playback-backend bridge --bridge-url http://bridge.local/play
+PYTHONPATH=../packages:.. python app.py --download-dir ~/Downloads/getoffline
 ```
 
 If `getoffline-sdk` is installed in your environment, `PYTHONPATH` is not needed.
@@ -40,8 +41,8 @@ player auto-detection prefers `mpv` or VLC before falling back to `ffplay`, beca
 `ffplay` can consume noticeably more CPU during startup/seeking on some systems.
 
 Before starting playback, the client downloads the selected media into
-`$GETOFFLINE_CONSOLE_DOWNLOAD_DIR` or `~/.config/getoffline-console/downloads` and reuses
-that file on future plays if it already exists.
+the directory passed with `--download-dir`, `$GETOFFLINE_CONSOLE_DOWNLOAD_DIR`, or
+`~/.config/getoffline-console/downloads` and reuses that file on future plays if it already exists.
 
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
 the downloaded media filename in `url` and `filename`, an `Authorization` header for
