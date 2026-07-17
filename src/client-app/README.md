@@ -41,7 +41,9 @@ player auto-detection prefers `mpv` or VLC before falling back to `ffplay`, beca
 `ffplay` can consume noticeably more CPU during startup/seeking on some systems.
 On macOS, the client also checks the standard VLC.app binary at
 `/Applications/VLC.app/Contents/MacOS/VLC`; you can pass that path with `--player`
-if your shell cannot find it automatically.
+if your shell cannot find it automatically. VLC/VLC.app playback uses a temporary
+localhost proxy so the client can add the GetOffline authorization header before
+VLC reads the stream.
 
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
 the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,

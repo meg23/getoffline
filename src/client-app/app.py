@@ -14,17 +14,20 @@ import argparse
 import base64
 import curses
 import getpass
+import http.server
 import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from http import HTTPStatus
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, cast
@@ -324,6 +327,7 @@ class GetOfflineConsole:
             # server, so treat unexpected process exits as a stopped session and
             # preserve the estimated resume point.
             self._save_progress("stopped")
+            self.playback.stop(self.playback_session)
             self.message = "Playback stopped"
             self.playback_session = None
             self.playing_id = None
@@ -420,6 +424,10 @@ def player_name(player: str) -> str:
     return Path(player).name.lower()
 
 
+def player_needs_auth_proxy(player: str) -> bool:
+    return player_name(player) in {"vlc", "cvlc"}
+
+
 def clamp_volume(volume: float) -> float:
     return max(0.0, min(float(volume), 1.0))
 
@@ -438,6 +446,85 @@ class PlaybackSession:
     session_id: str = ""
     active: bool = True
     volume: float = 1.0
+    proxy: "AuthenticatedStreamProxy | None" = None
+
+
+class _AuthenticatedProxyServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, server_address: tuple[str, int], upstream_url: str, auth_header: str) -> None:
+        super().__init__(server_address, _AuthenticatedProxyHandler)
+        self.upstream_url = upstream_url
+        self.auth_header = auth_header
+
+
+class _AuthenticatedProxyHandler(http.server.BaseHTTPRequestHandler):
+    server: _AuthenticatedProxyServer
+
+    def do_GET(self) -> None:  # noqa: N802 - http.server hook name
+        self._proxy(send_body=True)
+
+    def do_HEAD(self) -> None:  # noqa: N802 - http.server hook name
+        self._proxy(send_body=False)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+    def _proxy(self, *, send_body: bool) -> None:
+        headers = {"Authorization": self.server.auth_header}
+        if range_header := self.headers.get("Range"):
+            headers["Range"] = range_header
+        request = urllib.request.Request(
+            self.server.upstream_url,
+            headers=headers,
+            method="GET" if send_body else "HEAD",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - server URL is user configured.
+                self.send_response(response.status)
+                self._copy_response_headers(response.headers)
+                self.end_headers()
+                if send_body:
+                    shutil.copyfileobj(response, self.wfile)
+        except urllib.error.HTTPError as exc:
+            self.send_response(exc.code)
+            self._copy_response_headers(exc.headers)
+            self.end_headers()
+            if send_body:
+                shutil.copyfileobj(exc, self.wfile)
+        except urllib.error.URLError as exc:
+            body = f"Unable to fetch upstream stream: {exc.reason}".encode("utf-8", errors="replace")
+            self.send_response(HTTPStatus.BAD_GATEWAY)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+    def _copy_response_headers(self, headers: Mapping[str, str]) -> None:
+        skipped = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
+        for name, value in headers.items():
+            if name.lower() not in skipped:
+                self.send_header(name, value)
+
+
+class AuthenticatedStreamProxy:
+    """Local proxy that adds GetOffline auth headers for players without header support."""
+
+    def __init__(self, stream_url: str, auth_header: str) -> None:
+        self._server = _AuthenticatedProxyServer(("127.0.0.1", 0), stream_url, auth_header)
+        host, port = self._server.server_address[:2]
+        self.url = f"http://{host}:{port}/stream"
+        self._thread = threading.Thread(target=self._server.serve_forever, name="getoffline-auth-proxy", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=2)
 
 
 class LocalProcessPlaybackBackend:
@@ -464,7 +551,15 @@ class LocalProcessPlaybackBackend:
         del item
         if not self.player:
             raise PlaybackError(self.unavailable_message)
-        command = player_command(self.player, stream_url, auth_header, seek)
+        proxy = None
+        player_url = stream_url
+        player_auth_header = auth_header
+        if player_needs_auth_proxy(self.player):
+            proxy = AuthenticatedStreamProxy(stream_url, auth_header)
+            proxy.start()
+            player_url = proxy.url
+            player_auth_header = ""
+        command = player_command(self.player, player_url, player_auth_header, seek)
         popen_kwargs: dict[str, Any] = {
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
@@ -473,8 +568,13 @@ class LocalProcessPlaybackBackend:
             # Place the player in its own process group so stopping the console
             # also stops any helper processes spawned by the player.
             popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(command, **popen_kwargs)
-        return PlaybackSession(process=process, volume=clamp_volume(volume))
+        try:
+            process = subprocess.Popen(command, **popen_kwargs)
+        except OSError as exc:
+            if proxy is not None:
+                proxy.stop()
+            raise PlaybackError(f"unable to launch player {self.player!r}: {exc}") from exc
+        return PlaybackSession(process=process, volume=clamp_volume(volume), proxy=proxy)
 
     def set_volume(self, session: PlaybackSession, volume: float) -> None:
         session.volume = clamp_volume(volume)
@@ -487,6 +587,9 @@ class LocalProcessPlaybackBackend:
             except subprocess.TimeoutExpired:
                 self._kill_process(session.process)
                 session.process.wait(timeout=3)
+        if session.proxy is not None:
+            session.proxy.stop()
+            session.proxy = None
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
@@ -658,15 +761,10 @@ def player_command(player: str, url: str, auth_header: str, seek: float) -> list
         command = [player]
         if name == "cvlc":
             command.extend(["--intf", "ncurses"])
-        command.extend(
-            [
-                "--no-video",
-                "--play-and-exit",
-                f"--start-time={int(seek)}",
-                f"--http-header=Authorization: {auth_header}",
-                url,
-            ]
-        )
+        command.extend(["--no-video", "--play-and-exit", f"--start-time={int(seek)}"])
+        if auth_header:
+            command.append(f"--http-header=Authorization: {auth_header}")
+        command.append(url)
         return command
     return [player, url]
 

@@ -173,6 +173,13 @@ class StoppedPlaybackBackend:
     available = True
     unavailable_message = ""
 
+    def __init__(self) -> None:
+        self.stopped_sessions: list[console.PlaybackSession] = []
+
+    def stop(self, session: console.PlaybackSession) -> None:
+        self.stopped_sessions.append(session)
+        session.active = False
+
     def is_running(self, session: console.PlaybackSession) -> bool:
         return False
 
@@ -259,6 +266,19 @@ class ConsoleProgressTests(unittest.TestCase):
         self.assertIn("--start-time=42", command)
         self.assertIn("--http-header=Authorization: Basic abc123", command)
         self.assertEqual(command[-1], "http://getoffline.local/api/stream/7")
+
+    def test_vlc_uses_auth_proxy_without_header_flag_for_local_playback(self):
+        self.assertTrue(console.player_needs_auth_proxy("/Applications/VLC.app/Contents/MacOS/VLC"))
+
+        command = console.player_command(
+            "/Applications/VLC.app/Contents/MacOS/VLC",
+            "http://127.0.0.1:12345/stream",
+            "",
+            0.0,
+        )
+
+        self.assertNotIn("--http-header=Authorization: ", command)
+        self.assertEqual(command[-1], "http://127.0.0.1:12345/stream")
 
     def test_shutdown_stops_active_playback_and_saves_quit_progress_once(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
