@@ -44,6 +44,7 @@ PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
+DOWNLOAD_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 @dataclass
@@ -112,6 +113,8 @@ class GetOfflineConsole:
         self.playing_id: int | None = None
         self.play_started_at = 0.0
         self.play_start_position = 0.0
+        self.play_duration_seconds = 0.0
+        self.playing_title = ""
         self.playback_session: PlaybackSession | None = None
         self.last_progress_at = 0.0
         self._shut_down = False
@@ -208,9 +211,11 @@ class GetOfflineConsole:
             return
         self.playing_id = episode_id
         self.play_start_position = seek
+        self.play_duration_seconds = float(item.get("duration_seconds") or 0.0)
+        self.playing_title = str(item.get("title") or episode.get("title") or episode_id)
         self.play_started_at = time.monotonic()
         self.last_progress_at = 0.0
-        self.message = f"Playing: {item.get('title') or episode.get('title') or episode_id}"
+        self.message = f"Playing: {self.playing_title}"
 
     def stop(self, *, reason: str) -> None:
         if self.playback_session is not None:
@@ -218,6 +223,8 @@ class GetOfflineConsole:
         self._save_progress(reason)
         self.playback_session = None
         self.playing_id = None
+        self.play_duration_seconds = 0.0
+        self.playing_title = ""
 
     def shutdown(self) -> None:
         """Stop any active playback before the console app exits."""
@@ -303,7 +310,28 @@ class GetOfflineConsole:
             self.message = "Playback stopped"
             self.playback_session = None
             self.playing_id = None
+            self.play_duration_seconds = 0.0
+            self.playing_title = ""
             self.refresh()
+
+    def download_progress_percent(self) -> float | None:
+        if self.playing_id is None or self.play_duration_seconds <= 0:
+            return None
+        return max(0.0, min(100.0, (self.estimated_position() / self.play_duration_seconds) * 100.0))
+
+    def download_status_line(self, width: int) -> str:
+        if self.playing_id is None:
+            return ""
+        elapsed = max(time.monotonic() - self.play_started_at, 0.0)
+        spinner = DOWNLOAD_SPINNER[int(elapsed * 8) % len(DOWNLOAD_SPINNER)]
+        title = truncate(self.playing_title or str(self.playing_id), max(width // 3, 12))
+        percent = self.download_progress_percent()
+        prefix = f" {spinner} Client downloading media: {title} "
+        if percent is None:
+            return f"{prefix}| streaming {int(elapsed)}s "
+        suffix = f" {percent:5.1f}% | position ~{int(self.estimated_position())}s "
+        bar_width = max(width - len(prefix) - len(suffix), 8)
+        return prefix + progress_bar(percent, bar_width) + suffix
 
     def _draw(self, stdscr: Any) -> None:
         stdscr.erase()
@@ -338,6 +366,9 @@ class GetOfflineConsole:
         footer = f" {self.message} "
         if self.playing_id:
             footer += f"| position ~{int(self.estimated_position())}s "
+        download_line = self.download_status_line(width)
+        if download_line:
+            safe_addnstr(stdscr, height - 2, 0, download_line, curses.A_BOLD)
         safe_addnstr(stdscr, height - 1, 0, footer, curses.A_REVERSE)
         stdscr.refresh()
 
@@ -386,6 +417,12 @@ def truncate(value: str, max_width: int) -> str:
     if max_width <= 1:
         return value[:max_width]
     return value[: max_width - 1] + "…"
+
+
+def progress_bar(percent: float, width: int) -> str:
+    bounded_width = max(width, 1)
+    filled = int(round((max(0.0, min(percent, 100.0)) / 100.0) * bounded_width))
+    return "[" + "#" * filled + "-" * (bounded_width - filled) + "]"
 
 
 def detect_player() -> str | None:
