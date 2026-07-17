@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "app",
 ]
 MIDDLEWARE = [
+    "app.middleware.RequestDiagnosticsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",

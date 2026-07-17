@@ -6,6 +6,7 @@ route names. Dashboard data and actions are owned by the API service.
 
 from __future__ import annotations
 
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -200,12 +201,18 @@ def _api_proxy(
         response.status_code,
         response.headers,
         response.content,
+        cookies=response.cookies,
         streaming=response.streaming,
     )
 
 
 def _upstream_response(
-    status: int, headers, content: bytes, *, streaming: bool = False
+    status: int,
+    headers,
+    content: bytes,
+    *,
+    cookies: tuple[str, ...] = (),
+    streaming: bool = False,
 ) -> HttpResponse:
     response_class = StreamingHttpResponse if streaming else HttpResponse
     response = response_class(
@@ -216,6 +223,11 @@ def _upstream_response(
     for header in ("Content-Length", "Content-Range", "Accept-Ranges", "Location"):
         if headers.get(header):
             response[header] = headers[header]
+    for cookie_header in cookies:
+        upstream_cookies = SimpleCookie()
+        upstream_cookies.load(cookie_header)
+        for name, morsel in upstream_cookies.items():
+            response.cookies[name] = morsel
     return response
 
 
