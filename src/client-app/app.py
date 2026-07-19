@@ -73,12 +73,8 @@ class Credentials:
 class AuthenticatedTransport:
     """HTTP transport that attaches Basic auth to every SDK request."""
 
-    def __init__(
-        self, credentials: Credentials, *, timeout_seconds: float = 30.0
-    ) -> None:
-        self.transport = HttpTransport(
-            credentials.api_url, timeout_seconds=timeout_seconds
-        )
+    def __init__(self, credentials: Credentials, *, timeout_seconds: float = 30.0) -> None:
+        self.transport = HttpTransport(credentials.api_url, timeout_seconds=timeout_seconds)
         self.credentials = credentials
 
     def request(
@@ -92,9 +88,7 @@ class AuthenticatedTransport:
         headers: Mapping[str, str] | None = None,
     ) -> Response:
         merged = {"Authorization": self.credentials.auth_header, **(headers or {})}
-        return self.transport.request(
-            method, target, args, query=query, data=data, headers=merged
-        )
+        return self.transport.request(method, target, args, query=query, data=data, headers=merged)
 
 
 class GetOfflineConsole:
@@ -253,15 +247,9 @@ class GetOfflineConsole:
         episode = self.current_episode()
         if not episode:
             return
-        target = "/dashboard/downloads/{}/{}".format(
-            episode["id"], "played" if played else "unplayed"
-        )
+        target = "/dashboard/downloads/{}/{}".format(episode["id"], "played" if played else "unplayed")
         response = self.client.raw_request("POST", target)
-        self.message = (
-            "Updated playback status"
-            if response.ok
-            else f"Update failed ({response.status_code})"
-        )
+        self.message = "Updated playback status" if response.ok else f"Update failed ({response.status_code})"
         self.refresh()
 
     def toggle_favorite(self) -> None:
@@ -269,14 +257,8 @@ class GetOfflineConsole:
         if not episode:
             return
         action = "unfavorite" if episode.get("favorite") else "favorite"
-        response = self.client.raw_request(
-            "POST", f"/dashboard/downloads/{episode['id']}/{action}"
-        )
-        self.message = (
-            "Updated favorite"
-            if response.ok
-            else f"Favorite failed ({response.status_code})"
-        )
+        response = self.client.raw_request("POST", f"/dashboard/downloads/{episode['id']}/{action}")
+        self.message = "Updated favorite" if response.ok else f"Favorite failed ({response.status_code})"
         self.refresh()
 
     def add_download(self, stdscr: Any) -> None:
@@ -284,11 +266,7 @@ class GetOfflineConsole:
         if not url:
             return
         payload = self.client.download(url)
-        self.message = (
-            "Queued download"
-            if payload.get("ok")
-            else f"Queue failed: {payload.get('error', 'unknown')}"
-        )
+        self.message = "Queued download" if payload.get("ok") else f"Queue failed: {payload.get('error', 'unknown')}"
         self.refresh()
 
     def search(self, stdscr: Any) -> None:
@@ -354,16 +332,12 @@ class GetOfflineConsole:
     def estimated_position(self) -> float:
         if self.playing_id is None:
             return 0.0
-        return self.play_start_position + max(
-            time.monotonic() - self.play_started_at, 0.0
-        )
+        return self.play_start_position + max(time.monotonic() - self.play_started_at, 0.0)
 
     def _save_progress(self, reason: str) -> None:
         if self.playing_id is None:
             return
-        self.client.playback_progress(
-            self.playing_id, self.estimated_position(), reason=reason
-        )
+        self.client.playback_progress(self.playing_id, self.estimated_position(), reason=reason)
 
     def _send_periodic_progress(self) -> None:
         if (
@@ -378,9 +352,7 @@ class GetOfflineConsole:
             self._save_progress("timeupdate")
 
     def _reap_player(self) -> None:
-        if self.playback_session is not None and not self.playback.is_running(
-            self.playback_session
-        ):
+        if self.playback_session is not None and not self.playback.is_running(self.playback_session):
             # A local player process can disappear because the user closed the
             # player window/terminal controls, not only because media reached
             # EOF.  Saving this as ``ended`` clears the resume position on the
@@ -429,9 +401,7 @@ class GetOfflineConsole:
         stdscr.refresh()
 
 
-def safe_addnstr(
-    window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL
-) -> None:
+def safe_addnstr(window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL) -> None:
     """Draw text without failing on curses implementations that reject bottom-right writes."""
 
     height, width = window.getmaxyx()
@@ -538,11 +508,7 @@ class LocalProcessPlaybackBackend:
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
-        return bool(
-            session.active
-            and session.process is not None
-            and session.process.poll() is None
-        )
+        return bool(session.active and session.process is not None and session.process.poll() is None)
 
     def _terminate_process(self, process: subprocess.Popen[bytes]) -> None:
         if os.name == "posix":
@@ -750,9 +716,7 @@ def default_bridge_stop_url(bridge_url: str) -> str:
         path = path[: -len("/play")] + "/stop"
     else:
         path = f"{path}/stop"
-    return urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment)
-    )
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment))
 
 
 def build_playback_backend(
@@ -864,9 +828,7 @@ def save_credentials(credentials: Credentials) -> None:
 
 def login(base_url: str | None = None, username: str | None = None) -> Credentials:
     print("GetOffline login")
-    resolved_base = (
-        base_url or input("Base URL (for example http://localhost:8000): ").strip()
-    )
+    resolved_base = base_url or input("Base URL (for example http://localhost:8000): ").strip()
     resolved_user = username or input("Username: ").strip()
     password = getpass.getpass("Password: ")
     credentials = Credentials(resolved_base, resolved_user, password)

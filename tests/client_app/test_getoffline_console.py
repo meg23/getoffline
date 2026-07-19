@@ -181,9 +181,7 @@ class ConsolePlaybackTests(unittest.TestCase):
                 "episode_id": 7,
             },
         )
-        self.assertEqual(
-            BridgeHandler.requests[1], ("/stop", {"session_id": "session-123"})
-        )
+        self.assertEqual(BridgeHandler.requests[1], ("/stop", {"session_id": "session-123"}))
 
     def test_download_media_file_reuses_existing_file_without_request(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
