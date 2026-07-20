@@ -1,4 +1,5 @@
 import http.client
+import os
 import re
 import shutil
 import subprocess
@@ -505,6 +506,32 @@ def find_connected_device(
         return None
 
     expected_serial = None
+    log.info(
+        "Android transfer device discovery starting: adb=%s connection_mode=%s wifi_address=%s",
+        adb_executable,
+        str(connection_mode or "usb").strip().lower(),
+        _normalize_wifi_address(wifi_address) or "not configured",
+    )
+    try:
+        version = _run_adb_command(
+            [adb_executable, "version"],
+            description="checking adb version",
+            timeout=15,
+            runner=runner,
+        )
+        if int(getattr(version, "returncode", 1) or 0) != 0:
+            log.warning(
+                "Android transfer: adb version returned non-zero: %s",
+                _combined_output(version) or "no output",
+            )
+        else:
+            log.info(
+                "Android transfer: adb version: %s",
+                _combined_output(version).replace("\n", " | ") or "no output",
+            )
+    except RuntimeError as exc:
+        log.warning("Android transfer: adb version check failed: %s", exc)
+
     if str(connection_mode or "usb").strip().lower() == "wifi":
         expected_serial = _connect_adb_wifi(adb_executable, wifi_address, runner)
         if not expected_serial:
@@ -520,6 +547,12 @@ def find_connected_device(
         raise RuntimeError(
             f"adb devices failed: {_combined_output(completed) or 'no output'}"
         )
+
+    raw_devices_output = str(getattr(completed, "stdout", "") or "").strip()
+    log.info(
+        "Android transfer: adb devices raw output: %s",
+        raw_devices_output.replace("\n", " | ") or "no devices output",
+    )
 
     authorized = []
     unauthorized = []
@@ -719,11 +752,7 @@ def delete_items_from_android(
         log.info("Android delete skipped: no items selected")
         return result
 
-    adb_executable = (
-        shutil.which(config.adb_path)
-        if not Path(config.adb_path).is_absolute()
-        else config.adb_path
-    )
+    adb_executable = resolve_adb_executable(config.adb_path)
     if not adb_executable:
         result.message = f"adb not found: {config.adb_path}"
         result.failed += 1
@@ -825,8 +854,22 @@ def select_sync_items(
 
 def resolve_adb_executable(adb_path: str) -> str | None:
     if Path(adb_path).is_absolute():
-        return adb_path
-    return shutil.which(adb_path)
+        exists = Path(adb_path).exists()
+        log.info(
+            "Android transfer adb resolution: configured=%s absolute=yes exists=%s",
+            adb_path,
+            "yes" if exists else "no",
+        )
+        return adb_path if exists else None
+
+    resolved = shutil.which(adb_path)
+    log.info(
+        "Android transfer adb resolution: configured=%s absolute=no resolved=%s PATH=%s",
+        adb_path,
+        resolved or "not found",
+        os.environ.get("PATH", ""),
+    )
+    return resolved
 
 
 def normalize_android_destination(destination: str) -> str:
@@ -838,12 +881,27 @@ def log_android_sync_start(
     config: AndroidSyncConfig,
     session: AndroidSyncSession,
 ) -> None:
+    total_bytes = 0
+    missing_paths = 0
+    for item in sync_items:
+        local_path = item.file_path.expanduser()
+        try:
+            total_bytes += local_path.stat().st_size
+        except OSError:
+            missing_paths += 1
     log.info(
-        "Android transfer starting: items=%s destination=%s adb=%s include_subtitles=%s",
+        "Android transfer starting: items=%s destination=%s adb=%s device=%s "
+        "connection_mode=%s wifi_address=%s include_subtitles=%s estimated_bytes=%s "
+        "missing_local_paths=%s",
         len(sync_items),
         session.destination,
         session.adb_executable,
+        session.device_serial,
+        config.connection_mode or "usb",
+        _normalize_wifi_address(config.wifi_address) or "not configured",
         "yes" if config.include_subtitles else "no",
+        total_bytes,
+        missing_paths,
     )
 
 

@@ -144,7 +144,6 @@ class SourceFormData:
 
 log = logging.getLogger(__name__)
 MEDIA_RANGE_CHUNK_SIZE = 64 * 1024
-MEDIA_INITIAL_RANGE_SIZE = 1024 * 1024
 
 
 def _optional_int(value: object) -> int | None:
@@ -640,10 +639,11 @@ def _legacy_media(request: HttpRequest, download_id: int) -> HttpResponse:
         except ValueError:
             start, requested_end = 0, None
         start = max(0, min(start, file_size - 1))
-        if requested_end is None:
-            end = min(start + MEDIA_INITIAL_RANGE_SIZE - 1, file_size - 1)
-        else:
-            end = max(start, min(requested_end, file_size - 1))
+        end = (
+            file_size - 1
+            if requested_end is None
+            else max(start, min(requested_end, file_size - 1))
+        )
         length = end - start + 1
         response = StreamingHttpResponse(
             _file_range_iterator(path, start, length),
@@ -1059,7 +1059,12 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         or request.headers.get("accept") == "application/json"
     )
     if wants_json:
-        status_query = urlencode({"profile_id": profile_id, "token": completion_marker})
+        status_params = {"profile_id": profile_id}
+        if completion_marker:
+            status_params["token"] = completion_marker
+        else:
+            status_params["job_id"] = str(job.id)
+        status_query = urlencode(status_params)
         status_url = f"{reverse('worker_message_status')}?{status_query}"
         return JsonResponse(
             {
@@ -1081,6 +1086,19 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
 def worker_message_status(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
     token = str(request.GET.get("token") or "").strip()
+    job_id = str(request.GET.get("job_id") or "").strip()
+    if not token and job_id:
+        job = Job.objects.filter(profile_id=profile_id, id=job_id).first()
+        if job is None:
+            return JsonResponse({"finished": False, "ok": True, "status": "pending"})
+        return JsonResponse(
+            {
+                "finished": job.status in {JobStatus.SUCCEEDED, JobStatus.FAILED},
+                "ok": job.status is not JobStatus.FAILED,
+                "status": job.status,
+                "error_message": job.error_message or "",
+            }
+        )
     if not token:
         return JsonResponse(
             {

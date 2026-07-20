@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from http.client import HTTPResponse
 from typing import Any, Protocol, cast
 import urllib.error
 import urllib.parse
@@ -17,6 +18,7 @@ class Response:
     status_code: int
     content: bytes
     headers: Mapping[str, str] = field(default_factory=dict)
+    cookies: tuple[str, ...] = ()
     streaming: bool = False
 
     @property
@@ -82,6 +84,7 @@ class DjangoTransport:
             status_code=response.status_code,
             content=_django_response_content(response),
             headers={key: value for key, value in response.items()},
+            cookies=_django_response_cookies(response),
             streaming=bool(getattr(response, "streaming", False)),
         )
 
@@ -115,11 +118,9 @@ class HttpTransport:
             upstream = urllib.request.urlopen(  # nosec B310 - URL is configured by deployment.
                 req, timeout=self.timeout_seconds
             )
-            return _http_response(
-                upstream.status, dict(upstream.headers.items()), upstream.read()
-            )
+            return _http_response(upstream)
         except urllib.error.HTTPError as exc:
-            return _http_response(exc.code, dict(exc.headers.items()), exc.read())
+            return _http_error_response(exc)
 
     def _url(
         self,
@@ -228,9 +229,28 @@ def _is_upload(value: object) -> bool:
     return callable(getattr(value, "chunks", None))
 
 
-def _http_response(status: int, headers: Mapping[str, str], content: bytes) -> Response:
+def _django_response_cookies(response: object) -> tuple[str, ...]:
+    cookies = getattr(response, "cookies", None)
+    if not cookies:
+        return ()
+    return tuple(morsel.OutputString() for morsel in cookies.values())
+
+
+def _http_response(upstream: HTTPResponse) -> Response:
+    headers = dict(upstream.headers.items())
     return Response(
-        status_code=status,
-        content=content,
-        headers={key: value for key, value in headers.items()},
+        status_code=upstream.status,
+        content=upstream.read(),
+        headers=headers,
+        cookies=tuple(upstream.headers.get_all("Set-Cookie", [])),
+    )
+
+
+def _http_error_response(exc: urllib.error.HTTPError) -> Response:
+    headers = dict(exc.headers.items())
+    return Response(
+        status_code=exc.code,
+        content=exc.read(),
+        headers=headers,
+        cookies=tuple(exc.headers.get_all("Set-Cookie", [])),
     )

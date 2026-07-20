@@ -8,7 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
@@ -77,6 +76,7 @@ from workers.handlers import check_for_episodes
 from workers.handlers import generate_transcript
 from workers.handlers import retention_cleanup
 from workers.handlers import transcode_media
+from workers.handlers import transfer_media
 from workers import runner
 from django.contrib.auth.models import User
 
@@ -270,6 +270,70 @@ class SharedDjangoModelTests(TestCase):
             self.assertEqual(
                 child.payload["ffmpeg_source_file_paths"], [str(source_path)]
             )
+
+    def test_transfer_media_worker_runs_android_sync_for_downloads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_path = Path(tmpdir) / "episode.mp3"
+            media_path.write_bytes(b"audio")
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="android_sync_enabled", value="1"
+            )
+            download = Download.objects.create(
+                profile_id="default",
+                source_type="podcast",
+                source_name="Sync Source",
+                title="Sync Episode",
+                file_path=str(media_path),
+                file_ext="mp3",
+                download_status="downloaded",
+                last_seen_at=timezone.now(),
+            )
+            job = create_job(
+                profile_id="default",
+                job_type="transfer_media",
+                payload={"source": "test"},
+                idempotency_key="transfer_media:default:worker",
+            )
+
+            with patch("workers.handlers.sync_android_items") as sync_items:
+                sync_items.return_value = SimpleNamespace(
+                    attempted=1, copied=1, skipped=0, failed=0, message="copied 1"
+                )
+                transfer_media(job)
+
+            items, config = sync_items.call_args.args
+            self.assertTrue(config.enabled)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0].row_id, download.id)
+            self.assertEqual(items[0].title, "Sync Episode")
+            self.assertEqual(items[0].source_name, "Sync Source")
+            self.assertEqual(items[0].file_path, media_path)
+
+    def test_library_transfer_button_queues_transfer_media_job(self):
+        response = Client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="job_type" value="transfer_media"')
+        self.assertNotContains(response, 'name="job_type" value="update_downloads"')
+
+    def test_json_enqueue_transfer_status_url_tracks_job_status(self):
+        client = Client()
+
+        with patch("app.views.publish_job"):
+            response = client.post(
+                "/jobs/enqueue/",
+                {"job_type": "transfer_media"},
+                HTTP_ACCEPT="application/json",
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("job_id=", payload["status_url"])
+        self.assertNotIn("token=", payload["status_url"])
+        status_response = client.get(payload["status_url"])
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.json()["status"], "queued")
 
     def test_create_claim_and_finish_job(self):
         job = create_job(
@@ -612,7 +676,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(body.startswith("WEBVTT"))
         self.assertIn("00:00:00.000 --> 00:00:01.250", body)
 
-    def test_media_endpoint_limits_open_ended_range_for_fast_video_start(self):
+    def test_media_endpoint_honors_open_ended_range_to_eof(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -636,12 +700,12 @@ class SharedDjangoModelTests(TestCase):
             body = b"".join(response.streaming_content)
 
         self.assertEqual(response.status_code, 206)
-        self.assertEqual(response["Content-Length"], str(1024 * 1024))
+        self.assertEqual(response["Content-Length"], str(2 * 1024 * 1024))
         self.assertEqual(
             response["Content-Range"],
-            f"bytes 0-{1024 * 1024 - 1}/{2 * 1024 * 1024}",
+            f"bytes 0-{2 * 1024 * 1024 - 1}/{2 * 1024 * 1024}",
         )
-        self.assertEqual(len(body), 1024 * 1024)
+        self.assertEqual(len(body), 2 * 1024 * 1024)
 
     def test_media_endpoint_honors_explicit_range_end(self):
         client = Client()
@@ -890,7 +954,7 @@ class SharedDjangoModelTests(TestCase):
     def test_quick_add_form_returns_to_library_after_queueing_download(self):
         template = Path("src/app/templates/app/library.html").read_text()
 
-        self.assertIn("name=\"next\" value=\"{% url 'library' %}\"", template)
+        self.assertIn('name="next" value="{% url \'library\' %}"', template)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
@@ -923,7 +987,7 @@ class SharedDjangoModelTests(TestCase):
         user.set_password("pass")
         user.save(update_fields=["password"])
         self.assertTrue(client.login(username="default", password="pass"))
-    
+
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS media_summaries")
             cursor.execute(
@@ -995,7 +1059,7 @@ class SharedDjangoModelTests(TestCase):
                 self.assertEqual(cursor.fetchone()[0], 0)
 
     def _drop_media_summaries_test_table(self):
-    
+
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS media_summaries")
 
@@ -1066,11 +1130,21 @@ class SharedDjangoModelTests(TestCase):
         podcast_source.refresh_from_db()
 
         with (
-            patch("workers.handlers._youtube_candidates", return_value=[{"item_uid": "yt"}]) as youtube_candidates,
-            patch("workers.handlers._podcast_candidates", return_value=[{"item_uid": "pod"}]) as podcast_candidates,
+            patch(
+                "workers.handlers._youtube_candidates",
+                return_value=[{"item_uid": "yt"}],
+            ) as youtube_candidates,
+            patch(
+                "workers.handlers._podcast_candidates",
+                return_value=[{"item_uid": "pod"}],
+            ) as podcast_candidates,
         ):
-            self.assertEqual(list(_candidates_for_source(youtube_source)), [{"item_uid": "yt"}])
-            self.assertEqual(list(_candidates_for_source(podcast_source)), [{"item_uid": "pod"}])
+            self.assertEqual(
+                list(_candidates_for_source(youtube_source)), [{"item_uid": "yt"}]
+            )
+            self.assertEqual(
+                list(_candidates_for_source(podcast_source)), [{"item_uid": "pod"}]
+            )
 
         youtube_candidates.assert_called_once_with(youtube_source)
         podcast_candidates.assert_called_once_with(podcast_source)

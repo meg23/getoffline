@@ -160,7 +160,9 @@ class ConsolePlaybackTests(unittest.TestCase):
                 stream_url="http://getoffline.local/api/stream/7",
                 auth_header="Basic abc123",
                 seek=42.5,
+                volume=0.75,
             )
+            backend.set_volume(session, 0.5)
             backend.stop(session)
         finally:
             server.shutdown()
@@ -179,9 +181,32 @@ class ConsolePlaybackTests(unittest.TestCase):
                 "title": "Example",
                 "media_kind": "audio",
                 "episode_id": 7,
+                "volume": 0.75,
             },
         )
-        self.assertEqual(BridgeHandler.requests[1], ("/stop", {"session_id": "session-123"}))
+        self.assertEqual(BridgeHandler.requests[1], ("/volume", {"session_id": "session-123", "volume": 0.5}))
+        self.assertEqual(BridgeHandler.requests[2], ("/stop", {"session_id": "session-123"}))
+
+    def test_adjust_volume_clamps_and_posts_for_active_session(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.volume = 0.95
+        app.message = ""
+        app.playback_session = console.PlaybackSession(session_id="session-123")
+
+        class VolumeBackend:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, float]] = []
+
+            def set_volume(self, session: console.PlaybackSession, volume: float) -> None:
+                self.calls.append((session.session_id, volume))
+
+        app.playback = VolumeBackend()
+
+        app.adjust_volume(0.1)
+
+        self.assertEqual(app.volume, 1.0)
+        self.assertEqual(app.playback.calls, [("session-123", 1.0)])
+        self.assertEqual(app.message, "Volume: 100%")
 
     def test_download_media_file_reuses_existing_file_without_request(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
@@ -340,6 +365,13 @@ class StoppedPlaybackBackend:
     available = True
     unavailable_message = ""
 
+    def __init__(self) -> None:
+        self.stopped_sessions: list[console.PlaybackSession] = []
+
+    def stop(self, session: console.PlaybackSession) -> None:
+        self.stopped_sessions.append(session)
+        session.active = False
+
     def is_running(self, session: console.PlaybackSession) -> bool:
         return False
 
@@ -404,13 +436,79 @@ class ConsoleProgressTests(unittest.TestCase):
         self.assertEqual(app.client.progress_calls[0][0], 42)
         self.assertGreaterEqual(app.client.progress_calls[0][1], 149.0)
         self.assertEqual(app.client.progress_calls[0][2], "stopped")
-        self.assertEqual(app.message, "Loaded 0 unplayed item(s)")
+        self.assertEqual(app.message, "Playback stopped")
 
-    def test_local_player_detection_prefers_vlc_before_ffplay(self):
-        self.assertGreater(
-            console.PLAYER_CANDIDATES.index("ffplay"),
-            console.PLAYER_CANDIDATES.index("vlc"),
+    def test_local_player_detection_only_uses_ffplay(self):
+        self.assertEqual(console.PLAYER_CANDIDATES, ("ffplay",))
+
+    def test_ffplay_command_gets_headers_seek_and_initial_volume(self):
+        command = console.player_command(
+            "ffplay",
+            "http://getoffline.local/api/stream/7",
+            "Basic abc123",
+            42.5,
+            0.75,
         )
+
+        self.assertEqual(command[0], "ffplay")
+        self.assertIn("-nodisp", command)
+        self.assertIn("-autoexit", command)
+        self.assertIn("-ss", command)
+        self.assertIn("42.500", command)
+        self.assertIn("-volume", command)
+        self.assertIn("75", command)
+        self.assertIn("-headers", command)
+        self.assertIn("Authorization: Basic abc123\r\n", command)
+        self.assertEqual(command[-1], "http://getoffline.local/api/stream/7")
+
+    def test_ffplay_retries_from_beginning_when_seek_exits_cleanly(self):
+        class ExitedProcess:
+            returncode = 0
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 0
+
+            def poll(self) -> int:
+                return 0
+
+        class RunningProcess:
+            returncode = None
+
+            def wait(self, timeout: float | None = None) -> int:
+                raise console.subprocess.TimeoutExpired(["ffplay"], timeout or 0)
+
+            def poll(self) -> None:
+                return None
+
+        commands: list[list[str]] = []
+
+        def fake_popen(command: list[str], **_kwargs: Any) -> object:
+            commands.append(command)
+            return ExitedProcess() if len(commands) == 1 else RunningProcess()
+
+        original_popen = console.subprocess.Popen
+        original_log = console.PLAYER_LOG_FILE
+        log_path = Path(self.id().replace(".", "_") + ".log")
+        try:
+            console.subprocess.Popen = fake_popen
+            console.PLAYER_LOG_FILE = log_path
+            backend = console.LocalProcessPlaybackBackend("ffplay")
+            session = backend.start(
+                item={},
+                stream_url="http://getoffline.local/api/stream/7",
+                auth_header="Basic abc123",
+                seek=42.5,
+                volume=1.0,
+            )
+        finally:
+            console.subprocess.Popen = original_popen
+            console.PLAYER_LOG_FILE = original_log
+            log_path.unlink(missing_ok=True)
+
+        self.assertIsNotNone(session.process)
+        self.assertEqual(len(commands), 2)
+        self.assertIn("42.500", commands[0])
+        self.assertIn("0.000", commands[1])
 
     def test_shutdown_stops_active_playback_and_saves_quit_progress_once(self):
         app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
@@ -451,6 +549,7 @@ class ConsoleProgressTests(unittest.TestCase):
         app.offset = 0
         app.message = "Playing"
         app._shut_down = False
+        app.volume = 1.0
 
         original_curs_set = console.curses.curs_set
         try:

@@ -17,13 +17,38 @@ DEBUG = os.getenv("GETOFFLINE_DJANGO_DEBUG", "0").strip().lower() in {
     "yes",
     "on",
 }
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv(
-        "GETOFFLINE_DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
-    ).split(",")
-    if host.strip()
-]
+
+
+def _csv_env(name: str, default: str) -> list[str]:
+    return [
+        value.strip() for value in os.getenv(name, default).split(",") if value.strip()
+    ]
+
+
+def _allowed_hosts() -> list[str]:
+    # The Docker/nginx frontend is commonly reached from another device on the
+    # local network (for example http://192.168.x.x:8080). Django validates the
+    # Host header before routing requests, so the default accepts those LAN
+    # addresses. Always include Docker/internal service names too: users may
+    # carry forward an older strict GETOFFLINE_DJANGO_ALLOWED_HOSTS value, and
+    # the split frontend proxies /settings/ and /batch-update/ through the API
+    # service using the internal ``api`` hostname.
+    configured = _csv_env("GETOFFLINE_DJANGO_ALLOWED_HOSTS", "*")
+    internal = _csv_env(
+        "GETOFFLINE_DJANGO_INTERNAL_ALLOWED_HOSTS",
+        "localhost,127.0.0.1,testserver,frontend,api",
+    )
+    return list(dict.fromkeys([*configured, *internal]))
+
+
+ALLOWED_HOSTS = _allowed_hosts()
+
+
+STRICT_ALLOWED_HOSTS = os.getenv(
+    "GETOFFLINE_DJANGO_STRICT_ALLOWED_HOSTS", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+if not STRICT_ALLOWED_HOSTS and "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
@@ -56,6 +81,7 @@ INSTALLED_APPS = [
     "app",
 ]
 MIDDLEWARE = [
+    "app.middleware.AllowPrivateNetworkHostMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",

@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     environment: &getoffline-env
       GETOFFLINE_DJANGO_DEBUG: "0"
-      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,frontend,api}
+      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-*}
       GETOFFLINE_CSRF_TRUSTED_ORIGINS: ${GETOFFLINE_CSRF_TRUSTED_ORIGINS:-http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080}
       GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
       GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:-mysql}
@@ -195,6 +195,9 @@ services:
     restart: unless-stopped
     environment: *getoffline-env
     command: python -m workers transfer
+    volumes:
+      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+      - adb-data:/root/.android
     depends_on:
       mysql:
         condition: service_healthy
@@ -238,3 +241,4 @@ services:
 volumes:
   mysql-data:
   rabbitmq-data:
+  adb-data:

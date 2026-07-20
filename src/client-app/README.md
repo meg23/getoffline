@@ -2,7 +2,7 @@
 
 `app.py` is a dependency-light ncurses client for GetOffline. It uses
 the `getoffline-sdk` package for API communication and delegates audio playback
-to either a terminal-friendly local player (`mpv`, `cvlc`, `vlc`, or `ffplay`) or a generic HTTP audio bridge.
+to either `ffplay` for local playback or a generic HTTP audio bridge.
 
 ## Run
 
@@ -24,6 +24,7 @@ Credentials and optional playback defaults are stored in `$XDG_CONFIG_HOME/getof
 - `j`/`k` or arrow keys: move through the library
 - `Enter`/`p`: play the selected item from its saved resume position
 - `s`: stop playback and save progress
+- `-` / `+`: lower or raise playback volume
 - `/`: search the library/transcripts
 - `a`: queue a new YouTube/media URL for download
 - `m` / `u`: mark selected media played or unplayed
@@ -36,9 +37,14 @@ Credentials and optional playback defaults are stored in `$XDG_CONFIG_HOME/getof
 
 The app is intentionally console music-player-like: the terminal UI is always available while an
 external player or bridge handles media decoding. Playback progress is periodically saved
-through the SDK while playback is running and once again when playback stops. The local
-player auto-detection prefers `mpv` or VLC before falling back to `ffplay`, because
-`ffplay` can consume noticeably more CPU during startup/seeking on some systems.
+through the SDK while playback is running and once again when playback stops. Local
+playback uses `ffplay`, including the GetOffline authorization header and the
+configured initial volume. Player output is written to
+`$XDG_CONFIG_HOME/getoffline-console/player.log` or
+`~/.config/getoffline-console/player.log` so ffplay/auth/audio-device failures
+are visible when playback exits immediately. If ffplay exits cleanly right after
+starting from a saved resume position, the client retries once from the
+beginning of the item.
 
 Before starting playback, the client downloads the selected media into
 the directory passed with `--download-dir`, `$GETOFFLINE_CONSOLE_DOWNLOAD_DIR`, or

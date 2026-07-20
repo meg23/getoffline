@@ -59,6 +59,8 @@ class Credentials:
     playback_backend: str = DEFAULT_PLAYBACK_BACKEND
     bridge_url: str = ""
     bridge_stop_url: str = ""
+    bridge_volume_url: str = ""
+    volume: float = 1.0
 
     @property
     def api_url(self) -> str:
@@ -111,7 +113,9 @@ class GetOfflineConsole:
             player=player,
             bridge_url=bridge_url or credentials.bridge_url,
             bridge_stop_url=bridge_stop_url or credentials.bridge_stop_url,
+            bridge_volume_url=bridge_volume_url or credentials.bridge_volume_url,
         )
+        self.volume = clamp_volume(credentials.volume if volume is None else volume)
         self.filter_mode = "unplayed"
         self.episodes: list[dict[str, Any]] = []
         self.jobs: list[dict[str, Any]] = []
@@ -164,6 +168,10 @@ class GetOfflineConsole:
             self.play_selected(stdscr)
         elif key == ord("s"):
             self.stop(reason="stop")
+        elif key in (ord("-"), ord("_")):
+            self.adjust_volume(-0.1)
+        elif key in (ord("+"), ord("=")):
+            self.adjust_volume(0.1)
         elif key == ord("r"):
             self.refresh()
         elif key == ord("/"):
@@ -216,6 +224,7 @@ class GetOfflineConsole:
                 stream_url=str(media_file),
                 auth_header=self.credentials.auth_header,
                 seek=seek,
+                volume=self.volume,
             )
         except PlaybackError as exc:
             self.message = f"Playback failed: {exc}"
@@ -227,6 +236,18 @@ class GetOfflineConsole:
         self.message = (
             f"Playing: {item.get('title') or episode.get('title') or episode_id}"
         )
+
+    def adjust_volume(self, delta: float) -> None:
+        previous = self.volume
+        self.volume = clamp_volume(self.volume + delta)
+        if self.playback_session is not None:
+            try:
+                self.playback.set_volume(self.playback_session, self.volume)
+            except PlaybackError as exc:
+                self.volume = previous
+                self.message = f"Volume failed: {exc}"
+                return
+        self.message = f"Volume: {format_volume(self.volume)}"
 
     def stop(self, *, reason: str) -> None:
         if self.playback_session is not None:
@@ -359,17 +380,19 @@ class GetOfflineConsole:
             # server, so treat unexpected process exits as a stopped session and
             # preserve the estimated resume point.
             self._save_progress("stopped")
-            self.message = "Playback stopped"
+            exit_detail = self.playback_session.error_message
+            self.playback.stop(self.playback_session)
             self.playback_session = None
             self.playing_id = None
             self.refresh()
+            self.message = exit_detail or "Playback stopped"
 
     def _draw(self, stdscr: Any) -> None:
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         header = f" getoffline | {self.credentials.username}@{self.credentials.base_url} | filter: {self.filter_mode} "
         safe_addnstr(stdscr, 0, 0, header, curses.A_REVERSE)
-        controls = " Move: j/k  Play: Enter/p  Stop: s  Search: /  Add: a  Favorite: f  Quit: q "
+        controls = " Move: j/k  Play: Enter/p  Stop: s  Vol: -/+  Search: /  Add: a  Favorite: f  Quit: q "
         filters = " Mark: m played, u unplayed  Filters: 1 unplayed, 2 played, 3 favorites, 4 all  Refresh: r "
         safe_addnstr(stdscr, 1, 0, controls, curses.A_BOLD)
         safe_addnstr(stdscr, 2, 0, filters, curses.A_DIM)
@@ -394,7 +417,7 @@ class GetOfflineConsole:
             )
             attr = curses.A_REVERSE if absolute == self.selected else curses.A_NORMAL
             safe_addnstr(stdscr, row, 0, line, attr)
-        footer = f" {self.message} "
+        footer = f" {self.message} | volume {format_volume(self.volume)} "
         if self.playing_id:
             footer += f"| position ~{int(self.estimated_position())}s "
         safe_addnstr(stdscr, height - 1, 0, footer, curses.A_REVERSE)
@@ -451,6 +474,45 @@ def detect_player() -> str | None:
     return next((name for name in PLAYER_CANDIDATES if shutil.which(name)), None)
 
 
+def player_name(player: str) -> str:
+    return Path(player).name.lower()
+
+
+def clamp_volume(volume: float) -> float:
+    return max(0.0, min(float(volume), 1.0))
+
+
+def format_volume(volume: float) -> str:
+    return f"{int(round(clamp_volume(volume) * 100))}%"
+
+
+def prepare_player_log() -> Path:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    PLAYER_LOG_FILE.write_text("", encoding="utf-8")
+    return PLAYER_LOG_FILE
+
+
+def append_player_log(path: Path, message: str) -> None:
+    with path.open("ab") as handle:
+        handle.write(message.encode("utf-8", errors="replace"))
+
+
+def tail_text(path: Path, *, limit: int = 1000) -> str:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return data[-limit:].decode("utf-8", errors="replace").strip()
+
+
+def player_exit_message(session: "PlaybackSession") -> str:
+    code = session.process.poll() if session.process is not None else "unknown"
+    detail = tail_text(session.log_path) if session.log_path is not None else ""
+    if detail:
+        return f"Player exited ({code}); see {session.log_path}: {detail}"
+    return f"Player exited ({code}); see {session.log_path or PLAYER_LOG_FILE}"
+
+
 class PlaybackError(RuntimeError):
     """Raised when a playback backend cannot start or stop playback."""
 
@@ -460,6 +522,9 @@ class PlaybackSession:
     process: subprocess.Popen[bytes] | None = None
     session_id: str = ""
     active: bool = True
+    volume: float = 1.0
+    log_path: Path | None = None
+    error_message: str = ""
 
 
 class LocalProcessPlaybackBackend:
@@ -472,7 +537,7 @@ class LocalProcessPlaybackBackend:
 
     @property
     def unavailable_message(self) -> str:
-        return "No player found: install mpv, ffplay, or vlc"
+        return "No player found: install ffplay"
 
     def start(
         self,
@@ -481,21 +546,28 @@ class LocalProcessPlaybackBackend:
         stream_url: str,
         auth_header: str,
         seek: float,
+        volume: float = 1.0,
     ) -> PlaybackSession:
         del item
         if not self.player:
             raise PlaybackError(self.unavailable_message)
-        command = player_command(self.player, stream_url, auth_header, seek)
-        popen_kwargs: dict[str, Any] = {
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-        }
-        if os.name == "posix":
-            # Place the player in its own process group so stopping the console
-            # also stops any helper processes spawned by the player.
-            popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(command, **popen_kwargs)
-        return PlaybackSession(process=process)
+        log_path = prepare_player_log()
+        command = player_command(self.player, stream_url, auth_header, seek, volume)
+        process = self._launch_player(command, log_path)
+        session = PlaybackSession(process=process, volume=clamp_volume(volume), log_path=log_path)
+        if self._process_exited_immediately(session):
+            if session.process is not None and session.process.returncode == 0 and seek > 0:
+                append_player_log(log_path, f"\nRetrying from the beginning because ffplay exited immediately after seek {seek:.3f}s.\n")
+                retry_command = player_command(self.player, stream_url, auth_header, 0.0, volume)
+                retry_process = self._launch_player(retry_command, log_path)
+                session = PlaybackSession(process=retry_process, volume=clamp_volume(volume), log_path=log_path)
+                if not self._process_exited_immediately(session):
+                    return session
+            raise PlaybackError(session.error_message)
+        return session
+
+    def set_volume(self, session: PlaybackSession, volume: float) -> None:
+        session.volume = clamp_volume(volume)
 
     def stop(self, session: PlaybackSession) -> None:
         if session.process and session.process.poll() is None:
@@ -508,7 +580,40 @@ class LocalProcessPlaybackBackend:
         session.active = False
 
     def is_running(self, session: PlaybackSession) -> bool:
-        return bool(session.active and session.process is not None and session.process.poll() is None)
+        if not session.active or session.process is None:
+            return False
+        if session.process.poll() is None:
+            return True
+        session.error_message = player_exit_message(session)
+        return False
+
+    def _launch_player(self, command: list[str], log_path: Path) -> subprocess.Popen[bytes]:
+        log_file = log_path.open("ab")
+        popen_kwargs: dict[str, Any] = {
+            "stdout": log_file,
+            "stderr": subprocess.STDOUT,
+        }
+        if os.name == "posix":
+            # Place the player in its own process group so stopping the console
+            # also stops any helper processes spawned by the player.
+            popen_kwargs["start_new_session"] = True
+        try:
+            return subprocess.Popen(command, **popen_kwargs)
+        except OSError as exc:
+            raise PlaybackError(f"unable to launch player {self.player!r}: {exc}") from exc
+        finally:
+            log_file.close()
+
+    def _process_exited_immediately(self, session: PlaybackSession) -> bool:
+        if session.process is None:
+            return False
+        try:
+            session.process.wait(timeout=0.75)
+        except subprocess.TimeoutExpired:
+            return False
+        session.error_message = player_exit_message(session)
+        session.active = False
+        return True
 
     def _terminate_process(self, process: subprocess.Popen[bytes]) -> None:
         if os.name == "posix":
@@ -546,10 +651,12 @@ class AudioBridgePlaybackBackend:
         bridge_url: str,
         *,
         bridge_stop_url: str = "",
+        bridge_volume_url: str = "",
         timeout_seconds: float = BRIDGE_TIMEOUT_SECONDS,
     ) -> None:
         self.bridge_url = bridge_url.strip()
         self.bridge_stop_url = bridge_stop_url.strip()
+        self.bridge_volume_url = bridge_volume_url.strip()
         self.timeout_seconds = timeout_seconds
 
     @property
@@ -567,6 +674,7 @@ class AudioBridgePlaybackBackend:
         stream_url: str,
         auth_header: str,
         seek: float,
+        volume: float = 1.0,
     ) -> PlaybackSession:
         if not self.bridge_url:
             raise PlaybackError(self.unavailable_message)
@@ -580,10 +688,16 @@ class AudioBridgePlaybackBackend:
                 item.get("media_kind") or item.get("display_kind") or "audio"
             ),
             "episode_id": item.get("id"),
+            "volume": clamp_volume(volume),
         }
         response = self._post_json(self.bridge_url, payload)
         session_id = str(response.get("session_id") or "")
-        return PlaybackSession(session_id=session_id)
+        return PlaybackSession(session_id=session_id, volume=clamp_volume(volume))
+
+    def set_volume(self, session: PlaybackSession, volume: float) -> None:
+        session.volume = clamp_volume(volume)
+        volume_url = self.bridge_volume_url or default_bridge_volume_url(self.bridge_url)
+        self._post_json(volume_url, {"session_id": session.session_id, "volume": session.volume})
 
     def stop(self, session: PlaybackSession) -> None:
         if not session.active:
@@ -719,16 +833,27 @@ def default_bridge_stop_url(bridge_url: str) -> str:
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment))
 
 
+def default_bridge_volume_url(bridge_url: str) -> str:
+    parsed = urllib.parse.urlsplit(bridge_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/play"):
+        path = path[: -len("/play")] + "/volume"
+    else:
+        path = f"{path}/volume"
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/volume", parsed.query, parsed.fragment))
+
+
 def build_playback_backend(
     playback_backend: str,
     *,
     player: str | None = None,
     bridge_url: str = "",
     bridge_stop_url: str = "",
+    bridge_volume_url: str = "",
 ) -> LocalProcessPlaybackBackend | AudioBridgePlaybackBackend:
     normalized = (playback_backend or DEFAULT_PLAYBACK_BACKEND).strip().lower()
     if normalized == "bridge":
-        return AudioBridgePlaybackBackend(bridge_url, bridge_stop_url=bridge_stop_url)
+        return AudioBridgePlaybackBackend(bridge_url, bridge_stop_url=bridge_stop_url, bridge_volume_url=bridge_volume_url)
     if normalized == "local":
         return LocalProcessPlaybackBackend(player)
     raise SystemExit(
@@ -817,6 +942,8 @@ def load_credentials() -> Credentials | None:
         playback_backend=str(data.get("playback_backend") or DEFAULT_PLAYBACK_BACKEND),
         bridge_url=str(data.get("bridge_url") or ""),
         bridge_stop_url=str(data.get("bridge_stop_url") or ""),
+        bridge_volume_url=str(data.get("bridge_volume_url") or ""),
+        volume=clamp_volume(float(data.get("volume", 1.0))),
     )
 
 
