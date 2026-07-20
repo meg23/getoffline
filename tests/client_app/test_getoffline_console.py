@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import email.message
 import json
 import sys
+import tempfile
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -60,15 +63,65 @@ class ConsolePlaybackTests(unittest.TestCase):
             "http://bridge.local/api/audio/stop",
         )
 
-    def test_default_bridge_volume_url_uses_sibling_volume_endpoint(self):
+    def test_local_player_commands_do_not_include_http_headers_for_downloaded_files(
+        self,
+    ):
+        filename = "/Users/alice/Music/Fresh Audio.mp3"
+
         self.assertEqual(
-            console.default_bridge_volume_url("http://bridge.local/play"),
-            "http://bridge.local/volume",
+            console.player_command("mpv", filename, "Basic abc123", 12.25),
+            ["mpv", "--no-video", "--start=12.250", filename],
         )
         self.assertEqual(
-            console.default_bridge_volume_url("http://bridge.local/api/audio"),
-            "http://bridge.local/api/audio/volume",
+            console.player_command("ffplay", filename, "Basic abc123", 12.25),
+            ["ffplay", "-nodisp", "-autoexit", "-ss", "12.250", filename],
         )
+        self.assertEqual(
+            console.player_command("vlc", filename, "Basic abc123", 12.25),
+            ["vlc", "--intf", "ncurses", "--start-time=12", filename],
+        )
+
+    def test_remote_player_commands_still_include_http_headers_for_stream_urls(self):
+        command = console.player_command(
+            "mpv", "https://getoffline.test/api/stream/7", "Basic abc123", 12.25
+        )
+
+        self.assertIn("--http-header-fields=Authorization: Basic abc123", command)
+
+    def test_parse_args_accepts_download_dir_override(self):
+        original_argv = console.sys.argv
+        try:
+            console.sys.argv = ["app.py", "--download-dir", "~/Downloads/getoffline"]
+            args = console.parse_args()
+        finally:
+            console.sys.argv = original_argv
+
+        self.assertEqual(args.download_dir, "~/Downloads/getoffline")
+
+    def test_download_media_file_uses_instance_download_dir(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app.download_dir = Path(temp_dir)
+            existing = console.media_download_path(
+                11,
+                {"title": "Custom Dir", "media_kind": "audio"},
+                download_dir=app.download_dir,
+            )
+            existing.parent.mkdir(parents=True, exist_ok=True)
+            existing.write_bytes(b"already here")
+
+            with mock.patch.object(console.urllib.request, "urlopen") as urlopen:
+                path = app.download_media_file(
+                    11,
+                    {"title": "Custom Dir", "media_kind": "audio"},
+                    "http://example.test/api/stream/11",
+                )
+
+            self.assertEqual(path, existing)
+            urlopen.assert_not_called()
 
     def test_load_credentials_accepts_legacy_credentials_file(self):
         original = console.CONFIG_FILE
@@ -122,6 +175,7 @@ class ConsolePlaybackTests(unittest.TestCase):
             BridgeHandler.requests[0][1],
             {
                 "url": "http://getoffline.local/api/stream/7",
+                "filename": "http://getoffline.local/api/stream/7",
                 "headers": {"Authorization": "Basic abc123"},
                 "seek_seconds": 42.5,
                 "title": "Example",
@@ -154,13 +208,151 @@ class ConsolePlaybackTests(unittest.TestCase):
         self.assertEqual(app.playback.calls, [("session-123", 1.0)])
         self.assertEqual(app.message, "Volume: 100%")
 
+    def test_download_media_file_reuses_existing_file_without_request(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                existing = console.media_download_path(
+                    7, {"title": "Example", "media_kind": "audio"}
+                )
+                existing.parent.mkdir(parents=True, exist_ok=True)
+                existing.write_bytes(b"already here")
+
+                with mock.patch.object(console.urllib.request, "urlopen") as urlopen:
+                    path = app.download_media_file(
+                        7,
+                        {"title": "Example", "media_kind": "audio"},
+                        "http://example.test/api/stream/7",
+                    )
+                self.assertEqual(path, existing)
+                self.assertEqual(path.read_bytes(), b"already here")
+                urlopen.assert_not_called()
+            finally:
+                console.DOWNLOAD_DIR = original
+
+    def test_download_media_file_writes_downloaded_stream(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        class Response:
+            def __enter__(self) -> "Response":
+                self.chunks = [b"new ", b"audio", b""]
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self, _size: int) -> bytes:
+                return self.chunks.pop(0)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                with (
+                    mock.patch.object(
+                        console.urllib.request, "urlopen", return_value=Response()
+                    ) as urlopen,
+                    mock.patch.object(app, "_draw") as draw,
+                ):
+                    window = object()
+                    path = app.download_media_file(
+                        8,
+                        {"title": "Fresh Audio", "media_kind": "audio"},
+                        "http://example.test/api/stream/8",
+                        stdscr=window,
+                    )
+                draw.assert_called_once_with(window)
+                self.assertEqual(app.message, "Downloading file: Fresh Audio")
+                self.assertEqual(path.name, "8-Fresh-Audio.mp3")
+                self.assertEqual(path.read_bytes(), b"new audio")
+                self.assertEqual(
+                    urlopen.call_args.args[0].headers["Authorization"],
+                    "Basic YWxpY2U6c2VjcmV0",
+                )
+            finally:
+                console.DOWNLOAD_DIR = original
+
+    def test_download_media_file_uses_response_content_type_extension(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        class Response:
+            def __init__(self) -> None:
+                self.headers = email.message.Message()
+                self.headers["Content-Type"] = "audio/mp4"
+
+            def __enter__(self) -> "Response":
+                self.chunks = [b"\x00\x00\x00 ftypM4A ", b"audio", b""]
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self, _size: int) -> bytes:
+                return self.chunks.pop(0)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                with mock.patch.object(
+                    console.urllib.request, "urlopen", return_value=Response()
+                ):
+                    path = app.download_media_file(
+                        9,
+                        {"title": "M4A Audio", "media_kind": "audio"},
+                        "http://example.test/api/stream/9",
+                    )
+                self.assertEqual(path.name, "9-M4A-Audio.m4a")
+                self.assertEqual(path.read_bytes(), b"\x00\x00\x00 ftypM4A audio")
+            finally:
+                console.DOWNLOAD_DIR = original
+
+    def test_existing_cached_file_with_mp4_signature_is_renamed_before_reuse(self):
+        app = console.GetOfflineConsole.__new__(console.GetOfflineConsole)
+        app.credentials = console.Credentials("http://example.test", "alice", "secret")
+        app.message = "Ready"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = console.DOWNLOAD_DIR
+            try:
+                console.DOWNLOAD_DIR = Path(temp_dir)
+                legacy = console.media_download_path(
+                    10, {"title": "Legacy M4A", "media_kind": "audio"}
+                )
+                legacy.parent.mkdir(parents=True, exist_ok=True)
+                legacy.write_bytes(b"\x00\x00\x00 ftypM4A audio")
+
+                with mock.patch.object(console.urllib.request, "urlopen") as urlopen:
+                    path = app.download_media_file(
+                        10,
+                        {"title": "Legacy M4A", "media_kind": "audio"},
+                        "http://example.test/api/stream/10",
+                    )
+                self.assertEqual(path.name, "10-Legacy-M4A.m4a")
+                self.assertFalse(legacy.exists())
+                self.assertEqual(path.read_bytes(), b"\x00\x00\x00 ftypM4A audio")
+                urlopen.assert_not_called()
+            finally:
+                console.DOWNLOAD_DIR = original
+
 
 class FakeClient:
     def __init__(self) -> None:
         self.progress_calls: list[tuple[int, float, str]] = []
         self.refreshed = False
 
-    def playback_progress(self, episode_id: int, position_seconds: float, *, reason: str = "timeupdate") -> dict[str, Any]:
+    def playback_progress(
+        self, episode_id: int, position_seconds: float, *, reason: str = "timeupdate"
+    ) -> dict[str, Any]:
         self.progress_calls.append((episode_id, position_seconds, reason))
         return {"ok": True}
 

@@ -15,6 +15,7 @@ import base64
 import curses
 import getpass
 import json
+import mimetypes
 import os
 import shutil
 import signal
@@ -40,8 +41,11 @@ from getoffline_sdk import GetOfflineClient, HttpTransport, Response
 APP_NAME = "getoffline-console"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
-PLAYER_LOG_FILE = CONFIG_DIR / "player.log"
-PLAYER_CANDIDATES = ("ffplay",)
+DOWNLOAD_DIR = Path(
+    os.environ.get("GETOFFLINE_CONSOLE_DOWNLOAD_DIR", CONFIG_DIR / "downloads")
+)
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
@@ -97,10 +101,12 @@ class GetOfflineConsole:
         playback_backend: str | None = None,
         bridge_url: str | None = None,
         bridge_stop_url: str | None = None,
-        bridge_volume_url: str | None = None,
-        volume: float | None = None,
+        download_dir: str | Path | None = None,
     ) -> None:
         self.credentials = credentials
+        self.download_dir = (
+            Path(download_dir).expanduser() if download_dir else DOWNLOAD_DIR
+        )
         self.client = GetOfflineClient(AuthenticatedTransport(credentials))
         self.playback = build_playback_backend(
             playback_backend or credentials.playback_backend,
@@ -159,7 +165,7 @@ class GetOfflineConsole:
         elif key == curses.KEY_PPAGE:
             self.selected = max(0, self.selected - 10)
         elif key in (ord("\n"), curses.KEY_ENTER, ord("p")):
-            self.play_selected()
+            self.play_selected(stdscr)
         elif key == ord("s"):
             self.stop(reason="stop")
         elif key in (ord("-"), ord("_")):
@@ -192,7 +198,7 @@ class GetOfflineConsole:
             return None
         return self.episodes[self.selected]
 
-    def play_selected(self) -> None:
+    def play_selected(self, stdscr: Any | None = None) -> None:
         episode = self.current_episode()
         if not episode:
             self.message = "No episode selected"
@@ -204,13 +210,18 @@ class GetOfflineConsole:
         episode_id = int(episode["id"])
         player_payload = self.client.frontend_player(episode_id)
         item = dict(player_payload.get("item") or episode)
-        seek = float(player_payload.get("seek_seconds") or item.get("last_position_seconds") or 0.0)
+        seek = float(
+            player_payload.get("seek_seconds")
+            or item.get("last_position_seconds")
+            or 0.0
+        )
         self.client.playback_start(episode_id)
         url = self.stream_url(episode_id)
         try:
+            media_file = self.download_media_file(episode_id, item, url, stdscr=stdscr)
             self.playback_session = self.playback.start(
                 item=item,
-                stream_url=url,
+                stream_url=str(media_file),
                 auth_header=self.credentials.auth_header,
                 seek=seek,
                 volume=self.volume,
@@ -222,7 +233,9 @@ class GetOfflineConsole:
         self.play_start_position = seek
         self.play_started_at = time.monotonic()
         self.last_progress_at = 0.0
-        self.message = f"Playing: {item.get('title') or episode.get('title') or episode_id}"
+        self.message = (
+            f"Playing: {item.get('title') or episode.get('title') or episode_id}"
+        )
 
     def adjust_volume(self, delta: float) -> None:
         previous = self.volume
@@ -292,7 +305,50 @@ class GetOfflineConsole:
         self.refresh()
 
     def stream_url(self, episode_id: int) -> str:
-        return f"{self.credentials.api_url}/stream/{urllib.parse.quote(str(episode_id))}"
+        return (
+            f"{self.credentials.api_url}/stream/{urllib.parse.quote(str(episode_id))}"
+        )
+
+    def download_media_file(
+        self,
+        episode_id: int,
+        item: Mapping[str, Any],
+        stream_url: str,
+        *,
+        stdscr: Any | None = None,
+    ) -> Path:
+        download_dir = getattr(self, "download_dir", DOWNLOAD_DIR)
+        path = existing_media_download_path(episode_id, item, download_dir=download_dir)
+        if path is not None:
+            path = normalize_cached_media_extension(path)
+            self.message = f"Using downloaded file: {path.name}"
+            return path
+        download_stem = media_download_stem(episode_id, item, download_dir=download_dir)
+        download_stem.parent.mkdir(parents=True, exist_ok=True)
+        self.message = f"Downloading file: {item.get('title') or episode_id}"
+        if stdscr is not None:
+            self._draw(stdscr)
+        tmp_path = download_stem.with_name(download_stem.name + ".part")
+        request = urllib.request.Request(
+            stream_url, headers={"Authorization": self.credentials.auth_header}
+        )
+        try:
+            with (
+                urllib.request.urlopen(request, timeout=60) as response,
+                tmp_path.open("wb") as handle,
+            ):  # nosec B310 - GetOffline URL is user configured.
+                while True:
+                    chunk = response.read(DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                extension = media_extension_from_response(response)
+        except (OSError, urllib.error.URLError) as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise PlaybackError(f"download failed: {exc}") from exc
+        path = download_stem.with_suffix(extension)
+        tmp_path.replace(path)
+        return path
 
     def estimated_position(self) -> float:
         if self.playing_id is None:
@@ -585,7 +641,7 @@ class LocalProcessPlaybackBackend:
 class AudioBridgePlaybackBackend:
     """Generic HTTP audio bridge backend.
 
-    The bridge receives the authenticated GetOffline stream URL and decides how
+    The bridge receives a locally downloaded media filename and decides how
     to present playback to its downstream device. The console client does not
     know what type of device is behind the bridge.
     """
@@ -624,10 +680,13 @@ class AudioBridgePlaybackBackend:
             raise PlaybackError(self.unavailable_message)
         payload = {
             "url": stream_url,
+            "filename": stream_url,
             "headers": {"Authorization": auth_header},
             "seek_seconds": seek,
             "title": str(item.get("title") or ""),
-            "media_kind": str(item.get("media_kind") or item.get("display_kind") or "audio"),
+            "media_kind": str(
+                item.get("media_kind") or item.get("display_kind") or "audio"
+            ),
             "episode_id": item.get("id"),
             "volume": clamp_volume(volume),
         }
@@ -679,6 +738,91 @@ class AudioBridgePlaybackBackend:
         return decoded if isinstance(decoded, dict) else {}
 
 
+def media_download_path(
+    episode_id: int, item: Mapping[str, Any], *, download_dir: Path | None = None
+) -> Path:
+    return media_download_stem(episode_id, item, download_dir=download_dir).with_suffix(
+        default_media_extension(item)
+    )
+
+
+def media_download_stem(
+    episode_id: int, item: Mapping[str, Any], *, download_dir: Path | None = None
+) -> Path:
+    title = str(item.get("title") or f"episode-{episode_id}")
+    return (download_dir or DOWNLOAD_DIR) / f"{episode_id}-{safe_filename(title)}"
+
+
+def existing_media_download_path(
+    episode_id: int, item: Mapping[str, Any], *, download_dir: Path | None = None
+) -> Path | None:
+    stem = media_download_stem(episode_id, item, download_dir=download_dir)
+    if stem.with_suffix(default_media_extension(item)).is_file():
+        return stem.with_suffix(default_media_extension(item))
+    return next(
+        (path for path in sorted(stem.parent.glob(stem.name + ".*")) if path.is_file()),
+        None,
+    )
+
+
+def default_media_extension(item: Mapping[str, Any]) -> str:
+    media_kind = str(
+        item.get("media_kind") or item.get("display_kind") or "audio"
+    ).lower()
+    return ".mp4" if media_kind == "video" else ".mp3"
+
+
+def media_extension_from_response(response: Any) -> str:
+    headers = getattr(response, "headers", None)
+    content_type = ""
+    if headers is not None:
+        get_content_type = getattr(headers, "get_content_type", None)
+        if callable(get_content_type):
+            content_type = str(get_content_type())
+        else:
+            content_type = str(headers.get("Content-Type", "")).partition(";")[0]
+    extension = mimetypes.guess_extension(content_type) if content_type else None
+    if content_type == "audio/mp4":
+        return ".m4a"
+    return extension or ".mp3"
+
+
+def normalize_cached_media_extension(path: Path) -> Path:
+    extension = media_extension_from_file(path)
+    if extension == path.suffix.lower() or not extension:
+        return path
+    renamed = path.with_suffix(extension)
+    if renamed.exists():
+        return path
+    path.replace(renamed)
+    return renamed
+
+
+def media_extension_from_file(path: Path) -> str:
+    with path.open("rb") as handle:
+        header = handle.read(16)
+    if header.startswith(b"ID3") or header[:2] in {
+        b"\xff\xfb",
+        b"\xff\xf3",
+        b"\xff\xf2",
+    }:
+        return ".mp3"
+    if header.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm"
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        return ".m4a"
+    return ""
+
+
+def safe_filename(value: str) -> str:
+    cleaned = "".join(
+        character if character.isalnum() or character in "._- " else "-"
+        for character in value
+    )
+    cleaned = "-".join(cleaned.split())
+    return (cleaned.strip(".-") or "media")[:120]
+
+
 def default_bridge_stop_url(bridge_url: str) -> str:
     parsed = urllib.parse.urlsplit(bridge_url)
     path = parsed.path.rstrip("/")
@@ -712,27 +856,63 @@ def build_playback_backend(
         return AudioBridgePlaybackBackend(bridge_url, bridge_stop_url=bridge_stop_url, bridge_volume_url=bridge_volume_url)
     if normalized == "local":
         return LocalProcessPlaybackBackend(player)
-    raise SystemExit(f"Unsupported playback backend: {playback_backend!r}. Expected 'local' or 'bridge'.")
+    raise SystemExit(
+        f"Unsupported playback backend: {playback_backend!r}. Expected 'local' or 'bridge'."
+    )
 
 
-def player_command(player: str, url: str, auth_header: str, seek: float, volume: float = 1.0) -> list[str]:
-    if player_name(player) != "ffplay":
-        return [player, url]
-    return [
-        player,
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-nodisp",
-        "-autoexit",
-        "-ss",
-        f"{seek:.3f}",
-        "-volume",
-        str(int(round(clamp_volume(volume) * 100))),
-        "-headers",
-        f"Authorization: {auth_header}\r\n",
-        url,
-    ]
+def player_command(player: str, url: str, auth_header: str, seek: float) -> list[str]:
+    if is_http_url(url):
+        return remote_player_command(player, url, auth_header, seek)
+    return local_player_command(player, url, seek)
+
+
+def is_http_url(value: str) -> bool:
+    return urllib.parse.urlsplit(value).scheme in {"http", "https"}
+
+
+def local_player_command(player: str, filename: str, seek: float) -> list[str]:
+    if player == "mpv":
+        return ["mpv", "--no-video", f"--start={seek:.3f}", filename]
+    if player == "ffplay":
+        return ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}", filename]
+    if player in {"vlc", "cvlc"}:
+        return [player, "--intf", "ncurses", f"--start-time={int(seek)}", filename]
+    return [player, filename]
+
+
+def remote_player_command(
+    player: str, url: str, auth_header: str, seek: float
+) -> list[str]:
+    if player == "mpv":
+        return [
+            "mpv",
+            "--no-video",
+            f"--start={seek:.3f}",
+            f"--http-header-fields=Authorization: {auth_header}",
+            url,
+        ]
+    if player == "ffplay":
+        return [
+            "ffplay",
+            "-nodisp",
+            "-autoexit",
+            "-ss",
+            f"{seek:.3f}",
+            "-headers",
+            f"Authorization: {auth_header}\r\n",
+            url,
+        ]
+    if player in {"vlc", "cvlc"}:
+        return [
+            player,
+            "--intf",
+            "ncurses",
+            f"--start-time={int(seek)}",
+            f"--http-header=Authorization: {auth_header}",
+            url,
+        ]
+    return [player, url]
 
 
 def format_jobs(jobs: list[dict[str, Any]]) -> str:
@@ -789,27 +969,45 @@ def login(base_url: str | None = None, username: str | None = None) -> Credentia
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="console music-player-style ncurses client for GetOffline")
-    parser.add_argument("--login", action="store_true", help="prompt for credentials and store them locally")
+    parser = argparse.ArgumentParser(
+        description="console music-player-style ncurses client for GetOffline"
+    )
+    parser.add_argument(
+        "--login",
+        action="store_true",
+        help="prompt for credentials and store them locally",
+    )
     parser.add_argument("--base-url", help="GetOffline web base URL, without /api")
     parser.add_argument("--username", help="GetOffline username")
-    parser.add_argument("--player", help="media player command to use (default: auto-detect ffplay)")
+    parser.add_argument(
+        "--player",
+        help="media player command to use (default: auto-detect mpv/ffplay/vlc)",
+    )
     parser.add_argument(
         "--playback-backend",
         choices=("local", "bridge"),
         help="playback backend to use (default: stored config or local)",
     )
     parser.add_argument("--bridge-url", help="generic audio bridge play endpoint URL")
-    parser.add_argument("--bridge-stop-url", help="generic audio bridge stop endpoint URL")
-    parser.add_argument("--bridge-volume-url", help="generic audio bridge volume endpoint URL")
-    parser.add_argument("--volume", type=float, help="initial playback volume from 0.0 to 1.0")
+    parser.add_argument(
+        "--download-dir",
+        help=(
+            "directory for downloaded media cache "
+            "(default: GETOFFLINE_CONSOLE_DOWNLOAD_DIR or ~/.config/getoffline-console/downloads)"
+        ),
+    )
+    parser.add_argument(
+        "--bridge-stop-url", help="generic audio bridge stop endpoint URL"
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     args = parse_args()
-    credentials = login(args.base_url, args.username) if args.login else load_credentials()
+    credentials = (
+        login(args.base_url, args.username) if args.login else load_credentials()
+    )
     if credentials is None:
         credentials = login(args.base_url, args.username)
     app = GetOfflineConsole(
@@ -818,8 +1016,7 @@ def main() -> int:
         playback_backend=args.playback_backend,
         bridge_url=args.bridge_url,
         bridge_stop_url=args.bridge_stop_url,
-        bridge_volume_url=args.bridge_volume_url,
-        volume=args.volume,
+        download_dir=args.download_dir,
     )
     try:
         curses.wrapper(app.run)

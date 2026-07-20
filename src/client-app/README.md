@@ -11,7 +11,8 @@ From this repository:
 ```bash
 PYTHONPATH=../packages:.. python app.py --login --base-url http://localhost:8000
 PYTHONPATH=../packages:.. python app.py
-PYTHONPATH=../packages:.. python app.py --playback-backend bridge --bridge-url http://bridge.local/play --volume 0.75
+PYTHONPATH=../packages:.. python app.py --playback-backend bridge --bridge-url http://bridge.local/play
+PYTHONPATH=../packages:.. python app.py --download-dir ~/Downloads/getoffline
 ```
 
 If `getoffline-sdk` is installed in your environment, `PYTHONPATH` is not needed.
@@ -45,10 +46,12 @@ are visible when playback exits immediately. If ffplay exits cleanly right after
 starting from a saved resume position, the client retries once from the
 beginning of the item.
 
+Before starting playback, the client downloads the selected media into
+the directory passed with `--download-dir`, `$GETOFFLINE_CONSOLE_DOWNLOAD_DIR`, or
+`~/.config/getoffline-console/downloads` and reuses that file on future plays if it already exists.
+
 The generic audio bridge mode posts to the configured `--bridge-url` with JSON containing
-the GetOffline stream URL, an `Authorization` header, `seek_seconds`, `title`,
-`media_kind`, `episode_id`, and `volume` as a clamped `0.0`-to-`1.0` gain. Runtime
-volume changes post `session_id` and `volume` to `--bridge-volume-url`, or to a sibling
-`/volume` endpoint when that option is omitted. If no `--bridge-stop-url` is provided, the client
+the downloaded media filename in `url` and `filename`, an `Authorization` header for
+legacy bridge compatibility, `seek_seconds`, `title`, `media_kind`, and `episode_id`. If no `--bridge-stop-url` is provided, the client
 posts stop requests to a sibling `/stop` endpoint, so `http://bridge.local/play`
 defaults to `http://bridge.local/stop`.
