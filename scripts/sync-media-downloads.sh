@@ -5,9 +5,9 @@ usage() {
   cat <<'USAGE'
 Usage: sync-media-downloads.sh [--force] <downloads_dir> <sync_dir> <owner[:group]>
 
-Copies audio/video files from <downloads_dir> into <sync_dir> for cron jobs. The
+Copies MP3 and MP4 files from <downloads_dir> into <sync_dir> for cron jobs. The
 destination filename is "<artist> - <original filename>", where <artist> is the
-source file's parent directory name.
+source file's parent directory name. Other file types are ignored.
 
 Examples:
   sync-media-downloads.sh /srv/getoffline/downloads /mnt/media getoffline:getoffline
@@ -95,7 +95,7 @@ sanitize_component() {
 
 is_media_file() {
   case "${1,,}" in
-    *.aac|*.aiff|*.aif|*.alac|*.flac|*.m4a|*.m4v|*.mka|*.mkv|*.mov|*.mp3|*.mp4|*.mpeg|*.mpg|*.oga|*.ogg|*.opus|*.wav|*.webm|*.wma|*.wmv) return 0 ;;
+    *.mp3|*.mp4) return 0 ;;
     *) return 1 ;;
   esac
 }

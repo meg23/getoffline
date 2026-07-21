@@ -71,3 +71,16 @@ def test_invalid_source_does_not_replace_destination(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "invalid media (ffprobe)" in result.stderr
     assert destination.read_text() == "GOOD"
+
+
+def test_files_other_than_mp3_and_mp4_are_ignored(tmp_path: Path) -> None:
+    artist_dir = tmp_path / "downloads" / "An Artist"
+    artist_dir.mkdir(parents=True)
+    (artist_dir / "track.flac").write_text("GOOD")
+    (artist_dir / "captions.srt").write_text("GOOD")
+
+    result = _run_sync(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "copied=0 skipped=0 failed=0" in result.stdout
+    assert not list((tmp_path / "sync").iterdir())
