@@ -41,8 +41,9 @@ def _run_sync(tmp_path: Path, *options: str) -> subprocess.CompletedProcess[str]
 
 
 def test_force_resync_replaces_an_up_to_date_destination(tmp_path: Path) -> None:
-    source = tmp_path / "downloads" / "An Artist" / "track-converted.mp3"
-    destination = tmp_path / "sync" / "An Artist - track-converted.mp3"
+    filename = "I Built a LEGO Dinosaur Zoo… [OSTbtbIdIHo].mp4"
+    source = tmp_path / "downloads" / "An Artist" / filename
+    destination = tmp_path / "sync" / f"An Artist - {filename}"
     source.parent.mkdir(parents=True)
     destination.parent.mkdir()
     source.write_text("GOOD-new")
@@ -58,8 +59,8 @@ def test_force_resync_replaces_an_up_to_date_destination(tmp_path: Path) -> None
 
 
 def test_invalid_source_does_not_replace_destination(tmp_path: Path) -> None:
-    source = tmp_path / "downloads" / "An Artist" / "track-converted.mp3"
-    destination = tmp_path / "sync" / "An Artist - track-converted.mp3"
+    source = tmp_path / "downloads" / "An Artist" / "track.mp3"
+    destination = tmp_path / "sync" / "An Artist - track.mp3"
     source.parent.mkdir(parents=True)
     destination.parent.mkdir()
     source.write_text("BROKEN")
