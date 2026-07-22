@@ -102,13 +102,15 @@ The web app requires username/password login. Create users from the command line
 
 GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory transfer writes media, optional subtitles, `GetOffline.xspf`, and a `transferdb.txt` history file directly to the selected folder. Paths recorded in `transferdb.txt` are skipped on later runs so tagged media is not copied repeatedly.
 
-For a filesystem-only cron sync that does not use the database transfer queue, use `scripts/sync-media-downloads.sh`. It accepts the downloads directory, the destination directory, and the owner to apply to copied files. Each copied audio/video file is flattened into the destination as `<artist> - <original filename>`, where `<artist>` is the source file's parent folder name. Existing destination files are skipped unless the source file is newer. Example cron entry to run every 15 minutes:
+For a filesystem-only cron sync that does not use the database transfer queue, use `scripts/sync-media-downloads.sh`. It accepts the downloads directory, the destination directory, and the owner to apply to copied files. Only MP3 and MP4 files are considered; filenames do not need to contain `converted`, and other extensions (including subtitle files) are ignored. Each copied file is flattened into the destination as `<artist> - <original filename>`, where `<artist>` is the source file's parent folder name. Existing destination files are skipped unless the source file is newer. Example cron entry to run every 15 minutes:
 
 ```cron
 */15 * * * * /path/to/getoffline/scripts/sync-media-downloads.sh /srv/getoffline/downloads /mnt/offline-media getoffline:getoffline >> /var/log/getoffline-media-sync.log 2>&1
 ```
 
-Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped. After each non-dry-run sync, the script runs `chown -R <owner[:group]>` on the destination so all synced files are owned by the requested user, such as `jellyfin:jellyfin`.
+The sync requires `ffprobe` and verifies that every source contains an audio or video stream before publishing it. A failed probe is logged, causes the run to exit unsuccessfully, and does not replace an existing destination file. Up-to-date destination files are also probed; a damaged destination is automatically replaced.
+
+Pass `--force` (or set `FORCE_RESYNC=1`) to re-copy every matching file regardless of timestamps. Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped. After each non-dry-run sync, the script runs `chown -R <owner[:group]>` on the destination so all synced files are owned by the requested user, such as `jellyfin:jellyfin`.
 
 Android transfer uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
 
