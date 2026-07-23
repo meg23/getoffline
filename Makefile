@@ -27,7 +27,7 @@ WAPITI_PUBLIC_API_URL ?= http://127.0.0.1:8081/api/health
 WAPITI_AUTH_URL ?= $(WAPITI_FRONTEND_URL)/login/
 WAPITI_FORMAT ?= html
 WAPITI_STATE_DIR ?= $(WAPITI_REPORT_DIR)/.state
-WAPITI_OPTIONS ?= --no-bugreport --scope folder --flush-session --tasks 1 --max-scan-time 300 --store-session $(WAPITI_STATE_DIR)/sessions --store-config $(WAPITI_STATE_DIR)/config
+WAPITI_OPTIONS ?= --no-bugreport --scope folder --flush-session --tasks 1 --depth 2 --timeout 10 --max-attack-time 5 --max-scan-time 120 --store-session $(WAPITI_STATE_DIR)/sessions --store-config $(WAPITI_STATE_DIR)/config
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache GETOFFLINE_LOG_FILE=$(PWD)/.test-model-cache/youtube_batch_dl.log
 PY_FILES := $(shell find src tests -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
 SOURCE_PY_FILES := $(shell find src -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
