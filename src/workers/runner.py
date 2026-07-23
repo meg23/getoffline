@@ -29,7 +29,6 @@ from app.routing import FFMPEG_QUEUE
 from app.routing import PODCAST_DOWNLOAD_QUEUE
 from app.routing import SERIAL_EPISODE_CHECK_QUEUE
 from app.routing import TRANSCRIPT_QUEUE
-from app.routing import TRANSFER_QUEUE
 from app.routing import YOUTUBE_DOWNLOAD_QUEUE
 from app.routing import queue_arguments
 from app.routing import queue_name
@@ -51,7 +50,6 @@ QUEUE_BY_WORKER = {
     "downloader-podcast": PODCAST_DOWNLOAD_QUEUE,
     "transcripts": TRANSCRIPT_QUEUE,
     "ffmpeg": FFMPEG_QUEUE,
-    "transfer": TRANSFER_QUEUE,
     "cleanup": CLEANUP_QUEUE,
 }
 
@@ -61,7 +59,6 @@ JOB_TYPES_BY_WORKER = {
     "downloader-podcast": {JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE},
     "ffmpeg": {JobType.TRANSCODE_MEDIA},
     "transcripts": {JobType.GENERATE_TRANSCRIPT},
-    "transfer": {JobType.TRANSFER_MEDIA},
     "cleanup": {JobType.RETENTION_CLEANUP},
 }
 

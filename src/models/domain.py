@@ -32,7 +32,6 @@ class JobType(StrEnum):
     DOWNLOAD_SINGLE = "download_single"
     TRANSCODE_MEDIA = "transcode_media"
     GENERATE_TRANSCRIPT = "generate_transcript"
-    TRANSFER_MEDIA = "transfer_media"
     RETENTION_CLEANUP = "retention_cleanup"
 
 
@@ -42,7 +41,6 @@ class QueueName(StrEnum):
     PODCAST_DOWNLOAD = "getoffline.jobs.downloads.podcast"
     TRANSCRIPT = "getoffline.jobs.transcripts"
     FFMPEG = "getoffline.jobs.ffmpeg"
-    TRANSFER = "getoffline.jobs.transfer"
     CLEANUP = "getoffline.jobs.cleanup"
 
 

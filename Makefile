@@ -1,4 +1,4 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-wapiti test-wapiti-public test-wapiti-auth test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-wapiti test-wapiti-public test-wapiti-auth test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -154,10 +154,6 @@ run-worker-downloader-podcast: venv
 run-worker-transcripts: venv
 	@echo "Running parallel transcript worker..."
 	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transcripts --prefetch $${PREFETCH:-4}
-
-run-worker-transfer: venv
-	@echo "Running transfer worker..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m workers transfer
 
 run-worker-cleanup: venv
 	@echo "Running cleanup worker..."

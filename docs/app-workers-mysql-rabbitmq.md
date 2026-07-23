@@ -74,7 +74,6 @@ It can queue:
 - `update_downloads` / `check_for_episodes` to discover new work
 - `download_single` / `download_episode` to download one item at a time
 - `generate_transcript` for parallel transcript generation
-- `transfer_media`
 - `retention_cleanup` for automatic old-content deletion
 
 ## Running workers
@@ -124,19 +123,12 @@ make run-scheduler
 
 Use `python -m django run_scheduler --install-defaults` to insert the default update, transfer, and retention schedules. Edit the `scheduled_jobs` table to change `enabled`, `interval_seconds`, `payload`, or `next_run_at`.
 
-Transfer work remains isolated on its own queue:
-
-```bash
-make run-worker-transfer
-```
-
 ## Queue mapping
 
 - `getoffline.jobs.updates`: `update_downloads`, `check_for_episodes`
 - `getoffline.jobs.downloads.youtube`: YouTube and manual URL `download_single` / `download_episode`
 - `getoffline.jobs.downloads.podcast`: podcast `download_episode`
 - `getoffline.jobs.transcripts`: `generate_transcript`
-- `getoffline.jobs.transfer`: `transfer_media`
 - `getoffline.jobs.cleanup`: `retention_cleanup`
 
 Each RabbitMQ message contains only the job id, job type, profile id, and attempt.
@@ -157,7 +149,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 - `worker-updates` discovers new episodes and publishes download jobs.
 - `worker-downloader-youtube` consumes YouTube/manual URL download jobs one at a time, and `worker-downloader-podcast` consumes podcast download jobs.
 - YouTube and podcast downloader workers run FFmpeg post-processing inline before publishing transcript work.
-- `worker-transcripts`, `worker-transfer`, and `worker-cleanup` run the parallel/background processing queues.
+- `worker-transcripts` and `worker-cleanup` run the parallel/background processing queues.
 - `scheduler` polls the database for due `scheduled_jobs` rows and publishes durable RabbitMQ jobs.
 - `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
 

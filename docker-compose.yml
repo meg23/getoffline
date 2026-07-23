@@ -188,24 +188,6 @@ services:
       frontend:
         condition: service_healthy
 
-  worker-transfer:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-base.Dockerfile
-    restart: unless-stopped
-    environment: *getoffline-env
-    command: python -m workers transfer
-    volumes:
-      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-      - adb-data:/root/.android
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
-
   scheduler:
     build:
       context: .
@@ -241,4 +223,3 @@ services:
 volumes:
   mysql-data:
   rabbitmq-data:
-  adb-data:

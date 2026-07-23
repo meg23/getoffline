@@ -258,7 +258,7 @@ table {
 }
 .icon-button.is-pulsing {
   cursor: progress;
-  animation: transfer-pulse 1.8s ease-in-out infinite;
+  animation: update-pulse 1.8s ease-in-out infinite;
 }
 .toolbar-icon {
   display: block;
@@ -274,7 +274,7 @@ table {
 .toolbar-label {
   display: none;
 }
-@keyframes transfer-pulse {
+@keyframes update-pulse {
   0%,
   100% {
     opacity: 0.45;

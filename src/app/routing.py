@@ -9,7 +9,6 @@ YOUTUBE_DOWNLOAD_QUEUE = QueueName.YOUTUBE_DOWNLOAD
 PODCAST_DOWNLOAD_QUEUE = QueueName.PODCAST_DOWNLOAD
 TRANSCRIPT_QUEUE = QueueName.TRANSCRIPT
 FFMPEG_QUEUE = QueueName.FFMPEG
-TRANSFER_QUEUE = QueueName.TRANSFER
 CLEANUP_QUEUE = QueueName.CLEANUP
 MAX_QUEUE_PRIORITY = 10
 
@@ -56,8 +55,6 @@ def queue_name(job_type: str, payload: dict[str, object] | None = None) -> str:
         return FFMPEG_QUEUE
     if parsed_job_type is JobType.GENERATE_TRANSCRIPT:
         return TRANSCRIPT_QUEUE
-    if parsed_job_type is JobType.TRANSFER_MEDIA:
-        return TRANSFER_QUEUE
     if parsed_job_type is JobType.RETENTION_CLEANUP:
         return CLEANUP_QUEUE
     return f"getoffline.jobs.{job_type}"
