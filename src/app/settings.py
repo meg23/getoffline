@@ -64,6 +64,10 @@ CSRF_COOKIE_SECURE = os.getenv(
 SESSION_COOKIE_SECURE = os.getenv(
     "GETOFFLINE_SESSION_COOKIE_SECURE", "0"
 ).strip().lower() in {"1", "true", "yes", "on"}
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_HTTPONLY = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
 ROOT_URLCONF = "app.urls"
 STATIC_URL = "/static/"
 LOGIN_URL = "/login/"
@@ -91,7 +95,10 @@ INSTALLED_APPS = [
     "app",
 ]
 MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "app.middleware.AllowPrivateNetworkHostMiddleware",
+    "app.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",

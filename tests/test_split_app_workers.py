@@ -543,6 +543,24 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(schedule.enabled)
         self.assertEqual(schedule.interval_seconds, 420)
 
+    def test_add_source_rejects_oversized_name_without_server_error(self):
+        client = Client()
+        User.objects.create_user(username="alice", password="pass")
+        self.assertTrue(client.login(username="alice", password="pass"))
+
+        response = client.post(
+            "/sources/add/",
+            {
+                "source_type": "youtube",
+                "name": "x" * 256,
+                "url": "https://example.com/feed",
+                "media_type": "video",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(SourceConfig.objects.filter(profile_id="alice").exists())
+
     def test_retention_cleanup_deletes_expired_non_favorite_content(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             expired = Path(tmpdir) / "expired.mp4"
@@ -766,15 +784,19 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
+        player_script = (
+            Path(__file__).parents[1] / "src/app/static/app/player.js"
+        ).read_text(encoding="utf-8")
         self.assertNotIn('id="subtitle-track"', body)
         self.assertIn(f"/media/{download.id}/#t=42.500", body)
-        self.assertIn("const periodicProgressSeconds = 5;", body)
-        self.assertIn("media?.addEventListener('timeupdate'", body)
-        self.assertIn("media?.addEventListener('pause'", body)
-        self.assertIn("media?.addEventListener('seeked'", body)
-        self.assertIn("media?.addEventListener('ended'", body)
-        self.assertIn("window.addEventListener('pagehide'", body)
-        self.assertIn("navigator.sendBeacon(form.action, body)", body)
+        self.assertIn('/static/app/player.js"', body)
+        self.assertIn("const periodicProgressSeconds = 5;", player_script)
+        self.assertIn('media?.addEventListener("timeupdate"', player_script)
+        self.assertIn('media?.addEventListener("pause"', player_script)
+        self.assertIn('media?.addEventListener("seeked"', player_script)
+        self.assertIn('media?.addEventListener("ended"', player_script)
+        self.assertIn('window.addEventListener("pagehide"', player_script)
+        self.assertIn("navigator.sendBeacon(form.action, body)", player_script)
 
     def test_django_player_position_endpoint_persists_resume_and_completion(self):
         client = Client()

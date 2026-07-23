@@ -8,11 +8,13 @@ API controllers delegate stateful work here.
 
 import hashlib
 import logging
+import math
 import mimetypes
 import os
 import re
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -701,6 +703,66 @@ PROFILE_DEFAULTS = {
     "android_sync_exclude_regex": "",
 }
 
+CONFIG_INTEGER_RULES = {
+    "processing_workers": (1, None),
+    "auto_update_minutes": (0, None),
+    "auto_delete_content_days": (0, None),
+    "audio_quality": (0, None),
+    "ytdlp_video_max_height": (144, None),
+    "max_downloads": (1, None),
+    "android_sync_max_items": (1, None),
+}
+CONFIG_ENUM_RULES = {
+    "audio_format": {"mp3", "m4a", "opus"},
+    "video_format": {"mp4", "mkv"},
+    "video_codec": {"h264", "hevc", "copy"},
+    "android_sync_connection_mode": {"usb", "wifi"},
+}
+
+
+def _invalid_config_keys(request: HttpRequest) -> list[str]:
+    invalid: list[str] = []
+    for key, (minimum, maximum) in CONFIG_INTEGER_RULES.items():
+        raw_value = request.POST.get(f"config__{key}")
+        if raw_value is None:
+            continue
+        try:
+            value = int(str(raw_value).strip())
+        except (TypeError, ValueError):
+            invalid.append(key)
+            continue
+        if value < minimum or (maximum is not None and value > maximum):
+            invalid.append(key)
+    for key, allowed_values in CONFIG_ENUM_RULES.items():
+        raw_value = request.POST.get(f"config__{key}")
+        if raw_value is not None and str(raw_value).strip().lower() not in allowed_values:
+            invalid.append(key)
+    return invalid
+
+
+@contextmanager
+def _profile_settings_lock(profile_id: str):
+    """Serialize settings writes for one profile across gunicorn workers."""
+    if connection.vendor != "mysql":
+        yield True
+        return
+
+    lock_name = "getoffline_settings_" + hashlib.sha256(
+        profile_id.encode("utf-8")
+    ).hexdigest()[:48]
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT GET_LOCK(%s, %s)", [lock_name, 15])
+        result = cursor.fetchone()
+    acquired = bool(result and result[0] == 1)
+    if not acquired:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT RELEASE_LOCK(%s)", [lock_name])
+
 
 def _profile_settings(profile_id: str) -> dict[str, str]:
     values = dict(PROFILE_DEFAULTS)
@@ -752,6 +814,34 @@ def _source_form_data(
         and _posted_bool(request, prefix + "include_livestreams"),
         title_exclude=str(request.POST.get(prefix + "title_exclude") or "").strip(),
     )
+
+
+def _source_form_errors(
+    request: HttpRequest, form: SourceFormData, source_type: SourceType
+) -> list[str]:
+    errors: list[str] = []
+    if not form.name:
+        errors.append("name is required")
+    elif len(form.name) > 255:
+        errors.append("name must be 255 characters or fewer")
+    if not form.url:
+        errors.append("url is required")
+    if source_type is SourceType.YOUTUBE and form.media_type not in {"audio", "video"}:
+        errors.append("media_type is invalid")
+
+    raw_offset = str(request.POST.get("subtitle_offset_seconds") or "").strip()
+    if raw_offset and (
+        form.subtitle_offset_seconds is None
+        or not math.isfinite(form.subtitle_offset_seconds)
+    ):
+        errors.append("subtitle_offset_seconds is invalid")
+
+    raw_max_downloads = str(request.POST.get("max_downloads") or "").strip()
+    if raw_max_downloads and (
+        form.max_downloads is None or form.max_downloads < 1
+    ):
+        errors.append("max_downloads is invalid")
+    return errors
 
 
 def _source_update_fields(*, include_enabled: bool = True) -> list[str]:
@@ -1416,53 +1506,61 @@ def edit_metadata(request: HttpRequest) -> JsonResponse:
 @require_POST
 def save_config(request: HttpRequest) -> HttpResponseRedirect:
     profile_id = _profile_id(request)
+    invalid_keys = _invalid_config_keys(request)
+    if invalid_keys:
+        return HttpResponseBadRequest(
+            "Invalid settings: " + ", ".join(sorted(set(invalid_keys)))
+        )
     now = timezone.now()
-    checkbox_keys = {
-        "manual_upload_delete_explicit_content",
-        "android_sync_enabled",
-        "android_sync_include_subtitles",
-        "android_sync_include_unplayed",
-        "android_sync_include_started",
-        "android_sync_include_played",
-    }
-    posted_config_keys = {
-        key.removeprefix("config__")
-        for key in request.POST
-        if key.startswith("config__")
-    }
-    for checkbox_key in checkbox_keys:
-        if (
-            checkbox_key in posted_config_keys
-            and f"config__{checkbox_key}" not in request.POST
-        ):
+    with _profile_settings_lock(profile_id) as acquired:
+        if not acquired:
+            return HttpResponse("Settings update busy", status=429)
+        checkbox_keys = {
+            "manual_upload_delete_explicit_content",
+            "android_sync_enabled",
+            "android_sync_include_subtitles",
+            "android_sync_include_unplayed",
+            "android_sync_include_started",
+            "android_sync_include_played",
+        }
+        posted_config_keys = {
+            key.removeprefix("config__")
+            for key in request.POST
+            if key.startswith("config__")
+        }
+        for checkbox_key in checkbox_keys:
+            if (
+                checkbox_key in posted_config_keys
+                and f"config__{checkbox_key}" not in request.POST
+            ):
+                ProfileConfigValue.objects.update_or_create(
+                    profile_id=profile_id,
+                    key=checkbox_key,
+                    defaults={"value": "0", "updated_at": now},
+                )
+        for key, value in request.POST.items():
+            if not key.startswith("config__"):
+                continue
+            config_key = key.removeprefix("config__")
             ProfileConfigValue.objects.update_or_create(
                 profile_id=profile_id,
-                key=checkbox_key,
-                defaults={"value": "0", "updated_at": now},
+                key=config_key,
+                defaults={"value": str(value), "updated_at": now},
             )
-    for key, value in request.POST.items():
-        if not key.startswith("config__"):
-            continue
-        config_key = key.removeprefix("config__")
-        ProfileConfigValue.objects.update_or_create(
-            profile_id=profile_id,
-            key=config_key,
-            defaults={"value": str(value), "updated_at": now},
-        )
-    if "youtube_cookie_text" in request.POST:
-        ProfileDownloadSettings.objects.update_or_create(
-            profile_id=profile_id,
-            defaults={
-                "youtube_cookie_text": request.POST.get("youtube_cookie_text") or "",
-                "cookie_updated_at": now,
-                "updated_at": now,
-            },
-        )
-    if "config__auto_update_minutes" in request.POST:
-        _sync_update_downloads_schedule(
-            profile_id, request.POST.get("config__auto_update_minutes"), now=now
-        )
-    return HttpResponseRedirect(reverse("settings"))
+        if "youtube_cookie_text" in request.POST:
+            ProfileDownloadSettings.objects.update_or_create(
+                profile_id=profile_id,
+                defaults={
+                    "youtube_cookie_text": request.POST.get("youtube_cookie_text") or "",
+                    "cookie_updated_at": now,
+                    "updated_at": now,
+                },
+            )
+        if "config__auto_update_minutes" in request.POST:
+            _sync_update_downloads_schedule(
+                profile_id, request.POST.get("config__auto_update_minutes"), now=now
+            )
+        return HttpResponseRedirect(reverse("settings"))
 
 
 @login_required
@@ -1474,6 +1572,9 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
 
     profile_id = _profile_id(request)
     form = _source_form_data(request, source_type)
+    errors = _source_form_errors(request, form, source_type)
+    if errors:
+        return HttpResponseBadRequest("Invalid source: " + "; ".join(errors))
     position = _next_source_position(profile_id, source_type)
     SourceConfig.objects.create(
         profile_id=profile_id,

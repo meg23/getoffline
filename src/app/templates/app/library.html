@@ -24,7 +24,7 @@
             </span>
             <form method="post" action="{% url 'logout' %}">
               {% csrf_token %}
-              <button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻</button>
+              <button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻<span class="visually-hidden">Sign out</span></button>
             </form>
           </div>
         </div>
