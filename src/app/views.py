@@ -447,10 +447,6 @@ def _dashboard_actions_module():
     ).dashboard_actions
 
 
-def _queue_counts(profile_id: str):
-    return _dashboard_actions_module()._queue_counts(profile_id)
-
-
 def _sync_update_downloads_schedule(
     profile_id: str, raw_minutes: object, *, now=None
 ) -> None:

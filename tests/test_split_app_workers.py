@@ -43,14 +43,12 @@ from models.domain import DownloadStatus
 from models.domain import JobStatus
 from models.domain import SourceType
 from app.queue import job_priority  # noqa: E402
-from app.routing import CLEANUP_QUEUE  # noqa: E402
 from app.routing import PODCAST_DOWNLOAD_QUEUE
 from app.routing import TRANSCRIPT_QUEUE
 from app.routing import YOUTUBE_DOWNLOAD_QUEUE
 from app.routing import queue_arguments
 from app.routing import queue_name
 
-from app.views import _queue_counts  # noqa: E402
 from app.views import _sync_update_downloads_schedule
 from app.views import _write_manual_upload
 from models.jobs import claim_job  # noqa: E402
@@ -548,32 +546,6 @@ class SharedDjangoModelTests(TestCase):
             self.assertTrue(favorite.exists())
             self.assertEqual(expired_download.download_status, "retention_deleted")
             self.assertEqual(favorite_download.download_status, "downloaded")
-
-    def test_queue_counts_groups_active_jobs_by_worker_queue(self):
-        Job.objects.create(
-            profile_id="default", job_type="update_downloads", status=JobStatus.QUEUED
-        )
-        Job.objects.create(
-            profile_id="default",
-            job_type="check_for_episodes",
-            status=JobStatus.RUNNING,
-        )
-        Job.objects.create(
-            profile_id="default", job_type="download_episode", status=JobStatus.QUEUED
-        )
-        Job.objects.create(
-            profile_id="other", job_type="download_episode", status=JobStatus.QUEUED
-        )
-
-        counts = {row["label"]: row for row in _queue_counts("default")}
-
-        self.assertEqual(counts["Updates"]["queued"], 1)
-        self.assertEqual(counts["Updates"]["running"], 1)
-        self.assertEqual(counts["Updates"]["total"], 2)
-        self.assertEqual(counts["YouTube downloads"]["queued"], 1)
-        self.assertEqual(counts["YouTube downloads"]["running"], 0)
-        self.assertEqual(counts["Transcripts"]["total"], 0)
-        self.assertEqual(queue_name("retention_cleanup"), CLEANUP_QUEUE)
 
     def test_library_marks_sibling_podcast_subtitles_when_database_path_missing(self):
         client = Client()

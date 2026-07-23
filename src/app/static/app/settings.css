@@ -334,54 +334,6 @@ button {
   }
 }
 
-.queue-count-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: #fff;
-}
-.queue-count-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 680px;
-}
-.queue-count-table th,
-.queue-count-table td {
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-}
-.queue-count-table thead th {
-  background: #eef3ff;
-  color: #243251;
-  font-size: 0.82rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.queue-count-table tbody tr:last-child th,
-.queue-count-table tbody tr:last-child td {
-  border-bottom: 0;
-}
-.queue-count-table tbody th {
-  color: var(--text);
-  font-weight: 800;
-}
-.queue-count-table td:nth-child(3),
-.queue-count-table td:nth-child(4),
-.queue-count-table td:nth-child(5) {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.queue-name {
-  color: var(--muted);
-  font-size: 0.9rem;
-  overflow-wrap: anywhere;
-}
-.empty-queue-row {
-  color: var(--muted);
-  text-align: center;
-}
 .source-details {
   padding: 0;
   overflow: hidden;
@@ -594,9 +546,5 @@ button {
   }
   .source-fields {
     padding: 0 0.9rem 0.9rem;
-  }
-  .queue-count-table th,
-  .queue-count-table td {
-    padding: 0.7rem;
   }
 }

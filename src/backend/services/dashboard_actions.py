@@ -23,7 +23,6 @@ from urllib.parse import urlparse
 
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.db.models import Count
 from django.db.models import Sum
 from django.http import FileResponse
 from django.http import Http404
@@ -57,11 +56,6 @@ from models.models import SourceConfig
 from models.models import TranscriptSegment
 
 from app.queue import publish_job
-from app.routing import PODCAST_DOWNLOAD_QUEUE
-from app.routing import SERIAL_EPISODE_CHECK_QUEUE
-from app.routing import TRANSCRIPT_QUEUE
-from app.routing import YOUTUBE_DOWNLOAD_QUEUE
-from app.routing import queue_name
 
 ALLOWED_JOB_TYPES = frozenset(
     {
@@ -933,45 +927,6 @@ def _sync_update_downloads_schedule(
     schedule.save(update_fields=update_fields)
 
 
-def _queue_counts(profile_id: str) -> list[dict[str, object]]:
-    queue_labels = {
-        SERIAL_EPISODE_CHECK_QUEUE: "Updates",
-        YOUTUBE_DOWNLOAD_QUEUE: "YouTube downloads",
-        PODCAST_DOWNLOAD_QUEUE: "Podcast downloads",
-        TRANSCRIPT_QUEUE: "Transcripts",
-    }
-    counts = {
-        queue: {JobStatus.QUEUED: 0, JobStatus.RUNNING: 0} for queue in queue_labels
-    }
-    rows = (
-        Job.objects.filter(
-            profile_id=profile_id, status__in=[JobStatus.QUEUED, JobStatus.RUNNING]
-        )
-        .values("job_type", "status", "payload")
-        .annotate(total=Count("id"))
-    )
-    for row in rows:
-        queue = queue_name(
-            str(row["job_type"]),
-            row.get("payload") if isinstance(row.get("payload"), dict) else None,
-        )
-        counts.setdefault(queue, {JobStatus.QUEUED: 0, JobStatus.RUNNING: 0})
-        counts[queue][str(row["status"])] = int(row["total"] or 0)
-        queue_labels.setdefault(queue, queue.removeprefix("getoffline."))
-    return [
-        {
-            "queue": queue,
-            "label": queue_labels[queue],
-            "queued": values[JobStatus.QUEUED],
-            "running": values[JobStatus.RUNNING],
-            "total": values[JobStatus.QUEUED] + values[JobStatus.RUNNING],
-        }
-        for queue, values in sorted(
-            counts.items(), key=lambda item: queue_labels[item[0]].lower()
-        )
-    ]
-
-
 @login_required
 def settings_page(request: HttpRequest) -> HttpResponse:
     profile_id = _profile_id(request)
@@ -1004,7 +959,6 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "manual_upload_filter_checked": _checked(
                 settings, "manual_upload_delete_explicit_content"
             ),
-            "queue_counts": _queue_counts(profile_id),
         },
     )
 
