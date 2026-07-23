@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "getoffline-client-app"
+name = "getoffline-cli"
 version = "0.1.0"
-description = "Console client app for GetOffline"
+description = "Console CLI for GetOffline"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

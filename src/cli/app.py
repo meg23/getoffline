@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ruff: noqa: E402
-"""console music-player-style ncurses client for GetOffline.
+"""console music-player-style CLI for GetOffline.
 
 The app intentionally keeps dependencies to the Python standard library plus the
 GetOffline SDK. Playback is delegated to a console-friendly media player or a generic HTTP
@@ -986,7 +986,7 @@ def login(base_url: str | None = None, username: str | None = None) -> Credentia
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="console music-player-style ncurses client for GetOffline"
+        description="console music-player-style CLI for GetOffline"
     )
     parser.add_argument(
         "--login",

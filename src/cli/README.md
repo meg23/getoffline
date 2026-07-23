@@ -1,4 +1,4 @@
-# GetOffline Console client
+# GetOffline CLI
 
 `app.py` is a dependency-light ncurses client for GetOffline. It uses
 the `getoffline-sdk` package for API communication and delegates audio playback

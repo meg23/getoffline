@@ -34,7 +34,7 @@ jobs:
         run: |
           mkdir -p dist/wheels
           python -m pip wheel --no-deps --wheel-dir dist/wheels src/packages
-          python -m pip wheel --no-deps --wheel-dir dist/wheels src/client-app
+          python -m pip wheel --no-deps --wheel-dir dist/wheels src/cli
 
       - name: Download PEX bootstrap wheels
         run: |
@@ -45,13 +45,13 @@ jobs:
             setuptools==68.0.0 \
             wheel==0.40.0
 
-      - name: Build standalone client PEX
+      - name: Build standalone CLI PEX
         run: |
           mkdir -p dist/pex
           python -m pex \
             --no-pypi \
             --find-links dist/wheels \
-            getoffline-client-app==0.1.0 \
+            getoffline-cli==0.1.0 \
             getoffline-sdk==0.1.0 \
             --console-script getoffline-console \
             --python-shebang '/usr/bin/env python3' \
@@ -65,10 +65,10 @@ jobs:
           path: dist/wheels/getoffline_sdk-*.whl
           if-no-files-found: error
 
-      - name: Upload client PEX artifact
+      - name: Upload CLI PEX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: client-app-pex
+          name: cli-pex
           path: dist/pex/getoffline-console.pex
           if-no-files-found: error
 
@@ -101,7 +101,7 @@ jobs:
           notes_file="${RUNNER_TEMP}/release-notes.md"
           cat > "$notes_file" <<'NOTES'
           Release artifacts:
-          - getoffline-console.pex: standalone console client app with the GetOffline SDK bundled.
+          - getoffline-console.pex: standalone GetOffline CLI with the SDK bundled.
           - getoffline_sdk-*.whl: Python SDK wheel.
           NOTES
 
