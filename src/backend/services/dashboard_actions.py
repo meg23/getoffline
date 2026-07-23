@@ -259,7 +259,7 @@ def _profile_output_root(profile_id: str) -> Path:
         .first()
         or PROFILE_DEFAULTS["output_root"]
     )
-    return Path(str(value)).expanduser().resolve()
+    return Path(str(value)).expanduser().absolute()
 
 
 def _resolve_media_path(item: Download) -> Path:

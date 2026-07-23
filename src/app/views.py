@@ -91,8 +91,9 @@ def _decorate_download(item):
 def _safe_path(raw_path: str | None) -> Path:
     if not raw_path:
         raise Http404("File unavailable")
-    path = Path(raw_path).expanduser().resolve()
-    if not path.exists() or not path.is_file():
+    path = Path(raw_path).expanduser().absolute()
+    resolved_path = path.resolve()
+    if not resolved_path.exists() or not resolved_path.is_file():
         raise Http404("File unavailable")
     return path
 

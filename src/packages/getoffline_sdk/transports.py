@@ -115,7 +115,8 @@ class HttpTransport:
             url, data=body, headers=request_headers, method=method.upper()
         )
         try:
-            upstream = urllib.request.urlopen(  # nosec B310 - URL is configured by deployment.
+            # The upstream API URL is configured by the deployment environment.
+            upstream = urllib.request.urlopen(  # nosec B310
                 req, timeout=self.timeout_seconds
             )
             return _http_response(upstream)
