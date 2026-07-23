@@ -1,8 +1,9 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage clean venv migrate-db run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
 BUILD_OUTPUT := $(BUILD_DIR)/$(APP_NAME)
+STATIC_ROOT := $(PWD)/.staticfiles
 SRC_DIR := $(PWD)/src
 REQ_FILE := $(SRC_DIR)/requirements.txt
 VENV_DIR := .venv
@@ -82,7 +83,7 @@ test-coverage: venv
 
 clean:
 	@echo "Removing generated artifacts, virtual environment, and Python bytecode..."
-	rm -rf $(BUILD_DIR) $(VENV_DIR) .coverage .test-model-cache
+	rm -rf $(BUILD_DIR) $(VENV_DIR) $(STATIC_ROOT) .coverage .test-model-cache
 	find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
 
@@ -91,13 +92,17 @@ migrate-db: venv
 	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django migrate --run-syncdb
 	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django sync_model_schema
 
-run-app: venv
-	@echo "Running Django frontend app..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) -m app
+collectstatic: venv
+	@echo "Collecting cache-busted static assets..."
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 $(PYTHON) -m django collectstatic --noinput
 
-run-app-debug: venv
+run-app: venv collectstatic
+	@echo "Running Django frontend app..."
+	PYTHONPATH=$(SRC_DIR) GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 $(PYTHON) -m app
+
+run-app-debug: venv collectstatic
 	@echo "Running Django frontend app in debug mode..."
-	PYTHONPATH=$(SRC_DIR) GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
+	PYTHONPATH=$(SRC_DIR) GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
 
 run-worker-updates: venv
 	@echo "Running single-concurrency updates worker..."

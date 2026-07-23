@@ -70,6 +70,16 @@ LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "library"
 LOGOUT_REDIRECT_URL = "/login/"
 STATIC_ROOT = Path(os.getenv("GETOFFLINE_STATIC_ROOT", "/app/staticfiles"))
+STATIC_MANIFEST_ENABLED = os.getenv(
+    "GETOFFLINE_STATIC_MANIFEST", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+if STATIC_MANIFEST_ENABLED:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+        },
+    }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 INSTALLED_APPS = [
