@@ -119,6 +119,8 @@ The sync requires `ffprobe` and verifies that every source contains an audio or 
 
 Pass `--force` (or set `FORCE_RESYNC=1`) to re-copy every matching file regardless of timestamps. Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped. After each non-dry-run sync, the script runs `chown -R <owner[:group]>` on the destination so all synced files are owned by the requested user, such as `jellyfin:jellyfin`.
 
+The pure-Python equivalent is `crons/sync_media_downloads.py`. It accepts the same arguments and can write directly to a host directory that is also mounted into another Docker container. See [`crons/README.md`](crons/README.md) for scheduled host-cron usage.
+
 Clean up generated files:
 
 ```bash
