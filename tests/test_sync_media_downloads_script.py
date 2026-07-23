@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "sync-media-downloads.sh"
+SCRIPT = Path(__file__).parents[1] / "crons" / "sync_media_downloads.py"
+LEGACY_SCRIPT = Path(__file__).parents[1] / "scripts" / "sync-media-downloads.sh"
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -16,8 +18,6 @@ def _write_executable(path: Path, contents: str) -> None:
 def _script_environment(tmp_path: Path) -> dict[str, str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_executable(bin_dir / "rsync", "#!/bin/sh\ncp \"$3\" \"$4\"\n")
-    _write_executable(bin_dir / "chown", "#!/bin/sh\nexit 0\n")
     _write_executable(
         bin_dir / "ffprobe",
         '#!/bin/sh\nfor argument do media_path=$argument; done\n'
@@ -32,12 +32,35 @@ def _run_sync(tmp_path: Path, *options: str) -> subprocess.CompletedProcess[str]
     downloads.mkdir(parents=True, exist_ok=True)
     destination.mkdir(exist_ok=True)
     return subprocess.run(
-        [str(SCRIPT), *options, str(downloads.parent), str(destination), "owner"],
+        [
+            sys.executable,
+            str(SCRIPT),
+            *options,
+            str(downloads.parent),
+            str(destination),
+            f"{os.getuid()}:{os.getgid()}",
+        ],
         env=_script_environment(tmp_path),
         text=True,
         capture_output=True,
         check=False,
     )
+
+
+def test_python_entrypoint_preserves_script_arguments() -> None:
+    original = subprocess.run(
+        [str(LEGACY_SCRIPT), "--help"], text=True, capture_output=True, check=False
+    )
+    cron = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert cron.returncode == original.returncode == 0
+    assert "Usage:" in original.stdout
+    assert "usage:" in cron.stdout
 
 
 def test_force_resync_replaces_an_up_to_date_destination(tmp_path: Path) -> None:

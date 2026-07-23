@@ -29,8 +29,8 @@ WAPITI_FORMAT ?= html
 WAPITI_STATE_DIR ?= $(WAPITI_REPORT_DIR)/.state
 WAPITI_OPTIONS ?= --no-bugreport --scope folder --flush-session --tasks 1 --depth 2 --timeout 10 --max-attack-time 5 --max-scan-time 120 --store-session $(WAPITI_STATE_DIR)/sessions --store-config $(WAPITI_STATE_DIR)/config
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache GETOFFLINE_LOG_FILE=$(PWD)/.test-model-cache/youtube_batch_dl.log
-PY_FILES := $(shell find src tests -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
-SOURCE_PY_FILES := $(shell find src -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
+PY_FILES := $(shell find src tests crons -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
+SOURCE_PY_FILES := $(shell find src crons -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
 
 venv: $(VENV_DIR)/.installed
 
@@ -62,7 +62,7 @@ test-compile: venv
 
 test-ruff: venv
 	@echo "Running Ruff linting..."
-	$(RUFF) check src tests
+	$(RUFF) check src tests crons
 
 test-mccabe: venv
 	@echo "Running McCabe complexity checks..."
@@ -75,7 +75,7 @@ test-mccabe: venv
 
 test-mypy: venv
 	@echo "Running mypy static type checks..."
-	PYTHONPATH=$(SRC_DIR) $(MYPY) src tests
+	PYTHONPATH=$(SRC_DIR) $(MYPY) src tests crons
 
 test-bandit: venv
 	@echo "Running Bandit security checks..."
@@ -83,7 +83,7 @@ test-bandit: venv
 
 test-vulture: venv
 	@echo "Running Vulture dead-code analysis..."
-	$(VULTURE) src tests --min-confidence 100
+	$(VULTURE) src tests crons --min-confidence 100
 
 test-wapiti: test-wapiti-auth
 
