@@ -21,17 +21,6 @@ PROFILE_DEFAULTS = {
     "ytdlp_video_max_height": "720",
     "max_downloads": "3",
     "js_runtime_path": "qjs",
-    "android_sync_enabled": "0",
-    "android_sync_max_items": "10",
-    "android_sync_destination": "/sdcard/Movies/GetOffline",
-    "android_sync_adb_path": "adb",
-    "android_sync_connection_mode": "usb",
-    "android_sync_wifi_address": "",
-    "android_sync_include_subtitles": "1",
-    "android_sync_include_unplayed": "1",
-    "android_sync_include_started": "1",
-    "android_sync_include_played": "0",
-    "android_sync_exclude_regex": "",
 }
 
 

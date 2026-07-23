@@ -23,7 +23,6 @@ from app.routing import MAX_QUEUE_PRIORITY
 from app.routing import PODCAST_DOWNLOAD_QUEUE
 from app.routing import SERIAL_EPISODE_CHECK_QUEUE
 from app.routing import TRANSCRIPT_QUEUE
-from app.routing import TRANSFER_QUEUE
 from app.routing import YOUTUBE_DOWNLOAD_QUEUE
 from app.routing import queue_arguments
 from app.routing import queue_name
@@ -51,7 +50,6 @@ class AppRoutingTests(unittest.TestCase):
             "update_downloads": SERIAL_EPISODE_CHECK_QUEUE,
             "transcode_media": FFMPEG_QUEUE,
             "generate_transcript": TRANSCRIPT_QUEUE,
-            "transfer_media": TRANSFER_QUEUE,
             "retention_cleanup": CLEANUP_QUEUE,
         }
         for job_type, expected_queue in cases.items():
@@ -63,7 +61,6 @@ class AppRoutingTests(unittest.TestCase):
             queue_arguments(YOUTUBE_DOWNLOAD_QUEUE),
             {"x-max-priority": MAX_QUEUE_PRIORITY},
         )
-        self.assertEqual(queue_arguments(TRANSFER_QUEUE), {})
 
 
 class JobPriorityTests(unittest.TestCase):

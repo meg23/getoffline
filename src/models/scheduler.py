@@ -8,6 +8,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from app.queue import publish_job
+from models.domain import JobType
+from models.domain import parse_str_enum
 from models.jobs import create_job
 from models.models import ScheduledJob
 
@@ -46,6 +48,11 @@ def enqueue_due_scheduled_jobs(*, now=None, limit: int = 100) -> list[int]:
         with transaction.atomic():
             schedule = ScheduledJob.objects.select_for_update().get(pk=schedule_id)
             if not schedule.enabled or schedule.next_run_at > now:
+                continue
+            if parse_str_enum(JobType, schedule.job_type) is None:
+                schedule.enabled = False
+                schedule.updated_at = now
+                schedule.save(update_fields=["enabled", "updated_at"])
                 continue
             due_at = schedule.next_run_at
             idempotency_key = _render_idempotency_key(schedule, due_at)

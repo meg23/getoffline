@@ -59,7 +59,6 @@ from app.queue import publish_job
 from app.routing import PODCAST_DOWNLOAD_QUEUE
 from app.routing import SERIAL_EPISODE_CHECK_QUEUE
 from app.routing import TRANSCRIPT_QUEUE
-from app.routing import TRANSFER_QUEUE
 from app.routing import YOUTUBE_DOWNLOAD_QUEUE
 from app.routing import queue_name
 
@@ -67,7 +66,6 @@ ALLOWED_JOB_TYPES = frozenset(
     {
         JobType.UPDATE_DOWNLOADS,
         JobType.DOWNLOAD_SINGLE,
-        JobType.TRANSFER_MEDIA,
     }
 )
 DOWNLOAD_STATUSES = [
@@ -690,17 +688,6 @@ PROFILE_DEFAULTS = {
     "ytdlp_video_max_height": "720",
     "max_downloads": "3",
     "js_runtime_path": "qjs",
-    "android_sync_enabled": "0",
-    "android_sync_max_items": "10",
-    "android_sync_destination": "/sdcard/Movies/GetOffline",
-    "android_sync_adb_path": "adb",
-    "android_sync_connection_mode": "usb",
-    "android_sync_wifi_address": "",
-    "android_sync_include_subtitles": "1",
-    "android_sync_include_unplayed": "1",
-    "android_sync_include_started": "1",
-    "android_sync_include_played": "0",
-    "android_sync_exclude_regex": "",
 }
 
 CONFIG_INTEGER_RULES = {
@@ -710,13 +697,11 @@ CONFIG_INTEGER_RULES = {
     "audio_quality": (0, None),
     "ytdlp_video_max_height": (144, None),
     "max_downloads": (1, None),
-    "android_sync_max_items": (1, None),
 }
 CONFIG_ENUM_RULES = {
     "audio_format": {"mp3", "m4a", "opus"},
     "video_format": {"mp4", "mkv"},
     "video_codec": {"h264", "hevc", "copy"},
-    "android_sync_connection_mode": {"usb", "wifi"},
 }
 
 
@@ -949,7 +934,6 @@ def _queue_counts(profile_id: str) -> list[dict[str, object]]:
         YOUTUBE_DOWNLOAD_QUEUE: "YouTube downloads",
         PODCAST_DOWNLOAD_QUEUE: "Podcast downloads",
         TRANSCRIPT_QUEUE: "Transcripts",
-        TRANSFER_QUEUE: "Transfer",
     }
     counts = {
         queue: {JobStatus.QUEUED: 0, JobStatus.RUNNING: 0} for queue in queue_labels
@@ -1014,19 +998,6 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "profile_initial": (profile_name[:1] or "U").upper(),
             "manual_upload_filter_checked": _checked(
                 settings, "manual_upload_delete_explicit_content"
-            ),
-            "android_sync_enabled_checked": _checked(settings, "android_sync_enabled"),
-            "android_sync_include_subtitles_checked": _checked(
-                settings, "android_sync_include_subtitles"
-            ),
-            "android_sync_include_unplayed_checked": _checked(
-                settings, "android_sync_include_unplayed"
-            ),
-            "android_sync_include_started_checked": _checked(
-                settings, "android_sync_include_started"
-            ),
-            "android_sync_include_played_checked": _checked(
-                settings, "android_sync_include_played"
             ),
             "queue_counts": _queue_counts(profile_id),
         },
@@ -1517,11 +1488,6 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
             return HttpResponse("Settings update busy", status=429)
         checkbox_keys = {
             "manual_upload_delete_explicit_content",
-            "android_sync_enabled",
-            "android_sync_include_subtitles",
-            "android_sync_include_unplayed",
-            "android_sync_include_started",
-            "android_sync_include_played",
         }
         posted_config_keys = {
             key.removeprefix("config__")

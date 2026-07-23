@@ -76,7 +76,6 @@ from workers.handlers import check_for_episodes
 from workers.handlers import generate_transcript
 from workers.handlers import retention_cleanup
 from workers.handlers import transcode_media
-from workers.handlers import transfer_media
 from workers import runner
 from django.contrib.auth.models import User
 
@@ -271,52 +270,15 @@ class SharedDjangoModelTests(TestCase):
                 child.payload["ffmpeg_source_file_paths"], [str(source_path)]
             )
 
-    def test_transfer_media_worker_runs_android_sync_for_downloads(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            media_path = Path(tmpdir) / "episode.mp3"
-            media_path.write_bytes(b"audio")
-            ProfileConfigValue.objects.create(
-                profile_id="default", key="android_sync_enabled", value="1"
-            )
-            download = Download.objects.create(
-                profile_id="default",
-                source_type="podcast",
-                source_name="Sync Source",
-                title="Sync Episode",
-                file_path=str(media_path),
-                file_ext="mp3",
-                download_status="downloaded",
-                last_seen_at=timezone.now(),
-            )
-            job = create_job(
-                profile_id="default",
-                job_type="transfer_media",
-                payload={"source": "test"},
-                idempotency_key="transfer_media:default:worker",
-            )
-
-            with patch("workers.handlers.sync_android_items") as sync_items:
-                sync_items.return_value = SimpleNamespace(
-                    attempted=1, copied=1, skipped=0, failed=0, message="copied 1"
-                )
-                transfer_media(job)
-
-            items, config = sync_items.call_args.args
-            self.assertTrue(config.enabled)
-            self.assertEqual(len(items), 1)
-            self.assertEqual(items[0].row_id, download.id)
-            self.assertEqual(items[0].title, "Sync Episode")
-            self.assertEqual(items[0].source_name, "Sync Source")
-            self.assertEqual(items[0].file_path, media_path)
-
-    def test_library_transfer_button_queues_transfer_media_job(self):
+    def test_library_does_not_expose_removed_transfer_button(self):
         response = Client().get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'name="job_type" value="transfer_media"')
+        self.assertNotContains(response, 'id="transfer-form"')
+        self.assertNotContains(response, 'name="job_type" value="transfer_media"')
         self.assertNotContains(response, 'name="job_type" value="update_downloads"')
 
-    def test_json_enqueue_transfer_status_url_tracks_job_status(self):
+    def test_json_enqueue_rejects_removed_transfer_job(self):
         client = Client()
 
         with patch("app.views.publish_job"):
@@ -327,20 +289,14 @@ class SharedDjangoModelTests(TestCase):
                 HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             )
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertIn("job_id=", payload["status_url"])
-        self.assertNotIn("token=", payload["status_url"])
-        status_response = client.get(payload["status_url"])
-        self.assertEqual(status_response.status_code, 200)
-        self.assertEqual(status_response.json()["status"], "queued")
+        self.assertEqual(response.status_code, 400)
 
     def test_create_claim_and_finish_job(self):
         job = create_job(
             profile_id="default",
-            job_type="transfer_media",
+            job_type="retention_cleanup",
             payload={"source": "test"},
-            idempotency_key="transfer_media:default:test",
+            idempotency_key="retention_cleanup:default:test",
         )
         claimed = claim_job(job.id)
         self.assertIsNotNone(claimed)
@@ -467,11 +423,11 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertContains(response, 'data-server-mode="all"')
 
-    def test_scheduler_enqueues_due_database_configured_job(self):
+    def test_scheduler_disables_removed_job_types(self):
         due_at = timezone.now() - timedelta(minutes=1)
         schedule = ScheduledJob.objects.create(
             profile_id="default",
-            job_type="transfer_media",
+            job_type="removed_feature",
             interval_seconds=3600,
             payload={"source": "test-scheduler"},
             idempotency_key_template="scheduled:${job_type}:${profile_id}:${due_hour}",
@@ -481,21 +437,10 @@ class SharedDjangoModelTests(TestCase):
         with patch("models.scheduler.publish_job") as publish:
             job_ids = enqueue_due_scheduled_jobs(now=timezone.now())
 
-        self.assertEqual(len(job_ids), 1)
-        job = Job.objects.get(id=job_ids[0])
-        self.assertEqual(job.job_type, "transfer_media")
-        self.assertEqual(job.payload["source"], "test-scheduler")
-        self.assertEqual(job.payload["scheduled_job_id"], schedule.id)
+        self.assertEqual(job_ids, [])
         schedule.refresh_from_db()
-        self.assertGreater(schedule.next_run_at, due_at)
-        publish.assert_called_once_with(
-            {
-                "job_id": job.id,
-                "job_type": "transfer_media",
-                "profile_id": "default",
-                "attempt": 1,
-            }
-        )
+        self.assertFalse(schedule.enabled)
+        publish.assert_not_called()
 
     def test_auto_update_setting_creates_enabled_update_schedule(self):
         now = timezone.now()
@@ -943,18 +888,6 @@ class SharedDjangoModelTests(TestCase):
         )
         download.refresh_from_db()
         self.assertAlmostEqual(download.last_position_seconds, 7.0, places=2)
-
-    def test_library_update_button_stays_on_library_while_polling_callback(self):
-        script = Path("src/app/static/app/dashboard.js").read_text()
-
-        self.assertIn("getoffline:update-downloads-status-url", script)
-        self.assertIn("function startPolling(statusUrl)", script)
-        self.assertIn("const storedStatusUrl = rememberedStatusUrl();", script)
-        self.assertIn("startPolling(storedStatusUrl);", script)
-        self.assertIn("startPolling(payload.status_url);", script)
-        self.assertIn("forgetStatusUrl();", script)
-        self.assertNotIn("function returnToLibrary", script)
-        self.assertNotIn("HTMLFormElement.prototype.submit.call(form)", script)
 
     def test_enqueue_job_ajax_proxy_preserves_json_headers(self):
         client = Client()
@@ -2056,7 +1989,6 @@ class QueueRoutingTests(unittest.TestCase):
 
     def test_non_download_jobs_get_separate_queues(self):
         self.assertEqual(queue_name("transcode_media"), "getoffline.jobs.ffmpeg")
-        self.assertEqual(queue_name("transfer_media"), "getoffline.jobs.transfer")
         self.assertEqual(
             queue_name("generate_transcript"), "getoffline.jobs.transcripts"
         )

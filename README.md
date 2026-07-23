@@ -18,7 +18,6 @@
 - Database-backed runtime configuration managed from the web UI
 - Built-in local web app for browsing and playing downloaded audio/video in your browser
 - Username/password login with per-user settings, source feeds, playback history, and download folders
-- Optional offline transfer that copies selected media to a directory on disk or to a connected Android phone with `adb push`
 
 ## Requirements
 
@@ -46,13 +45,13 @@ GetOffline sets `js_runtimes={"quickjs": {"path": "qjs"}}` and `--remote-compone
 
 ## Configuration
 
-On startup, defaults are seeded into the configured Django database automatically and can be edited at `/settings`. Environment variables configure the Django/MySQL connection for deployments; app runtime settings such as `output_root`, formats, limits, source lists, cookies, and transfer options live in the database.
+On startup, defaults are seeded into the configured Django database automatically and can be edited at `/settings`. Environment variables configure the Django/MySQL connection for deployments; app runtime settings such as `output_root`, formats, limits, source lists, and cookies live in the database.
 
 YouTube live streams are skipped automatically for configured playlist and channel sources. To download a specific live video, paste its URL into the web app's **+** dialog. The download remains active until the stream ends or the application stops.
 
 ## Split app/workers deployment
 
-For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, keep the FFmpeg worker running so downloaded files are converted after download, and run multiple transfer workers if you need concurrency. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
+For deployments that should keep the frontend responsive, the repo includes a Django frontend in `src/app`, shared Django ORM models in `src/models`, and RabbitMQ workers in `src/workers`. Both the app and workers connect to the same MySQL database through Django's ORM using PyMySQL, so no native mysqlclient build is required. The app reads data and publishes jobs; workers consume queue-specific jobs. Run only one downloads worker to avoid downloading too quickly from YouTube, and keep the FFmpeg worker running so downloaded files are converted after download. Run `make migrate-db` after pulling Django model changes so existing MySQL tables get any missing columns, then use `make run-app-debug` to start the Django frontend with `GETOFFLINE_DJANGO_DEBUG=1`. See `docs/app-workers-mysql-rabbitmq.md`.
 
 
 ## Usage
@@ -108,11 +107,9 @@ Downloads are also checked automatically on the interval configured in **Setting
 
 The web app requires username/password login. Create users from the command line after migrations with `python -m django create_user <username> --password <password>`. The old profile switcher has been removed; each signed-in user gets one implicit library/settings partition keyed by their username.
 
-## Directory transfer
+## Standalone filesystem sync script
 
-GetOffline can copy selected downloads to a normal directory on disk (including a mounted external drive) or to an Android phone so they are available to watch or listen to offline. Choose **Local disk** or **Android device** in Settings; Android-only ADB settings are hidden when Local disk is selected. Directory transfer writes media, optional subtitles, `GetOffline.xspf`, and a `transferdb.txt` history file directly to the selected folder. Paths recorded in `transferdb.txt` are skipped on later runs so tagged media is not copied repeatedly.
-
-For a filesystem-only cron sync that does not use the database transfer queue, use `scripts/sync-media-downloads.sh`. It accepts the downloads directory, the destination directory, and the owner to apply to copied files. Only MP3 and MP4 files are considered; filenames do not need to contain `converted`, and other extensions (including subtitle files) are ignored. Each copied file is flattened into the destination as `<artist> - <original filename>`, where `<artist>` is the source file's parent folder name. Existing destination files are skipped unless the source file is newer. Example cron entry to run every 15 minutes:
+For a filesystem-only cron sync that does not use the app or a job queue, use `scripts/sync-media-downloads.sh`. It accepts the downloads directory, the destination directory, and the owner to apply to copied files. Only MP3 and MP4 files are considered; filenames do not need to contain `converted`, and other extensions (including subtitle files) are ignored. Each copied file is flattened into the destination as `<artist> - <original filename>`, where `<artist>` is the source file's parent folder name. Existing destination files are skipped unless the source file is newer. Example cron entry to run every 15 minutes:
 
 ```cron
 */15 * * * * /path/to/getoffline/scripts/sync-media-downloads.sh /srv/getoffline/downloads /mnt/offline-media getoffline:getoffline >> /var/log/getoffline-media-sync.log 2>&1
@@ -121,29 +118,6 @@ For a filesystem-only cron sync that does not use the database transfer queue, u
 The sync requires `ffprobe` and verifies that every source contains an audio or video stream before publishing it. A failed probe is logged, causes the run to exit unsuccessfully, and does not replace an existing destination file. Up-to-date destination files are also probed; a damaged destination is automatically replaced.
 
 Pass `--force` (or set `FORCE_RESYNC=1`) to re-copy every matching file regardless of timestamps. Set `DRY_RUN=1` before the command to preview the planned copies, or `VERBOSE=1` to log up-to-date files that were skipped. After each non-dry-run sync, the script runs `chown -R <owner[:group]>` on the destination so all synced files are owned by the requested user, such as `jellyfin:jellyfin`.
-
-Android transfer uses Android Debug Bridge (`adb`), which is more automation-friendly than the standard MTP file browser.
-
-To configure Android transfer:
-
-1. Install Android platform tools so `adb` is available on the computer running GetOffline.
-2. Enable Developer options and USB debugging on the phone, then authorize the computer when Android prompts you.
-3. Open `http://127.0.0.1:8080/settings`, choose **Android device**, and optionally enable automatic transfer after downloads.
-4. Choose the phone folder, for example `/sdcard/Movies/GetOffline`, and the maximum number of unplayed items to copy each transfer.
-
-To transfer over Wi-Fi, pair the device with `adb` first, then switch **ADB connection** to **Wi-Fi (connect to paired device)** in settings and enter the device address, such as `192.168.1.50:5555`. GetOffline runs `adb connect <address>` before each transfer/delete job and then uses that Wi-Fi serial for normal `adb push`, shell, and media-scan commands. If you omit a port, GetOffline defaults to `:5555`.
-
-When running with Docker Compose, `adb` is installed in the `worker-transfer` container and its pairing keys are kept in the `adb-data` volume. Pair from inside that same container so the worker can reuse the key later:
-
-```bash
-docker compose exec worker-transfer adb pair PHONE_IP:PAIRING_PORT
-docker compose exec worker-transfer adb connect PHONE_IP:5555
-docker compose exec worker-transfer adb devices
-```
-
-Use the **Wireless debugging** screen on Android for the temporary pairing port and code. The pairing port is usually different from the later `5555` connection port. If `adb devices` shows `unauthorized`, accept the authorization prompt on the phone or pair again from the container. USB debugging from containers requires passing the host USB bus into the container (for example `/dev/bus/usb`) and may require privileged device access, so Wi-Fi debugging is the simpler container setup.
-
-When enabled, GetOffline periodically transfers to the selected destination using the same interval as automatic download checks, and it also attempts a transfer after new downloads finish. The **Save and transfer** button in Settings persists the configuration and starts a transfer immediately. Completed destination paths are recorded in `transferdb.txt` and skipped on later runs. When `ffmpeg` is available, GetOffline tags copied media with VLC-visible title/artist/album metadata and embeds podcast artwork when the feed provides an image. Android transfer also asks the device's media scanner to rescan pushed files. Each transfer writes `GetOffline.xspf`, a VLC-compatible playlist with titles, source names, file locations, and each item's saved playback position as a VLC `start-time` option.
 
 Clean up generated files:
 

@@ -40,7 +40,6 @@ COMPOSE_SERVICES = (
     "worker-downloader-podcast",
     "worker-ffmpeg",
     "worker-transcripts",
-    "worker-transfer",
     "scheduler",
     "worker-cleanup",
 )

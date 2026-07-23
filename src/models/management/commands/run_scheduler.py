@@ -18,13 +18,6 @@ DEFAULT_SCHEDULES = [
     },
     {
         "profile_id": "default",
-        "job_type": "transfer_media",
-        "interval_seconds": 3600,
-        "payload": {"source": "scheduler"},
-        "idempotency_key_template": "scheduled:transfer_media:${profile_id}:${due_hour}",
-    },
-    {
-        "profile_id": "default",
         "job_type": "retention_cleanup",
         "interval_seconds": 86400,
         "payload": {"source": "scheduler"},

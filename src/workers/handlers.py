@@ -29,15 +29,11 @@ from models.models import Job
 from models.models import ProfileConfigValue
 from models.models import SourceConfig
 from models.models import TranscriptSegment
-from backend.services.settings import profile_settings
 from workers.content_filter import delete_media_artifacts
 from workers.content_filter import log_filtered_deletion
 from workers.content_filter import screen_transcript
 from workers.logger import get_logger
 from workers.subtitles import create_subtitles
-from workers.sync import AndroidSyncItem
-from workers.sync import config_from_defaults as android_config_from_defaults
-from workers.sync import sync_items as sync_android_items
 from workers.utils import sanitize_channel_name
 from workers.ytdlp_helpers import apply_ytdlp_player_js_variant_workaround
 from workers.ytdlp_helpers import enable_youtube_quickjs_remote_component
@@ -2708,63 +2704,6 @@ def retention_cleanup(job: Job) -> None:
     )
 
 
-def _android_sync_item_from_download(download: Download) -> AndroidSyncItem | None:
-    file_path = str(download.file_path or "").strip()
-    if not file_path:
-        return None
-    subtitle_path = str(download.subtitle_path or "").strip()
-    return AndroidSyncItem(
-        row_id=download.id,
-        title=download.title or Path(file_path).stem,
-        source_name=download.source_name or download.source_type or "GetOffline",
-        file_path=Path(file_path),
-        subtitle_path=Path(subtitle_path) if subtitle_path else None,
-        position_seconds=float(download.last_position_seconds or 0.0),
-        artwork_url=getattr(download, "thumbnail_url", None) or None,
-    )
-
-
-def transfer_media(job: Job) -> None:
-    log.info(
-        "Transfer worker started job_id=%s profile_id=%s payload=%s",
-        job.id,
-        job.profile_id,
-        job.payload,
-    )
-    config = android_config_from_defaults(profile_settings(job.profile_id))
-    downloads = Download.objects.filter(
-        profile_id=job.profile_id,
-        download_status=DownloadStatus.DOWNLOADED,
-    ).order_by("-completed_at", "-last_seen_at", "-id")
-    items = [
-        item
-        for item in (
-            _android_sync_item_from_download(download) for download in downloads
-        )
-        if item is not None
-    ]
-    log.info(
-        "Transfer worker selected Android candidates job_id=%s profile_id=%s candidates=%s enabled=%s",
-        job.id,
-        job.profile_id,
-        len(items),
-        config.enabled,
-    )
-    result = sync_android_items(items, config)
-    log.info(
-        "Transfer worker finished job_id=%s profile_id=%s attempted=%s copied=%s skipped=%s failed=%s message=%s",
-        job.id,
-        job.profile_id,
-        result.attempted,
-        result.copied,
-        result.skipped,
-        result.failed,
-        result.message,
-    )
-    if result.failed:
-        raise RuntimeError(result.message)
-
-
 HANDLERS = {
     "check_for_episodes": check_for_episodes,
     "update_downloads": update_downloads,
@@ -2772,6 +2711,5 @@ HANDLERS = {
     "download_single": download_single,
     "transcode_media": transcode_media,
     "generate_transcript": generate_transcript,
-    "transfer_media": transfer_media,
     "retention_cleanup": retention_cleanup,
 }

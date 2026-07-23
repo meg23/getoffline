@@ -256,10 +256,6 @@ table {
   background: #2f62f2;
   border-color: #2f62f2;
 }
-.icon-button.is-pulsing {
-  cursor: progress;
-  animation: transfer-pulse 1.8s ease-in-out infinite;
-}
 .toolbar-icon {
   display: block;
   width: 1.3rem;
@@ -273,17 +269,6 @@ table {
 }
 .toolbar-label {
   display: none;
-}
-@keyframes transfer-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-    box-shadow: 0 0 0 rgba(77, 121, 255, 0);
-  }
-  50% {
-    opacity: 1;
-    box-shadow: 0 0 18px rgba(77, 121, 255, 0.55);
-  }
 }
 .library-filter-wrap {
   display: inline-flex;
