@@ -17,7 +17,7 @@
             <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
             <span class="profile-name">{{ profile_name }}</span>
           </span>
-          <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻</button></form>
+          <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-icon-button" type="submit" title="Sign out" aria-label="Sign out">⏻<span class="visually-hidden">Sign out</span></button></form>
         </div>
       </header>
 

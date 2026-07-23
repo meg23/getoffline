@@ -40,3 +40,29 @@ class AllowPrivateNetworkHostMiddleware:
                     allowed_hosts.append(domain)
                     settings.ALLOWED_HOSTS = allowed_hosts
         return self.get_response(request)
+
+
+class SecurityHeadersMiddleware:
+    """Add a restrictive baseline policy to HTML and API responses."""
+
+    content_security_policy = (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "connect-src 'self'; "
+        "font-src 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "img-src 'self' data:; "
+        "media-src 'self' blob:; "
+        "object-src 'none'; "
+        "script-src 'self'; "
+        "style-src 'self'"
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        response.setdefault("Content-Security-Policy", self.content_security_policy)
+        return response

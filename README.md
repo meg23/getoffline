@@ -65,6 +65,14 @@ make run-app-debug
 
 Local app targets automatically run `collectstatic` with Django's manifest storage, so CSS and JavaScript URLs receive content hashes and browser caches are refreshed after frontend changes. Docker frontend builds use the same cache-busted static assets automatically.
 
+Run the authenticated Wapiti web security scan against both the frontend and API with:
+
+```bash
+make test-wapiti
+```
+
+The target starts the `frontend` and `api` Compose services if needed, creates a random disposable Django user, logs Wapiti in through `/login/`, and removes that user when the scan exits. It writes authenticated reports to `target/wapiti/frontend.html` and `target/wapiti/api.html`; the API default is the protected `/api/library` endpoint. Override `WAPITI_FRONTEND_URL`, `WAPITI_AUTH_URL`, `WAPITI_API_URL`, or `WAPITI_FORMAT` when scanning a different host or producing JSON reports. Use `make test-wapiti-public` for the unauthenticated frontend and public health-endpoint scan.
+
 To import local videos, open the web app and use the browser drag-and-drop importer. It copies supported files into `manual/<original-name>` under `output_root`, registers them as manual videos, and then runs the existing subtitle/filter pipeline. Existing manual files are renamed with numeric suffixes instead of overwritten.
 
 Supported video extensions are `.mp4`, `.mkv`, `.webm`, and `.mov`. The importer skips non-video files and uses the **Delete drag-and-drop uploads containing profanity or sexual content** setting under **Settings → General**.

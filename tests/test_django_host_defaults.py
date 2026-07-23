@@ -33,3 +33,12 @@ class DjangoHostDefaultsTests(SimpleTestCase):
         response = Client().get("/settings/", HTTP_HOST="8.8.8.8:8080")
 
         self.assertEqual(response.status_code, 400)
+
+    def test_security_headers_and_csrf_cookie_flags_are_set(self):
+        response = Client().get("/login/")
+
+        self.assertIn("default-src 'self'", response["Content-Security-Policy"])
+        self.assertIn("frame-ancestors 'none'", response["Content-Security-Policy"])
+        self.assertEqual(response["X-Frame-Options"], "DENY")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        self.assertTrue(response.cookies["csrftoken"]["httponly"])

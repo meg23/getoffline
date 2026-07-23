@@ -1,4 +1,4 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-wapiti test-wapiti-public test-wapiti-auth test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-transfer run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -15,10 +15,19 @@ RUFF := $(VENV_BIN)/ruff
 VULTURE := $(VENV_BIN)/vulture
 BANDIT := $(VENV_BIN)/bandit
 MYPY := $(VENV_BIN)/mypy
+WAPITI := $(VENV_BIN)/wapiti
 COVERAGE := $(VENV_BIN)/coverage
 MCCABE_MAX_COMPLEXITY := 60
 MCCABE_MIN_COMPLEXITY := 61
-CI_TOOLS := bandit coverage mccabe mypy pex ruff vulture
+CI_TOOLS := bandit coverage mccabe mypy pex ruff vulture wapiti3
+WAPITI_REPORT_DIR := $(BUILD_DIR)/wapiti
+WAPITI_FRONTEND_URL ?= http://127.0.0.1:8080
+WAPITI_API_URL ?= http://127.0.0.1:8081/api/library
+WAPITI_PUBLIC_API_URL ?= http://127.0.0.1:8081/api/health
+WAPITI_AUTH_URL ?= $(WAPITI_FRONTEND_URL)/login/
+WAPITI_FORMAT ?= html
+WAPITI_STATE_DIR ?= $(WAPITI_REPORT_DIR)/.state
+WAPITI_OPTIONS ?= --no-bugreport --scope folder --flush-session --tasks 1 --max-scan-time 300 --store-session $(WAPITI_STATE_DIR)/sessions --store-config $(WAPITI_STATE_DIR)/config
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache GETOFFLINE_LOG_FILE=$(PWD)/.test-model-cache/youtube_batch_dl.log
 PY_FILES := $(shell find src tests -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
 SOURCE_PY_FILES := $(shell find src -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
@@ -32,7 +41,7 @@ $(VENV_DIR)/.installed: $(REQ_FILE) Makefile
 	$(PYTHON) -m pip install -r $(REQ_FILE) $(CI_TOOLS)
 	@touch $@
 
-test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage
+test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage test-wapiti
 	@echo "All scans and unit tests passed."
 
 integration-test: venv
@@ -75,6 +84,32 @@ test-bandit: venv
 test-vulture: venv
 	@echo "Running Vulture dead-code analysis..."
 	$(VULTURE) src tests --min-confidence 100
+
+test-wapiti: test-wapiti-auth
+
+test-wapiti-public: venv
+	@echo "Starting frontend and API services for Wapiti..."
+	docker compose up -d --wait frontend api
+	@mkdir -p $(WAPITI_REPORT_DIR) $(WAPITI_STATE_DIR)/sessions $(WAPITI_STATE_DIR)/config
+	@echo "Scanning frontend: $(WAPITI_FRONTEND_URL)"
+	$(WAPITI) -u "$(WAPITI_FRONTEND_URL)" $(WAPITI_OPTIONS) --format $(WAPITI_FORMAT) -o "$(WAPITI_REPORT_DIR)/frontend-public.$(WAPITI_FORMAT)"
+	@echo "Scanning API: $(WAPITI_PUBLIC_API_URL)"
+	$(WAPITI) -u "$(WAPITI_PUBLIC_API_URL)" $(WAPITI_OPTIONS) --format $(WAPITI_FORMAT) -o "$(WAPITI_REPORT_DIR)/api-public.$(WAPITI_FORMAT)"
+	@echo "Wapiti reports written to $(WAPITI_REPORT_DIR)/"
+
+test-wapiti-auth: venv
+	@echo "Starting frontend and API services for authenticated Wapiti scan..."
+	docker compose up -d --wait frontend api
+	@mkdir -p $(WAPITI_REPORT_DIR) $(WAPITI_STATE_DIR)/sessions $(WAPITI_STATE_DIR)/config
+	WAPITI_BIN="$(WAPITI)" \
+	REPORT_DIR="$(WAPITI_REPORT_DIR)" \
+	FRONTEND_URL="$(WAPITI_FRONTEND_URL)" \
+	API_URL="$(WAPITI_API_URL)" \
+	AUTH_URL="$(WAPITI_AUTH_URL)" \
+	REPORT_FORMAT="$(WAPITI_FORMAT)" \
+	WAPITI_OPTIONS="$(WAPITI_OPTIONS)" \
+	$(SHELL) scripts/wapiti-authenticated-scan.sh
+	@echo "Authenticated Wapiti reports written to $(WAPITI_REPORT_DIR)/"
 
 test-coverage: venv
 	@echo "Running unit tests with coverage..."
