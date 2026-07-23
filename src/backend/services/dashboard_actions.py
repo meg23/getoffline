@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlencode
+from urllib.parse import urlparse
 
 from django.contrib.auth.decorators import login_required
 from django.db import connection
@@ -811,6 +812,10 @@ def _source_form_errors(
         errors.append("name must be 255 characters or fewer")
     if not form.url:
         errors.append("url is required")
+    else:
+        parsed_url = urlparse(form.url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            errors.append("url must be an absolute http(s) URL")
     if source_type is SourceType.YOUTUBE and form.media_type not in {"audio", "video"}:
         errors.append("media_type is invalid")
 
@@ -1579,6 +1584,11 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
         SourceConfig, pk=source_id, profile_id=_profile_id(request)
     )
     form = _source_form_data(request, source.source_type)
+    errors = _source_form_errors(
+        request, form, parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST
+    )
+    if errors:
+        return HttpResponseBadRequest("Invalid source: " + "; ".join(errors))
     _apply_source_form_data(source, form, now=timezone.now(), include_enabled=False)
     source.save(update_fields=_source_update_fields(include_enabled=False))
     return HttpResponseRedirect(reverse("settings"))
@@ -1595,6 +1605,22 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
     source_ids = _posted_source_ids(request)
     sources_by_id = _editable_sources_by_id(profile_id, source_type, source_ids)
     now = timezone.now()
+    validation_errors: list[str] = []
+    for source_id in source_ids:
+        source = sources_by_id.get(source_id)
+        if source is None or _posted_bool(request, f"source_{source_id}__delete"):
+            continue
+        form = _source_form_data(request, source.source_type, prefix=f"source_{source_id}__")
+        errors = _source_form_errors(
+            request,
+            form,
+            parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST,
+        )
+        validation_errors.extend(
+            f"source {source_id}: {error}" for error in errors
+        )
+    if validation_errors:
+        return HttpResponseBadRequest("Invalid source: " + "; ".join(validation_errors))
     for source_id in source_ids:
         source = sources_by_id.get(source_id)
         if source is None:

@@ -31,6 +31,19 @@
 
       <section class="panel toolbar-panel" aria-label="Dashboard controls">
         <div class="toolbar-actions">
+          <form id="update-form" method="post" action="{% url 'enqueue_job' %}" class="toolbar-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'library' %}" />
+            <input type="hidden" name="job_type" value="update_downloads" />
+            <button id="update-button" class="icon-button icon-button-primary" type="submit" title="Update podcasts and YouTube sources" aria-label="Update podcasts and YouTube sources">
+              <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 3v11m0 0 4-4m-4 4-4-4" />
+                <path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3" />
+              </svg>
+              <span class="toolbar-label">Update</span>
+            </button>
+          </form>
+
           <button id="quick-add-open" class="icon-button" type="button" title="Add YouTube link" aria-label="Add YouTube link">
             <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
               <path d="M12 5v14" />

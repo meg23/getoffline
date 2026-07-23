@@ -274,9 +274,10 @@ class SharedDjangoModelTests(TestCase):
         response = Client().get("/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="update-form"')
+        self.assertContains(response, 'name="job_type" value="update_downloads"')
         self.assertNotContains(response, 'id="transfer-form"')
         self.assertNotContains(response, 'name="job_type" value="transfer_media"')
-        self.assertNotContains(response, 'name="job_type" value="update_downloads"')
 
     def test_json_enqueue_rejects_removed_transfer_job(self):
         client = Client()
@@ -1103,6 +1104,20 @@ class SharedDjangoModelTests(TestCase):
 
         youtube_candidates.assert_called_once_with(youtube_source)
         podcast_candidates.assert_called_once_with(podcast_source)
+
+    def test_candidates_for_source_skips_invalid_urls(self):
+        source = SourceConfig(
+            profile_id="default",
+            source_type=SourceType.YOUTUBE,
+            name="Invalid source",
+            url="default",
+            media_type="video",
+        )
+
+        with patch("workers.handlers._youtube_entries_from_url") as extract:
+            self.assertEqual(list(_candidates_for_source(source)), [])
+
+        extract.assert_not_called()
 
     def test_episode_checker_honors_source_max_downloads(self):
         source = SourceConfig.objects.create(

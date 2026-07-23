@@ -273,6 +273,113 @@
         ?.slice(name.length + 1) || ""
     );
   }
+
+  const form = document.getElementById("update-form");
+  const button = document.getElementById("update-button");
+  const csrf =
+    form?.querySelector("[name=csrfmiddlewaretoken]")?.value ||
+    decodeURIComponent(readCookie("csrftoken") || "");
+  const doneStatuses = new Set(["succeeded", "failed"]);
+  const statusStorageKey = "getoffline:update-downloads-status-url";
+  let pollTimer = 0;
+
+  function setLoading(loading) {
+    if (!button) return;
+    button.classList.toggle("is-pulsing", loading);
+    button.disabled = loading;
+    button.setAttribute("aria-busy", loading ? "true" : "false");
+  }
+
+  function rememberStatusUrl(statusUrl) {
+    try {
+      window.sessionStorage?.setItem(statusStorageKey, statusUrl);
+    } catch (_) {}
+  }
+
+  function forgetStatusUrl() {
+    try {
+      window.sessionStorage?.removeItem(statusStorageKey);
+    } catch (_) {}
+  }
+
+  function schedulePoll(statusUrl) {
+    pollTimer = window.setTimeout(() => {
+      pollUntilDone(statusUrl).catch(() => schedulePoll(statusUrl));
+    }, 1500);
+  }
+
+  async function pollUntilDone(statusUrl) {
+    const response = await fetch(statusUrl, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("Unable to check update status.");
+    const payload = await response.json();
+    if (payload.finished || doneStatuses.has(String(payload.status || ""))) {
+      forgetStatusUrl();
+      setLoading(false);
+      if (payload.status === "failed" || payload.ok === false) {
+        window.alert(payload.error_message || "The source update failed.");
+      } else {
+        window.location.reload();
+      }
+      return;
+    }
+    schedulePoll(statusUrl);
+  }
+
+  function startPolling(statusUrl) {
+    rememberStatusUrl(statusUrl);
+    setLoading(true);
+    pollUntilDone(statusUrl).catch(() => schedulePoll(statusUrl));
+  }
+
+  function showQueueError(message) {
+    setLoading(false);
+    window.clearTimeout(pollTimer);
+    window.alert(message || "Failed to start the source update.");
+  }
+
+  try {
+    const storedStatusUrl = window.sessionStorage?.getItem(statusStorageKey) || "";
+    if (storedStatusUrl) startPolling(storedStatusUrl);
+  } catch (_) {}
+
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form || !button || button.disabled) return;
+    setLoading(true);
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "X-CSRFToken": csrf,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      if (!response.ok) throw new Error("The source update request failed.");
+      const payload = await response.json();
+      if (!payload.status_url) throw new Error("Missing update status URL.");
+      startPolling(payload.status_url);
+    } catch (error) {
+      showQueueError(error.message);
+    }
+  });
+})();
+(() => {
+  function readCookie(name) {
+    return (
+      document.cookie
+        .split(";")
+        .map((v) => v.trim())
+        .find((v) => v.startsWith(`${name}=`))
+        ?.slice(name.length + 1) || ""
+    );
+  }
   const csrf =
     document.querySelector("[name=csrfmiddlewaretoken]")?.value ||
     decodeURIComponent(readCookie("csrftoken") || "");

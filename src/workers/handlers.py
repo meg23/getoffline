@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from django.db import IntegrityError
 from django.db import transaction
@@ -1887,6 +1888,16 @@ def _youtube_candidates(source: SourceConfig) -> Iterable[dict]:
 
 
 def _candidates_for_source(source: SourceConfig) -> Iterable[dict]:
+    parsed_url = urlparse(str(source.url or "").strip())
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        log.warning(
+            "Skipping source with invalid URL source_id=%s source_name=%s source_type=%s url=%s",
+            source.id,
+            source.name,
+            source.source_type,
+            source.url,
+        )
+        return []
     source_type = _source_config_type(source)
     if source_type is SourceType.PODCAST:
         return _podcast_candidates(source)
