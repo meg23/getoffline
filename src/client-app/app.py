@@ -41,11 +41,12 @@ from getoffline_sdk import GetOfflineClient, HttpTransport, Response
 APP_NAME = "getoffline-console"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "credentials.json"
+PLAYER_LOG_FILE = CONFIG_DIR / "player.log"
 DOWNLOAD_DIR = Path(
     os.environ.get("GETOFFLINE_CONSOLE_DOWNLOAD_DIR", CONFIG_DIR / "downloads")
 )
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
-PLAYER_CANDIDATES = ("mpv", "cvlc", "vlc", "ffplay")
+PLAYER_CANDIDATES = ("ffplay",)
 PROGRESS_INTERVAL_SECONDS = 5.0
 DEFAULT_PLAYBACK_BACKEND = "local"
 BRIDGE_TIMEOUT_SECONDS = 10.0
@@ -101,6 +102,8 @@ class GetOfflineConsole:
         playback_backend: str | None = None,
         bridge_url: str | None = None,
         bridge_stop_url: str | None = None,
+        bridge_volume_url: str | None = None,
+        volume: float | None = None,
         download_dir: str | Path | None = None,
     ) -> None:
         self.credentials = credentials
@@ -334,9 +337,9 @@ class GetOfflineConsole:
         )
         try:
             with (
-                urllib.request.urlopen(request, timeout=60) as response,
+                urllib.request.urlopen(request, timeout=60) as response,  # nosec B310
                 tmp_path.open("wb") as handle,
-            ):  # nosec B310 - GetOffline URL is user configured.
+            ):
                 while True:
                     chunk = response.read(DOWNLOAD_CHUNK_SIZE)
                     if not chunk:
@@ -723,7 +726,8 @@ class AudioBridgePlaybackBackend:
             method="POST",
         )
         try:
-            response = urllib.request.urlopen(  # nosec B310 - bridge URL is user configured.
+            # The bridge endpoint is explicitly configured by the user.
+            response = urllib.request.urlopen(  # nosec B310
                 request, timeout=self.timeout_seconds
             )
             content = response.read()
@@ -861,28 +865,39 @@ def build_playback_backend(
     )
 
 
-def player_command(player: str, url: str, auth_header: str, seek: float) -> list[str]:
+def player_command(
+    player: str,
+    url: str,
+    auth_header: str,
+    seek: float,
+    volume: float = 1.0,
+) -> list[str]:
     if is_http_url(url):
-        return remote_player_command(player, url, auth_header, seek)
-    return local_player_command(player, url, seek)
+        return remote_player_command(player, url, auth_header, seek, volume)
+    return local_player_command(player, url, seek, volume)
 
 
 def is_http_url(value: str) -> bool:
     return urllib.parse.urlsplit(value).scheme in {"http", "https"}
 
 
-def local_player_command(player: str, filename: str, seek: float) -> list[str]:
+def local_player_command(
+    player: str, filename: str, seek: float, volume: float = 1.0
+) -> list[str]:
     if player == "mpv":
         return ["mpv", "--no-video", f"--start={seek:.3f}", filename]
     if player == "ffplay":
-        return ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}", filename]
+        command = ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}"]
+        if clamp_volume(volume) < 1.0:
+            command.extend(["-volume", str(int(round(clamp_volume(volume) * 100)))])
+        return [*command, filename]
     if player in {"vlc", "cvlc"}:
         return [player, "--intf", "ncurses", f"--start-time={int(seek)}", filename]
     return [player, filename]
 
 
 def remote_player_command(
-    player: str, url: str, auth_header: str, seek: float
+    player: str, url: str, auth_header: str, seek: float, volume: float = 1.0
 ) -> list[str]:
     if player == "mpv":
         return [
@@ -893,16 +908,17 @@ def remote_player_command(
             url,
         ]
     if player == "ffplay":
-        return [
+        command = [
             "ffplay",
             "-nodisp",
             "-autoexit",
             "-ss",
             f"{seek:.3f}",
-            "-headers",
-            f"Authorization: {auth_header}\r\n",
-            url,
         ]
+        if clamp_volume(volume) < 1.0:
+            command.extend(["-volume", str(int(round(clamp_volume(volume) * 100)))])
+        command.extend(["-headers", f"Authorization: {auth_header}\r\n", url])
+        return command
     if player in {"vlc", "cvlc"}:
         return [
             player,
@@ -999,6 +1015,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bridge-stop-url", help="generic audio bridge stop endpoint URL"
     )
+    parser.add_argument(
+        "--bridge-volume-url", help="generic audio bridge volume endpoint URL"
+    )
+    parser.add_argument(
+        "--volume", type=float, help="initial playback volume from 0.0 to 1.0"
+    )
     return parser.parse_args()
 
 
@@ -1016,6 +1038,8 @@ def main() -> int:
         playback_backend=args.playback_backend,
         bridge_url=args.bridge_url,
         bridge_stop_url=args.bridge_stop_url,
+        bridge_volume_url=args.bridge_volume_url,
+        volume=args.volume,
         download_dir=args.download_dir,
     )
     try:

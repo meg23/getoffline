@@ -6,6 +6,8 @@
   const filterInput = document.getElementById("library-filter");
   const filterMode = document.getElementById("library-filter-mode");
   const clearButton = document.getElementById("library-filter-clear");
+  const filterWrap = document.getElementById("library-filter-wrap");
+  const filterToggle = document.getElementById("library-filter-toggle");
   const selectAll = document.getElementById("select-all");
   const batchAction = document.getElementById("batch-action");
   const batchApply = document.getElementById("batch-apply");
@@ -34,6 +36,14 @@
   function renderCell(row, className, text) {
     const cell = document.createElement("td");
     cell.className = className;
+    const labels = {
+      "channel-col": "Channel",
+      "source-col": "Source",
+      "type-col": "Type",
+      "size-col": "Size",
+      "status-col": "Status",
+    };
+    if (labels[className]) cell.dataset.label = labels[className];
     cell.textContent = text || "";
     row.appendChild(cell);
     return cell;
@@ -64,6 +74,7 @@
 
     const episode = document.createElement("td");
     episode.className = "episode-col";
+    episode.dataset.label = "Episode";
     const link = document.createElement("a");
     link.className = "episode-link";
     link.href = rowUrl("player", id);
@@ -194,6 +205,18 @@
     if (filterMode) filterMode.value = "unplayed";
     if (!syncServerFilterMode()) applyFilters();
   });
+  function setFilterOpen(isOpen, focusInput = false) {
+    if (!filterWrap || !filterToggle) return;
+    filterWrap.classList.toggle("is-open", isOpen);
+    filterToggle.setAttribute("aria-expanded", String(isOpen));
+    if (isOpen && focusInput) filterInput?.focus();
+  }
+  filterToggle?.addEventListener("click", () => {
+    setFilterOpen(!filterWrap?.classList.contains("is-open"), true);
+  });
+  setFilterOpen(
+    filterMode?.value !== "unplayed" || Boolean(filterInput?.value),
+  );
   selectors().forEach(bindSelector);
   batchAction?.addEventListener("change", updateBatchState);
   selectAll?.addEventListener("change", () => {

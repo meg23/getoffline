@@ -7,7 +7,9 @@ class YTDLPStyleAdapter(logging.LoggerAdapter):
         return f"yt-dlp: [{self.extra['channel']}] {msg}", kwargs
 
 
-log_path = os.path.expanduser("~/youtube/youtube_batch_dl.log")
+log_path = os.path.expanduser(
+    os.environ.get("GETOFFLINE_LOG_FILE", "~/youtube/youtube_batch_dl.log")
+)
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
 logging.basicConfig(

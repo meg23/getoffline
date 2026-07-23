@@ -209,7 +209,7 @@ def _profile_setting(profile_id: str, key: str, default: str) -> str:
 
 def _download_output_root(profile_id: str) -> Path:
     root = _profile_setting(profile_id, "output_root", f"./downloads/{profile_id}")
-    return Path(root).expanduser().resolve()
+    return Path(root).expanduser().absolute()
 
 
 def _preferred_media_kind(download: Download, payload: dict) -> str:
@@ -641,7 +641,7 @@ def _postprocess_download_with_ffmpeg(
     )
     if source_paths_payload:
         source_paths = [
-            Path(str(path)).expanduser().resolve() for path in source_paths_payload
+            Path(str(path)).expanduser().absolute() for path in source_paths_payload
         ]
         source_path = source_paths[0]
     else:
@@ -654,7 +654,7 @@ def _postprocess_download_with_ffmpeg(
                 )
             )
             .expanduser()
-            .resolve()
+            .absolute()
         )
         source_paths = [source_path]
     log.info(
@@ -696,10 +696,16 @@ def _postprocess_download_with_ffmpeg(
         else _preferred_target_ext(profile_id, media_kind)
     )
     target_path = (
-        Path(str(payload.get("target_file_path"))).expanduser().resolve()
+        (
+            Path(str(payload.get("target_file_path"))).expanduser().resolve()
+            if download is not None
+            else Path(str(payload.get("target_file_path"))).expanduser().absolute()
+        )
         if payload.get("target_file_path")
         else _target_path(source_path, target_ext)
     )
+    if download is not None:
+        target_path = target_path.resolve()
     with _transcode_execution_lock(
         profile_id=profile_id, payload=payload, job_id=parent_job_id
     ):
@@ -817,7 +823,7 @@ def _postprocess_download_with_ffmpeg(
         output_root = (
             Path(str(payload.get("output_root") or _download_output_root(profile_id)))
             .expanduser()
-            .resolve()
+            .absolute()
         )
         log.info(
             "FFmpeg conversion updating database job_id=%s download_id=%s old_path=%s new_path=%s old_size_bytes=%s new_size_bytes=%s",

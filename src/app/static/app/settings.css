@@ -11,6 +11,21 @@
 * {
   box-sizing: border-box;
 }
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(47, 98, 242, 0.25);
+  outline-offset: 2px;
+}
 body {
   margin: 0;
   min-height: 100vh;
@@ -169,6 +184,7 @@ input,
 select,
 textarea {
   width: 100%;
+  min-height: 2.9rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid #cdd9f1;
   border-radius: 12px;
@@ -277,6 +293,7 @@ button {
   .settings-header {
     align-items: flex-start;
     flex-direction: column;
+    gap: 0.9rem;
   }
   .grid.two,
   .checkbox-grid {
@@ -287,6 +304,21 @@ button {
   }
   .settings-section {
     padding: 1rem;
+  }
+  .settings-header .profile-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .settings-header .back-link {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+  .actions {
+    justify-content: stretch;
+  }
+  .actions button {
+    width: 100%;
+    min-height: 2.9rem;
   }
 }
 
@@ -392,6 +424,115 @@ button {
 .danger-check {
   color: var(--danger);
 }
+
+.jobs-shell {
+  max-width: 900px;
+}
+.jobs-shell .eyebrow {
+  margin: 0 0 0.4rem;
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.jobs-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.jobs-intro h2 {
+  margin-bottom: 0.35rem;
+}
+.jobs-count {
+  flex: 0 0 auto;
+  border: 1px solid #cdd9f1;
+  border-radius: 999px;
+  background: #eef3ff;
+  color: #405078;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.jobs-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.job-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #e0e8f6;
+  border-radius: 13px;
+  background: #fbfcff;
+  padding: 0.85rem 1rem;
+}
+.job-card-main {
+  min-width: 0;
+}
+.job-id {
+  display: block;
+  margin-bottom: 0.18rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.job-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.job-error {
+  margin: 0.35rem 0 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.job-status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef3ff;
+  padding: 0.28rem 0.55rem;
+}
+.job-status-succeeded {
+  background: #def7e8;
+  color: #127343;
+}
+.job-status-failed {
+  background: #fff0f2;
+  color: var(--danger);
+}
+.job-status-running {
+  background: #e2f3ff;
+  color: #114e78;
+}
+.empty-job-state {
+  border: 1px dashed #cdd9f1;
+  border-radius: 13px;
+  color: var(--muted);
+  padding: 1.25rem;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .jobs-intro {
+    display: block;
+  }
+  .jobs-count {
+    display: inline-block;
+    margin-top: 0.75rem;
+  }
+  .job-card {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .job-status {
+    justify-self: start;
+  }
+}
 @media (max-width: 800px) {
   .source-summary {
     grid-template-columns: auto 1fr;
@@ -403,5 +544,47 @@ button {
   }
   .source-url {
     white-space: normal;
+  }
+}
+
+@media (max-width: 520px) {
+  body {
+    font-size: 0.96rem;
+  }
+  .settings-shell {
+    padding: 1rem 0.75rem 1.5rem;
+  }
+  .settings-header h1 {
+    font-size: 2.25rem;
+  }
+  .settings-section {
+    margin: 0.75rem 0 1rem;
+    border-radius: 14px;
+    padding: 0.9rem;
+  }
+  .settings-section h2 {
+    font-size: 1.35rem;
+  }
+  .section-help,
+  .field-help {
+    font-size: 0.92rem;
+  }
+  .checkbox-label {
+    align-items: flex-start;
+    line-height: 1.35;
+  }
+  .checkbox-label input {
+    flex: 0 0 auto;
+    margin-top: 0.15rem;
+  }
+  .source-summary {
+    padding: 0.9rem;
+  }
+  .source-fields {
+    padding: 0 0.9rem 0.9rem;
+  }
+  .queue-count-table th,
+  .queue-count-table td {
+    padding: 0.7rem;
   }
 }

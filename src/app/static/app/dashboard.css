@@ -15,6 +15,21 @@
 * {
   box-sizing: border-box;
 }
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(63, 111, 241, 0.28);
+  outline-offset: 2px;
+}
 body {
   margin: 0;
   min-height: 100vh;
@@ -56,6 +71,22 @@ table {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+.hero-copy {
+  min-width: 0;
+}
+.eyebrow {
+  margin: 0 0 0.45rem;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.hero-description {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.98rem;
 }
 .hero h1 {
   margin: 0;
@@ -228,6 +259,9 @@ table {
   stroke-linejoin: round;
   stroke-width: 2.25;
 }
+.toolbar-label {
+  display: none;
+}
 @keyframes transfer-pulse {
   0%,
   100% {
@@ -247,6 +281,30 @@ table {
   border-radius: 12px;
   background: #fff;
   overflow: hidden;
+}
+.library-filter-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 2.7rem;
+  width: 2.7rem;
+  min-width: 2.7rem;
+  min-height: 2.7rem;
+  padding: 0;
+  border: 1px solid #c9d5ef;
+  border-radius: 12px;
+  background: #eef3ff;
+  color: #2c3e74;
+  cursor: pointer;
+}
+.library-filter-toggle:hover,
+.library-filter-wrap.is-open .library-filter-toggle {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.library-filter-fields {
+  display: contents;
 }
 .library-filter-input {
   border: 0;
@@ -447,7 +505,8 @@ tbody tr:nth-child(even) td {
 .modal-note {
   color: var(--muted);
 }
-@media (max-width: 980px) {  table {
+@media (max-width: 980px) {
+  table {
     table-layout: auto;
     border: 0;
     background: transparent;
@@ -472,8 +531,9 @@ tbody tr:nth-child(even) td {
   tbody tr {
     position: relative;
     display: grid;
-    gap: 0.35rem;
-    padding: 1rem 3rem 1rem 1rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem 0.75rem;
+    padding: 1rem 3.25rem 1rem 1rem;
     border: 1px solid var(--border);
     border-radius: 16px;
     background: #fff;
@@ -483,6 +543,55 @@ tbody tr:nth-child(even) td {
     border: 0;
     padding: 0;
     white-space: normal;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  td:not(.episode-col):not(.selection-cell) {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  td:not(.episode-col):not(.selection-cell)::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: #8a96ad;
+    font-size: 0.67rem;
+    font-weight: 900;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .episode-col {
+    grid-column: 1 / -1;
+    order: -1;
+    font-size: 1.02rem;
+    line-height: 1.3;
+  }
+  .episode-link {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .channel-col {
+    grid-column: 1 / -1;
+    color: var(--text) !important;
+    font-size: 0.9rem !important;
+    font-weight: 700;
+  }
+  .channel-col::before {
+    color: var(--accent) !important;
+  }
+  .source-col,
+  .type-col,
+  .size-col,
+  .status-col {
+    grid-column: auto;
+  }
+  .pill {
+    font-size: 0.7rem;
   }
   .episode-col,
   .channel-col {
@@ -496,7 +605,7 @@ tbody tr:nth-child(even) td {
 }
 @media (max-width: 640px) {
   body {
-    padding: 0.55rem;
+    padding: 0.5rem;
   }
   .container {
     max-width: none;
@@ -504,11 +613,32 @@ tbody tr:nth-child(even) td {
   .hero {
     border-radius: 18px;
     padding: 1rem;
-  }  .toolbar-actions {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
   }
-  .library-filter-wrap,
+  .hero-heading {
+    align-items: flex-start;
+  }
+  .hero-description {
+    margin-top: 0.45rem;
+    font-size: 0.88rem;
+  }
+  .profile-controls {
+    gap: 0.35rem;
+  }
+  .profile-switch-form {
+    padding-right: 0.35rem;
+  }
+  .profile-icon-button {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+  .toolbar-panel {
+    padding: 0.7rem;
+  }
+  .toolbar-actions {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
   .batch-toolbar-form {
     grid-column: 1/-1;
     width: 100%;
@@ -516,19 +646,108 @@ tbody tr:nth-child(even) td {
   }
   .icon-button {
     width: 100%;
-    border-radius: 13px;
+    min-width: 0;
+    min-height: 2.7rem;
+    height: 2.7rem;
+    aspect-ratio: 1;
+    gap: 0;
+    border-radius: 11px;
+    padding: 0.35rem;
+  }
+  .toolbar-label {
+    display: none;
+  }
+  .library-filter-wrap {
+    display: inline-flex;
+    width: auto;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+    justify-self: end;
+  }
+  .library-filter-toggle {
+    display: inline-flex;
+  }
+  .library-filter-fields {
+    display: none;
+  }
+  .library-filter-wrap.is-open {
+    display: flex;
+    width: 100%;
+    grid-column: 1/-1;
+    border: 1px solid #c9d5ef;
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .library-filter-wrap.is-open .library-filter-fields {
+    display: inline-flex;
+    flex: 1;
+    min-width: 0;
+  }
+  .library-filter-wrap:not(.is-open) {
+    width: 100%;
+    justify-self: stretch;
+  }
+  .library-filter-wrap:not(.is-open) .library-filter-toggle {
+    width: 100%;
+    min-width: 0;
+    min-height: 2.7rem;
   }
   .library-filter-input {
     min-width: 0;
   }
   .library-filter-select {
-    min-width: 7rem;
+    min-width: 6.4rem;
+    padding-left: 0.6rem;
+    padding-right: 1.5rem;
   }
   .hero h1 {
     font-size: 1.8rem;
   }
   .profile-name {
     display: none;
+  }
+  .batch-toolbar-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+  }
+  .batch-select,
+  .batch-apply {
+    min-height: 2.8rem;
+  }
+  tbody {
+    gap: 0.6rem;
+  }
+  tbody tr {
+    padding: 0.9rem 2.9rem 0.9rem 0.85rem;
+  }
+  .selection-cell {
+    right: 0.8rem;
+    top: 0.9rem;
+  }
+  .row-selector,
+  #select-all {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0.5rem;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+  .modal {
+    border-radius: 18px 18px 12px 12px;
+    padding: 1rem;
+  }
+  .modal-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .modal-actions button {
+    min-height: 2.9rem;
   }
 }
 .quick-add-results {

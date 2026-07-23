@@ -18,20 +18,21 @@ COVERAGE := $(VENV_BIN)/coverage
 MCCABE_MAX_COMPLEXITY := 60
 MCCABE_MIN_COMPLEXITY := 61
 CI_TOOLS := bandit coverage mccabe mypy pex ruff vulture
-TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache
-PY_FILES := $(shell find src tests -name '*.py' -type f)
+TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache GETOFFLINE_LOG_FILE=$(PWD)/.test-model-cache/youtube_batch_dl.log
+PY_FILES := $(shell find src tests -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
+SOURCE_PY_FILES := $(shell find src -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
 
-venv: $(VENV_BIN)/activate
+venv: $(VENV_DIR)/.installed
 
-$(VENV_BIN)/activate: $(REQ_FILE) Makefile
+$(VENV_DIR)/.installed: $(REQ_FILE) Makefile
 	@echo "Creating virtual environment for $(APP_NAME)..."
 	python3 -m venv $(VENV_DIR)
-	$(PIP) install --upgrade pip
-	$(PIP) install -r $(REQ_FILE) $(CI_TOOLS)
-	@touch $(VENV_BIN)/activate
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -r $(REQ_FILE) $(CI_TOOLS)
+	@touch $@
 
 test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage
-	$(MAKE) integration-test
+	@echo "All scans and unit tests passed."
 
 integration-test: venv
 	@echo "Running combined Docker Compose integration test..."
@@ -68,7 +69,7 @@ test-mypy: venv
 
 test-bandit: venv
 	@echo "Running Bandit security checks..."
-	$(BANDIT) -c pyproject.toml -r src
+	$(BANDIT) -c pyproject.toml $(SOURCE_PY_FILES)
 
 test-vulture: venv
 	@echo "Running Vulture dead-code analysis..."

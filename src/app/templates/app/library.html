@@ -12,7 +12,11 @@
     <div class="container">
       <header class="hero">
         <div class="hero-heading">
-          <h1>GetOffline</h1>
+          <div class="hero-copy">
+            <p class="eyebrow">Your media library</p>
+            <h1>GetOffline</h1>
+            <p class="hero-description">Everything you save, ready when you are.</p>
+          </div>
           <div class="profile-controls" aria-label="User controls">
             <span class="profile-switch-form" aria-label="Signed in user">
               <span class="profile-avatar" aria-hidden="true">{{ profile_initial }}</span>
@@ -38,6 +42,7 @@
                 <path d="M12 3v11m0 0 4-4m-4 4-4-4" />
                 <path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3" />
               </svg>
+              <span class="toolbar-label">Transfer</span>
             </button>
           </form>
 
@@ -46,6 +51,7 @@
               <path d="M12 5v14" />
               <path d="M5 12h14" />
             </svg>
+            <span class="toolbar-label">Add link</span>
           </button>
 
           <button id="transcript-search-open" class="icon-button" type="button" title="Search transcripts" aria-label="Search transcripts">
@@ -53,6 +59,7 @@
               <circle cx="11" cy="11" r="6" />
               <path d="m16 16 4 4" />
             </svg>
+            <span class="toolbar-label">Search</span>
           </button>
 
           <a class="icon-button" href="{% url 'settings' %}" title="Settings" aria-label="Settings">
@@ -60,17 +67,25 @@
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
               <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.05a2 2 0 0 1-3.92 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.05-.04a2 2 0 0 1 0-3.92L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.05a2 2 0 0 1 3.92 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.03.38.23.73.6 1l.05.04a2 2 0 0 1 0 3.92L20 14c-.37.27-.57.62-.6 1Z" />
             </svg>
+            <span class="toolbar-label">Settings</span>
           </a>
 
-          <div class="library-filter-wrap" role="group" aria-label="Library filters">
-            <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
-            <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode" data-server-mode="{{ library_filter_mode|default:'unplayed' }}">
-              <option value="unplayed" {% if library_filter_mode == 'unplayed' %}selected{% endif %}>Unplayed</option>
-              <option value="played" {% if library_filter_mode == 'played' %}selected{% endif %}>Played</option>
-              <option value="favorites" {% if library_filter_mode == 'favorites' %}selected{% endif %}>Favorites</option>
-              <option value="all" {% if library_filter_mode == 'all' %}selected{% endif %}>All</option>
-            </select>
-            <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">×</button>
+          <div id="library-filter-wrap" class="library-filter-wrap" role="group" aria-label="Library filters">
+            <button id="library-filter-toggle" class="library-filter-toggle" type="button" title="Filter library" aria-label="Filter library" aria-controls="library-filter-fields" aria-expanded="false">
+              <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M4 5h16l-6.5 7v5l-3 2v-7L4 5Z" />
+              </svg>
+            </button>
+            <div id="library-filter-fields" class="library-filter-fields">
+              <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
+              <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode" data-server-mode="{{ library_filter_mode|default:'unplayed' }}">
+                <option value="unplayed" {% if library_filter_mode == 'unplayed' %}selected{% endif %}>Unplayed</option>
+                <option value="played" {% if library_filter_mode == 'played' %}selected{% endif %}>Played</option>
+                <option value="favorites" {% if library_filter_mode == 'favorites' %}selected{% endif %}>Favorites</option>
+                <option value="all" {% if library_filter_mode == 'all' %}selected{% endif %}>All</option>
+              </select>
+              <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">×</button>
+            </div>
           </div>
 
           <form id="batch-form" method="post" action="{% url 'batch_update' %}" class="batch-toolbar-form">
@@ -143,11 +158,11 @@
                 data-subtitle-url="{% if item.has_subtitles %}{% url 'subtitle' item.id %}{% endif %}"
                 data-resume-seconds="{{ item.last_position_seconds|default:0 }}"
               >
-                <td class="channel-col" title="{{ item.source_name|default:'' }}">
+                <td class="channel-col" data-label="Channel" title="{{ item.source_name|default:'' }}">
                   {{ item.source_name|default:item.source_type }}
                 </td>
 
-                <td class="episode-col">
+                <td class="episode-col" data-label="Episode">
                   <a
                     class="episode-link"
                     href="{% url 'player' item.id %}"
@@ -161,19 +176,19 @@
                   >{{ item.title|default:'Untitled' }}</a>
                 </td>
 
-                <td class="source-col">
+                <td class="source-col" data-label="Source">
                   <span class="pill status-new">{{ item.source_type|upper }}</span>
                 </td>
 
-                <td class="type-col">
+                <td class="type-col" data-label="Type">
                   <span class="pill">{{ item.display_type }}</span>
                 </td>
 
-                <td class="size-col">
+                <td class="size-col" data-label="Size">
                   {{ item.display_size }}
                 </td>
 
-                <td class="status-col">
+                <td class="status-col" data-label="Status">
                   <span class="pill {{ item.status_class }}">{{ item.status_label }}</span>
                 </td>
 
