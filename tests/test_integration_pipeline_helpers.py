@@ -18,13 +18,16 @@ class IntegrationPipelineHelperTests(unittest.TestCase):
                 self.assertIn("--scale", command)
                 self.assertIn(f"{service}=1", command)
 
-    def test_api_compose_command_expands_worker_defaults_in_container_shell(self):
+    def test_api_compose_command_uses_api_startup_entrypoint(self):
         compose = yaml.safe_load((pipeline.ROOT / "docker-compose.yml").read_text())
         command = compose["services"]["api"]["command"]
 
-        self.assertIn("sh -c", command)
-        self.assertIn("GETOFFLINE_API_GUNICORN_WORKERS:-3", command)
-        self.assertIn("GETOFFLINE_GUNICORN_TIMEOUT:-300", command)
+        self.assertEqual(command, "api-entrypoint.sh")
+        entrypoint = (pipeline.ROOT / "deploy/docker/api-entrypoint.sh").read_text()
+        self.assertIn("migrate --run-syncdb", entrypoint)
+        self.assertIn("sync_model_schema", entrypoint)
+        self.assertIn("GETOFFLINE_API_GUNICORN_WORKERS:-3", entrypoint)
+        self.assertIn("GETOFFLINE_GUNICORN_TIMEOUT:-300", entrypoint)
 
     def test_api_healthcheck_uses_public_health_endpoint(self):
         compose = yaml.safe_load((pipeline.ROOT / "docker-compose.yml").read_text())

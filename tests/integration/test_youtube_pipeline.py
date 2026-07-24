@@ -157,7 +157,12 @@ def _wait_for_service(deadline: float, url: str, name: str) -> None:
 
 
 def _wait_for_frontend(deadline: float, frontend_port: int) -> None:
-    _wait_for_service(deadline, f"http://127.0.0.1:{frontend_port}/", "frontend")
+    # The library is authenticated and intentionally returns a 401/redirect
+    # for anonymous requests. Probe the public login page so readiness checks
+    # do not create misleading authentication errors in the frontend logs.
+    _wait_for_service(
+        deadline, f"http://127.0.0.1:{frontend_port}/login/", "frontend"
+    )
 
 
 def _wait_for_api(deadline: float, api_port: int) -> None:
@@ -244,7 +249,12 @@ def _queue_download_job() -> int:
 def _make_downloads_host_writable(
     compose: list[str], compose_env: dict[str, str], *, force: bool = False
 ) -> None:
-    """Allow host cleanup to remove Docker-created download artifacts."""
+    """Allow host cleanup to remove Docker-created download artifacts.
+
+    The frontend is intentionally stateless and no longer mounts the downloads
+    directory. The API still mounts it, so use the API container for this
+    ownership/permission adjustment.
+    """
     project = str(compose_env.get("COMPOSE_PROJECT_NAME") or "")
     if not force and project in _WRITABLE_DOWNLOAD_STACKS:
         return
@@ -253,7 +263,7 @@ def _make_downloads_host_writable(
             *compose,
             "exec",
             "-T",
-            "frontend",
+            "api",
             "chmod",
             "-R",
             "a+rwX",
@@ -431,6 +441,7 @@ def main() -> int:
                 "GETOFFLINE_RABBITMQ_URL": (
                     f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
                 ),
+                "GETOFFLINE_DJANGO_ROLE": "api",
                 "DJANGO_SETTINGS_MODULE": "frontend.settings",
                 "PYTHONPATH": str(SRC),
             }

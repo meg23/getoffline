@@ -4,6 +4,8 @@ from . import views
 
 urlpatterns = [
     path("health", views.health, name="api_health"),
+    path("auth/login", views.login, name="api_login"),
+    path("auth/logout", views.logout, name="api_logout"),
     path("frontend/library", views.frontend_library, name="api_frontend_library"),
     path(
         "dashboard/active-pipeline-status",

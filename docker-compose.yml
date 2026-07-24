@@ -1,3 +1,34 @@
+x-common-env: &common-env
+  GETOFFLINE_DJANGO_DEBUG: "0"
+  GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-*}
+  GETOFFLINE_CSRF_TRUSTED_ORIGINS: ${GETOFFLINE_CSRF_TRUSTED_ORIGINS:-http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080}
+  GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
+
+x-runtime-env: &runtime-env
+  <<: *common-env
+  GETOFFLINE_DJANGO_ROLE: api
+  GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:-mysql}
+  GETOFFLINE_DB_PORT: ${GETOFFLINE_DB_PORT:-3306}
+  GETOFFLINE_DB_NAME: ${GETOFFLINE_DB_NAME:-getoffline}
+  GETOFFLINE_DB_USER: ${GETOFFLINE_DB_USER:-getoffline}
+  GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
+
+x-frontend-env: &frontend-env
+  <<: *common-env
+  GETOFFLINE_API_BASE_URL: ${GETOFFLINE_API_BASE_URL:-http://api:8000/api}
+
+x-api-env: &api-env
+  <<: *runtime-env
+  GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+  GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
+
+x-worker-env: &worker-env
+  <<: *runtime-env
+  GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+  GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
+  GETOFFLINE_YTDLP_MODULE: ${GETOFFLINE_YTDLP_MODULE:-yt_dlp}
+  GETOFFLINE_CPU_SCHEDULER_SLOTS: ${GETOFFLINE_CPU_SCHEDULER_SLOTS:-3}
+
 services:
   rabbitmq:
     image: rabbitmq:3.13
@@ -35,23 +66,7 @@ services:
       context: .
       dockerfile: deploy/docker/frontend.Dockerfile
     restart: unless-stopped
-    environment: &getoffline-env
-      GETOFFLINE_DJANGO_DEBUG: "0"
-      GETOFFLINE_DJANGO_ALLOWED_HOSTS: ${GETOFFLINE_DJANGO_ALLOWED_HOSTS:-*}
-      GETOFFLINE_CSRF_TRUSTED_ORIGINS: ${GETOFFLINE_CSRF_TRUSTED_ORIGINS:-http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080}
-      GETOFFLINE_DJANGO_SECRET_KEY: ${GETOFFLINE_DJANGO_SECRET_KEY:?set GETOFFLINE_DJANGO_SECRET_KEY}
-      GETOFFLINE_DB_HOST: ${GETOFFLINE_DB_HOST:-mysql}
-      GETOFFLINE_DB_PORT: ${GETOFFLINE_DB_PORT:-3306}
-      GETOFFLINE_DB_NAME: ${GETOFFLINE_DB_NAME:-getoffline}
-      GETOFFLINE_DB_USER: ${GETOFFLINE_DB_USER:-getoffline}
-      GETOFFLINE_DB_PASSWORD: ${GETOFFLINE_DB_PASSWORD:-getoffline}
-      GETOFFLINE_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
-      GETOFFLINE_RABBITMQ_EXCHANGE: ${GETOFFLINE_RABBITMQ_EXCHANGE:-getoffline}
-      GETOFFLINE_YTDLP_MODULE: ${GETOFFLINE_YTDLP_MODULE:-yt_dlp}
-      GETOFFLINE_CPU_SCHEDULER_SLOTS: ${GETOFFLINE_CPU_SCHEDULER_SLOTS:-3}
-      GETOFFLINE_API_BASE_URL: ${GETOFFLINE_API_BASE_URL:-http://api:8000/api}
-    volumes:
-      - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
+    environment: *frontend-env
     ports:
       - "${GETOFFLINE_FRONTEND_PUBLISHED_PORT:-8080}:80"
     healthcheck:
@@ -60,10 +75,6 @@ services:
       timeout: 5s
       retries: 20
     depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
       api:
         condition: service_healthy
 
@@ -72,12 +83,8 @@ services:
       context: .
       dockerfile: deploy/docker/frontend.Dockerfile
     restart: unless-stopped
-    environment: *getoffline-env
-    command: >
-      sh -c 'PYTHONPATH=/app/src exec gunicorn frontend.wsgi:application
-      --bind 0.0.0.0:8000
-      --workers "$${GETOFFLINE_API_GUNICORN_WORKERS:-3}"
-      --timeout "$${GETOFFLINE_GUNICORN_TIMEOUT:-300}"'
+    environment: *api-env
+    command: api-entrypoint.sh
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     ports:
@@ -98,7 +105,7 @@ services:
       context: .
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
-    environment: *getoffline-env
+    environment: *worker-env
     command: python -m workers updates
     depends_on:
       mysql:
@@ -114,7 +121,7 @@ services:
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
     cpus: 1.5
-    environment: *getoffline-env
+    environment: *worker-env
     command: python -m workers downloader-youtube
     deploy:
       replicas: 2
@@ -133,7 +140,7 @@ services:
       context: .
       dockerfile: deploy/docker/worker-download.Dockerfile
     restart: unless-stopped
-    environment: *getoffline-env
+    environment: *worker-env
     command: python -m workers downloader-podcast
     deploy:
       replicas: 2
@@ -153,7 +160,7 @@ services:
       dockerfile: deploy/docker/worker-ffmpeg.Dockerfile
     restart: unless-stopped
     cpus: 1.0
-    environment: *getoffline-env
+    environment: *worker-env
     command: python -m workers ffmpeg
     deploy:
       replicas: 3
@@ -173,7 +180,7 @@ services:
       dockerfile: deploy/docker/worker-transcripts.Dockerfile
     restart: unless-stopped
     cpus: 1.0
-    environment: *getoffline-env
+    environment: *worker-env
     command: sh -c "python -m workers transcripts --prefetch $${PREFETCH:-1}"
     deploy:
       replicas: 3
@@ -192,7 +199,7 @@ services:
       context: .
       dockerfile: deploy/docker/frontend.Dockerfile
     restart: unless-stopped
-    environment: *getoffline-env
+    environment: *worker-env
     command: python -m django run_scheduler --loop --install-defaults
     depends_on:
       mysql:
@@ -207,7 +214,7 @@ services:
       context: .
       dockerfile: deploy/docker/worker-base.Dockerfile
     restart: unless-stopped
-    environment: *getoffline-env
+    environment: *worker-env
     command: python -m workers cleanup
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
