@@ -402,7 +402,6 @@ def main() -> int:
         api_port = _free_tcp_port(reserved_ports)
         mysql_port = _free_tcp_port(reserved_ports)
         rabbitmq_port = _free_tcp_port(reserved_ports)
-        rabbitmq_management_port = _free_tcp_port(reserved_ports)
         project = f"getoffline-it-{uuid.uuid4().hex[:8]}"
         compose_env = os.environ.copy()
         compose_env.update(
@@ -414,9 +413,6 @@ def main() -> int:
                 "GETOFFLINE_API_PUBLISHED_PORT": str(api_port),
                 "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
                 "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
-                "GETOFFLINE_RABBITMQ_MANAGEMENT_PUBLISHED_PORT": str(
-                    rabbitmq_management_port
-                ),
                 "GETOFFLINE_DB_HOST": "mysql",
                 "GETOFFLINE_DB_PORT": "3306",
                 "GETOFFLINE_DB_NAME": "getoffline",
