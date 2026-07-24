@@ -145,7 +145,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 - `frontend` publishes host port `8080`, serves static files with bundled nginx, and proxies dynamic requests to the Django app running under Gunicorn WSGI in the same container.
   It preserves the original `Host` header, including the port, so Django CSRF origin checks match browser requests.
 - `mysql` runs MySQL 8.4, initializes the app database/user from `GETOFFLINE_DB_*`, and persists database files in the `mysql-data` named volume.
-- `rabbitmq` runs the broker and exposes the management UI on host port `15672`; broker state persists in `rabbitmq-data`.
+- `rabbitmq` runs the broker without the management UI; broker state persists in `rabbitmq-data`.
 - `worker-updates` discovers new episodes and publishes download jobs.
 - `worker-downloader-youtube` consumes YouTube/manual URL download jobs one at a time, and `worker-downloader-podcast` consumes podcast download jobs.
 - YouTube and podcast downloader workers run FFmpeg post-processing inline before publishing transcript work.
