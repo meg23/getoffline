@@ -1052,6 +1052,9 @@ class SharedDjangoModelTests(TestCase):
             idempotency_key=f"download_single:default:{download.id}",
         )
         self.assertEqual(replacement.payload["redownload"], True)
+        self.assertEqual(replacement.payload["item_uid"], download.item_uid)
+        self.assertEqual(replacement.payload["item_id"], download.item_id)
+        self.assertEqual(replacement.payload["title"], download.title)
         publish.assert_called_once_with(
             {
                 "job_id": replacement.id,
