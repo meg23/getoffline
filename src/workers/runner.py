@@ -20,18 +20,18 @@ from models.domain import SourceType
 from models.domain import parse_str_enum
 from workers.logger import get_logger
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 django.setup()
 
-from app.queue import job_priority  # noqa: E402
-from app.routing import CLEANUP_QUEUE  # noqa: E402
-from app.routing import FFMPEG_QUEUE
-from app.routing import PODCAST_DOWNLOAD_QUEUE
-from app.routing import SERIAL_EPISODE_CHECK_QUEUE
-from app.routing import TRANSCRIPT_QUEUE
-from app.routing import YOUTUBE_DOWNLOAD_QUEUE
-from app.routing import queue_arguments
-from app.routing import queue_name
+from frontend.queue import job_priority  # noqa: E402
+from frontend.routing import CLEANUP_QUEUE  # noqa: E402
+from frontend.routing import FFMPEG_QUEUE
+from frontend.routing import PODCAST_DOWNLOAD_QUEUE
+from frontend.routing import SERIAL_EPISODE_CHECK_QUEUE
+from frontend.routing import TRANSCRIPT_QUEUE
+from frontend.routing import YOUTUBE_DOWNLOAD_QUEUE
+from frontend.routing import queue_arguments
+from frontend.routing import queue_name
 from models.jobs import claim_job  # noqa: E402
 from models.jobs import finish_job
 from models.models import Job  # noqa: E402

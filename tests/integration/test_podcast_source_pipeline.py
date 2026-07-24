@@ -34,7 +34,7 @@ DEFAULT_TIMEOUT_SECONDS = 1800
 
 
 def _queue_episode_check() -> int:
-    from app.queue import publish_job
+    from frontend.queue import publish_job
     from models.domain import SourceType
     from models.jobs import create_job
     from models.models import ProfileConfigValue, SourceConfig
@@ -359,7 +359,7 @@ def main() -> int:
                 "GETOFFLINE_RABBITMQ_URL": (
                     f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
                 ),
-                "DJANGO_SETTINGS_MODULE": "app.settings",
+                "DJANGO_SETTINGS_MODULE": "frontend.settings",
                 "PYTHONPATH": str(pipeline.SRC),
             }
         )

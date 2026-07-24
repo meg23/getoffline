@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 
-from app import settings as app_settings
+from frontend import settings as app_settings
 from django.test import Client, SimpleTestCase, override_settings
 
 

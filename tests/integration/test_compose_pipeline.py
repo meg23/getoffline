@@ -68,7 +68,7 @@ def main() -> int:
                 "GETOFFLINE_RABBITMQ_URL": (
                     f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
                 ),
-                "DJANGO_SETTINGS_MODULE": "app.settings",
+                "DJANGO_SETTINGS_MODULE": "frontend.settings",
                 "PYTHONPATH": str(youtube.SRC),
             }
         )

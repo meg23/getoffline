@@ -2,7 +2,7 @@
 
 This split deployment uses three simple Python packages:
 
-- `src/app`: the Django frontend. It renders pages, reads from MySQL, and queues jobs.
+- `src/frontend`: the Django frontend. It renders pages, reads from MySQL, and queues jobs.
 - `src/models`: shared Django ORM models and tiny job helpers used by both app and workers.
 - `src/workers`: queue-specific Python workers that consume RabbitMQ messages and update MySQL.
 - `ScheduledJob` rows in MySQL define recurring work; the scheduler process enqueues due jobs.
@@ -14,7 +14,7 @@ worker process connect to the same MySQL database using Django's ORM.
 
 The split Django app uses `PyMySQL` as Django's MySQL driver shim, so it does not require the native `mysqlclient` package or local `pkg-config`/MariaDB client headers.
 
-Both the app and workers use `app.settings`, so they share these variables:
+Both the app and workers use `frontend.settings`, so they share these variables:
 
 ```bash
 export GETOFFLINE_DB_NAME=getoffline
@@ -50,7 +50,7 @@ This target runs Django migrations and then `sync_model_schema`, which adds miss
 ## Running the app
 
 ```bash
-PYTHONPATH=src python -m app
+PYTHONPATH=src python -m frontend
 ```
 
 Run the app in Django debug mode with:
@@ -59,7 +59,7 @@ Run the app in Django debug mode with:
 make run-app-debug
 ```
 
-The debug target starts `python -m app` with `GETOFFLINE_DJANGO_DEBUG=1`.
+The debug target starts `python -m frontend` with `GETOFFLINE_DJANGO_DEBUG=1`.
 
 The Django frontend covers the core library screens and actions:
 

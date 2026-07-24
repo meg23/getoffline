@@ -74,7 +74,7 @@ services:
     restart: unless-stopped
     environment: *getoffline-env
     command: >
-      sh -c 'exec gunicorn app.wsgi:application
+      sh -c 'PYTHONPATH=/app/src exec gunicorn frontend.wsgi:application
       --bind 0.0.0.0:8000
       --workers "$${GETOFFLINE_API_GUNICORN_WORKERS:-3}"
       --timeout "$${GETOFFLINE_GUNICORN_TIMEOUT:-300}"'

@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 
 import django
 
@@ -19,7 +19,7 @@ django.setup()
 
 from django.http import Http404
 
-from app import views
+from frontend import views
 from models.domain import DownloadStatus
 
 
@@ -75,7 +75,7 @@ class AppViewHelperTests(unittest.TestCase):
                 file_path=str(absolute_media),
             )
 
-            with patch("app.views._profile_output_root", return_value=root):
+            with patch("frontend.views._profile_output_root", return_value=root):
                 self.assertEqual(views._resolve_media_path(item), relative_media)
 
     def test_resolve_subtitle_path_rejects_paths_outside_profile_root(self):
@@ -94,7 +94,7 @@ class AppViewHelperTests(unittest.TestCase):
                 subtitle_path_relative="",
             )
 
-            with patch("app.views._profile_output_root", return_value=root):
+            with patch("frontend.views._profile_output_root", return_value=root):
                 self.assertIsNone(views._resolve_subtitle_path(item))
 
     def test_safe_path_rejects_missing_or_directory_paths(self):

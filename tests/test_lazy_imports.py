@@ -31,7 +31,7 @@ class LazyImportTests(unittest.TestCase):
             import sys
 
             sys.path.insert(0, os.path.join(os.getcwd(), "src"))
-            os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+            os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
             import workers.runner  # noqa: F401
             print("workers.transcription" in sys.modules)
             """
