@@ -12,14 +12,14 @@
       <section class="login-card" aria-labelledby="login-title">
         <h1 id="login-title">GetOffline</h1>
         <p class="login-copy">Sign in with your username and password.</p>
-        {% if form.errors %}<p class="login-error" role="alert">Invalid username or password.</p>{% endif %}
+        {% if login_error %}<p class="login-error" role="alert">Invalid username or password.</p>{% endif %}
         <form class="login-form" method="post" action="{% url 'login' %}">
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ next }}" />
           <label for="id_username">Username</label>
-          {{ form.username }}
+          <input id="id_username" name="username" type="text" autocomplete="username" required />
           <label for="id_password">Password</label>
-          {{ form.password }}
+          <input id="id_password" name="password" type="password" autocomplete="current-password" required />
           <button class="login-submit" type="submit">Sign in</button>
         </form>
       </section>

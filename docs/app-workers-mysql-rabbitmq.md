@@ -2,19 +2,21 @@
 
 This split deployment uses three simple Python packages:
 
-- `src/frontend`: the Django frontend. It renders pages, reads from MySQL, and queues jobs.
+- `src/frontend`: the stateless Django frontend. It renders pages and proxies authentication and data requests to the API.
+- `src/api`: the API service. It owns authentication, sessions, database access, and application actions.
 - `src/models`: shared Django ORM models and tiny job helpers used by both app and workers.
 - `src/workers`: queue-specific Python workers that consume RabbitMQ messages and update MySQL.
 - `ScheduledJob` rows in MySQL define recurring work; the scheduler process enqueues due jobs.
 
-The browser never connects to MySQL or RabbitMQ directly. The Django app and each
-worker process connect to the same MySQL database using Django's ORM.
+The browser never connects to MySQL or RabbitMQ directly. Only the API and worker
+processes connect to MySQL using Django's ORM; the frontend has no database
+credentials or database-backed session middleware.
 
 ## MySQL settings
 
 The split Django app uses `PyMySQL` as Django's MySQL driver shim, so it does not require the native `mysqlclient` package or local `pkg-config`/MariaDB client headers.
 
-Both the app and workers use `frontend.settings`, so they share these variables:
+The API and workers use `frontend.settings` with the API runtime role, so they share these variables:
 
 ```bash
 export GETOFFLINE_DB_NAME=getoffline
@@ -138,7 +140,7 @@ The job payload and status live in MySQL.
 
 The repository includes `docker-compose.yml` for running the frontend with bundled nginx, RabbitMQ, workers, and a persistent MySQL database. It builds separate worker images so each runtime installs only the dependency set it needs:
 
-- `frontend` and `migrate` build from `deploy/docker/frontend.Dockerfile`, an Alpine image with Django, Gunicorn, and nginx for web/database/queue dependencies.
+- `frontend` and `api` build from `deploy/docker/frontend.Dockerfile`; the frontend image is a stateless nginx/Gunicorn proxy, while the API image runs migrations and owns web/database/queue dependencies.
 - updates/downloader workers build from `deploy/docker/worker-download.Dockerfile`, an Alpine image with yt-dlp/feed parsing plus ffmpeg and deno only where download/discovery work needs them.
 - FFmpeg workers build from `deploy/docker/worker-ffmpeg.Dockerfile`, an Alpine image with only the shared worker dependencies plus the FFmpeg package. Transcript workers build from `deploy/docker/worker-transcripts.Dockerfile`, a Debian slim image that installs faster-whisper and CTranslate2 from normal Python wheels to avoid Alpine/native-wheel compatibility issues; deferred explicit-content screening after FFmpeg conversion is queued back to the transcript worker so the FFmpeg image does not need Whisper.
 - transfer and cleanup workers build from `deploy/docker/worker-base.Dockerfile`, a smaller Alpine worker image with only Django/database/queue dependencies.
@@ -151,7 +153,7 @@ The repository includes `docker-compose.yml` for running the frontend with bundl
 - YouTube and podcast downloader workers run FFmpeg post-processing inline before publishing transcript work.
 - `worker-transcripts` and `worker-cleanup` run the parallel/background processing queues.
 - `scheduler` polls the database for due `scheduled_jobs` rows and publishes durable RabbitMQ jobs.
-- `migrate` is a one-shot service that runs automatically before the frontend and workers start, applying Django schema updates to the configured MySQL database.
+- `api` runs Django migrations and `sync_model_schema` from `deploy/docker/api-entrypoint.sh` before starting Gunicorn.
 
 Example startup:
 
@@ -168,7 +170,7 @@ export GETOFFLINE_CSRF_TRUSTED_ORIGINS='http://localhost:8080'
 docker compose up --build -d
 ```
 
-On startup, `frontend` and every worker wait for the one-shot `migrate` service to finish successfully, so tables such as `downloads` are created before the web UI serves requests. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript workers can be scaled independently:
+On startup, the API waits for MySQL, runs migrations, and becomes healthy before the frontend starts. The default Compose database host is the `mysql` service. To use an external MySQL server instead, set `GETOFFLINE_DB_HOST` and keep the service credentials aligned with that server. Scale only the workers that are safe to run in parallel. Keep `worker-downloader` at one replica so YouTube downloads remain serialized, but transcript workers can be scaled independently:
 
 ```bash
 docker compose up -d --scale worker-transcripts=4

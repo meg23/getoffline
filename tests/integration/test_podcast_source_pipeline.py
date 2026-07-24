@@ -359,6 +359,7 @@ def main() -> int:
                 "GETOFFLINE_RABBITMQ_URL": (
                     f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
                 ),
+                "GETOFFLINE_DJANGO_ROLE": "api",
                 "DJANGO_SETTINGS_MODULE": "frontend.settings",
                 "PYTHONPATH": str(pipeline.SRC),
             }

@@ -1,17 +1,13 @@
-from django.contrib.auth import views as auth_views
+import os
+
 from django.urls import include
 from django.urls import path
 
 from . import views
 
 urlpatterns = [
-    path(
-        "login/",
-        auth_views.LoginView.as_view(template_name="registration/login.html"),
-        name="login",
-    ),
-    path("logout/", auth_views.LogoutView.as_view(), name="logout"),
-    path("api/", include("api.api.urls")),
+    path("login/", views.login, name="login"),
+    path("logout/", views.logout, name="logout"),
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
     path(
@@ -60,3 +56,9 @@ urlpatterns = [
         name="delete_file",
     ),
 ]
+
+if os.getenv("GETOFFLINE_DJANGO_ROLE", "frontend").strip().lower() in {
+    "api",
+    "worker",
+} or os.getenv("GETOFFLINE_TEST_IN_MEMORY_DB"):
+    urlpatterns.insert(2, path("api/", include("api.api.urls")))

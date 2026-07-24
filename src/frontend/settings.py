@@ -2,11 +2,26 @@ import os
 from typing import Any
 from pathlib import Path
 
-import pymysql
-
-pymysql.install_as_MySQLdb()
-
 BASE_DIR = Path(__file__).resolve().parent
+USE_IN_MEMORY_TEST_DB = os.getenv(
+    "GETOFFLINE_TEST_IN_MEMORY_DB", "0"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+API_RUNTIME = os.getenv("GETOFFLINE_DJANGO_ROLE", "frontend").strip().lower() in {
+    "api",
+    "worker",
+}
+USE_DATABASE_AUTH = USE_IN_MEMORY_TEST_DB or API_RUNTIME
+
+if USE_DATABASE_AUTH:
+    import pymysql
+
+    pymysql.install_as_MySQLdb()
+
 SECRET_KEY = os.getenv(
     "GETOFFLINE_DJANGO_SECRET_KEY",
     "getoffline-dev-secret",
@@ -86,45 +101,47 @@ if STATIC_MANIFEST_ENABLED:
     }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
-INSTALLED_APPS = [
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.staticfiles",
-    "models.apps.SharedModelsConfig",
-    "frontend",
-]
+
+INSTALLED_APPS = ["django.contrib.staticfiles", "frontend"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "frontend.middleware.AllowPrivateNetworkHostMiddleware",
     "frontend.middleware.SecurityHeadersMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
 ]
+if USE_DATABASE_AUTH:
+    INSTALLED_APPS = [
+        "django.contrib.auth",
+        "django.contrib.contenttypes",
+        "django.contrib.sessions",
+        "django.contrib.staticfiles",
+        "models.apps.SharedModelsConfig",
+        "frontend",
+    ]
+    MIDDLEWARE[4:4] = [
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+    ]
+TEMPLATE_CONTEXT_PROCESSORS = [
+    "django.template.context_processors.request",
+]
+if USE_DATABASE_AUTH:
+    TEMPLATE_CONTEXT_PROCESSORS.append(
+        "django.contrib.auth.context_processors.auth"
+    )
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-            ]
+            "context_processors": TEMPLATE_CONTEXT_PROCESSORS
         },
     }
 ]
-USE_IN_MEMORY_TEST_DB = os.getenv(
-    "GETOFFLINE_TEST_IN_MEMORY_DB", "0"
-).strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
 
 DATABASES: dict[str, dict[str, Any]]
 if USE_IN_MEMORY_TEST_DB:
@@ -134,7 +151,7 @@ if USE_IN_MEMORY_TEST_DB:
             "NAME": ":memory:",
         }
     }
-else:
+elif API_RUNTIME:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.mysql",
@@ -146,6 +163,8 @@ else:
             "OPTIONS": {"charset": "utf8mb4"},
         }
     }
+else:
+    DATABASES = {"default": {"ENGINE": "django.db.backends.dummy"}}
 RABBITMQ_URL = os.getenv(
     "GETOFFLINE_RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672/%2F"
 )

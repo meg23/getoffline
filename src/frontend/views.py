@@ -6,17 +6,26 @@ route names. Dashboard data and actions are owned by the API service.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import wraps
 from http.cookies import SimpleCookie
 import json
 import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import quote
 
-from django.contrib.auth.decorators import login_required
-from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseRedirect,
+    StreamingHttpResponse,
+)
 from django.shortcuts import render
 from django.test import Client as DjangoClient
+from django.urls import reverse
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
 
@@ -198,6 +207,35 @@ def _response_snippet(content: bytes) -> str:
     return " ".join(content[:500].decode("utf-8", errors="replace").split())
 
 
+class _APIUnauthorized(Exception):
+    """Raised when a protected API request has no valid API session."""
+
+
+def _login_redirect(request: HttpRequest) -> HttpResponse:
+    next_url = quote(request.get_full_path(), safe="/")
+    return HttpResponseRedirect(f"{reverse('login')}?next={next_url}")
+
+
+def frontend_login_required(
+    view_func: Callable[..., HttpResponse],
+) -> Callable[..., HttpResponse]:
+    """Require an API-owned session without touching a frontend database."""
+
+    @wraps(view_func)
+    def wrapper(
+        request: HttpRequest, *args: object, **kwargs: object
+    ) -> HttpResponse:
+        try:
+            response = view_func(request, *args, **kwargs)
+        except _APIUnauthorized:
+            return _login_redirect(request)
+        if response.status_code == 401:
+            return _login_redirect(request)
+        return response
+
+    return wrapper
+
+
 def _api_proxy(
     request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
 ) -> HttpResponse:
@@ -215,7 +253,8 @@ def _api_proxy(
         headers=_request_headers(request),
     )
     if response.status_code >= 400:
-        log.warning(
+        log_method = log.debug if response.status_code == 401 else log.warning
+        log_method(
             "API proxy returned error method=%s frontend_path=%s target=%s "
             "status=%s host=%s body=%r",
             request.method,
@@ -232,6 +271,30 @@ def _api_proxy(
         cookies=response.cookies,
         streaming=response.streaming,
     )
+
+
+def login(request: HttpRequest) -> HttpResponse:
+    if request.method == "GET":
+        return render(
+            request,
+            "registration/login.html",
+            {"next": request.GET.get("next") or "/"},
+        )
+    response = _api_proxy(request, "api_login")
+    if response.status_code == 401:
+        return render(
+            request,
+            "registration/login.html",
+            {
+                "next": request.POST.get("next") or "/",
+                "login_error": True,
+            },
+        )
+    return response
+
+
+def logout(request: HttpRequest) -> HttpResponse:
+    return _api_proxy(request, "api_logout")
 
 
 def _upstream_response(
@@ -263,6 +326,8 @@ def _api_get_json(
     request: HttpRequest, name: str, *args, query: dict[str, str] | None = None
 ) -> dict[str, object]:
     response = _api_proxy(request, name, *args, query=query)
+    if response.status_code == 401:
+        raise _APIUnauthorized
     if response.status_code == 404:
         raise Http404("API resource unavailable")
     if response.status_code >= 400:
@@ -270,7 +335,7 @@ def _api_get_json(
     return json.loads(response.content.decode("utf-8"))
 
 
-@login_required
+@frontend_login_required
 def library(request: HttpRequest) -> HttpResponse:
     payload = _api_get_json(
         request, "api_frontend_library", query={"filter": request.GET.get("filter", "")}
@@ -282,7 +347,7 @@ def library(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@frontend_login_required
 def jobs(request: HttpRequest) -> HttpResponse:
     payload = _api_get_json(request, "api_frontend_jobs")
     return render(
@@ -295,7 +360,7 @@ def jobs(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@frontend_login_required
 def player(request: HttpRequest, download_id: int) -> HttpResponse:
     payload = _api_get_json(
         request,
@@ -316,32 +381,32 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
     )
 
 
-@login_required
+@frontend_login_required
 def settings_page(request: HttpRequest) -> HttpResponse:
     return _api_proxy(request, "api_frontend_settings")
 
 
-@login_required
+@frontend_login_required
 def media(request: HttpRequest, download_id: int) -> HttpResponse:
     return _api_proxy(request, "api_stream", download_id)
 
 
-@login_required
+@frontend_login_required
 def subtitle(request: HttpRequest, download_id: int) -> HttpResponse:
     return _api_proxy(request, "api_subtitle", download_id)
 
 
-@login_required
+@frontend_login_required
 def active_pipeline_status(request: HttpRequest) -> HttpResponse:
     return _api_proxy(request, "api_dashboard_active_pipeline_status")
 
 
-@login_required
+@frontend_login_required
 def enqueue_job(request: HttpRequest) -> HttpResponse:
     return _api_proxy(request, "api_dashboard_enqueue_job")
 
 
-@login_required
+@frontend_login_required
 def worker_message_status(request: HttpRequest) -> HttpResponse:
     return _api_proxy(
         request,
@@ -353,12 +418,12 @@ def worker_message_status(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@frontend_login_required
 def batch_update(request: HttpRequest) -> HttpResponse:
     return _api_proxy(request, "api_dashboard_batch_update")
 
 
-@login_required
+@frontend_login_required
 def transcript_search(request: HttpRequest) -> HttpResponse:
     return _api_proxy(
         request,
@@ -367,12 +432,12 @@ def transcript_search(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@frontend_login_required
 def manual_upload(request: HttpRequest) -> HttpResponse:
     return _api_proxy(request, "api_dashboard_manual_upload")
 
 
-@login_required
+@frontend_login_required
 def edit_metadata(request: HttpRequest) -> HttpResponse:
     return _api_proxy(request, "api_dashboard_edit_metadata")
 
@@ -381,58 +446,58 @@ def _post_action(name: str, request: HttpRequest, *args) -> HttpResponse:
     return _api_proxy(request, name, *args)
 
 
-mark_played = login_required(
+mark_played = frontend_login_required(
     lambda request, download_id: _post_action(
         "api_dashboard_mark_played", request, download_id
     )
 )
-mark_unplayed = login_required(
+mark_unplayed = frontend_login_required(
     lambda request, download_id: _post_action(
         "api_dashboard_mark_unplayed", request, download_id
     )
 )
-favorite = login_required(
+favorite = frontend_login_required(
     lambda request, download_id: _post_action(
         "api_dashboard_favorite", request, download_id
     )
 )
-unfavorite = login_required(
+unfavorite = frontend_login_required(
     lambda request, download_id: _post_action(
         "api_dashboard_unfavorite", request, download_id
     )
 )
-save_position = login_required(
+save_position = frontend_login_required(
     lambda request, download_id: _post_action(
         "api_dashboard_save_position", request, download_id
     )
 )
-delete_file = login_required(
+delete_file = frontend_login_required(
     lambda request, download_id: _post_action(
         "api_dashboard_delete_file", request, download_id
     )
 )
-save_config = login_required(
+save_config = frontend_login_required(
     lambda request: _post_action("api_settings_save_config", request)
 )
-add_source = login_required(
+add_source = frontend_login_required(
     lambda request: _post_action("api_settings_add_source", request)
 )
-save_sources = login_required(
+save_sources = frontend_login_required(
     lambda request, source_type: _post_action(
         "api_settings_save_sources", request, source_type
     )
 )
-update_source = login_required(
+update_source = frontend_login_required(
     lambda request, source_id: _post_action(
         "api_settings_update_source", request, source_id
     )
 )
-toggle_source = login_required(
+toggle_source = frontend_login_required(
     lambda request, source_id: _post_action(
         "api_settings_toggle_source", request, source_id
     )
 )
-delete_source = login_required(
+delete_source = frontend_login_required(
     lambda request, source_id: _post_action(
         "api_settings_delete_source", request, source_id
     )

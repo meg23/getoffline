@@ -862,6 +862,24 @@ class SharedDjangoModelTests(TestCase):
         download.refresh_from_db()
         self.assertAlmostEqual(download.last_position_seconds, 7.0, places=2)
 
+    def test_frontend_login_is_owned_by_api_session(self):
+        client = DjangoClient(enforce_csrf_checks=True)
+        User.objects.create_user(username="api-login", password="pass")
+        login_page = client.get("/login/")
+        self.assertEqual(login_page.status_code, 200)
+        csrf_token = client.cookies["csrftoken"].value
+
+        response = client.post(
+            "/login/",
+            {"username": "api-login", "password": "pass", "next": "/"},
+            HTTP_X_CSRFTOKEN=csrf_token,
+            follow=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/")
+        self.assertIn("sessionid", response.cookies)
+
     def test_enqueue_job_ajax_proxy_preserves_json_headers(self):
         client = Client()
 

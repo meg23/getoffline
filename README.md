@@ -22,7 +22,7 @@ export GETOFFLINE_DJANGO_SECRET_KEY="replace-with-a-long-random-secret"
 docker compose up --build -d
 ```
 
-The frontend automatically applies database migrations and serves the app at [http://127.0.0.1:8080](http://127.0.0.1:8080). Create the first user from the API container:
+The API automatically applies database migrations and serves the application backend while the frontend serves the app at [http://127.0.0.1:8080](http://127.0.0.1:8080). Create the first user from the API container:
 
 ```bash
 docker compose exec api python -m django create_user alice --password 'change-this-password'

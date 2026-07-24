@@ -47,11 +47,12 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
 
 COPY deploy/nginx/default.conf /etc/nginx/http.d/default.conf
 COPY deploy/docker/frontend-entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
+COPY deploy/docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 COPY src ./src
 COPY --from=static /app/staticfiles ./staticfiles
-RUN python -c "import frontend; import api.api" \
+RUN GETOFFLINE_DJANGO_ROLE=api python -c "import frontend; import api.api" \
     && python -m compileall -q /app/src \
-    && chmod +x /usr/local/bin/frontend-entrypoint.sh
+    && chmod +x /usr/local/bin/frontend-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 
 EXPOSE 80
 CMD ["frontend-entrypoint.sh"]

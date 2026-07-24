@@ -11,6 +11,37 @@ import urllib.parse
 import urllib.request
 
 
+_API_ROUTE_PATHS = {
+    "api_login": "/api/auth/login",
+    "api_logout": "/api/auth/logout",
+    "api_frontend_library": "/api/frontend/library",
+    "api_frontend_jobs": "/api/frontend/jobs",
+    "api_frontend_player": "/api/frontend/player/{0}",
+    "api_frontend_settings": "/api/frontend/settings",
+    "api_dashboard_active_pipeline_status": "/api/dashboard/active-pipeline-status",
+    "api_dashboard_enqueue_job": "/api/dashboard/enqueue-job",
+    "api_dashboard_worker_message_status": "/api/dashboard/worker-message-status",
+    "api_dashboard_batch_update": "/api/dashboard/batch-update",
+    "api_dashboard_transcript_search": "/api/dashboard/transcript-search",
+    "api_dashboard_manual_upload": "/api/dashboard/manual-upload",
+    "api_dashboard_edit_metadata": "/api/dashboard/edit-metadata",
+    "api_dashboard_mark_played": "/api/dashboard/downloads/{0}/played",
+    "api_dashboard_mark_unplayed": "/api/dashboard/downloads/{0}/unplayed",
+    "api_dashboard_favorite": "/api/dashboard/downloads/{0}/favorite",
+    "api_dashboard_unfavorite": "/api/dashboard/downloads/{0}/unfavorite",
+    "api_dashboard_save_position": "/api/dashboard/downloads/{0}/position",
+    "api_dashboard_delete_file": "/api/dashboard/downloads/{0}/delete-file",
+    "api_settings_save_config": "/api/settings/save",
+    "api_settings_add_source": "/api/settings/sources/add",
+    "api_settings_save_sources": "/api/settings/sources/{0}/save",
+    "api_settings_update_source": "/api/settings/sources/{0}/update",
+    "api_settings_toggle_source": "/api/settings/sources/{0}/toggle",
+    "api_settings_delete_source": "/api/settings/sources/{0}/delete",
+    "api_stream": "/api/stream/{0}",
+    "api_subtitle": "/api/subtitle/{0}",
+}
+
+
 @dataclass(frozen=True)
 class Response:
     """Minimal response object shared by SDK transports."""
@@ -151,9 +182,15 @@ def _django_path(target: str, args: tuple[object, ...], api_prefix: str) -> str:
 
 
 def _reverse_route(target: str, args: tuple[object, ...]) -> str:
-    from django.urls import reverse
+    from django.urls import NoReverseMatch, reverse
 
-    return str(reverse(target, args=args))
+    try:
+        return str(reverse(target, args=args))
+    except NoReverseMatch:
+        path_template = _API_ROUTE_PATHS.get(target)
+        if path_template is None:
+            raise
+        return path_template.format(*(str(arg).strip("/") for arg in args))
 
 
 def _django_response_content(response: object) -> bytes:

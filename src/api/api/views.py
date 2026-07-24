@@ -6,9 +6,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
 from api.api.auth import api_login_required
@@ -32,6 +34,38 @@ from api.streaming.media import (
 from models.jobs import create_job
 from models.models import Download, Job, SourceConfig
 from frontend.queue import publish_job
+
+
+def _safe_login_redirect(request: HttpRequest) -> str:
+    next_url = str(request.POST.get("next") or "/")
+    if not url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return "/"
+    return next_url
+
+
+@require_POST
+def login(request: HttpRequest) -> HttpResponse:
+    username = str(request.POST.get("username") or "").strip()
+    password = str(request.POST.get("password") or "")
+    user = authenticate(request, username=username, password=password)
+    if user is None or not user.is_active:
+        return JsonResponse(
+            {"ok": False, "error": "Invalid username or password."}, status=401
+        )
+    auth_login(request, user)
+    get_token(request)
+    return HttpResponseRedirect(_safe_login_redirect(request))
+
+
+@api_login_required
+@require_POST
+def logout(request: HttpRequest) -> HttpResponseRedirect:
+    auth_logout(request)
+    return HttpResponseRedirect("/login/")
 
 
 def _json_body(request: HttpRequest) -> dict[str, object]:
