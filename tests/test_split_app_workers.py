@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 
 import django  # noqa: E402
 from django.apps import apps  # noqa: E402
@@ -42,15 +42,15 @@ def _clear_django_test_data():
 from models.domain import DownloadStatus
 from models.domain import JobStatus
 from models.domain import SourceType
-from app.queue import job_priority  # noqa: E402
-from app.routing import PODCAST_DOWNLOAD_QUEUE
-from app.routing import TRANSCRIPT_QUEUE
-from app.routing import YOUTUBE_DOWNLOAD_QUEUE
-from app.routing import queue_arguments
-from app.routing import queue_name
+from frontend.queue import job_priority  # noqa: E402
+from frontend.routing import PODCAST_DOWNLOAD_QUEUE
+from frontend.routing import TRANSCRIPT_QUEUE
+from frontend.routing import YOUTUBE_DOWNLOAD_QUEUE
+from frontend.routing import queue_arguments
+from frontend.routing import queue_name
 
-from app.views import _sync_update_downloads_schedule
-from app.views import _write_manual_upload
+from frontend.views import _sync_update_downloads_schedule
+from frontend.views import _write_manual_upload
 from models.jobs import claim_job  # noqa: E402
 from models.jobs import create_job
 from models.jobs import finish_job
@@ -280,7 +280,7 @@ class SharedDjangoModelTests(TestCase):
     def test_json_enqueue_rejects_removed_transfer_job(self):
         client = Client()
 
-        with patch("app.views.publish_job"):
+        with patch("frontend.views.publish_job"):
             response = client.post(
                 "/jobs/enqueue/",
                 {"job_type": "transfer_media"},
@@ -346,7 +346,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertTrue(client.login(username="default", password="pass"))
         with (
             tempfile.TemporaryDirectory() as tmpdir,
-            patch("app.views.publish_job") as publish,
+            patch("frontend.views.publish_job") as publish,
         ):
             ProfileConfigValue.objects.create(
                 profile_id="default", key="output_root", value=tmpdir
@@ -571,7 +571,7 @@ class SharedDjangoModelTests(TestCase):
                 subtitle_path=str(media.with_suffix(".srt")),
             )
 
-            with patch("app.views.publish_job"):
+            with patch("frontend.views.publish_job"):
                 response = client.get("/")
 
         self.assertEqual(response.status_code, 200)
@@ -697,13 +697,13 @@ class SharedDjangoModelTests(TestCase):
                 last_position_seconds=42.5,
             )
 
-            with patch("app.views.publish_job"):
+            with patch("frontend.views.publish_job"):
                 response = client.get(f"/play/{download.id}/")
 
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
         player_script = (
-            Path(__file__).parents[1] / "src/app/static/app/player.js"
+            Path(__file__).parents[1] / "src/frontend/static/app/player.js"
         ).read_text(encoding="utf-8")
         self.assertNotIn('id="subtitle-track"', body)
         self.assertIn(f"/media/{download.id}/#t=42.500", body)
@@ -821,7 +821,7 @@ class SharedDjangoModelTests(TestCase):
             last_position_seconds=33.25,
         )
 
-        with patch("app.views.publish_job"):
+        with patch("frontend.views.publish_job"):
             response = client.get("/?filter=all")
 
         self.assertEqual(response.status_code, 200)
@@ -865,7 +865,7 @@ class SharedDjangoModelTests(TestCase):
     def test_enqueue_job_ajax_proxy_preserves_json_headers(self):
         client = Client()
 
-        with patch("app.views.publish_job"):
+        with patch("frontend.views.publish_job"):
             response = client.post(
                 "/jobs/enqueue/",
                 {"job_type": "update_downloads", "next": "/"},
@@ -880,14 +880,14 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("status_url", payload)
 
     def test_quick_add_form_returns_to_library_after_queueing_download(self):
-        template = Path("src/app/templates/app/library.html").read_text()
+        template = Path("src/frontend/templates/app/library.html").read_text()
 
         self.assertIn('name="next" value="{% url \'library\' %}"', template)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
-        with patch("app.views.publish_job") as publish:
+        with patch("frontend.views.publish_job") as publish:
             response = client.post(
                 "/jobs/enqueue/",
                 {
@@ -1015,7 +1015,7 @@ class SharedDjangoModelTests(TestCase):
             idempotency_key=f"generate_transcript:default:{download.id}",
         )
 
-        with patch("app.views.publish_job") as publish:
+        with patch("frontend.views.publish_job") as publish:
             response = client.post(
                 "/batch-update/",
                 {"ids": [str(download.id)], "batch_action": "download"},

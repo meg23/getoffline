@@ -22,7 +22,7 @@ from models.domain import DownloadStatus
 from models.domain import JobStatus
 from models.domain import SourceType
 from models.domain import parse_str_enum
-from app.queue import publish_job
+from frontend.queue import publish_job
 from models.jobs import create_job
 from models.models import AppConfigValue
 from models.models import Download

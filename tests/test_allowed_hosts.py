@@ -8,7 +8,7 @@ def _load_allowed_hosts(
 ) -> list[str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = "src"
-    env["DJANGO_SETTINGS_MODULE"] = "app.settings"
+    env["DJANGO_SETTINGS_MODULE"] = "frontend.settings"
     env["GETOFFLINE_TEST_IN_MEMORY_DB"] = "1"
     env["GETOFFLINE_DJANGO_STRICT_ALLOWED_HOSTS"] = (
         "1" if strict_allowed_hosts else "0"
@@ -17,7 +17,7 @@ def _load_allowed_hosts(
         env.pop("GETOFFLINE_DJANGO_ALLOWED_HOSTS", None)
     else:
         env["GETOFFLINE_DJANGO_ALLOWED_HOSTS"] = env_value
-    script = "import app.settings; print(','.join(app.settings.ALLOWED_HOSTS))"
+    script = "import frontend.settings; print(','.join(frontend.settings.ALLOWED_HOSTS))"
     output = subprocess.check_output([sys.executable, "-c", script], env=env, text=True)
     return output.strip().split(",")
 

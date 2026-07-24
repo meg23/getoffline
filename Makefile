@@ -89,7 +89,7 @@ test-wapiti: test-wapiti-auth
 
 test-wapiti-public: venv
 	@echo "Starting frontend and API services for Wapiti..."
-	docker compose up -d --wait frontend api
+	docker compose up -d --build --wait frontend api
 	@mkdir -p $(WAPITI_REPORT_DIR) $(WAPITI_STATE_DIR)/sessions $(WAPITI_STATE_DIR)/config
 	@echo "Scanning frontend: $(WAPITI_FRONTEND_URL)"
 	$(WAPITI) -u "$(WAPITI_FRONTEND_URL)" $(WAPITI_OPTIONS) --format $(WAPITI_FORMAT) -o "$(WAPITI_REPORT_DIR)/frontend-public.$(WAPITI_FORMAT)"
@@ -99,7 +99,7 @@ test-wapiti-public: venv
 
 test-wapiti-auth: venv
 	@echo "Starting frontend and API services for authenticated Wapiti scan..."
-	docker compose up -d --wait frontend api
+	docker compose up -d --build --wait frontend api
 	@mkdir -p $(WAPITI_REPORT_DIR) $(WAPITI_STATE_DIR)/sessions $(WAPITI_STATE_DIR)/config
 	WAPITI_BIN="$(WAPITI)" \
 	REPORT_DIR="$(WAPITI_REPORT_DIR)" \
@@ -124,20 +124,20 @@ clean:
 
 migrate-db: venv
 	@echo "Migrating split Django/MySQL database..."
-	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django migrate --run-syncdb
-	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django sync_model_schema
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=frontend.settings $(PYTHON) -m django migrate --run-syncdb
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=frontend.settings $(PYTHON) -m django sync_model_schema
 
 collectstatic: venv
 	@echo "Collecting cache-busted static assets..."
-	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 $(PYTHON) -m django collectstatic --noinput
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=frontend.settings GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 $(PYTHON) -m django collectstatic --noinput
 
 run-app: venv collectstatic
-	@echo "Running Django frontend app..."
-	PYTHONPATH=$(SRC_DIR) GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 $(PYTHON) -m app
+	@echo "Running Django frontend..."
+	PYTHONPATH=$(SRC_DIR) GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 $(PYTHON) -m frontend
 
 run-app-debug: venv collectstatic
 	@echo "Running Django frontend app in debug mode..."
-	PYTHONPATH=$(SRC_DIR) GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m app
+	PYTHONPATH=$(SRC_DIR) GETOFFLINE_STATIC_ROOT=$(STATIC_ROOT) GETOFFLINE_STATIC_MANIFEST=1 GETOFFLINE_DJANGO_DEBUG=1 $(PYTHON) -m frontend
 
 run-worker-updates: venv
 	@echo "Running single-concurrency updates worker..."
@@ -161,4 +161,4 @@ run-worker-cleanup: venv
 
 run-scheduler: venv
 	@echo "Running scheduler..."
-	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=app.settings $(PYTHON) -m django run_scheduler --loop --install-defaults
+	PYTHONPATH=$(SRC_DIR) DJANGO_SETTINGS_MODULE=frontend.settings $(PYTHON) -m django run_scheduler --loop --install-defaults

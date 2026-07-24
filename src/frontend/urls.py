@@ -11,7 +11,7 @@ urlpatterns = [
         name="login",
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
-    path("api/", include("backend.api.urls")),
+    path("api/", include("api.api.urls")),
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
     path(

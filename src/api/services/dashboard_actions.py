@@ -55,7 +55,7 @@ from models.models import ScheduledJob
 from models.models import SourceConfig
 from models.models import TranscriptSegment
 
-from app.queue import publish_job
+from frontend.queue import publish_job
 
 ALLOWED_JOB_TYPES = frozenset(
     {

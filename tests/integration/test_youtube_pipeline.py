@@ -124,7 +124,7 @@ def _compose_cmd() -> list[str]:
 
 def _django_setup(env: dict[str, str]) -> None:
     os.environ.update(env)
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
     sys.path.insert(0, str(SRC))
     import django
 
@@ -173,7 +173,7 @@ def _verify_profanity_model() -> None:
 
 
 def _queue_download_job() -> int:
-    from app.queue import publish_job
+    from frontend.queue import publish_job
     from models.domain import SourceType
     from models.jobs import create_job
     from models.models import AppConfigValue, ProfileConfigValue, SourceConfig
@@ -431,7 +431,7 @@ def main() -> int:
                 "GETOFFLINE_RABBITMQ_URL": (
                     f"amqp://guest:guest@127.0.0.1:{rabbitmq_port}/%2F"
                 ),
-                "DJANGO_SETTINGS_MODULE": "app.settings",
+                "DJANGO_SETTINGS_MODULE": "frontend.settings",
                 "PYTHONPATH": str(SRC),
             }
         )

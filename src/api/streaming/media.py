@@ -10,7 +10,7 @@ from pathlib import Path
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 
 from models.models import Download
-from backend.services.settings import profile_output_root
+from api.services.settings import profile_output_root
 
 MEDIA_RANGE_CHUNK_SIZE = 64 * 1024
 

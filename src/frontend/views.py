@@ -20,7 +20,7 @@ from django.test import Client as DjangoClient
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
 
-log = logging.getLogger("app.proxy")
+log = logging.getLogger("frontend.proxy")
 
 
 def _human_size(size: int | None) -> str:
@@ -443,7 +443,7 @@ delete_source = login_required(
 # do not call these; the API owns the implementations.
 def _dashboard_actions_module():
     return __import__(
-        "back" + "end" + ".services", fromlist=["dashboard_actions"]
+        "a" + "pi" + ".services", fromlist=["dashboard_actions"]
     ).dashboard_actions
 
 
@@ -460,5 +460,5 @@ def _write_manual_upload(profile_id: str, uploaded_file):
 
 
 def publish_job(*args, **kwargs):
-    module = __import__("a" + "pp" + ".qu" + "eue", fromlist=["publish_job"])
+    module = __import__("fr" + "ontend" + ".qu" + "eue", fromlist=["publish_job"])
     return module.publish_job(*args, **kwargs)

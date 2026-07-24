@@ -9,23 +9,23 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 
 import django
 
 django.setup()
 
-from app.queue import job_priority
-from app.queue import publish_job
-from app.routing import CLEANUP_QUEUE
-from app.routing import FFMPEG_QUEUE
-from app.routing import MAX_QUEUE_PRIORITY
-from app.routing import PODCAST_DOWNLOAD_QUEUE
-from app.routing import SERIAL_EPISODE_CHECK_QUEUE
-from app.routing import TRANSCRIPT_QUEUE
-from app.routing import YOUTUBE_DOWNLOAD_QUEUE
-from app.routing import queue_arguments
-from app.routing import queue_name
+from frontend.queue import job_priority
+from frontend.queue import publish_job
+from frontend.routing import CLEANUP_QUEUE
+from frontend.routing import FFMPEG_QUEUE
+from frontend.routing import MAX_QUEUE_PRIORITY
+from frontend.routing import PODCAST_DOWNLOAD_QUEUE
+from frontend.routing import SERIAL_EPISODE_CHECK_QUEUE
+from frontend.routing import TRANSCRIPT_QUEUE
+from frontend.routing import YOUTUBE_DOWNLOAD_QUEUE
+from frontend.routing import queue_arguments
+from frontend.routing import queue_name
 
 
 class AppRoutingTests(unittest.TestCase):
@@ -114,7 +114,7 @@ class PublishJobTests(unittest.TestCase):
         connection = Mock()
         connection.channel.return_value = channel
 
-        with patch("app.queue.pika.BlockingConnection", return_value=connection):
+        with patch("frontend.queue.pika.BlockingConnection", return_value=connection):
             publish_job(
                 {
                     "job_id": 7,

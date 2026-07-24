@@ -13,7 +13,7 @@ FROM python:3.14-alpine AS static
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
-    DJANGO_SETTINGS_MODULE=app.settings \
+    DJANGO_SETTINGS_MODULE=frontend.settings \
     GETOFFLINE_STATIC_MANIFEST=1 \
     PATH=/opt/venv/bin:$PATH
 
@@ -31,7 +31,7 @@ FROM python:3.14-alpine
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
-    DJANGO_SETTINGS_MODULE=app.settings \
+    DJANGO_SETTINGS_MODULE=frontend.settings \
     GETOFFLINE_STATIC_MANIFEST=1 \
     GETOFFLINE_GUNICORN_BIND=127.0.0.1:8000 \
     PATH=/opt/venv/bin:$PATH
@@ -49,7 +49,8 @@ COPY deploy/nginx/default.conf /etc/nginx/http.d/default.conf
 COPY deploy/docker/frontend-entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
 COPY src ./src
 COPY --from=static /app/staticfiles ./staticfiles
-RUN python -m compileall -q /app/src \
+RUN python -c "import frontend; import api.api" \
+    && python -m compileall -q /app/src \
     && chmod +x /usr/local/bin/frontend-entrypoint.sh
 
 EXPOSE 80

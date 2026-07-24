@@ -68,7 +68,7 @@ CSRF_COOKIE_HTTPONLY = True
 SESSION_COOKIE_HTTPONLY = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
-ROOT_URLCONF = "app.urls"
+ROOT_URLCONF = "frontend.urls"
 STATIC_URL = "/static/"
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "library"
@@ -92,13 +92,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.staticfiles",
     "models.apps.SharedModelsConfig",
-    "app",
+    "frontend",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "app.middleware.AllowPrivateNetworkHostMiddleware",
-    "app.middleware.SecurityHeadersMiddleware",
+    "frontend.middleware.AllowPrivateNetworkHostMiddleware",
+    "frontend.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.common.CommonMiddleware",

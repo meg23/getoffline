@@ -11,9 +11,9 @@ from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 
-from backend.api.auth import api_login_required
-from backend.playback.service import apply_update, build_update, start
-from backend.services.library import (
+from api.api.auth import api_login_required
+from api.playback.service import apply_update, build_update, start
+from api.services.library import (
     episode_to_summary,
     human_duration,
     listened_seconds,
@@ -22,8 +22,8 @@ from backend.services.library import (
     normalize_library_filter,
     recent_jobs,
 )
-from backend.services.profiles import profile_id_for_request
-from backend.streaming.media import (
+from api.services.profiles import profile_id_for_request
+from api.streaming.media import (
     media_response,
     resolve_media_path,
     resolve_subtitle_path,
@@ -31,7 +31,7 @@ from backend.streaming.media import (
 )
 from models.jobs import create_job
 from models.models import Download, Job, SourceConfig
-from app.queue import publish_job
+from frontend.queue import publish_job
 
 
 def _json_body(request: HttpRequest) -> dict[str, object]:
@@ -157,8 +157,8 @@ def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
 def _dashboard_view(
     name: str, request: HttpRequest, *args: object, **kwargs: object
 ) -> HttpResponse:
-    from app import views as frontend_views
-    from backend.services import dashboard_actions
+    from frontend import views as frontend_views
+    from api.services import dashboard_actions
 
     # Keep legacy test mocks working while the API owns the implementation.
     setattr(dashboard_actions, "publish_job", frontend_views.publish_job)

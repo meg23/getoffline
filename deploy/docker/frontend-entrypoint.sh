@@ -5,7 +5,7 @@ python -m django migrate --run-syncdb
 python -m django sync_model_schema
 python -m django collectstatic --noinput
 
-gunicorn app.wsgi:application \
+PYTHONPATH=/app/src gunicorn frontend.wsgi:application \
   --bind "${GETOFFLINE_GUNICORN_BIND:-127.0.0.1:8000}" \
   --workers "${GETOFFLINE_GUNICORN_WORKERS:-3}" \
   --timeout "${GETOFFLINE_GUNICORN_TIMEOUT:-300}" &

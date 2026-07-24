@@ -13,9 +13,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 # Unit tests should not depend on external MySQL/RabbitMQ services. Configure
 # Django to use its in-memory test database before any test module imports
-# app.settings or calls django.setup().
+# frontend.settings or calls django.setup().
 os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 
 django.setup()
 setup_test_environment()
