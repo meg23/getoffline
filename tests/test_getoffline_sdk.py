@@ -2,6 +2,10 @@
 import os
 import sys
 import unittest
+from email.message import Message
+from io import BytesIO
+from unittest.mock import patch
+import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -21,7 +25,7 @@ from django.utils import timezone
 
 from models.domain import DownloadStatus
 from models.models import Download
-from packages.getoffline_sdk import DjangoTransport, GetOfflineClient
+from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 from packages.getoffline_sdk.transports import Response
 
 
@@ -81,6 +85,34 @@ class GetOfflineSdkTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"service": "api"', response.content)
+
+    def test_http_transport_preserves_redirects_for_frontend_proxy(self):
+        headers = Message()
+        headers["Location"] = "/"
+        error = urllib.error.HTTPError(
+            "http://api:8000/api/dashboard/batch-update",
+            302,
+            "Found",
+            headers,
+            BytesIO(b""),
+        )
+
+        class RedirectingOpener:
+            def open(self, *args, **kwargs):
+                raise error
+
+        with patch(
+            "urllib.request.build_opener", return_value=RedirectingOpener()
+        ) as build_opener:
+            response = HttpTransport("http://api:8000/api").request(
+                "POST",
+                "/dashboard/batch-update",
+                data={"next": "/"},
+            )
+
+        build_opener.assert_called_once()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/")
 
 
 class StreamingDjangoTransportTests(unittest.TestCase):

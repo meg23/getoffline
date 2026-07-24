@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from http.client import HTTPResponse
-from typing import Any, Protocol, cast
+from typing import IO, Any, Protocol, cast
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -116,7 +116,7 @@ class HttpTransport:
         )
         try:
             # The upstream API URL is configured by the deployment environment.
-            upstream = urllib.request.urlopen(  # nosec B310
+            upstream = urllib.request.build_opener(_NoRedirectHandler()).open(
                 req, timeout=self.timeout_seconds
             )
             return _http_response(upstream)
@@ -255,3 +255,19 @@ def _http_error_response(exc: urllib.error.HTTPError) -> Response:
         headers=headers,
         cookies=tuple(exc.headers.get_all("Set-Cookie", [])),
     )
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Leave redirect responses for the browser-facing proxy to handle."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        del req, fp, code, msg, headers, newurl
+        return None
