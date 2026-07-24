@@ -883,6 +883,8 @@ class SharedDjangoModelTests(TestCase):
         template = Path("src/frontend/templates/app/library.html").read_text()
 
         self.assertIn('name="next" value="{% url \'library\' %}"', template)
+        batch_form = template.split('id="batch-form"', 1)[1]
+        self.assertIn('name="next" value="{% url \'library\' %}"', batch_form)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
@@ -968,10 +970,12 @@ class SharedDjangoModelTests(TestCase):
                 {
                     "ids": [str(download.id), str(directory_download.id)],
                     "batch_action": "purge",
+                    "next": "/",
                 },
             )
 
             self.assertEqual(response.status_code, 302)
+            self.assertEqual(response["Location"], "/")
             self.assertFalse(media_path.exists())
             self.assertTrue(directory_path.exists())
             self.assertFalse(Download.objects.filter(pk=download.pk).exists())

@@ -88,6 +88,7 @@
 
           <form id="batch-form" method="post" action="{% url 'batch_update' %}" class="batch-toolbar-form">
             {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'library' %}" />
             <select id="batch-action" class="batch-select" name="batch_action" aria-label="Batch action">
               <option value="">Choose action</option>
               <option value="played">played</option>
