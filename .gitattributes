@@ -1,0 +1,49 @@
+# Enforce LF line endings for consistent behavior across Windows, Mac, and Linux
+
+# Auto-detect and normalize text files
+* text=auto
+
+# Shell scripts - always LF
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Python - always LF
+*.py text eol=lf
+*.pyx text eol=lf
+*.pyi text eol=lf
+
+# Web templates and styles - always LF
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+
+# Documentation - always LF
+*.md text eol=lf
+*.txt text eol=lf
+*.rst text eol=lf
+
+# Configuration files - always LF
+.dockerignore text eol=lf
+.gitignore text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+docker-compose.yml text eol=lf
+
+# Binary files - no normalization
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mov binary
+*.mp4 binary
+*.mp3 binary
+*.gz binary
+*.zip binary
+*.7z binary
+*.ttf binary
+*.otf binary
