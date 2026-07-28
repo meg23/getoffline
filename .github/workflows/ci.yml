@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "tests/**"
+      - "deploy/**"
+      - "crons/**"
+      - "docker-compose.yml"
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "tests/**"
+      - "deploy/**"
+      - "crons/**"
+      - "docker-compose.yml"
 
 concurrency:
   group: getoffline-${{ github.workflow }}-${{ github.ref }}
