@@ -132,6 +132,8 @@ class SourceFormData:
     include_shorts: bool
     include_livestreams: bool
     title_exclude: str
+    censor_profanity: bool
+    censor_method: str
 
 
 log = logging.getLogger(__name__)
@@ -671,6 +673,8 @@ PROFILE_DEFAULTS = {
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
     "manual_upload_delete_explicit_content": "0",
+    "manual_upload_censor_profanity": "0",
+    "manual_upload_censor_method": "duck",
     "audio_format": "mp3",
     "video_format": "mp4",
     "video_codec": "h264",
@@ -694,6 +698,7 @@ CONFIG_ENUM_RULES = {
     "audio_format": {"mp3", "m4a", "opus"},
     "video_format": {"mp4", "mkv"},
     "video_codec": {"h264", "hevc", "copy"},
+    "manual_upload_censor_method": {"duck", "beep"},
 }
 
 
@@ -773,6 +778,12 @@ def _source_form_data(
 ) -> SourceFormData:
     parsed_source_type = parse_str_enum(SourceType, source_type)
     is_youtube = parsed_source_type is SourceType.YOUTUBE
+    
+    # Parse censor method
+    censor_method = str(request.POST.get(prefix + "manual_upload_censor_method") or "duck").strip().lower()
+    if censor_method not in {"duck", "beep"}:
+        censor_method = "duck"
+    
     return SourceFormData(
         name=str(request.POST.get(prefix + "name") or "").strip(),
         url=str(request.POST.get(prefix + "url") or "").strip(),
@@ -794,6 +805,8 @@ def _source_form_data(
         include_livestreams=is_youtube
         and _posted_bool(request, prefix + "include_livestreams"),
         title_exclude=str(request.POST.get(prefix + "title_exclude") or "").strip(),
+        censor_profanity=_posted_bool(request, prefix + "manual_upload_censor_profanity"),
+        censor_method=censor_method,
     )
 
 
@@ -813,6 +826,8 @@ def _source_form_errors(
             errors.append("url must be an absolute http(s) URL")
     if source_type is SourceType.YOUTUBE and form.media_type not in {"audio", "video"}:
         errors.append("media_type is invalid")
+    if form.censor_method not in {"duck", "beep"}:
+        errors.append("manual_upload_censor_method is invalid")
 
     raw_offset = str(request.POST.get("subtitle_offset_seconds") or "").strip()
     if raw_offset and (
@@ -840,6 +855,8 @@ def _source_update_fields(*, include_enabled: bool = True) -> list[str]:
         "title_exclude",
         "include_shorts",
         "include_livestreams",
+        "manual_upload_censor_profanity",
+        "manual_upload_censor_method",
         "updated_at",
     ]
     if not include_enabled:
@@ -863,6 +880,8 @@ def _apply_source_form_data(
     source.max_downloads = form.max_downloads
     source.delete_explicit_content = form.delete_explicit_content
     source.title_exclude = form.title_exclude
+    source.manual_upload_censor_profanity = form.censor_profanity
+    source.manual_upload_censor_method = form.censor_method
     source.updated_at = now
     return source
 
@@ -1158,6 +1177,7 @@ def worker_message_status(request: HttpRequest) -> JsonResponse:
 @require_POST
 def manual_upload(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
+    settings = _profile_settings(profile_id)
     uploaded_files = request.FILES.getlist("files") or request.FILES.getlist("file")
     if not uploaded_files:
         return JsonResponse(
@@ -1182,6 +1202,13 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
                     "media_type": media_type,
                     "recent_download": True,
                     "manual_upload": True,
+                    "delete_explicit_content": _checked(
+                        settings, "manual_upload_delete_explicit_content"
+                    ),
+                    "censor_profanity": _checked(
+                        settings, "manual_upload_censor_profanity"
+                    ),
+                    "censor_method": settings.get("manual_upload_censor_method", "duck"),
                 },
                 idempotency_key=f"generate_transcript:{profile_id}:{download.id}",
             )
@@ -1519,6 +1546,8 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         include_shorts=form.include_shorts,
         include_livestreams=form.include_livestreams,
         title_exclude=form.title_exclude,
+        manual_upload_censor_profanity=form.censor_profanity,
+        manual_upload_censor_method=form.censor_method,
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings"))

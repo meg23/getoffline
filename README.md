@@ -22,6 +22,17 @@ export GETOFFLINE_DJANGO_SECRET_KEY="replace-with-a-long-random-secret"
 docker compose up --build -d
 ```
 
+### Using Podman
+
+Podman can be used as a drop-in replacement for Docker. If you have Podman installed along with `podman-compose`, use the same commands with `podman-compose` instead:
+
+```bash
+export GETOFFLINE_DJANGO_SECRET_KEY="replace-with-a-long-random-secret"
+podman-compose up --build -d
+```
+
+All `docker compose` commands work identically with `podman-compose`.
+
 The API automatically applies database migrations and serves the application backend while the frontend serves the app at [http://127.0.0.1:8080](http://127.0.0.1:8080). Create the first user from the API container:
 
 ```bash
