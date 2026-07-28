@@ -1,7 +1,10 @@
 from django.db import models
 from django.utils import timezone
 
-from .domain import DownloadStatus, JobStatus, ProfanityStatus
+
+from .domain import JobStatus
+from .domain import ProfanityStatus
+from .domain import DownloadStatus, JobStatus
 
 
 class AppConfigValue(models.Model):

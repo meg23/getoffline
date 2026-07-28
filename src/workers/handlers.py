@@ -15,6 +15,12 @@ from urllib.parse import urlparse
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from models.domain import DownloadStatus
+from models.domain import JobStatus
+from models.domain import SourceType
+from models.domain import parse_str_enum
+from models.domain import ProfanityStatus
+
 from frontend.queue import publish_job
 from models.domain import DownloadStatus, JobStatus, ProfanityStatus, SourceType, parse_str_enum
 from models.jobs import create_job
