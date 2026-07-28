@@ -84,7 +84,7 @@ services:
       dockerfile: deploy/docker/frontend.Dockerfile
     restart: unless-stopped
     environment: *api-env
-    command: api-entrypoint.sh
+    command: /usr/local/bin/api-entrypoint.sh
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
     ports:
