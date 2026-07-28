@@ -1367,6 +1367,8 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
             "delete_explicit_content": bool(
                 payload.get("delete_explicit_content", False)
             ),
+            "censor_profanity": bool(payload.get("censor_profanity", False)),
+            "censor_method": str(payload.get("censor_method", "duck")).strip().lower(),
             "item_uid": item_uid,
         }
         if media_kind == "video" and not transcode_payload["delete_explicit_content"]:
@@ -2056,6 +2058,8 @@ def check_for_episodes(job: Job) -> None:
                         "subtitles": bool(source.subtitles),
                         "subtitle_offset_seconds": source.subtitle_offset_seconds,
                         "delete_explicit_content": bool(source.delete_explicit_content),
+                        "censor_profanity": bool(source.manual_upload_censor_profanity),
+                        "censor_method": str(source.manual_upload_censor_method or "duck").strip().lower(),
                         "include_shorts": bool(
                             getattr(source, "include_shorts", False)
                         ),
