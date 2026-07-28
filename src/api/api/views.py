@@ -90,6 +90,8 @@ def _episode_for_frontend(item: Download) -> dict[str, object]:
             "status_label": getattr(item, "status_label", "UNPLAYED"),
             "status_class": getattr(item, "status_class", "status-unplayed"),
             "has_subtitles": bool(getattr(item, "has_subtitles", False)),
+            "profanity_label": getattr(item, "profanity_label", ""),
+            "profanity_class": getattr(item, "profanity_class", ""),
         }
     )
     return data
