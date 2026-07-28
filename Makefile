@@ -6,12 +6,14 @@ BUILD_OUTPUT := $(BUILD_DIR)/$(APP_NAME)
 STATIC_ROOT := $(PWD)/.staticfiles
 SRC_DIR := $(PWD)/src
 REQ_FILE := $(SRC_DIR)/requirements.txt
+CI_REQ_FILE := requirements-ci.txt
 VENV_DIR := .venv
 VENV_BIN := $(VENV_DIR)/bin
 PYTHON := $(VENV_BIN)/python
 PIP := $(VENV_BIN)/pip
 PEX := $(VENV_BIN)/pex
 RUFF := $(VENV_BIN)/ruff
+RUFF_STRICT_SELECT := I,PIE810,PLR0402,TRY401,RUF013,RUF046,RUF100,B010,BLE001,EXE001,PLR1730,PYI034,PYI041,RUF012,SIM103,SIM117,UP012,UP037
 VULTURE := $(VENV_BIN)/vulture
 BANDIT := $(VENV_BIN)/bandit
 MYPY := $(VENV_BIN)/mypy
@@ -19,7 +21,7 @@ WAPITI := $(VENV_BIN)/wapiti
 COVERAGE := $(VENV_BIN)/coverage
 MCCABE_MAX_COMPLEXITY := 60
 MCCABE_MIN_COMPLEXITY := 61
-CI_TOOLS := bandit coverage mccabe mypy pex ruff vulture wapiti3
+CI_TOOLS := bandit coverage mccabe mypy pex vulture wapiti3
 WAPITI_REPORT_DIR := $(BUILD_DIR)/wapiti
 WAPITI_FRONTEND_URL ?= http://127.0.0.1:8080
 WAPITI_API_URL ?= http://127.0.0.1:8081/api/library
@@ -34,11 +36,11 @@ SOURCE_PY_FILES := $(shell find src crons -type f -name '*.py' -not -path '*/bui
 
 venv: $(VENV_DIR)/.installed
 
-$(VENV_DIR)/.installed: $(REQ_FILE) Makefile
+$(VENV_DIR)/.installed: $(REQ_FILE) $(CI_REQ_FILE) Makefile
 	@echo "Creating virtual environment for $(APP_NAME)..."
 	python3 -m venv $(VENV_DIR)
 	$(PYTHON) -m pip install --upgrade pip
-	$(PYTHON) -m pip install -r $(REQ_FILE) $(CI_TOOLS)
+	$(PYTHON) -m pip install -r $(REQ_FILE) -r $(CI_REQ_FILE) $(CI_TOOLS)
 	@touch $@
 
 test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-coverage test-wapiti
@@ -62,7 +64,7 @@ test-compile: venv
 
 test-ruff: venv
 	@echo "Running Ruff linting..."
-	$(RUFF) check src tests crons
+	$(RUFF) check --extend-select $(RUFF_STRICT_SELECT) src tests crons
 
 test-mccabe: venv
 	@echo "Running McCabe complexity checks..."

@@ -1,9 +1,7 @@
-# ruff: noqa: E402
 import os
 import sys
 import tempfile
 import unittest
-
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -62,7 +60,9 @@ class AppViewHelperTests(unittest.TestCase):
         self.assertTrue(item.has_subtitles)
         self.assertIsNone(item.resolved_subtitle_path)
 
-    def test_resolve_media_path_prefers_existing_relative_path_before_absolute_path(self):
+    def test_resolve_media_path_prefers_existing_relative_path_before_absolute_path(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             relative_media = root / "relative.mp3"

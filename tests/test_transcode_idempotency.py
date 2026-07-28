@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import os
 import sys
 import tempfile
@@ -14,8 +13,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 
 django.setup()
 
-from workers.handlers import _transcode_idempotency_key
-from workers.handlers import _transcode_lock_key
+from workers.handlers import _transcode_idempotency_key, _transcode_lock_key
 
 
 class TranscodeIdempotencyTests(unittest.TestCase):

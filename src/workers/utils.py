@@ -42,9 +42,7 @@ def split_title_filter_terms(value: object) -> list[str]:
     """Return normalized title exclusion terms split on commas or newlines."""
     raw = str(value or "")
     return [
-        term.strip().casefold()
-        for term in re.split(r"[,\n\r]+", raw)
-        if term.strip()
+        term.strip().casefold() for term in re.split(r"[,\n\r]+", raw) if term.strip()
     ]
 
 

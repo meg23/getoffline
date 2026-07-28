@@ -41,12 +41,8 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     && python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -c /tmp/requirements.txt faster-whisper==${FASTER_WHISPER_VERSION}
-RUN /opt/venv/bin/python - <<'PY'
-import os
-from faster_whisper.utils import download_model
-model = os.environ.get("WHISPER_MODEL", "base")
-download_model(model, output_dir=os.environ["GETOFFLINE_MODEL_CACHE_DIR"])
-PY
+COPY deploy/docker/download_whisper_model.py /tmp/download_whisper_model.py
+RUN /opt/venv/bin/python /tmp/download_whisper_model.py
 
 FROM python:3.12-slim
 

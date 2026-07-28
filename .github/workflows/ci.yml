@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "tests/**"
+      - "deploy/**"
+      - "crons/**"
+      - "docker-compose.yml"
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "tests/**"
+      - "deploy/**"
+      - "crons/**"
+      - "docker-compose.yml"
 
 concurrency:
   group: getoffline-${{ github.workflow }}-${{ github.ref }}
@@ -40,10 +54,10 @@ jobs:
           python3 -m venv .venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r src/requirements.txt ruff
+          .venv/bin/python -m pip install -r src/requirements.txt -r requirements-ci.txt
 
       - name: Run Ruff linting
-        run: ruff check src tests
+        run: ruff check src tests crons
 
   mccabe:
     runs-on: ubuntu-latest
@@ -162,4 +176,3 @@ jobs:
 
       - name: Run integration tests
         run: make integration-test
-

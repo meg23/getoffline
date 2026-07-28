@@ -1,10 +1,7 @@
-# ruff: noqa: E402
 import os
 import sys
 import unittest
-
-from unittest.mock import Mock
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -15,17 +12,18 @@ import django
 
 django.setup()
 
-from frontend.queue import job_priority
-from frontend.queue import publish_job
-from frontend.routing import CLEANUP_QUEUE
-from frontend.routing import FFMPEG_QUEUE
-from frontend.routing import MAX_QUEUE_PRIORITY
-from frontend.routing import PODCAST_DOWNLOAD_QUEUE
-from frontend.routing import SERIAL_EPISODE_CHECK_QUEUE
-from frontend.routing import TRANSCRIPT_QUEUE
-from frontend.routing import YOUTUBE_DOWNLOAD_QUEUE
-from frontend.routing import queue_arguments
-from frontend.routing import queue_name
+from frontend.queue import job_priority, publish_job
+from frontend.routing import (
+    CLEANUP_QUEUE,
+    FFMPEG_QUEUE,
+    MAX_QUEUE_PRIORITY,
+    PODCAST_DOWNLOAD_QUEUE,
+    SERIAL_EPISODE_CHECK_QUEUE,
+    TRANSCRIPT_QUEUE,
+    YOUTUBE_DOWNLOAD_QUEUE,
+    queue_arguments,
+    queue_name,
+)
 
 
 class AppRoutingTests(unittest.TestCase):
@@ -89,7 +87,10 @@ class JobPriorityTests(unittest.TestCase):
         )
         self.assertEqual(
             job_priority(
-                {"job_type": "generate_transcript", "payload": {"source_type": "podcast"}}
+                {
+                    "job_type": "generate_transcript",
+                    "payload": {"source_type": "podcast"},
+                }
             ),
             8,
         )
@@ -132,7 +133,10 @@ class PublishJobTests(unittest.TestCase):
         published = channel.basic_publish.call_args.kwargs
         self.assertEqual(published["routing_key"], YOUTUBE_DOWNLOAD_QUEUE)
         self.assertEqual(published["properties"].priority, MAX_QUEUE_PRIORITY)
-        self.assertEqual(published["body"], b'{"job_id": 7, "job_type": "download_single", "priority": 999}')
+        self.assertEqual(
+            published["body"],
+            b'{"job_id": 7, "job_type": "download_single", "priority": 999}',
+        )
         connection.close.assert_called_once_with()
 
 

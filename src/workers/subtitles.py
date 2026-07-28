@@ -55,7 +55,7 @@ def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
             try:
                 path.unlink(missing_ok=True)
                 log.info("Removed extra subtitle sidecar: %s", path.name)
-            except Exception as cleanup_exc:
+            except OSError as cleanup_exc:
                 log.warning(
                     "Could not remove subtitle sidecar %s: %s", path, cleanup_exc
                 )
@@ -106,7 +106,7 @@ def _format_srt_timestamp(value: float) -> str:
     minutes = int(value // 60)
     value -= minutes * 60
     seconds = int(value)
-    millis = int(round((value - seconds) * 1000))
+    millis = round((value - seconds) * 1000)
 
     if millis == 1000:
         millis = 0
@@ -152,7 +152,7 @@ def _shift_srt_timestamps(srt_path: Path, offset_seconds: float):
 
 
 def generate_whisper_subtitles(
-    input_file: Path, settings: dict, subtitle_path: Path = None
+    input_file: Path, settings: dict, subtitle_path: Path | None = None
 ):
     input_file = Path(input_file)
     subtitle_path = (
@@ -339,10 +339,8 @@ def create_subtitles(
                     "Generated %s subtitles: %s", context_label, subtitle_path.name
                 )
             return subtitle_path
-        except Exception as subtitle_exc:
-            logger.exception(
-                "Subtitle generation failed for %s: %s", media_file, subtitle_exc
-            )
+        except Exception:
+            logger.exception("Subtitle generation failed for %s", media_file)
             return None
 
     if not media_file.exists():

@@ -1,11 +1,10 @@
-# ruff: noqa: E402
 import os
 import sys
 import unittest
+import urllib.error
 from email.message import Message
 from io import BytesIO
 from unittest.mock import patch
-import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -85,6 +84,36 @@ class GetOfflineSdkTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"service": "api"', response.content)
+
+    def test_client_convenience_methods_forward_to_transport(self):
+        class RecordingTransport:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, method, target, args=(), **kwargs):
+                self.calls.append((method, target, args, kwargs))
+                return Response(200, b'{"ok": true}')
+
+        transport = RecordingTransport()
+        client = GetOfflineClient(transport)
+        self.assertEqual(client.frontend_library(filter_mode="played"), {"ok": True})
+        self.assertEqual(client.frontend_jobs(), {"ok": True})
+        self.assertEqual(client.frontend_player(3, start_seconds="4"), {"ok": True})
+        self.assertEqual(client.search("term"), {"ok": True})
+        self.assertEqual(client.library(), {"ok": True})
+        self.assertEqual(client.history(), {"ok": True})
+        self.assertEqual(client.user(), {"ok": True})
+        self.assertEqual(client.csrf(), {"ok": True})
+        self.assertEqual(client.download("https://example", media_type="audio"), {"ok": True})
+        self.assertEqual(client.playback_start(3), {"ok": True})
+        self.assertEqual(client.playback_progress(3, 2.5), {"ok": True})
+        self.assertEqual(client.playback_complete(3, 5), {"ok": True})
+        self.assertEqual(len(transport.calls), 12)
+
+        transport.request = lambda *args, **kwargs: Response(500, b"error")
+        self.assertEqual(client.json_request("GET", "/error"), {})
+        transport.request = lambda *args, **kwargs: Response(200, b"[]")
+        self.assertEqual(client.json_request("GET", "/list"), {})
 
     def test_http_transport_preserves_redirects_for_frontend_proxy(self):
         headers = Message()
