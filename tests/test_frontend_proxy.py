@@ -13,9 +13,29 @@ import django
 django.setup()
 
 from django.test import RequestFactory
+from django.template.loader import get_template
 
 from frontend.views import _api_proxy, _request_headers, _upstream_response
 from packages.getoffline_sdk import Response
+
+
+class TemplateCompilationRegressionTests(unittest.TestCase):
+    """Regression tests to ensure templates compile without syntax errors."""
+
+    def test_library_template_compiles(self):
+        """Test that library.html template compiles."""
+        template = get_template("app/library.html")
+        self.assertIsNotNone(template)
+
+    def test_settings_template_compiles(self):
+        """Test that settings.html template compiles."""
+        template = get_template("app/settings.html")
+        self.assertIsNotNone(template)
+
+    def test_login_template_compiles(self):
+        """Test that login.html template compiles."""
+        template = get_template("app/login.html")
+        self.assertIsNotNone(template)
 
 
 class FrontendProxyTests(unittest.TestCase):

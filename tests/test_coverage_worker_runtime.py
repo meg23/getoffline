@@ -233,6 +233,12 @@ class RunnerCoverageTests(unittest.TestCase):
 
 
 class SchedulerCoverageTests(unittest.TestCase):
+    def test_heavy_job_types_includes_censor_profanity(self):
+        from workers.scheduler import HEAVY_JOB_TYPES
+        self.assertEqual(HEAVY_JOB_TYPES[JobType.CENSOR_PROFANITY], HeavyJobKind.FFMPEG)
+        self.assertEqual(HEAVY_JOB_TYPES[JobType.TRANSCODE_MEDIA], HeavyJobKind.FFMPEG)
+        self.assertEqual(HEAVY_JOB_TYPES[JobType.GENERATE_TRANSCRIPT], HeavyJobKind.TRANSCRIPT)
+
     def test_in_memory_backend_branches_and_expiry(self):
         now = [100.0]
         backend = InMemorySlotBackend(capacity=1, clock=lambda: now[0])

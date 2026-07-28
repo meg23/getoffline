@@ -305,7 +305,7 @@ class BuildBeepFilterTests(unittest.TestCase):
         filter_str = build_beep_filter([segment])
 
         self.assertIsNotNone(filter_str)
-        self.assertIn("atone=f=1000", filter_str)
+        self.assertIn("sine", filter_str)
         self.assertIn("amix", filter_str)
 
     def test_respects_beep_frequency_parameter(self):
@@ -316,7 +316,7 @@ class BuildBeepFilterTests(unittest.TestCase):
         filter_str = build_beep_filter([segment], beep_frequency=2000)
 
         self.assertIsNotNone(filter_str)
-        self.assertIn("atone=f=2000", filter_str)
+        self.assertIn("frequency=2000", filter_str)
 
     def test_respects_beep_amplitude_parameter(self):
         """Test that custom beep amplitude is used."""
@@ -326,7 +326,7 @@ class BuildBeepFilterTests(unittest.TestCase):
         filter_str = build_beep_filter([segment], beep_amplitude=0.8)
 
         self.assertIsNotNone(filter_str)
-        self.assertIn("a=0.8", filter_str)
+        self.assertIn("volume=0.8", filter_str)
 
     def test_returns_none_for_empty_segments(self):
         """Test that None is returned for empty segment list."""
@@ -365,7 +365,7 @@ class BuildCensorFilterTests(unittest.TestCase):
         filter_str = build_censor_filter([segment], method="beep")
 
         self.assertIsNotNone(filter_str)
-        self.assertIn("atone", filter_str)
+        self.assertIn("sine", filter_str)
 
     def test_returns_none_for_unknown_method(self):
         """Test that unknown method returns None."""

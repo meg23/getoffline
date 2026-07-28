@@ -22,7 +22,7 @@ class IntegrationPipelineHelperTests(unittest.TestCase):
         compose = yaml.safe_load((pipeline.ROOT / "docker-compose.yml").read_text())
         command = compose["services"]["api"]["command"]
 
-        self.assertEqual(command, "api-entrypoint.sh")
+        self.assertEqual(command, "/usr/local/bin/api-entrypoint.sh")
         entrypoint = (pipeline.ROOT / "deploy/docker/api-entrypoint.sh").read_text()
         self.assertIn("migrate --run-syncdb", entrypoint)
         self.assertIn("sync_model_schema", entrypoint)
