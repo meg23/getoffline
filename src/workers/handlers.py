@@ -1089,7 +1089,7 @@ def _download_request_from_payload(
     if not source_name and source_type is SourceType.YOUTUBE:
         try:
             source_name = resolve_youtube_source_name(download_url)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             log.warning(
                 "Could not resolve YouTube channel name for direct download job_id=%s url=%s: %s",
                 job.id,
@@ -1558,9 +1558,7 @@ def _episode_was_downloaded(
         return True
     if item_url and rows.filter(item_url=item_url).exists():
         return True
-    if title and rows.filter(title=title).exists():
-        return True
-    return False
+    return bool(title and rows.filter(title=title).exists())
 
 
 def _source_limit(source: SourceConfig) -> int:
@@ -2303,7 +2301,7 @@ def _screen_deferred_video_before_insert(
         return None
     try:
         explicit_match = screen_transcript(Path(subtitle_path))
-    except Exception as screening_exc:
+    except Exception as screening_exc:  # noqa: BLE001
         deleted_paths = delete_media_artifacts(media_path)
         log.warning(
             "Deleted video because profanity screening failed before database insert job_id=%s media_path=%s error=%s deleted_artifacts=%s",
@@ -2577,7 +2575,7 @@ def generate_transcript(job: Job) -> None:
                 )
                 try:
                     explicit_match = screen_transcript(Path(subtitle_path))
-                except Exception as screening_exc:
+                except Exception as screening_exc:  # noqa: BLE001
                     log.error(
                         "Transcript worker profanity check failed without deleting media job_id=%s download_id=%s error=%s",
                         job.id,

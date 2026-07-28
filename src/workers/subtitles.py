@@ -55,7 +55,7 @@ def _cleanup_subtitle_sidecars(media_file: Path, keep_subtitle: Path):
             try:
                 path.unlink(missing_ok=True)
                 log.info("Removed extra subtitle sidecar: %s", path.name)
-            except Exception as cleanup_exc:
+            except OSError as cleanup_exc:
                 log.warning(
                     "Could not remove subtitle sidecar %s: %s", path, cleanup_exc
                 )

@@ -15,7 +15,7 @@ import re
 import wave
 from pathlib import Path
 from string import Template
-from typing import Any
+from typing import Any, Self
 
 _VIDEO_ID = "BB49x_uMlGA"
 _TITLE = "Integration YouTube runtime video"
@@ -27,7 +27,7 @@ class YoutubeDL:
         self.opts = opts or {}
         self._last_info: dict[str, Any] | None = None
 
-    def __enter__(self) -> "YoutubeDL":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, _traceback) -> None:

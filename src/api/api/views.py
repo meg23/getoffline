@@ -9,7 +9,13 @@ from pathlib import Path
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseRedirect,
+    JsonResponse,
+)
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -159,7 +165,7 @@ def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
     has_subtitles = False
     try:
         has_subtitles = resolve_subtitle_path(item) is not None
-    except Exception:
+    except Http404:
         has_subtitles = False
     try:
         requested_seek = float(request.GET.get("t") or 0.0)
@@ -197,7 +203,7 @@ def _dashboard_view(
     from frontend import views as frontend_views
 
     # Keep legacy test mocks working while the API owns the implementation.
-    setattr(dashboard_actions, "publish_job", frontend_views.publish_job)
+    dashboard_actions.publish_job = frontend_views.publish_job
     legacy = getattr(dashboard_actions, f"_legacy_{name}", None) or getattr(
         dashboard_actions, name
     )

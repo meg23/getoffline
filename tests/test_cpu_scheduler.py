@@ -62,10 +62,9 @@ class CpuSlotSchedulerTests(unittest.TestCase):
             backend, heartbeat_seconds=3600, poll_seconds=0.001
         )
 
-        with self.assertRaises(RuntimeError):
-            with scheduler.acquire("ffmpeg"):
-                self.assertEqual(backend.snapshot()["in_use"], 1)
-                raise RuntimeError("boom")
+        with self.assertRaises(RuntimeError), scheduler.acquire("ffmpeg"):
+            self.assertEqual(backend.snapshot()["in_use"], 1)
+            raise RuntimeError("boom")
 
         self.assertEqual(backend.snapshot()["in_use"], 0)
 

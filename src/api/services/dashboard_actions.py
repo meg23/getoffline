@@ -164,7 +164,7 @@ def _human_size(size: int | None) -> str:
     return f"{value:.2f} GB"
 
 
-def _human_duration(seconds: float | int | None) -> str:
+def _human_duration(seconds: float | None) -> str:
     total = int(float(seconds or 0))
     hours, remainder = divmod(total, 3600)
     minutes = remainder // 60

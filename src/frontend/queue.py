@@ -3,6 +3,7 @@ from typing import Any
 
 import pika
 from django.conf import settings
+from django.db import DatabaseError
 
 from models.domain import JobType, MediaType, SourceType, parse_str_enum
 from models.models import Job
@@ -60,7 +61,7 @@ def _message_with_payload(message: dict[str, Any]) -> dict[str, Any]:
         payload = (
             Job.objects.filter(pk=int(job_id)).values_list("payload", flat=True).first()
         )
-    except Exception:
+    except (DatabaseError, TypeError, ValueError):
         return message
     if not isinstance(payload, dict):
         return message

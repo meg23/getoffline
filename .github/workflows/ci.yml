@@ -43,7 +43,7 @@ jobs:
           .venv/bin/python -m pip install -r src/requirements.txt ruff
 
       - name: Run Ruff linting
-        run: ruff check src tests
+        run: ruff check src tests crons
 
   mccabe:
     runs-on: ubuntu-latest
@@ -162,4 +162,3 @@ jobs:
 
       - name: Run integration tests
         run: make integration-test
-

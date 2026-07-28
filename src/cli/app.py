@@ -68,7 +68,7 @@ class Credentials:
 
     @property
     def auth_header(self) -> str:
-        raw = f"{self.username}:{self.password}".encode("utf-8")
+        raw = f"{self.username}:{self.password}".encode()
         return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
@@ -428,8 +428,7 @@ class GetOfflineConsole:
         safe_addnstr(stdscr, 2, 0, filters, curses.A_DIM)
         list_top = 4
         list_height = max(height - 6, 1)
-        if self.selected < self.offset:
-            self.offset = self.selected
+        self.offset = min(self.offset, self.selected)
         if self.selected >= self.offset + list_height:
             self.offset = self.selected - list_height + 1
         visible = self.episodes[self.offset : self.offset + list_height]
@@ -537,7 +536,7 @@ def tail_text(path: Path, *, limit: int = 1000) -> str:
     return data[-limit:].decode("utf-8", errors="replace").strip()
 
 
-def player_exit_message(session: "PlaybackSession") -> str:
+def player_exit_message(session: PlaybackSession) -> str:
     code = session.process.poll() if session.process is not None else "unknown"
     detail = tail_text(session.log_path) if session.log_path is not None else ""
     if detail:

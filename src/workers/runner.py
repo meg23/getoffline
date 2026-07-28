@@ -526,7 +526,7 @@ def process_delivery(
 ) -> int:
     try:
         process_queued_job_message(message)
-    except Exception:
+    except Exception:  # noqa: BLE001
         nack_failed_delivery(channel, config, method_frame)
     else:
         ack_completed_delivery(channel, config, method_frame)

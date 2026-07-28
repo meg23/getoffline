@@ -7,8 +7,22 @@ extend-select = [
     "RUF013",
     "RUF046",
     "RUF100",
+    "B010",
+    "BLE001",
+    "EXE001",
+    "PLR1730",
+    "PYI034",
+    "PYI041",
+    "SIM103",
+    "SIM117",
+    "UP012",
+    "UP037",
+    "RUF012",
 ]
 extend-ignore = ["E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/models/models.py" = ["RUF012"]
 
 [tool.mypy]
 python_version = "3.12"
