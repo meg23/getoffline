@@ -255,8 +255,7 @@ class SharedDjangoModelTests(TestCase):
             child = Job.objects.get(
                 job_type="generate_transcript",
                 idempotency_key=(
-                    "generate_transcript:default:deferred:youtube:"
-                    "Test Channel:video-2"
+                    "generate_transcript:default:deferred:youtube:Test Channel:video-2"
                 ),
             )
             self.assertEqual(child.payload["deferred_media_path"], str(target_path))

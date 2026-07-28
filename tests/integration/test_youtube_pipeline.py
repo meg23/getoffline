@@ -160,9 +160,7 @@ def _wait_for_frontend(deadline: float, frontend_port: int) -> None:
     # The library is authenticated and intentionally returns a 401/redirect
     # for anonymous requests. Probe the public login page so readiness checks
     # do not create misleading authentication errors in the frontend logs.
-    _wait_for_service(
-        deadline, f"http://127.0.0.1:{frontend_port}/login/", "frontend"
-    )
+    _wait_for_service(deadline, f"http://127.0.0.1:{frontend_port}/login/", "frontend")
 
 
 def _wait_for_api(deadline: float, api_port: int) -> None:

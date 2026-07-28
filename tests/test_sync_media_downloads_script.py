@@ -20,8 +20,8 @@ def _script_environment(tmp_path: Path) -> dict[str, str]:
     bin_dir.mkdir()
     _write_executable(
         bin_dir / "ffprobe",
-        '#!/bin/sh\nfor argument do media_path=$argument; done\n'
-        'case "$(cat \"$media_path\" 2>/dev/null)" in GOOD*) echo audio;; *) exit 1;; esac\n',
+        "#!/bin/sh\nfor argument do media_path=$argument; done\n"
+        'case "$(cat "$media_path" 2>/dev/null)" in GOOD*) echo audio;; *) exit 1;; esac\n',
     )
     return {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
 

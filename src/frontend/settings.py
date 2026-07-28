@@ -128,18 +128,14 @@ TEMPLATE_CONTEXT_PROCESSORS = [
     "django.template.context_processors.request",
 ]
 if USE_DATABASE_AUTH:
-    TEMPLATE_CONTEXT_PROCESSORS.append(
-        "django.contrib.auth.context_processors.auth"
-    )
+    TEMPLATE_CONTEXT_PROCESSORS.append("django.contrib.auth.context_processors.auth")
 
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": TEMPLATE_CONTEXT_PROCESSORS
-        },
+        "OPTIONS": {"context_processors": TEMPLATE_CONTEXT_PROCESSORS},
     }
 ]
 

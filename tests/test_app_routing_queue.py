@@ -89,7 +89,10 @@ class JobPriorityTests(unittest.TestCase):
         )
         self.assertEqual(
             job_priority(
-                {"job_type": "generate_transcript", "payload": {"source_type": "podcast"}}
+                {
+                    "job_type": "generate_transcript",
+                    "payload": {"source_type": "podcast"},
+                }
             ),
             8,
         )
@@ -132,7 +135,10 @@ class PublishJobTests(unittest.TestCase):
         published = channel.basic_publish.call_args.kwargs
         self.assertEqual(published["routing_key"], YOUTUBE_DOWNLOAD_QUEUE)
         self.assertEqual(published["properties"].priority, MAX_QUEUE_PRIORITY)
-        self.assertEqual(published["body"], b'{"job_id": 7, "job_type": "download_single", "priority": 999}')
+        self.assertEqual(
+            published["body"],
+            b'{"job_id": 7, "job_type": "download_single", "priority": 999}',
+        )
         connection.close.assert_called_once_with()
 
 

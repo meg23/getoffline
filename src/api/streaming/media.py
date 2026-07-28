@@ -27,7 +27,9 @@ def safe_path(raw_path: str | None) -> Path:
 def resolve_media_path(item: Download) -> Path:
     candidates: list[Path] = []
     if item.file_path_relative:
-        candidates.append(profile_output_root(item.profile_id) / str(item.file_path_relative))
+        candidates.append(
+            profile_output_root(item.profile_id) / str(item.file_path_relative)
+        )
     if item.file_path:
         candidates.append(Path(str(item.file_path)))
     for candidate in candidates:
@@ -40,7 +42,9 @@ def resolve_media_path(item: Download) -> Path:
 
 def srt_to_vtt(content: str) -> str:
     lines = content.replace("\ufeff", "").splitlines()
-    timestamp_re = re.compile(r"^(\d{2}:\d{2}:\d{2}),(\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}),(\d{3})(.*)$")
+    timestamp_re = re.compile(
+        r"^(\d{2}:\d{2}:\d{2}),(\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}),(\d{3})(.*)$"
+    )
     out_lines = ["WEBVTT", ""]
     for line in lines:
         match = timestamp_re.match(line)
@@ -60,7 +64,9 @@ def resolve_subtitle_path(item: Download) -> Path | None:
     if item.subtitle_path:
         candidates.append(Path(str(item.subtitle_path)))
     if item.subtitle_path_relative:
-        candidates.append(profile_output_root(item.profile_id) / str(item.subtitle_path_relative))
+        candidates.append(
+            profile_output_root(item.profile_id) / str(item.subtitle_path_relative)
+        )
     candidates.extend([media_path.with_suffix(".srt"), media_path.with_suffix(".vtt")])
     root = profile_output_root(item.profile_id)
     for candidate in candidates:
@@ -108,7 +114,11 @@ def media_response(path: Path, range_header: str = "") -> HttpResponse:
             else max(start, min(requested_end, file_size - 1))
         )
         length = end - start + 1
-        response = StreamingHttpResponse(file_range_iterator(path, start, length), status=206, content_type=content_type)
+        response = StreamingHttpResponse(
+            file_range_iterator(path, start, length),
+            status=206,
+            content_type=content_type,
+        )
         response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
         response["Content-Length"] = str(length)
     else:

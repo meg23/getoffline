@@ -44,22 +44,24 @@ class TranscriptionChunkingTests(unittest.TestCase):
             fake_module = types.SimpleNamespace(
                 WhisperModel=lambda *args, **kwargs: FakeModel()
             )
-            with patch.dict(sys.modules, {"faster_whisper": fake_module}), patch.object(
-                transcription, "_WHISPER_MODEL_CACHE", {}
-            ), patch.object(
-                transcription, "_probe_audio_duration", return_value=25.0
-            ), patch.object(
-                transcription,
-                "_extract_audio_chunk",
-                side_effect=lambda _src, dst, _start, _duration: dst.write_bytes(
-                    b"chunk"
+            with (
+                patch.dict(sys.modules, {"faster_whisper": fake_module}),
+                patch.object(transcription, "_WHISPER_MODEL_CACHE", {}),
+                patch.object(transcription, "_probe_audio_duration", return_value=25.0),
+                patch.object(
+                    transcription,
+                    "_extract_audio_chunk",
+                    side_effect=lambda _src, dst, _start, _duration: dst.write_bytes(
+                        b"chunk"
+                    ),
                 ),
-            ), patch.dict(
-                os.environ,
-                {
-                    "GETOFFLINE_TRANSCRIPTION_CHUNK_THRESHOLD_SECONDS": "10",
-                    "GETOFFLINE_TRANSCRIPTION_CHUNK_SECONDS": "10",
-                },
+                patch.dict(
+                    os.environ,
+                    {
+                        "GETOFFLINE_TRANSCRIPTION_CHUNK_THRESHOLD_SECONDS": "10",
+                        "GETOFFLINE_TRANSCRIPTION_CHUNK_SECONDS": "10",
+                    },
+                ),
             ):
                 result = transcription._transcribe_in_process(
                     input_file, "base", language="en", log_prefix="test"
@@ -103,12 +105,13 @@ class TranscriptionChunkingTests(unittest.TestCase):
             model_cache = Path(tmpdir) / "models"
 
             fake_module = types.SimpleNamespace(WhisperModel=FakeModel)
-            with patch.dict(sys.modules, {"faster_whisper": fake_module}), patch.object(
-                transcription, "_WHISPER_MODEL_CACHE", {}
-            ), patch.object(
-                transcription, "_probe_audio_duration", return_value=1.0
-            ), patch.dict(
-                os.environ, {"GETOFFLINE_MODEL_CACHE_DIR": str(model_cache)}
+            with (
+                patch.dict(sys.modules, {"faster_whisper": fake_module}),
+                patch.object(transcription, "_WHISPER_MODEL_CACHE", {}),
+                patch.object(transcription, "_probe_audio_duration", return_value=1.0),
+                patch.dict(
+                    os.environ, {"GETOFFLINE_MODEL_CACHE_DIR": str(model_cache)}
+                ),
             ):
                 first = transcription._transcribe_in_process(
                     input_file, "base", language="en", log_prefix="first"

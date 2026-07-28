@@ -222,9 +222,7 @@ def frontend_login_required(
     """Require an API-owned session without touching a frontend database."""
 
     @wraps(view_func)
-    def wrapper(
-        request: HttpRequest, *args: object, **kwargs: object
-    ) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
         try:
             response = view_func(request, *args, **kwargs)
         except _APIUnauthorized:

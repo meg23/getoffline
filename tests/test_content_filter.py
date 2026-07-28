@@ -122,9 +122,7 @@ class ContentFilterTests(unittest.TestCase):
             patch("workers.content_filter.find_explicit_content", return_value=match),
             patch("builtins.print"),
         ):
-            self.assertEqual(
-                main(["--fail-on-match", "--text", "flagged words"]), 1
-            )
+            self.assertEqual(main(["--fail-on-match", "--text", "flagged words"]), 1)
 
     def test_cli_check_model_reports_active_model(self):
         with (

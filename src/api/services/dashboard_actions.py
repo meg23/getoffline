@@ -715,7 +715,10 @@ def _invalid_config_keys(request: HttpRequest) -> list[str]:
             invalid.append(key)
     for key, allowed_values in CONFIG_ENUM_RULES.items():
         raw_value = request.POST.get(f"config__{key}")
-        if raw_value is not None and str(raw_value).strip().lower() not in allowed_values:
+        if (
+            raw_value is not None
+            and str(raw_value).strip().lower() not in allowed_values
+        ):
             invalid.append(key)
     return invalid
 
@@ -727,9 +730,10 @@ def _profile_settings_lock(profile_id: str):
         yield True
         return
 
-    lock_name = "getoffline_settings_" + hashlib.sha256(
-        profile_id.encode("utf-8")
-    ).hexdigest()[:48]
+    lock_name = (
+        "getoffline_settings_"
+        + hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:48]
+    )
     with connection.cursor() as cursor:
         cursor.execute("SELECT GET_LOCK(%s, %s)", [lock_name, 15])
         result = cursor.fetchone()
@@ -821,9 +825,7 @@ def _source_form_errors(
         errors.append("subtitle_offset_seconds is invalid")
 
     raw_max_downloads = str(request.POST.get("max_downloads") or "").strip()
-    if raw_max_downloads and (
-        form.max_downloads is None or form.max_downloads < 1
-    ):
+    if raw_max_downloads and (form.max_downloads is None or form.max_downloads < 1):
         errors.append("max_downloads is invalid")
     return errors
 
@@ -1476,7 +1478,8 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
             ProfileDownloadSettings.objects.update_or_create(
                 profile_id=profile_id,
                 defaults={
-                    "youtube_cookie_text": request.POST.get("youtube_cookie_text") or "",
+                    "youtube_cookie_text": request.POST.get("youtube_cookie_text")
+                    or "",
                     "cookie_updated_at": now,
                     "updated_at": now,
                 },
@@ -1539,7 +1542,9 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     )
     form = _source_form_data(request, source.source_type)
     errors = _source_form_errors(
-        request, form, parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST
+        request,
+        form,
+        parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST,
     )
     if errors:
         return HttpResponseBadRequest("Invalid source: " + "; ".join(errors))
@@ -1564,15 +1569,15 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
         source = sources_by_id.get(source_id)
         if source is None or _posted_bool(request, f"source_{source_id}__delete"):
             continue
-        form = _source_form_data(request, source.source_type, prefix=f"source_{source_id}__")
+        form = _source_form_data(
+            request, source.source_type, prefix=f"source_{source_id}__"
+        )
         errors = _source_form_errors(
             request,
             form,
             parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST,
         )
-        validation_errors.extend(
-            f"source {source_id}: {error}" for error in errors
-        )
+        validation_errors.extend(f"source {source_id}: {error}" for error in errors)
     if validation_errors:
         return HttpResponseBadRequest("Invalid source: " + "; ".join(validation_errors))
     for source_id in source_ids:

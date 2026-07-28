@@ -109,14 +109,19 @@ class DatabaseSlotBackend:
             CpuSlotRequest = self._request_model()
             in_use = CpuSlotRequest.objects.filter(status=CpuSlotStatus.RUNNING).count()
             waiting_ffmpeg = (
-                CpuSlotRequest.objects.filter(status=CpuSlotStatus.WAITING, job_type=HeavyJobKind.FFMPEG)
+                CpuSlotRequest.objects.filter(
+                    status=CpuSlotStatus.WAITING, job_type=HeavyJobKind.FFMPEG
+                )
                 .exclude(lease_id=lease_id)
                 .exists()
             )
             allowed = False
             reason = "capacity-full"
             if in_use < self.capacity:
-                if parse_str_enum(HeavyJobKind, job_type) is HeavyJobKind.FFMPEG or not waiting_ffmpeg:
+                if (
+                    parse_str_enum(HeavyJobKind, job_type) is HeavyJobKind.FFMPEG
+                    or not waiting_ffmpeg
+                ):
                     updated = CpuSlotRequest.objects.filter(lease_id=lease_id).update(
                         job_type=job_type,
                         status=CpuSlotStatus.RUNNING,
@@ -206,7 +211,9 @@ class DatabaseSlotBackend:
         CpuSlotRequest = self._request_model()
         return {
             "reason": reason,
-            "in_use": CpuSlotRequest.objects.filter(status=CpuSlotStatus.RUNNING).count(),
+            "in_use": CpuSlotRequest.objects.filter(
+                status=CpuSlotStatus.RUNNING
+            ).count(),
             "waiting_ffmpeg": CpuSlotRequest.objects.filter(
                 status=CpuSlotStatus.WAITING, job_type=HeavyJobKind.FFMPEG
             ).count(),
@@ -279,13 +286,17 @@ class InMemorySlotBackend:
             ffmpeg_waiting = any(
                 other_id != lease_id
                 and request["status"] is CpuSlotStatus.WAITING
-                and parse_str_enum(HeavyJobKind, request["job_type"]) is HeavyJobKind.FFMPEG
+                and parse_str_enum(HeavyJobKind, request["job_type"])
+                is HeavyJobKind.FFMPEG
                 for other_id, request in self.requests.items()
             )
             reason = "capacity-full"
             ok = False
             if in_use < self.capacity:
-                if parse_str_enum(HeavyJobKind, job_type) is HeavyJobKind.FFMPEG or not ffmpeg_waiting:
+                if (
+                    parse_str_enum(HeavyJobKind, job_type) is HeavyJobKind.FFMPEG
+                    or not ffmpeg_waiting
+                ):
                     self.requests[lease_id] = {
                         "job_type": job_type,
                         "status": CpuSlotStatus.RUNNING,
@@ -333,7 +344,8 @@ class InMemorySlotBackend:
                 1
                 for request in self.requests.values()
                 if request["status"] is CpuSlotStatus.WAITING
-                and parse_str_enum(HeavyJobKind, request["job_type"]) is HeavyJobKind.FFMPEG
+                and parse_str_enum(HeavyJobKind, request["job_type"])
+                is HeavyJobKind.FFMPEG
             ),
             "waiting_transcript": sum(
                 1
