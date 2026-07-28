@@ -54,7 +54,7 @@ jobs:
           python3 -m venv .venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r src/requirements.txt ruff
+          .venv/bin/python -m pip install -r src/requirements.txt -r requirements-ci.txt
 
       - name: Run Ruff linting
         run: ruff check src tests crons
