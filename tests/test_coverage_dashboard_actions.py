@@ -201,4 +201,4 @@ class DashboardActionCoverageTests(TestCase):
             self.assertEqual(len(json.loads(actions.transcript_search(self.request("get", "/search", {"q": "phrase"})).content)["results"]), 1)
             self.assertEqual(actions._normalize_upload_stem("...bad?.mp3"), "bad-.mp3")
             with self.assertRaises(ValueError):
-                actions._write_manual_upload("alice", SimpleNamespace(name="bad.txt", chunks=lambda: []))
+                actions._write_manual_upload("alice", SimpleNamespace(name="bad.txt", chunks=list))
