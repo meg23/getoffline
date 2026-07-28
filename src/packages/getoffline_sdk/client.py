@@ -23,9 +23,16 @@ class GetOfflineClient:
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
+        streaming: bool = False,
     ) -> Response:
         return self.transport.request(
-            method, target, args, query=query, data=data, headers=headers
+            method,
+            target,
+            args,
+            query=query,
+            data=data,
+            headers=headers,
+            streaming=streaming,
         )
 
     def json_request(

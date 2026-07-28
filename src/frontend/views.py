@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import wraps
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -249,6 +249,7 @@ def _api_proxy(
         query=query,
         data=data,
         headers=_request_headers(request),
+        streaming=name in {"api_stream", "api_subtitle"},
     )
     if response.status_code >= 400:
         log_method = log.debug if response.status_code == 401 else log.warning
@@ -268,6 +269,7 @@ def _api_proxy(
         response.content,
         cookies=response.cookies,
         streaming=response.streaming,
+        streaming_content=response.streaming_content,
     )
 
 
@@ -302,10 +304,15 @@ def _upstream_response(
     *,
     cookies: tuple[str, ...] = (),
     streaming: bool = False,
+    streaming_content: Iterable[bytes] | None = None,
 ) -> HttpResponse:
     response_class = StreamingHttpResponse if streaming else HttpResponse
     response = response_class(
-        [content] if response_class is StreamingHttpResponse else content,
+        (
+            streaming_content if streaming_content is not None else [content]
+            if response_class is StreamingHttpResponse
+            else content
+        ),
         status=status,
         content_type=headers.get("Content-Type", "application/octet-stream"),
     )

@@ -17,7 +17,7 @@ django.setup()
 from django.http import Http404, HttpResponse, JsonResponse
 from django.test import RequestFactory, TestCase
 
-from api.api import views
+from api import views
 from api.services import dashboard_actions
 
 
@@ -69,19 +69,19 @@ class ApiViewCoverageTests(TestCase):
         self.assertEqual(views._json_body(request), {"ok": True})
         self.assertEqual(views.health(self.request()).status_code, 200)
 
-        with patch("api.api.views.authenticate", return_value=None):
+        with patch("api.views.authenticate", return_value=None):
             response = views.login(self.request("post", "/login", {"username": "x"}))
         self.assertEqual(response.status_code, 401)
         user = SimpleNamespace(is_active=True)
         request = self.request("post", "/login", {"next": "/ok"})
         with (
-            patch("api.api.views.authenticate", return_value=user),
-            patch("api.api.views.auth_login"),
-            patch("api.api.views.get_token"),
+            patch("api.views.authenticate", return_value=user),
+            patch("api.views.auth_login"),
+            patch("api.views.get_token"),
         ):
             response = views.login(request)
         self.assertEqual(response.status_code, 302)
-        with patch("api.api.views.auth_logout"):
+        with patch("api.views.auth_logout"):
             self.assertEqual(views.logout(self.request("post", "/logout")).status_code, 302)
 
     def test_frontend_endpoints_cover_fallbacks_and_serialization(self):
@@ -91,13 +91,13 @@ class ApiViewCoverageTests(TestCase):
         )
         summary = {"id": 4, "title": "Episode"}
         with (
-            patch("api.api.views.profile_id_for_request", return_value="alice"),
-            patch("api.api.views.normalize_library_filter", return_value="all"),
-            patch("api.api.views.list_downloads", return_value=[item]),
-            patch("api.api.views.library_filter_counts", return_value={"all": 1}),
-            patch("api.api.views.recent_jobs", return_value=[]),
-            patch("api.api.views.episode_to_summary", return_value=summary),
-            patch("api.api.views.listened_seconds", return_value=61),
+            patch("api.views.profile_id_for_request", return_value="alice"),
+            patch("api.views.normalize_library_filter", return_value="all"),
+            patch("api.views.list_downloads", return_value=[item]),
+            patch("api.views.library_filter_counts", return_value={"all": 1}),
+            patch("api.views.recent_jobs", return_value=[]),
+            patch("api.views.episode_to_summary", return_value=summary),
+            patch("api.views.listened_seconds", return_value=61),
         ):
             response = views.frontend_library(self.request("get", "/library"))
         self.assertEqual(json.loads(response.content)["stats"]["visible"], 1)
@@ -114,9 +114,9 @@ class ApiViewCoverageTests(TestCase):
 
         player_request = self.request("get", "/player", {"t": "bad"})
         with (
-            patch("api.api.views.get_object_or_404", return_value=item),
-            patch("api.api.views.episode_to_summary", return_value=summary),
-            patch("api.api.views.resolve_subtitle_path", side_effect=Http404),
+            patch("api.views.get_object_or_404", return_value=item),
+            patch("api.views.episode_to_summary", return_value=summary),
+            patch("api.views.resolve_subtitle_path", side_effect=Http404),
         ):
             response = views.frontend_player(player_request, 4)
         payload = json.loads(response.content)
@@ -124,8 +124,8 @@ class ApiViewCoverageTests(TestCase):
         self.assertEqual(payload["media_kind"], "video")
 
         with (
-            patch("api.api.views.get_object_or_404", return_value=item),
-            patch("api.api.views.resolve_subtitle_path", return_value=None),
+            patch("api.views.get_object_or_404", return_value=item),
+            patch("api.views.resolve_subtitle_path", return_value=None),
             self.assertRaises(Http404),
         ):
             views.subtitle(self.request(), 4)
@@ -166,9 +166,9 @@ class ApiViewCoverageTests(TestCase):
             id=4, title="Alpha", description="Description", played=True,
             last_position_seconds=12,
         )
-        with patch("api.api.views.list_downloads", return_value=[item]), patch(
-            "api.api.views.episode_to_summary", return_value={"id": 4}
-        ), patch("api.api.views.profile_id_for_request", return_value="alice"):
+        with patch("api.views.list_downloads", return_value=[item]), patch(
+            "api.views.episode_to_summary", return_value={"id": 4}
+        ), patch("api.views.profile_id_for_request", return_value="alice"):
             self.assertEqual(json.loads(views.search(self.request("get", "/search", {"q": "a"})).content)["results"], [])
             results = json.loads(views.search(self.request("get", "/search", {"q": "alp"})).content)
             self.assertEqual(len(results["results"]), 1)
@@ -176,31 +176,31 @@ class ApiViewCoverageTests(TestCase):
             self.assertEqual(len(history["episodes"]), 1)
             library = json.loads(views.library(self.request()).content)
             self.assertEqual(library["episodes"], [{"id": 4}])
-        with patch("api.api.views.SourceConfig.objects.filter") as filter_sources:
+        with patch("api.views.SourceConfig.objects.filter") as filter_sources:
             filter_sources.return_value.order_by.return_value = [
                 SimpleNamespace(id=1, name="Feed", url="https://feed", enabled=True)
             ]
             self.assertEqual(len(json.loads(views.podcasts(self.request()).content)["podcasts"]), 1)
 
         item = SimpleNamespace(id=4, last_position_seconds=2, played=False, total_listened_seconds=3, save=MagicMock())
-        with patch("api.api.views.get_object_or_404", return_value=item), patch(
-            "api.api.views.start", return_value=SimpleNamespace(to_dict=lambda: {"id": 4})
+        with patch("api.views.get_object_or_404", return_value=item), patch(
+            "api.views.start", return_value=SimpleNamespace(to_dict=lambda: {"id": 4})
         ):
             self.assertEqual(views.playback_start(self.request("post", "/start", {"episode_id": 4})).status_code, 200)
-        with patch("api.api.views.get_object_or_404", return_value=item), patch(
-            "api.api.views.build_update", return_value=None
+        with patch("api.views.get_object_or_404", return_value=item), patch(
+            "api.views.build_update", return_value=None
         ):
             self.assertEqual(views.playback_progress(self.request("post", "/progress", {"episode_id": 4, "position_seconds": "bad"})).status_code, 400)
             self.assertEqual(views.playback_complete(self.request("post", "/complete", {"episode_id": 4, "position_seconds": "bad"})).status_code, 400)
         update = SimpleNamespace(to_dict=lambda: {"id": 4})
-        with patch("api.api.views.get_object_or_404", return_value=item), patch(
-            "api.api.views.build_update", return_value=update
-        ), patch("api.api.views.apply_update", return_value=update):
+        with patch("api.views.get_object_or_404", return_value=item), patch(
+            "api.views.build_update", return_value=update
+        ), patch("api.views.apply_update", return_value=update):
             self.assertEqual(views.playback_progress(self.request("post", "/progress", {"episode_id": 4, "position_seconds": 4})).status_code, 200)
             self.assertEqual(views.playback_complete(self.request("post", "/complete", {"episode_id": 4, "position_seconds": 4})).status_code, 200)
 
-        with patch("api.api.views.create_job", return_value=SimpleNamespace(id=10, job_type="download_single", profile_id="alice", status="queued")), patch(
-            "api.api.views.publish_job"
+        with patch("api.views.create_job", return_value=SimpleNamespace(id=10, job_type="download_single", profile_id="alice", status="queued")), patch(
+            "api.views.publish_job"
         ) as publish:
             response = views.download(self.request("post", "/download", {"url": "https://example"}))
             self.assertEqual(response.status_code, 200)
@@ -213,13 +213,13 @@ class ApiViewCoverageTests(TestCase):
 
     def test_stream_and_episode_detail(self):
         item = SimpleNamespace(id=4)
-        with patch("api.api.views.get_object_or_404", return_value=item), patch(
-            "api.api.views.episode_to_summary", return_value={"id": 4}
+        with patch("api.views.get_object_or_404", return_value=item), patch(
+            "api.views.episode_to_summary", return_value={"id": 4}
         ):
             self.assertEqual(json.loads(views.episode_detail(self.request(), 4).content), {"episode": {"id": 4}})
-        with patch("api.api.views.get_object_or_404", return_value=item), patch(
-            "api.api.views.resolve_media_path", return_value="/tmp/episode.mp4"
-        ), patch("api.api.views.media_response", return_value=HttpResponse(status=206)) as media:
+        with patch("api.views.get_object_or_404", return_value=item), patch(
+            "api.views.resolve_media_path", return_value="/tmp/episode.mp4"
+        ), patch("api.views.media_response", return_value=HttpResponse(status=206)) as media:
             response = views.stream(self.request("get", "/stream", content_type="application/json"), 4)
             self.assertEqual(response.status_code, 206)
             media.assert_called_once()

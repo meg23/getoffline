@@ -21,7 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
-from api.api.auth import api_login_required
+from api.auth import api_login_required
 from api.playback.service import apply_update, build_update, start
 from api.services.library import (
     episode_to_summary,

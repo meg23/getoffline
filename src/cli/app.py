@@ -92,10 +92,17 @@ class AuthenticatedTransport:
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
+        streaming: bool = False,
     ) -> Response:
         merged = {"Authorization": self.credentials.auth_header, **(headers or {})}
         return self.transport.request(
-            method, target, args, query=query, data=data, headers=merged
+            method,
+            target,
+            args,
+            query=query,
+            data=data,
+            headers=merged,
+            streaming=streaming,
         )
 
 
