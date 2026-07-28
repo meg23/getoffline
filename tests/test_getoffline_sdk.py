@@ -25,7 +25,7 @@ from django.utils import timezone
 from models.domain import DownloadStatus
 from models.models import Download
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
-from packages.getoffline_sdk.transports import Response
+from packages.getoffline_sdk.transports import Response, _encoded_body
 
 
 class GetOfflineSdkTests(unittest.TestCase):
@@ -142,6 +142,81 @@ class GetOfflineSdkTests(unittest.TestCase):
         build_opener.assert_called_once()
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/")
+
+    def test_http_transport_streams_media_without_reading_the_whole_response(self):
+        class ChunkedResponse:
+            status = 206
+            headers = Message()
+
+            def __init__(self):
+                self.read_sizes = []
+                self.closed = False
+                self.chunks = iter((b"abc", b"def", b""))
+
+            def read(self, size=-1):
+                self.read_sizes.append(size)
+                return next(self.chunks)
+
+            def close(self):
+                self.closed = True
+
+        upstream = ChunkedResponse()
+
+        class StreamingOpener:
+            def open(self, *args, **kwargs):
+                return upstream
+
+        with patch(
+            "urllib.request.build_opener", return_value=StreamingOpener()
+        ):
+            response = HttpTransport("http://api:8000/api").request(
+                "GET",
+                "api_stream",
+                (7,),
+                headers={"Range": "bytes=0-"},
+                streaming=True,
+            )
+
+        self.assertTrue(response.streaming)
+        self.assertEqual(response.content, b"")
+        self.assertEqual(upstream.read_sizes, [])
+        self.assertIsNotNone(response.streaming_content)
+        self.assertEqual(b"".join(response.streaming_content or ()), b"abcdef")
+        self.assertEqual(upstream.read_sizes, [65536, 65536, 65536])
+        self.assertTrue(upstream.closed)
+
+    def test_multipart_upload_body_is_lazy(self):
+        class Upload:
+            name = "large-video.mp4"
+            content_type = "video/mp4"
+
+            def __init__(self):
+                self.chunks_calls = 0
+
+            def chunks(self):
+                self.chunks_calls += 1
+                yield b"first-upload-chunk"
+                yield b"second-upload-chunk"
+
+        upload = Upload()
+        body, content_type = _encoded_body(
+            {"title": "Large video", "file": upload}
+        )
+
+        self.assertIn("multipart/form-data", content_type)
+        self.assertNotIsInstance(body, bytes)
+        self.assertEqual(upload.chunks_calls, 0)
+
+        body_iterator = iter(body or ())
+        parts = [next(body_iterator), next(body_iterator)]
+        self.assertEqual(upload.chunks_calls, 0)
+        parts.extend(body_iterator)
+
+        self.assertEqual(upload.chunks_calls, 1)
+        encoded = b"".join(parts)
+        self.assertIn(b'filename="large-video.mp4"', encoded)
+        self.assertIn(b"first-upload-chunk", encoded)
+        self.assertIn(b"second-upload-chunk", encoded)
 
 
 class StreamingDjangoTransportTests(unittest.TestCase):
