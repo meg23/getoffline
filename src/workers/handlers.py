@@ -840,7 +840,10 @@ def _postprocess_download_with_ffmpeg(
         if (
             download is None
             and media_kind == "video"
-            and bool(payload.get("delete_explicit_content", False))
+            and (
+                bool(payload.get("delete_explicit_content", False))
+                or bool(payload.get("censor_profanity", False))
+            )
         ):
             child = create_job(
                 profile_id=profile_id,
@@ -868,7 +871,11 @@ def _postprocess_download_with_ffmpeg(
                     "source_type": deferred_lookup.get("source_type"),
                     "media_type": media_kind,
                     "recent_download": True,
-                    "delete_explicit_content": True,
+                    "delete_explicit_content": bool(
+                        payload.get("delete_explicit_content", False)
+                    ),
+                    "censor_profanity": bool(payload.get("censor_profanity", False)),
+                    "censor_method": str(payload.get("censor_method", "duck")).strip().lower(),
                 },
                 idempotency_key=(
                     f"generate_transcript:{profile_id}:deferred:"
@@ -978,6 +985,8 @@ def transcode_media(job: Job) -> None:
             "delete_explicit_content": bool(
                 payload.get("delete_explicit_content", False)
             ),
+            "censor_profanity": bool(payload.get("censor_profanity", False)),
+            "censor_method": str(payload.get("censor_method", "duck")).strip().lower(),
         },
         idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
     )
