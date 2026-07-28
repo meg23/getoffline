@@ -66,6 +66,13 @@ class SourceConfig(models.Model):
     include_shorts = models.BooleanField(default=False)
     include_livestreams = models.BooleanField(default=False)
     title_exclude = models.TextField(blank=True, null=True)
+    censor_profanity = models.BooleanField(default=False)
+    censor_method = models.CharField(
+        max_length=20,
+        choices=[("duck", "Mute"), ("beep", "Beep tone")],
+        default="duck",
+    )
+    keep_original = models.BooleanField(default=False)
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -111,6 +118,8 @@ class Download(models.Model):
     last_position_seconds = models.FloatField(default=0.0)
     total_listened_seconds = models.FloatField(default=0.0)
     last_position_updated_at = models.DateTimeField(blank=True, null=True)
+    is_censored = models.BooleanField(default=False)
+    censored_segments = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "downloads"

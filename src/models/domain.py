@@ -14,6 +14,7 @@ class MediaType(StrEnum):
 class DownloadStatus(StrEnum):
     DOWNLOADED = "downloaded"
     FILTERED = "filtered"
+    CENSORED = "censored"
     MISSING = "missing"
     RETENTION_DELETED = "retention_deleted"
 

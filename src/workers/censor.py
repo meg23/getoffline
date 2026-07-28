@@ -28,12 +28,12 @@ def _srt_timestamp_to_seconds(timestamp_str: str) -> float:
     """Convert SRT timestamp (HH:MM:SS,mmm or HH:MM:SS.mmm) to seconds (float)."""
     # Replace comma with period for consistency
     timestamp_str = timestamp_str.strip().replace(",", ".")
-    
+
     # Parse HH:MM:SS.mmm format
     parts = timestamp_str.split(":")
     if len(parts) != 3:
         raise ValueError(f"Invalid SRT timestamp format: {timestamp_str}")
-    
+
     try:
         hours = int(parts[0])
         minutes = int(parts[1])
