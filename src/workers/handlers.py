@@ -2592,7 +2592,7 @@ def generate_transcript(job: Job) -> None:
             )
             should_delete = bool(payload.get("delete_explicit_content", False))
             should_censor = bool(payload.get("censor_profanity", False))
-            
+
             if should_delete or should_censor:
                 log.info(
                     "Transcript worker profanity check started job_id=%s download_id=%s subtitle_path=%s media_path=%s delete=%s censor=%s",
@@ -2613,7 +2613,7 @@ def generate_transcript(job: Job) -> None:
                         screening_exc,
                     )
                     return
-                
+
                 if explicit_match is not None:
                     if should_censor:
                         # Get all profanity matches for censoring
@@ -2627,15 +2627,15 @@ def generate_transcript(job: Job) -> None:
                                 censor_exc,
                             )
                             profane_matches = [explicit_match] if explicit_match else []
-                        
+
                         if not profane_matches and explicit_match:
                             profane_matches = [explicit_match]
-                        
+
                         profane_sentences = [m.sentence for m in profane_matches]
                         censor_method = str(payload.get("censor_method", "duck")).strip().lower()
                         if censor_method not in {"duck", "beep"}:
                             censor_method = "duck"
-                        
+
                         censor_job = _queue_audio_censoring_job(
                             profile_id=job.profile_id,
                             media_path=media_path,
@@ -2644,7 +2644,7 @@ def generate_transcript(job: Job) -> None:
                             censor_method=censor_method,
                             download_id=download_id,
                         )
-                        
+
                         if censor_job:
                             download.profanity_status = ProfanityStatus.UNCENSORED
                             download.last_seen_at = timezone.now()
@@ -2664,7 +2664,7 @@ def generate_transcript(job: Job) -> None:
                                 censor_job.id,
                             )
                             return
-                    
+
                     if should_delete:
                         deleted_paths = delete_media_artifacts(media_path)
                         TranscriptSegment.objects.filter(download=download).delete()
@@ -2701,7 +2701,7 @@ def generate_transcript(job: Job) -> None:
                         download.save(
                             update_fields=["profanity_status", "last_seen_at"]
                         )
-                
+
                 log.info(
                     "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
                     job.id,
@@ -2913,12 +2913,12 @@ def _queue_audio_censoring_job(
             media_path,
         )
         return None
-    
+
     # Normalize method
     censor_method = str(censor_method or "duck").strip().lower()
     if censor_method not in {"duck", "beep"}:
         censor_method = "duck"
-    
+
     # Validate filter generation
     censor_filter = build_censor_filter(segments, method=censor_method)
     if not censor_filter:
@@ -2929,7 +2929,7 @@ def _queue_audio_censoring_job(
             censor_method,
         )
         return None
-    
+
     payload = {
         "media_path": str(media_path),
         "subtitle_path": str(subtitle_path) if subtitle_path else None,
@@ -2937,7 +2937,7 @@ def _queue_audio_censoring_job(
         "censor_filter": censor_filter,
         "censored_segments": [asdict(seg) for seg in segments],
     }
-    
+
     if download_id is not None:
         payload["download_id"] = download_id
         idempotency_key = f"censor_profanity:{profile_id}:download:{download_id}"
@@ -2945,12 +2945,12 @@ def _queue_audio_censoring_job(
         # Deferred media without download ID
         media_hash = hashlib.sha1(str(media_path).encode()).hexdigest()
         idempotency_key = f"censor_profanity:{profile_id}:media:{media_hash}"
-    
+
     if download_lookup:
         payload["download_lookup"] = download_lookup
     if download_defaults:
         payload["download_defaults"] = download_defaults
-    
+
     job = create_job(
         profile_id=profile_id,
         job_type=JobType.CENSOR_PROFANITY,
@@ -2983,11 +2983,11 @@ def _download_output_root(profile_id: str) -> Path:
 def censor_profanity(job: Job) -> None:
     """FFmpeg worker handler for audio profanity censoring."""
     payload = job.payload if isinstance(job.payload, dict) else {}
-    
+
     download_id = payload.get("download_id")
     media_path_str = payload.get("media_path")
     censor_method = str(payload.get("censor_method", "duck")).strip().lower()
-    
+
     if not media_path_str:
         log.error(
             "Censor job missing media_path job_id=%s profile_id=%s",
@@ -2995,10 +2995,10 @@ def censor_profanity(job: Job) -> None:
             job.profile_id,
         )
         return
-    
+
     media_path = Path(media_path_str).expanduser().resolve()
     profile_root = _download_output_root(job.profile_id)
-    
+
     # Verify media is within profile root
     try:
         media_path.relative_to(profile_root)
@@ -3011,7 +3011,7 @@ def censor_profanity(job: Job) -> None:
             profile_root,
         )
         return
-    
+
     if not media_path.exists() or not media_path.is_file():
         log.error(
             "Censor job media file not found job_id=%s profile_id=%s media_path=%s",
@@ -3020,11 +3020,11 @@ def censor_profanity(job: Job) -> None:
             media_path,
         )
         return
-    
+
     # Validate censor method
     if censor_method not in {"duck", "beep"}:
         censor_method = "duck"
-    
+
     # Rebuild segments from payload
     segments = _censor_segments_from_payload(payload)
     if not segments:
@@ -3034,7 +3034,7 @@ def censor_profanity(job: Job) -> None:
             job.profile_id,
         )
         return
-    
+
     # Rebuild filter
     censor_filter = build_censor_filter(segments, method=censor_method)
     if not censor_filter:
@@ -3044,10 +3044,10 @@ def censor_profanity(job: Job) -> None:
             job.profile_id,
         )
         return
-    
+
     # Create temporary output file
     temp_output = media_path.parent / f".{media_path.name}.censor.tmp"
-    
+
     try:
         # Get audio quality setting
         audio_quality = (
@@ -3056,31 +3056,31 @@ def censor_profanity(job: Job) -> None:
             .first()
             or "0"
         )
-        
+
         # Build FFmpeg command
         cmd = ["ffmpeg", "-i", str(media_path), "-y"]
-        
+
         if censor_method == "duck":
             # Wrap duck filter
             cmd.extend(["-af", f"[0:a]{censor_filter}[outa]"])
         else:
             # Beep filter already produces [outa]
             cmd.extend(["-filter_complex", censor_filter])
-        
+
         cmd.extend(["-map", "0:v?", "-c:v", "copy"])
         cmd.extend(["-map", "[outa]", "-shortest"])
         cmd.extend(_censor_audio_codec_args(media_path, audio_quality))
         cmd.append(str(temp_output))
-        
+
         log.info(
             "Censor job running ffmpeg job_id=%s profile_id=%s cmd_len=%s",
             job.id,
             job.profile_id,
             len(cmd),
         )
-        
+
         subprocess.run(cmd, check=True, capture_output=True)
-        
+
         # Verify output
         if not temp_output.exists() or temp_output.stat().st_size == 0:
             log.error(
@@ -3089,7 +3089,7 @@ def censor_profanity(job: Job) -> None:
                 job.profile_id,
             )
             return
-        
+
         # Atomic replace
         temp_output.replace(media_path)
         log.info(
@@ -3099,7 +3099,7 @@ def censor_profanity(job: Job) -> None:
             media_path,
             media_path.stat().st_size,
         )
-        
+
     except subprocess.CalledProcessError as exc:
         log.error(
             "Censor job ffmpeg failed job_id=%s profile_id=%s error=%s stdout=%s stderr=%s",
@@ -3120,7 +3120,7 @@ def censor_profanity(job: Job) -> None:
         )
         temp_output.unlink(missing_ok=True)
         return
-    
+
     # Update download if it exists
     if download_id:
         try:
@@ -3164,7 +3164,7 @@ def censor_profanity(job: Job) -> None:
                     **download_defaults,
                 }
                 download = Download.objects.create(**download_data)
-                
+
                 # Create transcript segments if subtitle path provided
                 subtitle_path = payload.get("subtitle_path")
                 if subtitle_path and Path(subtitle_path).exists():
@@ -3180,7 +3180,7 @@ def censor_profanity(job: Job) -> None:
                             download.id,
                             seg_exc,
                         )
-                
+
                 log.info(
                     "Censor job created deferred download record job_id=%s profile_id=%s download_id=%s",
                     job.id,

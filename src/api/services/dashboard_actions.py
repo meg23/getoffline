@@ -778,12 +778,12 @@ def _source_form_data(
 ) -> SourceFormData:
     parsed_source_type = parse_str_enum(SourceType, source_type)
     is_youtube = parsed_source_type is SourceType.YOUTUBE
-    
+
     # Parse censor method
     censor_method = str(request.POST.get(prefix + "manual_upload_censor_method") or "duck").strip().lower()
     if censor_method not in {"duck", "beep"}:
         censor_method = "duck"
-    
+
     return SourceFormData(
         name=str(request.POST.get(prefix + "name") or "").strip(),
         url=str(request.POST.get(prefix + "url") or "").strip(),

@@ -481,6 +481,15 @@ button {
   text-align: center;
 }
 
+.censor-option-group,
+.censor-method-group {
+  margin-left: 24px;
+  margin-top: 8px;
+}
+.censor-option-group-manual {
+  margin-top: -8px;
+}
+
 @media (max-width: 520px) {
   .jobs-intro {
     display: block;

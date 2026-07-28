@@ -49,11 +49,11 @@
           profanity</label>
         <p class="field-help">Reviews the generated audio transcript before retaining media uploaded through the
           browser.</p>
-        <div style="margin-left: 24px; margin-top: -8px;">
+        <div class="censor-option-group-manual">
           <input type="hidden" name="config__manual_upload_censor_profanity" value="0" />
           <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_censor_profanity" value="1"
               {% if manual_upload_censor_checked %}checked{% endif %} /> Censor profanity instead of deleting</label>
-          <div style="margin-left: 24px; margin-top: 8px;">
+          <div class="censor-method-group">
             <label for="manual_censor_method">Censoring method</label>
             <select id="manual_censor_method" name="config__manual_upload_censor_method">
               <option value="duck" {% if settings.manual_upload_censor_method == 'duck' %}selected{% endif %}>Mute audio
@@ -178,12 +178,12 @@
                   profanity</label>
                 <p class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as
                   filtered.</p>
-                <div style="margin-left: 24px; margin-top: 8px;">
+                <div class="censor-option-group">
                   <input type="hidden" name="source_{{ source.id }}__manual_upload_censor_profanity" value="0" />
                   <label class="checkbox-label"><input type="checkbox"
                       name="source_{{ source.id }}__manual_upload_censor_profanity" value="1" {% if
                       source.manual_upload_censor_profanity %}checked{% endif %} /> Censor profanity instead</label>
-                  <div style="margin-left: 24px; margin-top: 8px;">
+                  <div class="censor-method-group">
                     <label for="youtube-{{ source.id }}-censor-method">Censoring method</label>
                     <select id="youtube-{{ source.id }}-censor-method"
                       name="source_{{ source.id }}__manual_upload_censor_method">
@@ -295,12 +295,12 @@
                   profanity or sexual content</label>
                 <p class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as
                   filtered.</p>
-                <div style="margin-left: 24px; margin-top: 8px;">
+                <div class="censor-option-group">
                   <input type="hidden" name="source_{{ source.id }}__manual_upload_censor_profanity" value="0" />
                   <label class="checkbox-label"><input type="checkbox"
                       name="source_{{ source.id }}__manual_upload_censor_profanity" value="1" {% if
                       source.manual_upload_censor_profanity %}checked{% endif %} /> Censor profanity instead</label>
-                  <div style="margin-left: 24px; margin-top: 8px;">
+                  <div class="censor-method-group">
                     <label for="podcast-{{ source.id }}-censor-method">Censoring method</label>
                     <select id="podcast-{{ source.id }}-censor-method"
                       name="source_{{ source.id }}__manual_upload_censor_method">
