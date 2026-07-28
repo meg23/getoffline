@@ -87,10 +87,10 @@
               placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
             <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode"
               data-server-mode="{{ library_filter_mode|default:'unplayed' }}">
-              <option value="unplayed" {% if library_filter_mode=='unplayed' %}selected{% endif %}>Unplayed</option>
-              <option value="played" {% if library_filter_mode=='played' %}selected{% endif %}>Played</option>
-              <option value="favorites" {% if library_filter_mode=='favorites' %}selected{% endif %}>Favorites</option>
-              <option value="all" {% if library_filter_mode=='all' %}selected{% endif %}>All</option>
+              <option value="unplayed" {% if library_filter_mode == 'unplayed' %}selected{% endif %}>Unplayed</option>
+              <option value="played" {% if library_filter_mode == 'played' %}selected{% endif %}>Played</option>
+              <option value="favorites" {% if library_filter_mode == 'favorites' %}selected{% endif %}>Favorites</option>
+              <option value="all" {% if library_filter_mode == 'all' %}selected{% endif %}>All</option>
             </select>
             <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters"
               aria-label="Clear filters">×</button>

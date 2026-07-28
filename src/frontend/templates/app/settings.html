@@ -56,9 +56,9 @@
           <div style="margin-left: 24px; margin-top: 8px;">
             <label for="manual_censor_method">Censoring method</label>
             <select id="manual_censor_method" name="config__manual_upload_censor_method">
-              <option value="duck" {% if settings.manual_upload_censor_method=='duck' %}selected{% endif %}>Mute audio
+              <option value="duck" {% if settings.manual_upload_censor_method == 'duck' %}selected{% endif %}>Mute audio
                 during profanity</option>
-              <option value="beep" {% if settings.manual_upload_censor_method=='beep' %}selected{% endif %}>Beep tone
+              <option value="beep" {% if settings.manual_upload_censor_method == 'beep' %}selected{% endif %}>Beep tone
                 during profanity</option>
             </select>
           </div>
@@ -75,20 +75,20 @@
         {% csrf_token %}
         <div class="grid two">
           <div><label>Audio format</label><select name="config__audio_format">
-              <option value="mp3" {% if settings.audio_format=='mp3' %}selected{% endif %}>MP3</option>
-              <option value="m4a" {% if settings.audio_format=='m4a' %}selected{% endif %}>M4A</option>
-              <option value="opus" {% if settings.audio_format=='opus' %}selected{% endif %}>Opus</option>
+              <option value="mp3" {% if settings.audio_format == 'mp3' %}selected{% endif %}>MP3</option>
+              <option value="m4a" {% if settings.audio_format == 'm4a' %}selected{% endif %}>M4A</option>
+              <option value="opus" {% if settings.audio_format == 'opus' %}selected{% endif %}>Opus</option>
             </select></div>
           <div><label>Video format</label><select name="config__video_format">
-              <option value="mp4" {% if settings.video_format=='mp4' %}selected{% endif %}>MP4</option>
-              <option value="mkv" {% if settings.video_format=='mkv' %}selected{% endif %}>MKV</option>
+              <option value="mp4" {% if settings.video_format == 'mp4' %}selected{% endif %}>MP4</option>
+              <option value="mkv" {% if settings.video_format == 'mkv' %}selected{% endif %}>MKV</option>
             </select></div>
           <div><label>Video encoding</label><select name="config__video_codec">
-              <option value="h264" {% if settings.video_codec=='h264' %}selected{% endif %}>H.264 fast (Jellyfin
+              <option value="h264" {% if settings.video_codec == 'h264' %}selected{% endif %}>H.264 fast (Jellyfin
                 friendly)</option>
-              <option value="hevc" {% if settings.video_codec=='hevc' %}selected{% endif %}>HEVC (H.265, smaller but
+              <option value="hevc" {% if settings.video_codec == 'hevc' %}selected{% endif %}>HEVC (H.265, smaller but
                 slower)</option>
-              <option value="copy" {% if settings.video_codec=='copy' %}selected{% endif %}>Copy when possible</option>
+              <option value="copy" {% if settings.video_codec == 'copy' %}selected{% endif %}>Copy when possible</option>
             </select>
             <p class="field-help">Defaults to fast H.264/AAC MP4 for broad Jellyfin direct-play compatibility.</p>
           </div>
@@ -150,8 +150,8 @@
                   name="source_{{ source.id }}__url" value="{{ source.url }}" required /></div>
               <div><label for="youtube-{{ source.id }}-media-type">Download type</label><select
                   id="youtube-{{ source.id }}-media-type" name="source_{{ source.id }}__media_type">
-                  <option value="audio" {% if source.media_type !='video' %}selected{% endif %}>audio</option>
-                  <option value="video" {% if source.media_type=='video' %}selected{% endif %}>video</option>
+                  <option value="audio" {% if source.media_type != 'video' %}selected{% endif %}>audio</option>
+                  <option value="video" {% if source.media_type == 'video' %}selected{% endif %}>video</option>
                 </select></div>
               <div><label for="youtube-{{ source.id }}-subtitles">Subtitles</label><select
                   id="youtube-{{ source.id }}-subtitles" name="source_{{ source.id }}__subtitles">
@@ -187,9 +187,9 @@
                     <label for="youtube-{{ source.id }}-censor-method">Censoring method</label>
                     <select id="youtube-{{ source.id }}-censor-method"
                       name="source_{{ source.id }}__manual_upload_censor_method">
-                      <option value="duck" {% if source.manual_upload_censor_method=='duck' %}selected{% endif %}>Mute
+                      <option value="duck" {% if source.manual_upload_censor_method == 'duck' %}selected{% endif %}>Mute
                         audio</option>
-                      <option value="beep" {% if source.manual_upload_censor_method=='beep' %}selected{% endif %}>Beep
+                      <option value="beep" {% if source.manual_upload_censor_method == 'beep' %}selected{% endif %}>Beep
                         tone</option>
                     </select>
                   </div>
