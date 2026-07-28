@@ -50,7 +50,7 @@ COPY deploy/docker/frontend-entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
 COPY deploy/docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 COPY src ./src
 COPY --from=static /app/staticfiles ./staticfiles
-RUN GETOFFLINE_DJANGO_ROLE=api python -c "import frontend; import api.api" \
+RUN GETOFFLINE_DJANGO_ROLE=api python -c "import frontend; import api" \
     && python -m compileall -q /app/src \
     && chmod +x /usr/local/bin/frontend-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 
