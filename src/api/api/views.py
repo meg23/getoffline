@@ -203,7 +203,8 @@ def _dashboard_view(
     from frontend import views as frontend_views
 
     # Keep legacy test mocks working while the API owns the implementation.
-    dashboard_actions.publish_job = frontend_views.publish_job
+    # Keep the legacy test patch point dynamic; mypy cannot model module exports.
+    setattr(dashboard_actions, "publish_job", frontend_views.publish_job)  # noqa: B010
     legacy = getattr(dashboard_actions, f"_legacy_{name}", None) or getattr(
         dashboard_actions, name
     )
