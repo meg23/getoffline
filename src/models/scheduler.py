@@ -8,8 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from frontend.queue import publish_job
-from models.domain import JobType
-from models.domain import parse_str_enum
+from models.domain import JobType, parse_str_enum
 from models.jobs import create_job
 from models.models import ScheduledJob
 

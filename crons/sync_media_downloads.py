@@ -13,7 +13,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 MEDIA_SUFFIXES = {".mp3", ".mp4"}
 
 

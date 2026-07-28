@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import os
 import sys
 import tempfile
@@ -13,11 +12,11 @@ os.environ.setdefault("GETOFFLINE_TEST_IN_MEMORY_DB", "1")
 os.environ.setdefault("GETOFFLINE_DB_NAME", ":memory:")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 
-import django  # noqa: E402
-from django.apps import apps  # noqa: E402
-from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
+import django
+from django.apps import apps
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
-from django.test import Client as DjangoClient  # noqa: E402
+from django.test import Client as DjangoClient
 from django.test import TestCase
 from django.utils import timezone
 
@@ -39,43 +38,48 @@ def _clear_django_test_data():
         model.objects.all().delete()
 
 
-from models.domain import DownloadStatus
-from models.domain import JobStatus
-from models.domain import SourceType
-from frontend.queue import job_priority  # noqa: E402
-from frontend.routing import PODCAST_DOWNLOAD_QUEUE
-from frontend.routing import TRANSCRIPT_QUEUE
-from frontend.routing import YOUTUBE_DOWNLOAD_QUEUE
-from frontend.routing import queue_arguments
-from frontend.routing import queue_name
-
-from frontend.views import _sync_update_downloads_schedule
-from frontend.views import _write_manual_upload
-from models.jobs import claim_job  # noqa: E402
-from models.jobs import create_job
-from models.jobs import finish_job
-from models.models import Download  # noqa: E402
-from models.models import Job
-from models.models import ProfileConfigValue
-from models.models import ScheduledJob
-from models.models import SourceConfig
-from models.models import TranscriptSegment
-from models.scheduler import enqueue_due_scheduled_jobs  # noqa: E402
-from workers.handlers import _candidates_for_source
-from workers.handlers import _delete_ffmpeg_source_files  # noqa: E402
-from workers.handlers import _download_with_yt_dlp
-from workers.handlers import _downloaded_media_requires_ffmpeg
-from workers.handlers import _ffmpeg_video_args
-from workers.handlers import _idempotency_key
-from workers.handlers import _is_expected_ytdlp_download_error
-from workers.handlers import _yt_dlp_download_outtmpl
-from workers.handlers import _youtube_candidates
-from workers.handlers import check_for_episodes
-from workers.handlers import generate_transcript
-from workers.handlers import retention_cleanup
-from workers.handlers import transcode_media
-from workers import runner
 from django.contrib.auth.models import User
+
+from frontend.queue import job_priority
+from frontend.routing import (
+    PODCAST_DOWNLOAD_QUEUE,
+    TRANSCRIPT_QUEUE,
+    YOUTUBE_DOWNLOAD_QUEUE,
+    queue_arguments,
+    queue_name,
+)
+from frontend.views import _sync_update_downloads_schedule, _write_manual_upload
+from models.domain import DownloadStatus, JobStatus, SourceType
+from models.jobs import (
+    claim_job,
+    create_job,
+    finish_job,
+)
+from models.models import (
+    Download,
+    Job,
+    ProfileConfigValue,
+    ScheduledJob,
+    SourceConfig,
+    TranscriptSegment,
+)
+from models.scheduler import enqueue_due_scheduled_jobs
+from workers import runner
+from workers.handlers import (
+    _candidates_for_source,
+    _delete_ffmpeg_source_files,
+    _download_with_yt_dlp,
+    _downloaded_media_requires_ffmpeg,
+    _ffmpeg_video_args,
+    _idempotency_key,
+    _is_expected_ytdlp_download_error,
+    _youtube_candidates,
+    _yt_dlp_download_outtmpl,
+    check_for_episodes,
+    generate_transcript,
+    retention_cleanup,
+    transcode_media,
+)
 
 
 class AuthenticatedClient(DjangoClient):

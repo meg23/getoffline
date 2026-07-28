@@ -204,7 +204,7 @@ def _normalize_faster_whisper_result(
 def _transcribe_in_process(
     input_file: Path,
     model_name: str,
-    language: str = None,
+    language: str | None = None,
     log_prefix: str = "transcription",
 ):
     model = _get_or_load_whisper_model(model_name)
@@ -236,7 +236,7 @@ def _transcribe_in_process(
         )
         all_text_parts = []
         all_segments = []
-        chunk_count = int(math.ceil(duration_seconds / chunk_seconds))
+        chunk_count = math.ceil(duration_seconds / chunk_seconds)
         with tempfile.TemporaryDirectory(prefix="getoffline-transcription-") as tmpdir:
             tmpdir_path = Path(tmpdir)
             for chunk_index in range(chunk_count):
@@ -314,7 +314,7 @@ def transcribe_with_whisper(
     input_file: Path,
     model_name: str,
     log_prefix: str,
-    language: str = None,
+    language: str | None = None,
     mode: str = "in_process",
 ):
     input_file = Path(input_file).resolve()

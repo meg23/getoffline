@@ -7,21 +7,16 @@ import socket
 import threading
 import time
 import uuid
-from collections.abc import Callable
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol
 
 from django.conf import settings
-from django.db import IntegrityError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from models.domain import CpuSlotStatus
-from models.domain import HeavyJobKind
-from models.domain import JobType
-from models.domain import parse_str_enum
+from models.domain import CpuSlotStatus, HeavyJobKind, JobType, parse_str_enum
 from workers.logger import get_logger
 
 log = get_logger("workers.scheduler")

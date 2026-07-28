@@ -7,38 +7,38 @@ import threading
 import time
 from collections.abc import Iterable
 from contextlib import contextmanager
-from dataclasses import asdict
-from dataclasses import dataclass
-from datetime import datetime
-from datetime import timedelta
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
-from django.db import IntegrityError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from models.domain import DownloadStatus
-from models.domain import JobStatus
-from models.domain import SourceType
-from models.domain import parse_str_enum
 from frontend.queue import publish_job
+from models.domain import DownloadStatus, JobStatus, SourceType, parse_str_enum
 from models.jobs import create_job
-from models.models import AppConfigValue
-from models.models import Download
-from models.models import Job
-from models.models import ProfileConfigValue
-from models.models import SourceConfig
-from models.models import TranscriptSegment
-from workers.content_filter import delete_media_artifacts
-from workers.content_filter import log_filtered_deletion
-from workers.content_filter import screen_transcript
+from models.models import (
+    AppConfigValue,
+    Download,
+    Job,
+    ProfileConfigValue,
+    SourceConfig,
+    TranscriptSegment,
+)
+from workers.content_filter import (
+    delete_media_artifacts,
+    log_filtered_deletion,
+    screen_transcript,
+)
 from workers.logger import get_logger
 from workers.subtitles import create_subtitles
 from workers.utils import sanitize_channel_name
-from workers.ytdlp_helpers import apply_ytdlp_player_js_variant_workaround
-from workers.ytdlp_helpers import enable_youtube_quickjs_remote_component
-from workers.ytdlp_helpers import resolve_youtube_source_name
+from workers.ytdlp_helpers import (
+    apply_ytdlp_player_js_variant_workaround,
+    enable_youtube_quickjs_remote_component,
+    resolve_youtube_source_name,
+)
 
 log = get_logger("workers.handlers")
 

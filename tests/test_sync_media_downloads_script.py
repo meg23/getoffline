@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).parents[1] / "crons" / "sync_media_downloads.py"
 LEGACY_SCRIPT = Path(__file__).parents[1] / "scripts" / "sync-media-downloads.sh"
 

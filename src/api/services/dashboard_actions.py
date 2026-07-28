@@ -18,44 +18,41 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from django.contrib.auth.decorators import login_required
 from django.db import connection
 from django.db.models import Sum
-from django.http import FileResponse
-from django.http import Http404
-from django.http import HttpRequest
-from django.http import HttpResponse
-from django.http import HttpResponseBadRequest
-from django.http import HttpResponseRedirect
-from django.http import JsonResponse
-from django.http import StreamingHttpResponse
-from django.shortcuts import get_object_or_404
-from django.shortcuts import render
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseRedirect,
+    JsonResponse,
+    StreamingHttpResponse,
+)
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from models.domain import DownloadStatus
-from models.domain import JobStatus
-from models.domain import JobType
-from models.domain import SourceType
-from models.domain import parse_str_enum
-from models.jobs import create_job
-from models.models import AppConfigValue
-from models.models import Download
-from models.models import DownloadSettings
-from models.models import Job
-from models.models import ProfileConfigValue
-from models.models import ProfileDownloadSettings
-from models.models import ScheduledJob
-from models.models import SourceConfig
-from models.models import TranscriptSegment
-
 from frontend.queue import publish_job
+from models.domain import DownloadStatus, JobStatus, JobType, SourceType, parse_str_enum
+from models.jobs import create_job
+from models.models import (
+    AppConfigValue,
+    Download,
+    DownloadSettings,
+    Job,
+    ProfileConfigValue,
+    ProfileDownloadSettings,
+    ScheduledJob,
+    SourceConfig,
+    TranscriptSegment,
+)
 
 ALLOWED_JOB_TYPES = frozenset(
     {

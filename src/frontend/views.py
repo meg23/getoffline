@@ -6,12 +6,12 @@ route names. Dashboard data and actions are owned by the API service.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from functools import wraps
-from http.cookies import SimpleCookie
 import json
 import logging
 import os
+from collections.abc import Callable
+from functools import wraps
+from http.cookies import SimpleCookie
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
@@ -26,8 +26,8 @@ from django.http import (
 from django.shortcuts import render
 from django.test import Client as DjangoClient
 from django.urls import reverse
-from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
+from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
 log = logging.getLogger("frontend.proxy")
 

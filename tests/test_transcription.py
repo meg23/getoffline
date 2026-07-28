@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers import transcription  # noqa: E402
+from workers import transcription
 
 
 class FakeSegment:

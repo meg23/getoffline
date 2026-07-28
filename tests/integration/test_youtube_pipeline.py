@@ -150,7 +150,7 @@ def _wait_for_service(deadline: float, url: str, name: str) -> None:
             with urllib.request.urlopen(url, timeout=5) as response:
                 if response.status < 500:
                     return
-        except Exception as exc:  # noqa: BLE001 - diagnostic polling
+        except Exception as exc:
             last_error = exc
         time.sleep(5)
     raise AssertionError(f"{name} did not become reachable: {last_error}")

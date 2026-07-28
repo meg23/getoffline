@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import base64
 import os
 import sys

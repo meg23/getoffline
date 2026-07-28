@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from http.client import HTTPResponse
 from typing import IO, Any, Protocol, cast
-import urllib.error
-import urllib.parse
-import urllib.request
-
 
 _API_ROUTE_PATHS = {
     "api_login": "/api/auth/login",

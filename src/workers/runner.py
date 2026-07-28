@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import argparse
 import json
 import os
@@ -13,31 +12,33 @@ from django.conf import settings
 from django.db import close_old_connections
 from pika import exceptions as pika_exceptions
 
-from models.domain import JobStatus
-from models.domain import JobType
-from models.domain import MediaType
-from models.domain import SourceType
-from models.domain import parse_str_enum
+from models.domain import JobStatus, JobType, MediaType, SourceType, parse_str_enum
 from workers.logger import get_logger
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "frontend.settings")
 django.setup()
 
-from frontend.queue import job_priority  # noqa: E402
-from frontend.routing import CLEANUP_QUEUE  # noqa: E402
-from frontend.routing import FFMPEG_QUEUE
-from frontend.routing import PODCAST_DOWNLOAD_QUEUE
-from frontend.routing import SERIAL_EPISODE_CHECK_QUEUE
-from frontend.routing import TRANSCRIPT_QUEUE
-from frontend.routing import YOUTUBE_DOWNLOAD_QUEUE
-from frontend.routing import queue_arguments
-from frontend.routing import queue_name
-from models.jobs import claim_job  # noqa: E402
-from models.jobs import finish_job
-from models.models import Job  # noqa: E402
-from workers.handlers import HANDLERS  # noqa: E402
-from workers.scheduler import HEAVY_JOB_TYPES  # noqa: E402
-from workers.scheduler import scheduler_from_settings
+from frontend.queue import job_priority
+from frontend.routing import (
+    CLEANUP_QUEUE,
+    FFMPEG_QUEUE,
+    PODCAST_DOWNLOAD_QUEUE,
+    SERIAL_EPISODE_CHECK_QUEUE,
+    TRANSCRIPT_QUEUE,
+    YOUTUBE_DOWNLOAD_QUEUE,
+    queue_arguments,
+    queue_name,
+)
+from models.jobs import (
+    claim_job,
+    finish_job,
+)
+from models.models import Job
+from workers.handlers import HANDLERS
+from workers.scheduler import (
+    HEAVY_JOB_TYPES,
+    scheduler_from_settings,
+)
 
 log = get_logger("workers.runner")
 

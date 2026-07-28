@@ -1,6 +1,6 @@
 import os
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
 USE_IN_MEMORY_TEST_DB = os.getenv(

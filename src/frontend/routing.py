@@ -1,8 +1,4 @@
-from models.domain import JobType
-from models.domain import MediaType
-from models.domain import QueueName
-from models.domain import SourceType
-from models.domain import parse_str_enum
+from models.domain import JobType, MediaType, QueueName, SourceType, parse_str_enum
 
 SERIAL_EPISODE_CHECK_QUEUE = QueueName.SERIAL_EPISODE_CHECK
 YOUTUBE_DOWNLOAD_QUEUE = QueueName.YOUTUBE_DOWNLOAD

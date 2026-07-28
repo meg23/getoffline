@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ruff: noqa: E402
 """console music-player-style CLI for GetOffline.
 
 The app intentionally keeps dependencies to the Python standard library plus the
@@ -22,12 +21,12 @@ import signal
 import subprocess
 import sys
 import time
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Any, cast
 
 REPO_SRC = Path(__file__).resolve().parents[1]
@@ -516,7 +515,7 @@ def clamp_volume(volume: float) -> float:
 
 
 def format_volume(volume: float) -> str:
-    return f"{int(round(clamp_volume(volume) * 100))}%"
+    return f"{round(clamp_volume(volume) * 100)}%"
 
 
 def prepare_player_log() -> Path:
@@ -950,7 +949,7 @@ def local_player_command(
     if player == "ffplay":
         command = ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}"]
         if clamp_volume(volume) < 1.0:
-            command.extend(["-volume", str(int(round(clamp_volume(volume) * 100)))])
+            command.extend(["-volume", str(round(clamp_volume(volume) * 100))])
         return [*command, filename]
     if player in {"vlc", "cvlc"}:
         return [player, "--intf", "ncurses", f"--start-time={int(seek)}", filename]
@@ -977,7 +976,7 @@ def remote_player_command(
             f"{seek:.3f}",
         ]
         if clamp_volume(volume) < 1.0:
-            command.extend(["-volume", str(int(round(clamp_volume(volume) * 100)))])
+            command.extend(["-volume", str(round(clamp_volume(volume) * 100))])
         command.extend(["-headers", f"Authorization: {auth_header}\r\n", url])
         return command
     if player in {"vlc", "cvlc"}:

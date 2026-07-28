@@ -1,11 +1,10 @@
-# ruff: noqa: E402
 import os
 import sys
 import unittest
+import urllib.error
 from email.message import Message
 from io import BytesIO
 from unittest.mock import patch
-import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 

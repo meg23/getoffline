@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
+from django.contrib.auth import authenticate
+from django.contrib.auth import login as auth_login
+from django.contrib.auth import logout as auth_logout
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
@@ -18,9 +20,9 @@ from api.playback.service import apply_update, build_update, start
 from api.services.library import (
     episode_to_summary,
     human_duration,
-    listened_seconds,
-    list_downloads,
     library_filter_counts,
+    list_downloads,
+    listened_seconds,
     normalize_library_filter,
     recent_jobs,
 )
@@ -31,9 +33,9 @@ from api.streaming.media import (
     resolve_subtitle_path,
     subtitle_response,
 )
+from frontend.queue import publish_job
 from models.jobs import create_job
 from models.models import Download, Job, SourceConfig
-from frontend.queue import publish_job
 
 
 def _safe_login_redirect(request: HttpRequest) -> str:
@@ -191,8 +193,8 @@ def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
 def _dashboard_view(
     name: str, request: HttpRequest, *args: object, **kwargs: object
 ) -> HttpResponse:
-    from frontend import views as frontend_views
     from api.services import dashboard_actions
+    from frontend import views as frontend_views
 
     # Keep legacy test mocks working while the API owns the implementation.
     setattr(dashboard_actions, "publish_job", frontend_views.publish_job)
