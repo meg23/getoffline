@@ -50,9 +50,17 @@ def transcript_text(subtitle_path: Path) -> str:
 
 def find_explicit_content(text: str) -> ExplicitContentMatch | None:
     """Find explicit language in transcript text."""
+    matches = find_explicit_content_matches(text)
+    return matches[0] if matches else None
+
+
+def find_explicit_content_matches(
+    text: str,
+) -> list[ExplicitContentMatch]:
+    """Find all explicit language matches in transcript text."""
     transcript = str(text or "").strip()
     if not transcript:
-        return None
+        return []
 
     sentences = [
         sentence.strip()
@@ -63,6 +71,7 @@ def find_explicit_content(text: str) -> ExplicitContentMatch | None:
         sentences = [transcript]
 
     predictions = _predict_profanity(sentences)
+    matches = []
     if predictions is not None:
         for sentence, prediction in zip(sentences, predictions):
             try:
@@ -70,19 +79,29 @@ def find_explicit_content(text: str) -> ExplicitContentMatch | None:
             except (TypeError, ValueError):
                 is_profane = bool(prediction)
             if is_profane:
-                return ExplicitContentMatch(
-                    category="profanity",
-                    term=_PROFANITY_FILTER_TERM,
-                    sentence=sentence,
+                matches.append(
+                    ExplicitContentMatch(
+                        category="profanity",
+                        term=_PROFANITY_FILTER_TERM,
+                        sentence=sentence,
+                    )
                 )
 
-    return None
+    return matches
 
 
 def screen_transcript(subtitle_path: Path | None) -> ExplicitContentMatch | None:
     if subtitle_path is None or not Path(subtitle_path).exists():
         return None
     return find_explicit_content(transcript_text(Path(subtitle_path)))
+
+
+def screen_transcript_matches(
+    subtitle_path: Path | None,
+) -> list[ExplicitContentMatch]:
+    if subtitle_path is None or not Path(subtitle_path).exists():
+        return []
+    return find_explicit_content_matches(transcript_text(Path(subtitle_path)))
 
 
 def delete_media_artifacts(media_path: Path) -> list[Path]:

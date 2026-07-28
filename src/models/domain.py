@@ -33,6 +33,7 @@ class JobType(StrEnum):
     TRANSCODE_MEDIA = "transcode_media"
     GENERATE_TRANSCRIPT = "generate_transcript"
     RETENTION_CLEANUP = "retention_cleanup"
+    CENSOR_PROFANITY = "censor_profanity"
 
 
 class QueueName(StrEnum):

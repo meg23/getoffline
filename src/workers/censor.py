@@ -43,33 +43,79 @@ def _parse_srt_timestamp(timestamp_str: str) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-def _extract_srt_blocks(srt_content: str) -> list[tuple[str, str, str]]:
-    """Extract SRT blocks as (index, timecode, text) tuples.
+def _extract_srt_blocks(srt_content: str) -> list[tuple[str, str, str, str]]:
+    """Extract SRT blocks as (index, start_time, end_time, text) tuples.
+
+    Uses a line-based state parser to handle edge cases like empty cues,
+    various line endings, and optional SRT cue settings.
 
     Args:
         srt_content: Raw SRT file content
 
     Returns:
-        List of (index, timecode, text) tuples
+        List of (index, start_time, end_time, text) tuples
     """
-    # Pattern: index (number), timecode (HH:MM:SS,mmm --> HH:MM:SS,mmm), text
-    srt_block_pattern = re.compile(
-        r"(\d+)\s+(\d{2}:\d{2}:\d{2}[.,]\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}[.,]\d{3})\s+(.*?)(?=\n\n|\Z)",
-        re.DOTALL,
-    )
+    # Normalize line endings
+    content = srt_content.replace("\r\n", "\n").replace("\r", "\n")
+    lines = content.split("\n")
 
     blocks = []
-    for match in srt_block_pattern.finditer(srt_content):
-        index = match.group(1)
-        start_time = match.group(2)
-        end_time = match.group(3)
-        text = match.group(4).strip()
+    i = 0
 
-        # Clean up text (remove extra whitespace, join lines)
-        text = " ".join(text.split())
+    while i < len(lines):
+        line = lines[i].strip()
 
-        if text:  # Only include non-empty blocks
-            blocks.append((index, start_time, end_time, text))
+        # Skip empty lines
+        if not line:
+            i += 1
+            continue
+
+        # Try to parse as cue index (should be numeric)
+        try:
+            index = int(line)
+        except ValueError:
+            # Not a cue index, skip this line
+            i += 1
+            continue
+
+        # Next line should be timecode
+        i += 1
+        if i >= len(lines):
+            break
+
+        timecode_line = lines[i].strip()
+
+        # Parse timecode: HH:MM:SS,mmm --> HH:MM:SS,mmm [optional settings]
+        timecode_match = re.match(
+            r"(\d{2}:\d{2}:\d{2}[,.]\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}[,.]\d{3})",
+            timecode_line,
+        )
+        if not timecode_match:
+            i += 1
+            continue
+
+        start_time = timecode_match.group(1)
+        end_time = timecode_match.group(2)
+
+        # Collect cue text (can be multiple lines until empty line or EOF)
+        text_lines = []
+        i += 1
+        while i < len(lines):
+            text_line = lines[i].rstrip()
+            # Stop at empty line
+            if not text_line.strip():
+                i += 1
+                break
+            text_lines.append(text_line.strip())
+            i += 1
+
+        # Join text lines with spaces, normalize whitespace
+        text = " ".join(text_lines)
+        text = " ".join(text.split())  # Normalize multiple spaces
+
+        # Only add non-empty blocks
+        if text:
+            blocks.append((str(index), start_time, end_time, text))
 
     return blocks
 
@@ -118,9 +164,12 @@ def extract_profanity_segments(
             start_seconds = _parse_srt_timestamp(start_str)
             end_seconds = _parse_srt_timestamp(end_str)
 
-            # Check if text matches any profane sentence
+            # Normalize and check if text contains any profane sentence
+            normalized_block_text = text.lower()
             for profane_text in profane_texts:
-                if profane_text.strip().lower() == text.lower():
+                normalized_profane_text = profane_text.strip().lower()
+                # Use substring matching instead of exact match
+                if normalized_profane_text in normalized_block_text:
                     segment = AudioSegment(
                         start_seconds=start_seconds,
                         end_seconds=end_seconds,
@@ -240,8 +289,7 @@ def build_beep_filter(
 ) -> str | None:
     """Generate FFmpeg audio filter to overlay beep tones on profane segments.
 
-    Uses atone to generate a 1000Hz beep, volume filter to mute original audio,
-    and amix to combine them.
+    Uses sine source to generate beep tones that overlay the muted original audio.
 
     Args:
         segments: List of audio segments to censor
@@ -256,55 +304,34 @@ def build_beep_filter(
 
     merged = _merge_overlapping_segments(segments)
 
-    # Generate beep definitions for each segment
-    # Each segment gets a unique beep that starts and ends exactly at segment boundaries
-    beep_segments = []
-    for i, segment in enumerate(merged):
-        duration = segment.duration_seconds
-        beep_segments.append(
-            f"atone=f={beep_frequency}:d={duration:.3f}:a={beep_amplitude}[beep{i}]"
-        )
-
-    # Build the mute conditions (same as duck filter)
+    # Build enable expression: between(t,start,end)+between(t,start2,end2)+...
     enable_conditions = []
     for segment in merged:
         condition = f"between(t,{segment.start_seconds:.3f},{segment.end_seconds:.3f})"
         enable_conditions.append(condition)
+
     enable_expr = "+".join(enable_conditions)
 
-    # Mute the original audio during profane segments
-    mute_filter = f"[0:a]volume=0:enable='{enable_expr}'[muted]"
+    # Build complete filter graph:
+    # 1. Mute the original audio during profane segments
+    # 2. Generate beep tones from sine source
+    # 3. Mix the muted audio with the beep
 
-    # Concatenate beep generation filters
-    # This is complex because we need to generate multiple beeps synchronized to the timeline
-    # For now, we use a simpler approach: generate one composite beep and mix it
-
-    # Alternative approach: Use anullsrc to generate silence, then use aformat to match audio
-    # Then overlay the muted audio with clicks at the profane segments
-
-    # Simplified approach: Generate a single beep filter that covers all segments
-    total_duration = merged[-1].end_seconds if merged else 0
-    if total_duration == 0:
-        return None
-
-    # Create enable expression for beep generation to align with profane segments
-    beep_enable = enable_expr
-
-    # Generate beep tone synchronized to profane segments
-    # anullsrc generates silence, we then apply tone during profane times
-    beep_definition = f"[0:a]atone=f={beep_frequency}:d={total_duration:.3f}:a={beep_amplitude},volume=0:enable='{beep_enable}'[beep]"
-
-    # Mix muted original with beep tone
-    filter_complex = f"{mute_filter};[muted][beep]amix=inputs=2:duration=first[out]"
+    filter_graph = (
+        f"[0:a]volume=0:enable='{enable_expr}'[muted];"
+        f"sine=frequency={beep_frequency}:sample_rate=48000,"
+        f"volume={beep_amplitude}:enable='{enable_expr}'[beep];"
+        f"[muted][beep]amix=inputs=2:duration=first:normalize=0[outa]"
+    )
 
     log.info(
         "Generated beep filter for %d segments at %dHz: %s",
         len(merged),
         beep_frequency,
-        filter_complex,
+        filter_graph,
     )
 
-    return filter_complex
+    return filter_graph
 
 
 def build_censor_filter(

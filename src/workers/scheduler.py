@@ -23,6 +23,7 @@ log = get_logger("workers.scheduler")
 
 HEAVY_JOB_TYPES = {
     JobType.TRANSCODE_MEDIA: HeavyJobKind.FFMPEG,
+    JobType.CENSOR_PROFANITY: HeavyJobKind.FFMPEG,
     JobType.GENERATE_TRANSCRIPT: HeavyJobKind.TRANSCRIPT,
 }
 DEFAULT_CAPACITY = 3

@@ -49,7 +49,7 @@ def queue_name(job_type: str, payload: dict[str, object] | None = None) -> str:
         return SERIAL_EPISODE_CHECK_QUEUE
     if parsed_job_type in DOWNLOAD_JOB_TYPES:
         return _download_queue_name(payload)
-    if parsed_job_type is JobType.TRANSCODE_MEDIA:
+    if parsed_job_type in {JobType.TRANSCODE_MEDIA, JobType.CENSOR_PROFANITY}:
         return FFMPEG_QUEUE
     if parsed_job_type is JobType.GENERATE_TRANSCRIPT:
         return TRANSCRIPT_QUEUE
