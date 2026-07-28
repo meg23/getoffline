@@ -2181,6 +2181,8 @@ def download_episode(job: Job) -> None:
                 "delete_explicit_content": bool(
                     payload.get("delete_explicit_content", False)
                 ),
+                "censor_profanity": bool(payload.get("censor_profanity", False)),
+                "censor_method": str(payload.get("censor_method", "duck")).strip().lower(),
             },
             parent_job_id=job.id,
         )
@@ -2194,6 +2196,8 @@ def download_episode(job: Job) -> None:
         "media_type": media_kind,
         "recent_download": True,
         "delete_explicit_content": bool(payload.get("delete_explicit_content", False)),
+        "censor_profanity": bool(payload.get("censor_profanity", False)),
+        "censor_method": str(payload.get("censor_method", "duck")).strip().lower(),
     }
     log.info(
         "Download worker selected next stage parent_job_id=%s download_id=%s file_ext=%s media_kind=%s target_ext=%s next_job_type=%s",
