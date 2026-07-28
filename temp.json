@@ -1,0 +1,262 @@
+{
+	"Id": "a0c9896a12ab79e9afec5b590c5fdb22e650de8dd48b8755edafcb810db70624",
+	"Created": "2026-07-28T02:28:00.70926094Z",
+	"Path": "/usr/local/bin/api-entrypoint.sh",
+	"Args": [],
+	"State": {
+		"Status": "restarting",
+		"Running": true,
+		"Paused": false,
+		"Restarting": true,
+		"OOMKilled": false,
+		"Dead": false,
+		"Pid": 0,
+		"ExitCode": 255,
+		"Error": "",
+		"StartedAt": "2026-07-28T02:28:19.653817604Z",
+		"FinishedAt": "2026-07-28T02:28:20.182251274Z",
+		"Health": {
+			"Status": "unhealthy",
+			"FailingStreak": 0,
+			"Log": []
+		}
+	},
+	"Image": "sha256:8d8968e6acb56b4480adeb758f10f9503517115fde9a15be4c99623275105ad6",
+	"ResolvConfPath": "/var/lib/docker/containers/a0c9896a12ab79e9afec5b590c5fdb22e650de8dd48b8755edafcb810db70624/resolv.conf",
+	"HostnamePath": "/var/lib/docker/containers/a0c9896a12ab79e9afec5b590c5fdb22e650de8dd48b8755edafcb810db70624/hostname",
+	"HostsPath": "/var/lib/docker/containers/a0c9896a12ab79e9afec5b590c5fdb22e650de8dd48b8755edafcb810db70624/hosts",
+	"LogPath": "/var/lib/docker/containers/a0c9896a12ab79e9afec5b590c5fdb22e650de8dd48b8755edafcb810db70624/a0c9896a12ab79e9afec5b590c5fdb22e650de8dd48b8755edafcb810db70624-json.log",
+	"Name": "/getoffline-api-1",
+	"RestartCount": 8,
+	"Driver": "overlayfs",
+	"Platform": "linux",
+	"MountLabel": "",
+	"ProcessLabel": "",
+	"AppArmorProfile": "",
+	"ExecIDs": null,
+	"HostConfig": {
+		"Binds": [
+			"C:\\Github\\getoffline\\downloads:/app/downloads:rw"
+		],
+		"ContainerIDFile": "",
+		"LogConfig": {
+			"Type": "json-file",
+			"Config": {}
+		},
+		"NetworkMode": "getoffline_default",
+		"PortBindings": {
+			"8000/tcp": [
+				{
+					"HostIp": "",
+					"HostPort": "8081"
+				}
+			]
+		},
+		"RestartPolicy": {
+			"Name": "unless-stopped",
+			"MaximumRetryCount": 0
+		},
+		"AutoRemove": false,
+		"VolumeDriver": "",
+		"VolumesFrom": null,
+		"ConsoleSize": [
+			0,
+			0
+		],
+		"CapAdd": null,
+		"CapDrop": null,
+		"CgroupnsMode": "private",
+		"Dns": null,
+		"DnsOptions": null,
+		"DnsSearch": null,
+		"ExtraHosts": [],
+		"GroupAdd": null,
+		"IpcMode": "private",
+		"Cgroup": "",
+		"Links": null,
+		"OomScoreAdj": 0,
+		"PidMode": "",
+		"Privileged": false,
+		"PublishAllPorts": false,
+		"ReadonlyRootfs": false,
+		"SecurityOpt": null,
+		"UTSMode": "",
+		"UsernsMode": "",
+		"ShmSize": 67108864,
+		"Runtime": "runc",
+		"Isolation": "",
+		"CpuShares": 0,
+		"Memory": 0,
+		"NanoCpus": 0,
+		"CgroupParent": "",
+		"BlkioWeight": 0,
+		"BlkioWeightDevice": null,
+		"BlkioDeviceReadBps": null,
+		"BlkioDeviceWriteBps": null,
+		"BlkioDeviceReadIOps": null,
+		"BlkioDeviceWriteIOps": null,
+		"CpuPeriod": 0,
+		"CpuQuota": 0,
+		"CpuRealtimePeriod": 0,
+		"CpuRealtimeRuntime": 0,
+		"CpusetCpus": "",
+		"CpusetMems": "",
+		"Devices": null,
+		"DeviceCgroupRules": null,
+		"DeviceRequests": null,
+		"MemoryReservation": 0,
+		"MemorySwap": 0,
+		"MemorySwappiness": null,
+		"OomKillDisable": null,
+		"PidsLimit": null,
+		"Ulimits": null,
+		"CpuCount": 0,
+		"CpuPercent": 0,
+		"IOMaximumIOps": 0,
+		"IOMaximumBandwidth": 0,
+		"MaskedPaths": [
+			"/proc/acpi",
+			"/proc/asound",
+			"/proc/interrupts",
+			"/proc/kcore",
+			"/proc/keys",
+			"/proc/latency_stats",
+			"/proc/sched_debug",
+			"/proc/scsi",
+			"/proc/timer_list",
+			"/proc/timer_stats",
+			"/sys/devices/virtual/powercap",
+			"/sys/firmware"
+		],
+		"ReadonlyPaths": [
+			"/proc/bus",
+			"/proc/fs",
+			"/proc/irq",
+			"/proc/sys",
+			"/proc/sysrq-trigger"
+		]
+	},
+	"Storage": {
+		"RootFS": {
+			"Snapshot": {
+				"Name": "overlayfs"
+			}
+		}
+	},
+	"Mounts": [
+		{
+			"Type": "bind",
+			"Source": "C:\\Github\\getoffline\\downloads",
+			"Destination": "/app/downloads",
+			"Mode": "rw",
+			"RW": true,
+			"Propagation": "rprivate"
+		}
+	],
+	"Config": {
+		"Hostname": "a0c9896a12ab",
+		"Domainname": "",
+		"User": "",
+		"AttachStdin": false,
+		"AttachStdout": true,
+		"AttachStderr": true,
+		"ExposedPorts": {
+			"80/tcp": {},
+			"8000/tcp": {}
+		},
+		"Tty": false,
+		"OpenStdin": false,
+		"StdinOnce": false,
+		"Env": [
+			"GETOFFLINE_DB_PASSWORD=getoffline",
+			"GETOFFLINE_RABBITMQ_EXCHANGE=getoffline",
+			"GETOFFLINE_CSRF_TRUSTED_ORIGINS=http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080",
+			"GETOFFLINE_DB_NAME=getoffline",
+			"GETOFFLINE_DJANGO_DEBUG=0",
+			"GETOFFLINE_DB_PORT=3306",
+			"GETOFFLINE_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/%2F",
+			"GETOFFLINE_DJANGO_ALLOWED_HOSTS=*",
+			"GETOFFLINE_DJANGO_ROLE=api",
+			"GETOFFLINE_DB_HOST=mysql",
+			"GETOFFLINE_DJANGO_SECRET_KEY=bananas-are-great",
+			"GETOFFLINE_DB_USER=getoffline",
+			"PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			"PYTHON_VERSION=3.14.6",
+			"PYTHON_SHA256=143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63",
+			"PYTHONDONTWRITEBYTECODE=1",
+			"PYTHONUNBUFFERED=1",
+			"PYTHONPATH=/app/src",
+			"DJANGO_SETTINGS_MODULE=frontend.settings",
+			"GETOFFLINE_STATIC_MANIFEST=1",
+			"GETOFFLINE_GUNICORN_BIND=127.0.0.1:8000"
+		],
+		"Cmd": [
+			"/usr/local/bin/api-entrypoint.sh"
+		],
+		"Healthcheck": {
+			"Test": [
+				"CMD-SHELL",
+				"curl -f http://localhost:8000/api/health || exit 1"
+			],
+			"Interval": 10000000000,
+			"Timeout": 5000000000,
+			"Retries": 20
+		},
+		"Image": "getoffline-api",
+		"Volumes": null,
+		"WorkingDir": "/app",
+		"Entrypoint": null,
+		"Labels": {
+			"com.docker.compose.config-hash": "c8bb9a42b81a0d679fc64e2da5f851529ac92f85abcb09f7acbf4ebef4c28c0c",
+			"com.docker.compose.container-number": "1",
+			"com.docker.compose.depends_on": "mysql:service_healthy:false,rabbitmq:service_healthy:false",
+			"com.docker.compose.image": "sha256:8d8968e6acb56b4480adeb758f10f9503517115fde9a15be4c99623275105ad6",
+			"com.docker.compose.oneoff": "False",
+			"com.docker.compose.project": "getoffline",
+			"com.docker.compose.project.config_files": "C:\\Github\\getoffline\\docker-compose.yml",
+			"com.docker.compose.project.working_dir": "C:\\Github\\getoffline",
+			"com.docker.compose.service": "api",
+			"com.docker.compose.version": "5.3.1"
+		}
+	},
+	"NetworkSettings": {
+		"SandboxID": "",
+		"SandboxKey": "",
+		"Ports": {},
+		"Networks": {
+			"getoffline_default": {
+				"IPAMConfig": null,
+				"Links": null,
+				"Aliases": [
+					"getoffline-api-1",
+					"api"
+				],
+				"DriverOpts": null,
+				"GwPriority": 0,
+				"NetworkID": "83dee43155828627f319014d194a82204dcccb37c8391f428644dd65fd044434",
+				"EndpointID": "",
+				"Gateway": "",
+				"IPAddress": "",
+				"MacAddress": "",
+				"IPPrefixLen": 0,
+				"IPv6Gateway": "",
+				"GlobalIPv6Address": "",
+				"GlobalIPv6PrefixLen": 0,
+				"DNSNames": [
+					"getoffline-api-1",
+					"api",
+					"a0c9896a12ab"
+				]
+			}
+		}
+	},
+	"ImageManifestDescriptor": {
+		"mediaType": "application/vnd.oci.image.manifest.v1+json",
+		"digest": "sha256:341be1b3ea44a8fe3275e877bf842776f0935c82a1d1507fadbefa2a096549ca",
+		"size": 2948,
+		"platform": {
+			"architecture": "amd64",
+			"os": "linux"
+		}
+	}
+}

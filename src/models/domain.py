@@ -54,6 +54,12 @@ class HeavyJobKind(StrEnum):
     TRANSCRIPT = "transcript"
 
 
+class ProfanityStatus(StrEnum):
+    CLEAN = "clean"
+    UNCENSORED = "uncensored"
+    CENSORED = "censored"
+
+
 def parse_str_enum(enum_type: type[StrEnum], value: object) -> StrEnum | None:
     try:
         return enum_type(str(value or "").strip().lower())

@@ -12,6 +12,8 @@ PROFILE_DEFAULTS = {
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
     "manual_upload_delete_explicit_content": "0",
+    "manual_upload_censor_profanity": "0",
+    "manual_upload_censor_method": "duck",
     "audio_format": "mp3",
     "video_format": "mp4",
     "video_codec": "h264",

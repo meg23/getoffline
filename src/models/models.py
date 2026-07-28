@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from .domain import DownloadStatus
 from .domain import JobStatus
+from .domain import ProfanityStatus
 
 
 class AppConfigValue(models.Model):
@@ -67,6 +68,12 @@ class SourceConfig(models.Model):
     include_shorts = models.BooleanField(default=False)
     include_livestreams = models.BooleanField(default=False)
     title_exclude = models.TextField(blank=True, null=True)
+    manual_upload_censor_profanity = models.BooleanField(default=False)
+    manual_upload_censor_method = models.CharField(
+        max_length=32,
+        choices=[("duck", "Mute audio"), ("beep", "Beep tone")],
+        default="duck",
+    )
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -112,6 +119,12 @@ class Download(models.Model):
     last_position_seconds = models.FloatField(default=0.0)
     total_listened_seconds = models.FloatField(default=0.0)
     last_position_updated_at = models.DateTimeField(blank=True, null=True)
+    profanity_status = models.CharField(
+        max_length=32,
+        default=ProfanityStatus.CLEAN,
+        db_index=True,
+        choices=[(choice, choice.upper()) for choice in ProfanityStatus],
+    )
 
     class Meta:
         db_table = "downloads"

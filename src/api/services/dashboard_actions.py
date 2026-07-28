@@ -959,6 +959,9 @@ def settings_page(request: HttpRequest) -> HttpResponse:
             "manual_upload_filter_checked": _checked(
                 settings, "manual_upload_delete_explicit_content"
             ),
+            "manual_upload_censor_checked": _checked(
+                settings, "manual_upload_censor_profanity"
+            ),
         },
     )
 

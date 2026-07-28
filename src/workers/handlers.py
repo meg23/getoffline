@@ -22,6 +22,7 @@ from models.domain import DownloadStatus
 from models.domain import JobStatus
 from models.domain import SourceType
 from models.domain import parse_str_enum
+from models.domain import ProfanityStatus
 from frontend.queue import publish_job
 from models.jobs import create_job
 from models.models import AppConfigValue
@@ -2326,6 +2327,7 @@ def _screen_deferred_video_before_insert(
                 "download_status": DownloadStatus.FILTERED,
                 "completed_at": timezone.now(),
                 "last_seen_at": timezone.now(),
+                "profanity_status": ProfanityStatus.UNCENSORED,
             }
         )
         Download.objects.update_or_create(
@@ -2355,6 +2357,7 @@ def _screen_deferred_video_before_insert(
         if Path(subtitle_path).is_relative_to(output_root)
         else None
     )
+    final_defaults["profanity_status"] = ProfanityStatus.CLEAN
     download, _created = Download.objects.update_or_create(
         **download_lookup,
         defaults=final_defaults,

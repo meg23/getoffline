@@ -7,7 +7,7 @@ from pathlib import Path
 from django.db.models import QuerySet, Sum
 from django.urls import reverse
 
-from models.domain import DownloadStatus, parse_str_enum
+from models.domain import DownloadStatus, parse_str_enum, ProfanityStatus
 from models.models import Download, Job
 from shared.schemas.media import EpisodeSummary
 
@@ -66,6 +66,15 @@ def decorate_download(item: Download) -> Download:
         item.status_class = "status-missing"
     item.resolved_subtitle_path = None
     item.has_subtitles = bool(item.subtitle_path or item.subtitle_path_relative)
+    profanity_status = parse_str_enum(ProfanityStatus, item.profanity_status or "clean")
+    item.profanity_label = ""
+    item.profanity_class = ""
+    if profanity_status is ProfanityStatus.CENSORED:
+        item.profanity_label = "CENSORED"
+        item.profanity_class = "profanity-censored"
+    elif profanity_status is ProfanityStatus.UNCENSORED:
+        item.profanity_label = "EXPLICIT"
+        item.profanity_class = "profanity-explicit"
     return item
 
 

@@ -451,6 +451,14 @@ tbody tr:nth-child(even) td {
   background: #fde7e9;
   color: #96253b;
 }
+.profanity-explicit {
+  background: #fde7e9;
+  color: #96253b;
+}
+.profanity-censored {
+  background: #ffeaa7;
+  color: #d63031;
+}
 .selection-cell {
   text-align: right;
 }
