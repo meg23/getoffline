@@ -69,6 +69,12 @@ class SourceConfig(models.Model):
     include_shorts = models.BooleanField(default=False)
     include_livestreams = models.BooleanField(default=False)
     title_exclude = models.TextField(blank=True, null=True)
+    censor_profanity = models.BooleanField(default=False)
+    censor_method = models.CharField(
+        max_length=32,
+        choices=[("duck", "Mute audio"), ("beep", "Beep tone")],
+        default="duck",
+    )
     manual_upload_censor_profanity = models.BooleanField(default=False)
     manual_upload_censor_method = models.CharField(
         max_length=32,

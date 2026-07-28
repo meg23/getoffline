@@ -179,17 +179,15 @@
                 <p class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as
                   filtered.</p>
                 <div class="censor-option-group">
-                  <input type="hidden" name="source_{{ source.id }}__manual_upload_censor_profanity" value="0" />
-                  <label class="checkbox-label"><input type="checkbox"
-                      name="source_{{ source.id }}__manual_upload_censor_profanity" value="1" {% if
-                      source.manual_upload_censor_profanity %}checked{% endif %} /> Censor profanity instead</label>
+                  <input type="hidden" name="source_{{ source.id }}__censor_profanity" value="0" />
+                  <label class="checkbox-label"><input type="checkbox" name="source_{{ source.id }}__censor_profanity" value="1" {% if source.censor_profanity %}checked{% endif %} /> Censor profanity instead</label>
                   <div class="censor-method-group">
                     <label for="youtube-{{ source.id }}-censor-method">Censoring method</label>
                     <select id="youtube-{{ source.id }}-censor-method"
-                      name="source_{{ source.id }}__manual_upload_censor_method">
-                      <option value="duck" {% if source.manual_upload_censor_method == 'duck' %}selected{% endif %}>Mute
+                      name="source_{{ source.id }}__censor_method">
+                      <option value="duck" {% if source.censor_method == 'duck' %}selected{% endif %}>Mute
                         audio</option>
-                      <option value="beep" {% if source.manual_upload_censor_method == 'beep' %}selected{% endif %}>Beep
+                      <option value="beep" {% if source.censor_method == 'beep' %}selected{% endif %}>Beep
                         tone</option>
                     </select>
                   </div>
@@ -296,17 +294,15 @@
                 <p class="field-help">Uses the generated audio transcript. Matching media is removed and remembered as
                   filtered.</p>
                 <div class="censor-option-group">
-                  <input type="hidden" name="source_{{ source.id }}__manual_upload_censor_profanity" value="0" />
-                  <label class="checkbox-label"><input type="checkbox"
-                      name="source_{{ source.id }}__manual_upload_censor_profanity" value="1" {% if
-                      source.manual_upload_censor_profanity %}checked{% endif %} /> Censor profanity instead</label>
+                  <input type="hidden" name="source_{{ source.id }}__censor_profanity" value="0" />
+                  <label class="checkbox-label"><input type="checkbox" name="source_{{ source.id }}__censor_profanity" value="1" {% if source.censor_profanity %}checked{% endif %} /> Censor profanity instead</label>
                   <div class="censor-method-group">
                     <label for="podcast-{{ source.id }}-censor-method">Censoring method</label>
                     <select id="podcast-{{ source.id }}-censor-method"
-                      name="source_{{ source.id }}__manual_upload_censor_method">
-                      <option value="duck" {% if source.manual_upload_censor_method=='duck' %}selected{% endif %}>Mute
+                      name="source_{{ source.id }}__censor_method">
+                      <option value="duck" {% if source.censor_method == 'duck' %}selected{% endif %}>Mute
                         audio</option>
-                      <option value="beep" {% if source.manual_upload_censor_method=='beep' %}selected{% endif %}>Beep
+                      <option value="beep" {% if source.censor_method == 'beep' %}selected{% endif %}>Beep
                         tone</option>
                     </select>
                   </div>
