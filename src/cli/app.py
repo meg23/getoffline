@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ruff: noqa: E402
 """console music-player-style CLI for GetOffline.
 
 The app intentionally keeps dependencies to the Python standard library plus the
@@ -22,12 +21,12 @@ import signal
 import subprocess
 import sys
 import time
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Any, cast
 
 REPO_SRC = Path(__file__).resolve().parents[1]
@@ -69,15 +68,19 @@ class Credentials:
 
     @property
     def auth_header(self) -> str:
-        raw = f"{self.username}:{self.password}".encode("utf-8")
+        raw = f"{self.username}:{self.password}".encode()
         return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
 class AuthenticatedTransport:
     """HTTP transport that attaches Basic auth to every SDK request."""
 
-    def __init__(self, credentials: Credentials, *, timeout_seconds: float = 30.0) -> None:
-        self.transport = HttpTransport(credentials.api_url, timeout_seconds=timeout_seconds)
+    def __init__(
+        self, credentials: Credentials, *, timeout_seconds: float = 30.0
+    ) -> None:
+        self.transport = HttpTransport(
+            credentials.api_url, timeout_seconds=timeout_seconds
+        )
         self.credentials = credentials
 
     def request(
@@ -89,9 +92,18 @@ class AuthenticatedTransport:
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
+        streaming: bool = False,
     ) -> Response:
         merged = {"Authorization": self.credentials.auth_header, **(headers or {})}
-        return self.transport.request(method, target, args, query=query, data=data, headers=merged)
+        return self.transport.request(
+            method,
+            target,
+            args,
+            query=query,
+            data=data,
+            headers=merged,
+            streaming=streaming,
+        )
 
 
 class GetOfflineConsole:
@@ -271,9 +283,15 @@ class GetOfflineConsole:
         episode = self.current_episode()
         if not episode:
             return
-        target = "/dashboard/downloads/{}/{}".format(episode["id"], "played" if played else "unplayed")
+        target = "/dashboard/downloads/{}/{}".format(
+            episode["id"], "played" if played else "unplayed"
+        )
         response = self.client.raw_request("POST", target)
-        self.message = "Updated playback status" if response.ok else f"Update failed ({response.status_code})"
+        self.message = (
+            "Updated playback status"
+            if response.ok
+            else f"Update failed ({response.status_code})"
+        )
         self.refresh()
 
     def toggle_favorite(self) -> None:
@@ -281,8 +299,14 @@ class GetOfflineConsole:
         if not episode:
             return
         action = "unfavorite" if episode.get("favorite") else "favorite"
-        response = self.client.raw_request("POST", f"/dashboard/downloads/{episode['id']}/{action}")
-        self.message = "Updated favorite" if response.ok else f"Favorite failed ({response.status_code})"
+        response = self.client.raw_request(
+            "POST", f"/dashboard/downloads/{episode['id']}/{action}"
+        )
+        self.message = (
+            "Updated favorite"
+            if response.ok
+            else f"Favorite failed ({response.status_code})"
+        )
         self.refresh()
 
     def add_download(self, stdscr: Any) -> None:
@@ -290,7 +314,11 @@ class GetOfflineConsole:
         if not url:
             return
         payload = self.client.download(url)
-        self.message = "Queued download" if payload.get("ok") else f"Queue failed: {payload.get('error', 'unknown')}"
+        self.message = (
+            "Queued download"
+            if payload.get("ok")
+            else f"Queue failed: {payload.get('error', 'unknown')}"
+        )
         self.refresh()
 
     def search(self, stdscr: Any) -> None:
@@ -356,12 +384,16 @@ class GetOfflineConsole:
     def estimated_position(self) -> float:
         if self.playing_id is None:
             return 0.0
-        return self.play_start_position + max(time.monotonic() - self.play_started_at, 0.0)
+        return self.play_start_position + max(
+            time.monotonic() - self.play_started_at, 0.0
+        )
 
     def _save_progress(self, reason: str) -> None:
         if self.playing_id is None:
             return
-        self.client.playback_progress(self.playing_id, self.estimated_position(), reason=reason)
+        self.client.playback_progress(
+            self.playing_id, self.estimated_position(), reason=reason
+        )
 
     def _send_periodic_progress(self) -> None:
         if (
@@ -376,7 +408,9 @@ class GetOfflineConsole:
             self._save_progress("timeupdate")
 
     def _reap_player(self) -> None:
-        if self.playback_session is not None and not self.playback.is_running(self.playback_session):
+        if self.playback_session is not None and not self.playback.is_running(
+            self.playback_session
+        ):
             # A local player process can disappear because the user closed the
             # player window/terminal controls, not only because media reached
             # EOF.  Saving this as ``ended`` clears the resume position on the
@@ -401,8 +435,7 @@ class GetOfflineConsole:
         safe_addnstr(stdscr, 2, 0, filters, curses.A_DIM)
         list_top = 4
         list_height = max(height - 6, 1)
-        if self.selected < self.offset:
-            self.offset = self.selected
+        self.offset = min(self.offset, self.selected)
         if self.selected >= self.offset + list_height:
             self.offset = self.selected - list_height + 1
         visible = self.episodes[self.offset : self.offset + list_height]
@@ -427,7 +460,9 @@ class GetOfflineConsole:
         stdscr.refresh()
 
 
-def safe_addnstr(window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL) -> None:
+def safe_addnstr(
+    window: Any, y: int, x: int, text: str, attr: int = curses.A_NORMAL
+) -> None:
     """Draw text without failing on curses implementations that reject bottom-right writes."""
 
     height, width = window.getmaxyx()
@@ -486,7 +521,7 @@ def clamp_volume(volume: float) -> float:
 
 
 def format_volume(volume: float) -> str:
-    return f"{int(round(clamp_volume(volume) * 100))}%"
+    return f"{round(clamp_volume(volume) * 100)}%"
 
 
 def prepare_player_log() -> Path:
@@ -508,7 +543,7 @@ def tail_text(path: Path, *, limit: int = 1000) -> str:
     return data[-limit:].decode("utf-8", errors="replace").strip()
 
 
-def player_exit_message(session: "PlaybackSession") -> str:
+def player_exit_message(session: PlaybackSession) -> str:
     code = session.process.poll() if session.process is not None else "unknown"
     detail = tail_text(session.log_path) if session.log_path is not None else ""
     if detail:
@@ -557,13 +592,28 @@ class LocalProcessPlaybackBackend:
         log_path = prepare_player_log()
         command = player_command(self.player, stream_url, auth_header, seek, volume)
         process = self._launch_player(command, log_path)
-        session = PlaybackSession(process=process, volume=clamp_volume(volume), log_path=log_path)
+        session = PlaybackSession(
+            process=process, volume=clamp_volume(volume), log_path=log_path
+        )
         if self._process_exited_immediately(session):
-            if session.process is not None and session.process.returncode == 0 and seek > 0:
-                append_player_log(log_path, f"\nRetrying from the beginning because ffplay exited immediately after seek {seek:.3f}s.\n")
-                retry_command = player_command(self.player, stream_url, auth_header, 0.0, volume)
+            if (
+                session.process is not None
+                and session.process.returncode == 0
+                and seek > 0
+            ):
+                append_player_log(
+                    log_path,
+                    f"\nRetrying from the beginning because ffplay exited immediately after seek {seek:.3f}s.\n",
+                )
+                retry_command = player_command(
+                    self.player, stream_url, auth_header, 0.0, volume
+                )
                 retry_process = self._launch_player(retry_command, log_path)
-                session = PlaybackSession(process=retry_process, volume=clamp_volume(volume), log_path=log_path)
+                session = PlaybackSession(
+                    process=retry_process,
+                    volume=clamp_volume(volume),
+                    log_path=log_path,
+                )
                 if not self._process_exited_immediately(session):
                     return session
             raise PlaybackError(session.error_message)
@@ -590,7 +640,9 @@ class LocalProcessPlaybackBackend:
         session.error_message = player_exit_message(session)
         return False
 
-    def _launch_player(self, command: list[str], log_path: Path) -> subprocess.Popen[bytes]:
+    def _launch_player(
+        self, command: list[str], log_path: Path
+    ) -> subprocess.Popen[bytes]:
         log_file = log_path.open("ab")
         popen_kwargs: dict[str, Any] = {
             "stdout": log_file,
@@ -603,7 +655,9 @@ class LocalProcessPlaybackBackend:
         try:
             return subprocess.Popen(command, **popen_kwargs)
         except OSError as exc:
-            raise PlaybackError(f"unable to launch player {self.player!r}: {exc}") from exc
+            raise PlaybackError(
+                f"unable to launch player {self.player!r}: {exc}"
+            ) from exc
         finally:
             log_file.close()
 
@@ -699,8 +753,12 @@ class AudioBridgePlaybackBackend:
 
     def set_volume(self, session: PlaybackSession, volume: float) -> None:
         session.volume = clamp_volume(volume)
-        volume_url = self.bridge_volume_url or default_bridge_volume_url(self.bridge_url)
-        self._post_json(volume_url, {"session_id": session.session_id, "volume": session.volume})
+        volume_url = self.bridge_volume_url or default_bridge_volume_url(
+            self.bridge_url
+        )
+        self._post_json(
+            volume_url, {"session_id": session.session_id, "volume": session.volume}
+        )
 
     def stop(self, session: PlaybackSession) -> None:
         if not session.active:
@@ -834,7 +892,9 @@ def default_bridge_stop_url(bridge_url: str) -> str:
         path = path[: -len("/play")] + "/stop"
     else:
         path = f"{path}/stop"
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment))
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, path or "/stop", parsed.query, parsed.fragment)
+    )
 
 
 def default_bridge_volume_url(bridge_url: str) -> str:
@@ -844,7 +904,9 @@ def default_bridge_volume_url(bridge_url: str) -> str:
         path = path[: -len("/play")] + "/volume"
     else:
         path = f"{path}/volume"
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path or "/volume", parsed.query, parsed.fragment))
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, path or "/volume", parsed.query, parsed.fragment)
+    )
 
 
 def build_playback_backend(
@@ -857,7 +919,11 @@ def build_playback_backend(
 ) -> LocalProcessPlaybackBackend | AudioBridgePlaybackBackend:
     normalized = (playback_backend or DEFAULT_PLAYBACK_BACKEND).strip().lower()
     if normalized == "bridge":
-        return AudioBridgePlaybackBackend(bridge_url, bridge_stop_url=bridge_stop_url, bridge_volume_url=bridge_volume_url)
+        return AudioBridgePlaybackBackend(
+            bridge_url,
+            bridge_stop_url=bridge_stop_url,
+            bridge_volume_url=bridge_volume_url,
+        )
     if normalized == "local":
         return LocalProcessPlaybackBackend(player)
     raise SystemExit(
@@ -889,7 +955,7 @@ def local_player_command(
     if player == "ffplay":
         command = ["ffplay", "-nodisp", "-autoexit", "-ss", f"{seek:.3f}"]
         if clamp_volume(volume) < 1.0:
-            command.extend(["-volume", str(int(round(clamp_volume(volume) * 100)))])
+            command.extend(["-volume", str(round(clamp_volume(volume) * 100))])
         return [*command, filename]
     if player in {"vlc", "cvlc"}:
         return [player, "--intf", "ncurses", f"--start-time={int(seek)}", filename]
@@ -916,7 +982,7 @@ def remote_player_command(
             f"{seek:.3f}",
         ]
         if clamp_volume(volume) < 1.0:
-            command.extend(["-volume", str(int(round(clamp_volume(volume) * 100)))])
+            command.extend(["-volume", str(round(clamp_volume(volume) * 100))])
         command.extend(["-headers", f"Authorization: {auth_header}\r\n", url])
         return command
     if player in {"vlc", "cvlc"}:
@@ -971,7 +1037,9 @@ def save_credentials(credentials: Credentials) -> None:
 
 def login(base_url: str | None = None, username: str | None = None) -> Credentials:
     print("GetOffline login")
-    resolved_base = base_url or input("Base URL (for example http://localhost:8000): ").strip()
+    resolved_base = (
+        base_url or input("Base URL (for example http://localhost:8000): ").strip()
+    )
     resolved_user = username or input("Username: ").strip()
     password = getpass.getpass("Password: ")
     credentials = Credentials(resolved_base, resolved_user, password)

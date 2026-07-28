@@ -1,7 +1,6 @@
 import os
 
-from django.urls import include
-from django.urls import path
+from django.urls import include, path
 
 from . import views
 
@@ -61,4 +60,4 @@ if os.getenv("GETOFFLINE_DJANGO_ROLE", "frontend").strip().lower() in {
     "api",
     "worker",
 } or os.getenv("GETOFFLINE_TEST_IN_MEMORY_DB"):
-    urlpatterns.insert(2, path("api/", include("api.api.urls")))
+    urlpatterns.insert(2, path("api/", include("api.urls")))

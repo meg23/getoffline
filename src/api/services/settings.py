@@ -29,15 +29,26 @@ PROFILE_DEFAULTS = {
 def profile_settings(profile_id: str) -> dict[str, str]:
     values = dict(PROFILE_DEFAULTS)
     values["output_root"] = f"./downloads/{profile_id}"
-    values.update({row.key: row.value for row in AppConfigValue.objects.order_by("key")})
-    values.update({row.key: row.value for row in ProfileConfigValue.objects.filter(profile_id=profile_id)})
+    values.update(
+        {row.key: row.value for row in AppConfigValue.objects.order_by("key")}
+    )
+    values.update(
+        {
+            row.key: row.value
+            for row in ProfileConfigValue.objects.filter(profile_id=profile_id)
+        }
+    )
     return values
 
 
 def profile_output_root(profile_id: str) -> Path:
     value = (
-        ProfileConfigValue.objects.filter(profile_id=profile_id, key="output_root").values_list("value", flat=True).first()
-        or AppConfigValue.objects.filter(key="output_root").values_list("value", flat=True).first()
+        ProfileConfigValue.objects.filter(profile_id=profile_id, key="output_root")
+        .values_list("value", flat=True)
+        .first()
+        or AppConfigValue.objects.filter(key="output_root")
+        .values_list("value", flat=True)
+        .first()
         or PROFILE_DEFAULTS["output_root"]
     )
     return Path(str(value)).expanduser().resolve()

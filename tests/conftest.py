@@ -5,8 +5,7 @@ import sys
 from pathlib import Path
 
 import django
-from django.test.utils import setup_test_environment
-from django.test.utils import teardown_test_environment
+from django.test.utils import setup_test_environment, teardown_test_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))

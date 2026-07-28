@@ -4,8 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.scheduler import GlobalSlotScheduler
-from workers.scheduler import InMemorySlotBackend
+from workers.scheduler import GlobalSlotScheduler, InMemorySlotBackend
 
 
 class CpuSlotSchedulerTests(unittest.TestCase):
@@ -63,10 +62,9 @@ class CpuSlotSchedulerTests(unittest.TestCase):
             backend, heartbeat_seconds=3600, poll_seconds=0.001
         )
 
-        with self.assertRaises(RuntimeError):
-            with scheduler.acquire("ffmpeg"):
-                self.assertEqual(backend.snapshot()["in_use"], 1)
-                raise RuntimeError("boom")
+        with self.assertRaises(RuntimeError), scheduler.acquire("ffmpeg"):
+            self.assertEqual(backend.snapshot()["in_use"], 1)
+            raise RuntimeError("boom")
 
         self.assertEqual(backend.snapshot()["in_use"], 0)
 

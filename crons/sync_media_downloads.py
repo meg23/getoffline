@@ -13,13 +13,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 MEDIA_SUFFIXES = {".mp3", ".mp4"}
 
 
 def sanitize_component(value: str) -> str:
     value = value.replace("\n", " ").replace("\r", " ")
-    for character in "/\\:*?\"<>|":
+    for character in '/\\:*?"<>|':
         value = value.replace(character, "-")
     value = " ".join(value.split()).strip(" .-")
     return value or "Unknown Artist"
@@ -119,7 +118,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="copy files even when the destination is up to date",
     )
     parser.add_argument("downloads_dir", help="directory containing downloaded media")
-    parser.add_argument("sync_dir", help="destination directory, including a mounted path")
+    parser.add_argument(
+        "sync_dir", help="destination directory, including a mounted path"
+    )
     parser.add_argument("owner", help="owner in user[:group] or uid[:gid] form")
     return parser
 

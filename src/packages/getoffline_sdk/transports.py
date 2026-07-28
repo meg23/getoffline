@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
-from http.client import HTTPResponse
-from typing import IO, Any, Protocol, cast
 import urllib.error
 import urllib.parse
 import urllib.request
-
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
+from http.client import HTTPResponse
+from typing import IO, Any, Protocol, cast
 
 _API_ROUTE_PATHS = {
     "api_login": "/api/auth/login",
@@ -51,6 +50,7 @@ class Response:
     headers: Mapping[str, str] = field(default_factory=dict)
     cookies: tuple[str, ...] = ()
     streaming: bool = False
+    streaming_content: Iterable[bytes] | None = None
 
     @property
     def ok(self) -> bool:
@@ -69,6 +69,7 @@ class Transport(Protocol):
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
+        streaming: bool = False,
     ) -> Response: ...
 
 
@@ -104,6 +105,7 @@ class DjangoTransport:
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
+        streaming: bool = False,
     ) -> Response:
         django_headers = _django_headers(headers or {})
         path = _django_path(target, args, self.api_prefix)
@@ -136,6 +138,7 @@ class HttpTransport:
         query: Mapping[str, object] | None = None,
         data: object | None = None,
         headers: Mapping[str, str] | None = None,
+        streaming: bool = False,
     ) -> Response:
         url = self._url(target, args, query if method.upper() == "GET" else None)
         body, content_type = _encoded_body(data)
@@ -150,7 +153,7 @@ class HttpTransport:
             upstream = urllib.request.build_opener(_NoRedirectHandler()).open(
                 req, timeout=self.timeout_seconds
             )
-            return _http_response(upstream)
+            return _http_response(upstream, streaming=streaming)
         except urllib.error.HTTPError as exc:
             return _http_error_response(exc)
 
@@ -211,7 +214,7 @@ def _django_headers(headers: Mapping[str, str]) -> dict[str, str]:
     return converted
 
 
-def _encoded_body(data: object | None) -> tuple[bytes | None, str]:
+def _encoded_body(data: object | None) -> tuple[bytes | Iterable[bytes] | None, str]:
     if data is None:
         return None, "application/octet-stream"
     if not _contains_upload(data):
@@ -221,32 +224,29 @@ def _encoded_body(data: object | None) -> tuple[bytes | None, str]:
             "application/x-www-form-urlencoded",
         )
     boundary = "----getoffline-sdk-boundary"
-    chunks: list[bytes] = []
+    return _multipart_body(data, boundary), f"multipart/form-data; boundary={boundary}"
+
+
+def _multipart_body(data: object, boundary: str) -> Iterator[bytes]:
     for key, value in _iter_fields(data):
         if _is_upload(value):
             filename = getattr(value, "name", "upload")
             content_type = (
                 getattr(value, "content_type", None) or "application/octet-stream"
             )
-            chunks.extend(
-                [
-                    f"--{boundary}\r\n".encode(),
-                    f'Content-Disposition: form-data; name="{key}"; filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'.encode(),
-                ]
-            )
-            chunks.extend(cast(Any, value).chunks())
-            chunks.append(b"\r\n")
+            yield f"--{boundary}\r\n".encode()
+            yield (
+                f'Content-Disposition: form-data; name="{key}"; '
+                f'filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'
+            ).encode()
+            yield from cast(Iterable[bytes], cast(Any, value).chunks())
+            yield b"\r\n"
         else:
-            chunks.extend(
-                [
-                    f"--{boundary}\r\n".encode(),
-                    f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
-                    str(value).encode(),
-                    b"\r\n",
-                ]
-            )
-    chunks.append(f"--{boundary}--\r\n".encode())
-    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+            yield f"--{boundary}\r\n".encode()
+            yield f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode()
+            yield str(value).encode()
+            yield b"\r\n"
+    yield f"--{boundary}--\r\n".encode()
 
 
 def _contains_upload(data: object) -> bool:
@@ -274,14 +274,30 @@ def _django_response_cookies(response: object) -> tuple[str, ...]:
     return tuple(morsel.OutputString() for morsel in cookies.values())
 
 
-def _http_response(upstream: HTTPResponse) -> Response:
+def _http_response(upstream: HTTPResponse, *, streaming: bool = False) -> Response:
     headers = dict(upstream.headers.items())
+    body = _http_response_stream(upstream) if streaming else None
     return Response(
         status_code=upstream.status,
-        content=upstream.read(),
+        content=b"" if streaming else upstream.read(),
         headers=headers,
         cookies=tuple(upstream.headers.get_all("Set-Cookie", [])),
+        streaming=streaming,
+        streaming_content=body,
     )
+
+
+def _http_response_stream(upstream: HTTPResponse) -> Iterator[bytes]:
+    """Yield bounded chunks from an upstream response and close it afterward."""
+
+    try:
+        while True:
+            chunk = upstream.read(64 * 1024)
+            if not chunk:
+                return
+            yield chunk
+    finally:
+        upstream.close()
 
 
 def _http_error_response(exc: urllib.error.HTTPError) -> Response:
