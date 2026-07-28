@@ -101,6 +101,7 @@ def library_download_query(profile_id: str) -> QuerySet[Download, Download]:
         "last_position_seconds",
         "total_listened_seconds",
         "duration_seconds",
+        "profanity_status",
     )
 
 
