@@ -2,9 +2,9 @@ import os
 from unittest.mock import patch
 
 from django.conf import settings
+from django.test import Client, SimpleTestCase, override_settings
 
 from frontend import settings as app_settings
-from django.test import Client, SimpleTestCase, override_settings
 
 
 class DjangoHostDefaultsTests(SimpleTestCase):

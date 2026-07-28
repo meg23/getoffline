@@ -18,44 +18,41 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from django.contrib.auth.decorators import login_required
 from django.db import connection
 from django.db.models import Sum
-from django.http import FileResponse
-from django.http import Http404
-from django.http import HttpRequest
-from django.http import HttpResponse
-from django.http import HttpResponseBadRequest
-from django.http import HttpResponseRedirect
-from django.http import JsonResponse
-from django.http import StreamingHttpResponse
-from django.shortcuts import get_object_or_404
-from django.shortcuts import render
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseRedirect,
+    JsonResponse,
+    StreamingHttpResponse,
+)
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from models.domain import DownloadStatus
-from models.domain import JobStatus
-from models.domain import JobType
-from models.domain import SourceType
-from models.domain import parse_str_enum
-from models.jobs import create_job
-from models.models import AppConfigValue
-from models.models import Download
-from models.models import DownloadSettings
-from models.models import Job
-from models.models import ProfileConfigValue
-from models.models import ProfileDownloadSettings
-from models.models import ScheduledJob
-from models.models import SourceConfig
-from models.models import TranscriptSegment
-
 from frontend.queue import publish_job
+from models.domain import DownloadStatus, JobStatus, JobType, SourceType, parse_str_enum
+from models.jobs import create_job
+from models.models import (
+    AppConfigValue,
+    Download,
+    DownloadSettings,
+    Job,
+    ProfileConfigValue,
+    ProfileDownloadSettings,
+    ScheduledJob,
+    SourceConfig,
+    TranscriptSegment,
+)
 
 ALLOWED_JOB_TYPES = frozenset(
     {
@@ -167,7 +164,7 @@ def _human_size(size: int | None) -> str:
     return f"{value:.2f} GB"
 
 
-def _human_duration(seconds: float | int | None) -> str:
+def _human_duration(seconds: float | None) -> str:
     total = int(float(seconds or 0))
     hours, remainder = divmod(total, 3600)
     minutes = remainder // 60
@@ -715,7 +712,10 @@ def _invalid_config_keys(request: HttpRequest) -> list[str]:
             invalid.append(key)
     for key, allowed_values in CONFIG_ENUM_RULES.items():
         raw_value = request.POST.get(f"config__{key}")
-        if raw_value is not None and str(raw_value).strip().lower() not in allowed_values:
+        if (
+            raw_value is not None
+            and str(raw_value).strip().lower() not in allowed_values
+        ):
             invalid.append(key)
     return invalid
 
@@ -727,9 +727,10 @@ def _profile_settings_lock(profile_id: str):
         yield True
         return
 
-    lock_name = "getoffline_settings_" + hashlib.sha256(
-        profile_id.encode("utf-8")
-    ).hexdigest()[:48]
+    lock_name = (
+        "getoffline_settings_"
+        + hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:48]
+    )
     with connection.cursor() as cursor:
         cursor.execute("SELECT GET_LOCK(%s, %s)", [lock_name, 15])
         result = cursor.fetchone()
@@ -821,9 +822,7 @@ def _source_form_errors(
         errors.append("subtitle_offset_seconds is invalid")
 
     raw_max_downloads = str(request.POST.get("max_downloads") or "").strip()
-    if raw_max_downloads and (
-        form.max_downloads is None or form.max_downloads < 1
-    ):
+    if raw_max_downloads and (form.max_downloads is None or form.max_downloads < 1):
         errors.append("max_downloads is invalid")
     return errors
 
@@ -1476,7 +1475,8 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
             ProfileDownloadSettings.objects.update_or_create(
                 profile_id=profile_id,
                 defaults={
-                    "youtube_cookie_text": request.POST.get("youtube_cookie_text") or "",
+                    "youtube_cookie_text": request.POST.get("youtube_cookie_text")
+                    or "",
                     "cookie_updated_at": now,
                     "updated_at": now,
                 },
@@ -1539,7 +1539,9 @@ def update_source(request: HttpRequest, source_id: int) -> HttpResponseRedirect:
     )
     form = _source_form_data(request, source.source_type)
     errors = _source_form_errors(
-        request, form, parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST
+        request,
+        form,
+        parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST,
     )
     if errors:
         return HttpResponseBadRequest("Invalid source: " + "; ".join(errors))
@@ -1564,15 +1566,15 @@ def save_sources(request: HttpRequest, source_type: str) -> HttpResponseRedirect
         source = sources_by_id.get(source_id)
         if source is None or _posted_bool(request, f"source_{source_id}__delete"):
             continue
-        form = _source_form_data(request, source.source_type, prefix=f"source_{source_id}__")
+        form = _source_form_data(
+            request, source.source_type, prefix=f"source_{source_id}__"
+        )
         errors = _source_form_errors(
             request,
             form,
             parse_str_enum(SourceType, source.source_type) or SourceType.PODCAST,
         )
-        validation_errors.extend(
-            f"source {source_id}: {error}" for error in errors
-        )
+        validation_errors.extend(f"source {source_id}: {error}" for error in errors)
     if validation_errors:
         return HttpResponseBadRequest("Invalid source: " + "; ".join(validation_errors))
     for source_id in source_ids:

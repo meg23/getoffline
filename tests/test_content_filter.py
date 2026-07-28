@@ -7,13 +7,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from workers.content_filter import ExplicitContentMatch  # noqa: E402
-from workers.content_filter import delete_media_artifacts
-from workers.content_filter import find_explicit_content
-from workers.content_filter import log_filtered_deletion
-from workers.content_filter import main
-from workers.content_filter import screen_transcript
-from workers.content_filter import transcript_text
+from workers.content_filter import (
+    ExplicitContentMatch,
+    delete_media_artifacts,
+    find_explicit_content,
+    log_filtered_deletion,
+    main,
+    screen_transcript,
+    transcript_text,
+)
 
 
 class ContentFilterTests(unittest.TestCase):
@@ -122,9 +124,7 @@ class ContentFilterTests(unittest.TestCase):
             patch("workers.content_filter.find_explicit_content", return_value=match),
             patch("builtins.print"),
         ):
-            self.assertEqual(
-                main(["--fail-on-match", "--text", "flagged words"]), 1
-            )
+            self.assertEqual(main(["--fail-on-match", "--text", "flagged words"]), 1)
 
     def test_cli_check_model_reports_active_model(self):
         with (

@@ -5,8 +5,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from urllib.parse import parse_qs
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from workers.logger import get_logger
 from workers.utils import sanitize_channel_name
@@ -174,7 +173,7 @@ def extract_youtube_video_id(url: str | None) -> str | None:
             query_values = parse_qs(parsed.query or "")
             video_id = str((query_values.get("v") or [""])[0]).strip()
             return video_id or None
-        if path.startswith("/shorts/") or path.startswith("/embed/"):
+        if path.startswith(("/shorts/", "/embed/")):
             parts = [segment for segment in path.split("/") if segment]
             if len(parts) >= 2:
                 return parts[1].strip() or None

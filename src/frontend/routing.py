@@ -1,8 +1,4 @@
-from models.domain import JobType
-from models.domain import MediaType
-from models.domain import QueueName
-from models.domain import SourceType
-from models.domain import parse_str_enum
+from models.domain import JobType, MediaType, QueueName, SourceType, parse_str_enum
 
 SERIAL_EPISODE_CHECK_QUEUE = QueueName.SERIAL_EPISODE_CHECK
 YOUTUBE_DOWNLOAD_QUEUE = QueueName.YOUTUBE_DOWNLOAD
@@ -12,12 +8,14 @@ FFMPEG_QUEUE = QueueName.FFMPEG
 CLEANUP_QUEUE = QueueName.CLEANUP
 MAX_QUEUE_PRIORITY = 10
 
-PRIORITY_QUEUES = frozenset({
-    YOUTUBE_DOWNLOAD_QUEUE,
-    PODCAST_DOWNLOAD_QUEUE,
-    TRANSCRIPT_QUEUE,
-    FFMPEG_QUEUE,
-})
+PRIORITY_QUEUES = frozenset(
+    {
+        YOUTUBE_DOWNLOAD_QUEUE,
+        PODCAST_DOWNLOAD_QUEUE,
+        TRANSCRIPT_QUEUE,
+        FFMPEG_QUEUE,
+    }
+)
 SERIAL_JOB_TYPES = frozenset({JobType.CHECK_FOR_EPISODES, JobType.UPDATE_DOWNLOADS})
 DOWNLOAD_JOB_TYPES = frozenset({JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE})
 

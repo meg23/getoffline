@@ -12,6 +12,7 @@ PYTHON := $(VENV_BIN)/python
 PIP := $(VENV_BIN)/pip
 PEX := $(VENV_BIN)/pex
 RUFF := $(VENV_BIN)/ruff
+RUFF_STRICT_SELECT := I,PIE810,PLR0402,TRY401,RUF013,RUF046,RUF100,B010,BLE001,EXE001,PLR1730,PYI034,PYI041,RUF012,SIM103,SIM117,UP012,UP037
 VULTURE := $(VENV_BIN)/vulture
 BANDIT := $(VENV_BIN)/bandit
 MYPY := $(VENV_BIN)/mypy
@@ -62,7 +63,7 @@ test-compile: venv
 
 test-ruff: venv
 	@echo "Running Ruff linting..."
-	$(RUFF) check src tests crons
+	$(RUFF) check --extend-select $(RUFF_STRICT_SELECT) src tests crons
 
 test-mccabe: venv
 	@echo "Running McCabe complexity checks..."
