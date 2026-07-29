@@ -47,9 +47,14 @@ metadata.
 | `docs/` | Deployment and architecture notes. |
 | `Makefile` | Canonical local development, quality, test, migration, and process commands. |
 
-Do not treat generated files under `__pycache__`, `target`, coverage output,
-package build output, or local downloads as source. Do not modify or delete
-unrelated user-created files in a dirty worktree.
+**Generated files and directories** (never commit these; ensure `.gitignore` coverage):
+- Python bytecode: `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd` (version-specific, regenerated at runtime)
+- Build artifacts: `target/`, `build/`, `dist/`, `*.egg-info/`
+- Test/coverage output: `.coverage`, `htmlcov/`, `.pytest_cache/`
+- Downloaded assets: `downloads/` directory and model cache
+- Environment/local overrides: `.env`, `.env.local`
+
+Do not modify or delete unrelated user-created files in a dirty worktree.
 
 ## Runtime architecture
 
@@ -282,6 +287,11 @@ magic or duplicated implementations.
 - Keep security defaults in place: CSRF protection for browser sessions,
   secure host/origin configuration, `X-Frame-Options`, content-type sniffing
   protection, and authenticated state-changing endpoints.
+- **Do not commit Python bytecode** (`__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd`).
+  These are generated at runtime in containers and on local test machines.
+  Ensure they are in `.gitignore` and use `git rm --cached` if any are
+  accidentally committed. Bytecode files are version-specific and should never
+  be shared across Python versions or environments.
 - Do not commit secrets, generated downloads, model caches, credentials,
   coverage artifacts, or local Docker state.
 

@@ -51,6 +51,8 @@ def queue_name(job_type: str, payload: dict[str, object] | None = None) -> str:
         return _download_queue_name(payload)
     if parsed_job_type is JobType.TRANSCODE_MEDIA:
         return FFMPEG_QUEUE
+    if parsed_job_type is JobType.CENSOR_AUDIO:
+        return FFMPEG_QUEUE
     if parsed_job_type is JobType.GENERATE_TRANSCRIPT:
         return TRANSCRIPT_QUEUE
     if parsed_job_type is JobType.RETENTION_CLEANUP:
