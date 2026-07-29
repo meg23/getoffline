@@ -48,7 +48,8 @@ metadata.
 | `Makefile` | Canonical local development, quality, test, migration, and process commands. |
 
 **Generated files and directories** (never commit these; ensure `.gitignore` coverage):
-- Python bytecode: `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd` (version-specific, regenerated at runtime)
+
+- Python bytecode: `__pycache__/` , `*.pyc` , `*.pyo` , `*.pyd` (version-specific, regenerated at runtime)
 - Build artifacts: `target/`, `build/`, `dist/`, `*.egg-info/`
 - Test/coverage output: `.coverage`, `htmlcov/`, `.pytest_cache/`
 - Downloaded assets: `downloads/` directory and model cache
