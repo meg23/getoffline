@@ -975,6 +975,9 @@ def transcode_media(job: Job) -> None:
             "delete_explicit_content": bool(
                 payload.get("delete_explicit_content", False)
             ),
+            "censor_profanity": bool(payload.get("censor_profanity", False)),
+            "censor_method": str(payload.get("censor_method", "duck")),
+            "keep_original": bool(payload.get("keep_original", False)),
         },
         idempotency_key=f"generate_transcript:{job.profile_id}:{download.id}",
     )
@@ -2116,6 +2119,9 @@ def check_for_episodes(job: Job) -> None:
                         "subtitles": bool(source.subtitles),
                         "subtitle_offset_seconds": source.subtitle_offset_seconds,
                         "delete_explicit_content": bool(source.delete_explicit_content),
+                        "censor_profanity": bool(source.censor_profanity),
+                        "censor_method": str(source.censor_method or "duck"),
+                        "keep_original": bool(source.keep_original),
                         "include_shorts": bool(
                             getattr(source, "include_shorts", False)
                         ),
@@ -2228,6 +2234,9 @@ def download_episode(job: Job) -> None:
                 "delete_explicit_content": bool(
                     payload.get("delete_explicit_content", False)
                 ),
+                "censor_profanity": bool(payload.get("censor_profanity", False)),
+                "censor_method": str(payload.get("censor_method", "duck")),
+                "keep_original": bool(payload.get("keep_original", False)),
             },
             parent_job_id=job.id,
         )
@@ -2241,6 +2250,9 @@ def download_episode(job: Job) -> None:
         "media_type": media_kind,
         "recent_download": True,
         "delete_explicit_content": bool(payload.get("delete_explicit_content", False)),
+        "censor_profanity": bool(payload.get("censor_profanity", False)),
+        "censor_method": str(payload.get("censor_method", "duck")),
+        "keep_original": bool(payload.get("keep_original", False)),
     }
     log.info(
         "Download worker selected next stage parent_job_id=%s download_id=%s file_ext=%s media_kind=%s target_ext=%s next_job_type=%s",
@@ -2631,7 +2643,12 @@ def generate_transcript(job: Job) -> None:
                     else None
                 ),
             )
-            if bool(payload.get("delete_explicit_content", False)):
+            # Check if we need to screen for profanity (either delete or censor)
+            should_screen = bool(
+                payload.get("delete_explicit_content", False)
+                or payload.get("censor_profanity", False)
+            )
+            if should_screen:
                 log.info(
                     "Transcript worker profanity check started job_id=%s download_id=%s subtitle_path=%s media_path=%s",
                     job.id,
@@ -2643,36 +2660,17 @@ def generate_transcript(job: Job) -> None:
                     explicit_match = screen_transcript(Path(subtitle_path))
                 except Exception as screening_exc:  # noqa: BLE001
                     log.error(
-                        "Transcript worker profanity check failed without deleting media job_id=%s download_id=%s error=%s",
+                        "Transcript worker profanity check failed job_id=%s download_id=%s error=%s",
                         job.id,
                         download_id,
                         screening_exc,
                     )
                     return
                 if explicit_match is not None:
-                    # Check if source has censoring enabled
-                    source_config = SourceConfig.objects.filter(
-                        profile_id=job.profile_id,
-                        name=download.source_name,
-                    ).first()
-
-                    # For manual uploads, check profile-level settings; otherwise check source config
-                    if download.source_type == "manual":
-                        censor_enabled = bool(
-                            _profile_setting(job.profile_id, "manual_upload_censor_profanity") == "1"
-                        )
-                        censor_method = _profile_setting(
-                            job.profile_id, "manual_upload_censor_method", "duck"
-                        )
-                        keep_original = bool(
-                            _profile_setting(job.profile_id, "manual_upload_keep_original") == "1"
-                        )
-                    else:
-                        censor_enabled = source_config and source_config.censor_profanity
-                        censor_method = (
-                            source_config.censor_method if source_config else "duck"
-                        )
-                        keep_original = source_config.keep_original if source_config else False
+                    # Determine if we should censor or delete
+                    censor_enabled = bool(payload.get("censor_profanity", False))
+                    censor_method = str(payload.get("censor_method", "duck"))
+                    keep_original = bool(payload.get("keep_original", False))
 
                     if censor_enabled:
                         # Try to censor instead of deleting
@@ -2715,41 +2713,71 @@ def generate_transcript(job: Job) -> None:
                                 )
                                 return
                             else:
-                                # No segments found, fall back to deletion
+                                # No segments found, fall back to deletion if delete_explicit_content is True
                                 log.warning(
-                                    "No profanity segments found for censoring, falling back to deletion job_id=%s download_id=%s",
+                                    "No profanity segments found for censoring job_id=%s download_id=%s",
                                     job.id,
                                     download_id,
                                 )
+                                if not bool(payload.get("delete_explicit_content", False)):
+                                    # If not deleting, just mark as downloaded
+                                    download.download_status = DownloadStatus.DOWNLOADED
+                                    download.last_seen_at = timezone.now()
+                                    download.save(update_fields=["download_status", "last_seen_at"])
+                                    return
                         except Exception as censor_exc:  # noqa: BLE001
                             log.error(
-                                "Censoring preparation failed, falling back to deletion job_id=%s download_id=%s error=%s",
+                                "Censoring preparation failed job_id=%s download_id=%s error=%s",
                                 job.id,
                                 download_id,
                                 censor_exc,
                             )
+                            if not bool(payload.get("delete_explicit_content", False)):
+                                # If censoring fails but we're not supposed to delete, still keep the file
+                                log.warning(
+                                    "Censoring failed but delete_explicit_content is False, keeping file job_id=%s download_id=%s",
+                                    job.id,
+                                    download_id,
+                                )
+                                download.download_status = DownloadStatus.DOWNLOADED
+                                download.last_seen_at = timezone.now()
+                                download.save(update_fields=["download_status", "last_seen_at"])
+                                return
 
-                    # Fall back to deletion if censoring not enabled or failed
-                    deleted_paths = delete_media_artifacts(media_path)
-                    TranscriptSegment.objects.filter(download=download).delete()
-                    download.download_status = DownloadStatus.FILTERED
-                    download.last_seen_at = timezone.now()
-                    download.save(update_fields=["download_status", "last_seen_at"])
-                    log_filtered_deletion(
-                        source_type=download.source_type,
-                        source_name=download.source_name,
-                        title=str(download.title or media_path.stem),
-                        media_path=media_path,
-                        match=explicit_match,
-                        deleted_paths=deleted_paths,
-                    )
-                    log.warning(
-                        "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
-                        job.id,
-                        download_id,
-                        explicit_match.category,
-                    )
-                    return
+                    # If censoring not enabled, delete if delete_explicit_content is True
+                    if bool(payload.get("delete_explicit_content", False)):
+                        deleted_paths = delete_media_artifacts(media_path)
+                        TranscriptSegment.objects.filter(download=download).delete()
+                        download.download_status = DownloadStatus.FILTERED
+                        download.last_seen_at = timezone.now()
+                        download.save(update_fields=["download_status", "last_seen_at"])
+                        log_filtered_deletion(
+                            source_type=download.source_type,
+                            source_name=download.source_name,
+                            title=str(download.title or media_path.stem),
+                            media_path=media_path,
+                            match=explicit_match,
+                            deleted_paths=deleted_paths,
+                        )
+                        log.warning(
+                            "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
+                            job.id,
+                            download_id,
+                            explicit_match.category,
+                        )
+                        return
+                    else:
+                        # Profanity found but neither deleting nor censoring, just keep file
+                        log.info(
+                            "Profanity detected but not deleting/censoring job_id=%s download_id=%s category=%s",
+                            job.id,
+                            download_id,
+                            explicit_match.category,
+                        )
+                        download.download_status = DownloadStatus.DOWNLOADED
+                        download.last_seen_at = timezone.now()
+                        download.save(update_fields=["download_status", "last_seen_at"])
+                        return
                 log.info(
                     "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
                     job.id,
