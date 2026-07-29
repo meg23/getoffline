@@ -84,7 +84,7 @@ def _is_sentence_profane(sentence: str) -> bool:
     """Check if a sentence contains profanity using profanityfilter."""
     try:
         return bool(_PROFANITY_FILTER.is_profane(sentence))
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -207,7 +207,6 @@ def build_duck_filter(
 def build_beep_filter(
     segments: list[AudioSegment],
     frequency: int = 1000,
-    beep_duration_ms: float = 500,
 ) -> str | None:
     """Generate FFmpeg audio filter for beeping profane segments.
 
@@ -217,7 +216,6 @@ def build_beep_filter(
     Args:
         segments: List of AudioSegment with profanity
         frequency: Beep frequency in Hz (default 1000)
-        beep_duration_ms: Individual beep duration in milliseconds (default 500)
 
     Returns:
         FFmpeg -filter_complex string, or None if no segments

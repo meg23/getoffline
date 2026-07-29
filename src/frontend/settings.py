@@ -170,8 +170,8 @@ CPU_SCHEDULER_SLOTS = int(os.getenv("GETOFFLINE_CPU_SCHEDULER_SLOTS", "3"))
 # Allow large media file uploads (up to 2GB, configured via environment variable)
 # Default Django limit is 2.5MB which is too small for video/audio files
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(
-    os.getenv("GETOFFLINE_DATA_UPLOAD_MAX_MEMORY_SIZE", 2 * 1024 * 1024 * 1024)  # 2GB
+    os.getenv("GETOFFLINE_DATA_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024 * 1024))
 )
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(
-    os.getenv("GETOFFLINE_FILE_UPLOAD_MAX_MEMORY_SIZE", 2 * 1024 * 1024 * 1024)  # 2GB
+    os.getenv("GETOFFLINE_FILE_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024 * 1024))
 )

@@ -1206,17 +1206,16 @@ def _configure_youtube_download_filters(
                         + cookie_text
                     )
 
-                temp_cookie = tempfile.NamedTemporaryFile(
+                with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".txt", delete=False, prefix="yt_cookies_"
-                )
-                temp_cookie.write(cookie_text)
-                temp_cookie.close()
-                ydl_opts["cookiefile"] = temp_cookie.name
+                ) as temp_cookie:
+                    temp_cookie.write(cookie_text)
+                    ydl_opts["cookiefile"] = temp_cookie.name
                 log.info(
                     "YouTube download using cookies file from database job_id=%s profile_id=%s",
                     job.id, job.profile_id
                 )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log.warning(
             "Failed to load YouTube cookies for job_id=%s profile_id=%s: %s",
             job.id, job.profile_id, str(e)
@@ -2975,6 +2974,7 @@ def censor_audio(job: Job) -> None:
             capture_output=True,
             text=True,
             timeout=300,
+            check=False,
         )
 
         if result.returncode != 0:

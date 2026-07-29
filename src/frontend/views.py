@@ -21,6 +21,7 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseRedirect,
+    JsonResponse,
     StreamingHttpResponse,
 )
 from django.shortcuts import render
@@ -501,18 +502,17 @@ def manual_upload(request: HttpRequest) -> HttpResponse:
         except requests.RequestException as e:
             log.error("manual_upload API request failed: %s", str(e))
             return JsonResponse(
-                {"ok": False, "error_message": f"Failed to reach API: {str(e)}"},
+                {"ok": False, "error_message": f"Failed to reach API: {e!s}"},
                 status=500,
             )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import traceback
         error_detail = traceback.format_exc()
         log.error(f"manual_upload exception: {error_detail}")
         return JsonResponse(
-            {"ok": False, "error_message": f"Upload error: {str(e)}", "trace": error_detail},
+            {"ok": False, "error_message": f"Upload error: {e!s}", "trace": error_detail},
             status=500,
         )
-
 
 @frontend_login_required
 def edit_metadata(request: HttpRequest) -> HttpResponse:
