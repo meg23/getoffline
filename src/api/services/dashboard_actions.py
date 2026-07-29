@@ -132,6 +132,9 @@ class SourceFormData:
     include_shorts: bool
     include_livestreams: bool
     title_exclude: str
+    censor_profanity: bool
+    censor_method: str
+    keep_original: bool
 
 
 log = logging.getLogger(__name__)
@@ -794,6 +797,9 @@ def _source_form_data(
         include_livestreams=is_youtube
         and _posted_bool(request, prefix + "include_livestreams"),
         title_exclude=str(request.POST.get(prefix + "title_exclude") or "").strip(),
+        censor_profanity=_posted_bool(request, prefix + "censor_profanity"),
+        censor_method=str(request.POST.get(prefix + "censor_method") or "duck").strip().lower(),
+        keep_original=_posted_bool(request, prefix + "keep_original"),
     )
 
 
@@ -840,6 +846,9 @@ def _source_update_fields(*, include_enabled: bool = True) -> list[str]:
         "title_exclude",
         "include_shorts",
         "include_livestreams",
+        "censor_profanity",
+        "censor_method",
+        "keep_original",
         "updated_at",
     ]
     if not include_enabled:
@@ -863,6 +872,9 @@ def _apply_source_form_data(
     source.max_downloads = form.max_downloads
     source.delete_explicit_content = form.delete_explicit_content
     source.title_exclude = form.title_exclude
+    source.censor_profanity = form.censor_profanity
+    source.censor_method = form.censor_method
+    source.keep_original = form.keep_original
     source.updated_at = now
     return source
 
@@ -1516,6 +1528,9 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         include_shorts=form.include_shorts,
         include_livestreams=form.include_livestreams,
         title_exclude=form.title_exclude,
+        censor_profanity=form.censor_profanity,
+        censor_method=form.censor_method,
+        keep_original=form.keep_original,
         updated_at=timezone.now(),
     )
     return HttpResponseRedirect(reverse("settings"))

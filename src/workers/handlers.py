@@ -2619,7 +2619,7 @@ def generate_transcript(job: Job) -> None:
                     # Check if source has censoring enabled
                     source_config = SourceConfig.objects.filter(
                         profile_id=job.profile_id,
-                        source_name=download.source_name,
+                        name=download.source_name,
                     ).first()
 
                     censor_enabled = source_config and source_config.censor_profanity
@@ -2834,30 +2834,56 @@ def censor_audio(job: Job) -> None:
     # Determine if filter is simple (-af) or complex (-filter_complex)
     is_complex_filter = "[" in audio_filter or "]" in audio_filter
 
+    # Check if input is audio-only by trying to detect streams
+    # For simplicity, assume MP3/AAC/OGG are audio-only, MP4/MKV may have video
+    is_audio_only = media_path.suffix.lower() in [".mp3", ".aac", ".ogg", ".wav", ".m4a"]
+
     if is_complex_filter:
         # Use -filter_complex for beep (which uses pad notation)
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-i", str(media_path),
-            "-filter_complex", audio_filter,
-            "-c:v", "copy",  # Copy video codec unchanged
-            "-c:a", "aac",   # Encode audio with AAC
-            "-b:a", "128k",  # Audio bitrate
-            "-y",  # Overwrite output
-            str(output_path),
-        ]
+        if is_audio_only:
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-i", str(media_path),
+                "-filter_complex", audio_filter,
+                "-c:a", "libmp3lame",  # Encode audio with MP3
+                "-b:a", "128k",  # Audio bitrate
+                "-y",  # Overwrite output
+                str(output_path),
+            ]
+        else:
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-i", str(media_path),
+                "-filter_complex", audio_filter,
+                "-c:v", "copy",  # Copy video codec unchanged
+                "-c:a", "aac",   # Encode audio with AAC
+                "-b:a", "128k",  # Audio bitrate
+                "-y",  # Overwrite output
+                str(output_path),
+            ]
     else:
         # Use -af for simple audio filters (duck)
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-i", str(media_path),
-            "-af", audio_filter,
-            "-c:v", "copy",  # Copy video codec unchanged
-            "-c:a", "aac",   # Encode audio with AAC
-            "-b:a", "128k",  # Audio bitrate
-            "-y",  # Overwrite output
-            str(output_path),
-        ]
+        if is_audio_only:
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-i", str(media_path),
+                "-af", audio_filter,
+                "-c:a", "libmp3lame",  # Encode audio with MP3
+                "-b:a", "128k",  # Audio bitrate
+                "-y",  # Overwrite output
+                str(output_path),
+            ]
+        else:
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-i", str(media_path),
+                "-af", audio_filter,
+                "-c:v", "copy",  # Copy video codec unchanged
+                "-c:a", "aac",   # Encode audio with AAC
+                "-b:a", "128k",  # Audio bitrate
+                "-y",  # Overwrite output
+                str(output_path),
+            ]
 
     try:
         log.info(

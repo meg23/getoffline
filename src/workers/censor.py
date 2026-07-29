@@ -192,13 +192,16 @@ def build_duck_filter(
     merged = _merge_overlapping_segments(segments)
 
     # Build enable expression: between(t,start,end) OR between(t,start,end) OR ...
+    # Commas in FFmpeg filter expressions must be escaped with backslash
     conditions = [
-        f"between(t,{seg.start_seconds},{seg.end_seconds})" for seg in merged
+        f"between(t\\,{seg.start_seconds}\\,{seg.end_seconds})"
+        for seg in merged
     ]
     enable_expr = "+".join(conditions)
 
-    # FFmpeg audio filter: volume=0:enable="condition"
-    return f'volume={volume_level}:enable="{enable_expr}"'
+    # FFmpeg audio filter: volume=0:enable='expression'
+    # Use single quotes to avoid shell interpretation issues
+    return f"volume={volume_level}:enable='{enable_expr}'"
 
 
 def build_beep_filter(
