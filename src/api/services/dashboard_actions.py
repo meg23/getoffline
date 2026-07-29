@@ -674,6 +674,9 @@ PROFILE_DEFAULTS = {
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
     "manual_upload_delete_explicit_content": "0",
+    "manual_upload_censor_profanity": "0",
+    "manual_upload_censor_method": "duck",
+    "manual_upload_keep_original": "0",
     "audio_format": "mp3",
     "video_format": "mp4",
     "video_codec": "h264",
@@ -697,6 +700,7 @@ CONFIG_ENUM_RULES = {
     "audio_format": {"mp3", "m4a", "opus"},
     "video_format": {"mp4", "mkv"},
     "video_codec": {"h264", "hevc", "copy"},
+    "manual_upload_censor_method": {"duck", "beep"},
 }
 
 
@@ -732,7 +736,7 @@ def _profile_settings_lock(profile_id: str):
 
     lock_name = (
         "getoffline_settings_"
-        + hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:48]
+        + hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:44]
     )
     with connection.cursor() as cursor:
         cursor.execute("SELECT GET_LOCK(%s, %s)", [lock_name, 15])
@@ -1458,6 +1462,8 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
             return HttpResponse("Settings update busy", status=429)
         checkbox_keys = {
             "manual_upload_delete_explicit_content",
+            "manual_upload_censor_profanity",
+            "manual_upload_keep_original",
         }
         posted_config_keys = {
             key.removeprefix("config__")

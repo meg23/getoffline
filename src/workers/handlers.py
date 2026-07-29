@@ -2622,16 +2622,29 @@ def generate_transcript(job: Job) -> None:
                         name=download.source_name,
                     ).first()
 
-                    censor_enabled = source_config and source_config.censor_profanity
+                    # For manual uploads, check profile-level settings; otherwise check source config
+                    if download.source_type == "manual":
+                        censor_enabled = bool(
+                            _profile_setting(job.profile_id, "manual_upload_censor_profanity") == "1"
+                        )
+                        censor_method = _profile_setting(
+                            job.profile_id, "manual_upload_censor_method", "duck"
+                        )
+                        keep_original = bool(
+                            _profile_setting(job.profile_id, "manual_upload_keep_original") == "1"
+                        )
+                    else:
+                        censor_enabled = source_config and source_config.censor_profanity
+                        censor_method = (
+                            source_config.censor_method if source_config else "duck"
+                        )
+                        keep_original = source_config.keep_original if source_config else False
 
                     if censor_enabled:
                         # Try to censor instead of deleting
                         try:
                             profanity_segments = extract_profanity_segments(Path(subtitle_path))
                             if profanity_segments:
-                                censor_method = source_config.censor_method if source_config else "duck"
-                                keep_original = source_config.keep_original if source_config else False
-
                                 censor_payload = {
                                     "download_id": download_id,
                                     "media_path": str(media_path),

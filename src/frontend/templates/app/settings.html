@@ -36,6 +36,28 @@
           <input type="hidden" name="config__manual_upload_delete_explicit_content" value="0" />
           <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_delete_explicit_content" value="1" {% if manual_upload_filter_checked %}checked{% endif %} /> Delete drag-and-drop uploads containing profanity</label>
           <p class="field-help">Reviews the generated audio transcript before retaining media uploaded through the browser.</p>
+
+          <div style="margin-top: 1.5rem; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 1rem;">
+            <input type="hidden" name="config__manual_upload_censor_profanity" value="0" />
+            <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_censor_profanity" value="1" {% if settings.manual_upload_censor_profanity == '1' %}checked{% endif %} /> Censor profanity in drag-and-drop uploads</label>
+            <p class="field-help">Applies mute or beep filtering to detected profanity instead of deleting the file.</p>
+
+            <div style="margin-left: 1.5rem; margin-top: 1rem;">
+              <label for="manual_upload_censor_method">Censoring method</label>
+              <select id="manual_upload_censor_method" name="config__manual_upload_censor_method">
+                <option value="duck" {% if settings.manual_upload_censor_method == 'duck' %}selected{% endif %}>Mute (duck method)</option>
+                <option value="beep" {% if settings.manual_upload_censor_method == 'beep' %}selected{% endif %}>Beep tone</option>
+              </select>
+              <p class="field-help">Choose how profanity is censored: mute (volume reduction) or beep (tone overlay).</p>
+            </div>
+
+            <div style="margin-left: 1.5rem; margin-top: 1rem;">
+              <input type="hidden" name="config__manual_upload_keep_original" value="0" />
+              <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_keep_original" value="1" {% if settings.manual_upload_keep_original == '1' %}checked{% endif %} /> Keep original uncensored file with _original suffix</label>
+              <p class="field-help">Preserves the uncensored version alongside the censored file for reference.</p>
+            </div>
+          </div>
+
           <div class="actions"><button class="primary" type="submit">Save general settings</button></div>
         </form>
       </section>
