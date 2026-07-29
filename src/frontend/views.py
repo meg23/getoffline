@@ -439,7 +439,68 @@ def transcript_search(request: HttpRequest) -> HttpResponse:
 
 @frontend_login_required
 def manual_upload(request: HttpRequest) -> HttpResponse:
-    return _api_proxy(request, "api_dashboard_manual_upload")
+    """Handle manual file uploads via drag-and-drop.
+
+    Direct HTTP request to API endpoint instead of SDK proxy to properly handle
+    multipart file uploads (SDK transports don't handle FILES properly).
+    """
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error_message": "POST required"}, status=400)
+
+    try:
+        # Make direct HTTP request to API endpoint
+        import requests
+        from django.conf import settings
+
+        # Get the API URL from settings or default to localhost
+        api_base_url = getattr(settings, "GETOFFLINE_API_URL", "http://getoffline-api-1:8000")
+        api_url = f"{api_base_url}/api/dashboard/manual-upload"
+
+        # Forward the request with files
+        try:
+            # Build files dict for requests library
+            files_dict = {}
+            for field_name in request.FILES:
+                for file_obj in request.FILES.getlist(field_name):
+                    files_dict[field_name] = file_obj
+
+            # Add CSRF token as header for API authentication
+            csrf_token = request.POST.get('csrfmiddlewaretoken', '')
+            headers = {}
+            if csrf_token:
+                headers['X-CSRFToken'] = csrf_token
+
+            # Forward cookies for session/auth
+            cookies = request.COOKIES
+
+            # Make request to API
+            response = requests.post(
+                api_url,
+                files=files_dict,
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+
+            # Forward the API response
+            return HttpResponse(
+                response.content,
+                status=response.status_code,
+                content_type=response.headers.get('Content-Type', 'application/json'),
+            )
+        except requests.RequestException as e:
+            return JsonResponse(
+                {"ok": False, "error_message": f"Failed to reach API: {str(e)}"},
+                status=500,
+            )
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        log.error(f"manual_upload exception: {error_detail}")
+        return JsonResponse(
+            {"ok": False, "error_message": f"Upload error: {str(e)}", "trace": error_detail},
+            status=500,
+        )
 
 
 @frontend_login_required

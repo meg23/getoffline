@@ -858,9 +858,29 @@
         "X-Requested-With": "XMLHttpRequest",
       },
     });
-    const payload = await response.json().catch(() => ({}));
+
+    // Try to parse response as JSON, but handle non-JSON responses
+    let payload = {};
+    let errorText = "";
+    try {
+      // Clone the response to read the body as text first
+      const textResponse = response.clone();
+      errorText = await textResponse.text().catch(() => "");
+      payload = JSON.parse(errorText);
+    } catch (e) {
+      // Not valid JSON - errorText contains the raw response
+      if (!response.ok) {
+        throw new Error(`Server error (${response.status}): ${errorText || response.statusText}`);
+      }
+      payload = {};
+    }
+
     if (!response.ok || !payload.ok) {
-      const message = payload.error_message || payload.errors?.[0]?.error || "Upload failed.";
+      const message =
+        payload.error_message ||
+        payload.errors?.[0]?.error ||
+        payload.errors?.[0] ||
+        `HTTP ${response.status}: ${response.statusText}`;
       throw new Error(message);
     }
     if (status) status.textContent = "Upload queued. Refreshing library…";
