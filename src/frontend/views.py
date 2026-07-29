@@ -26,6 +26,7 @@ from django.http import (
 from django.shortcuts import render
 from django.test import Client as DjangoClient
 from django.urls import reverse
+from django.views.decorators.csrf import csrf_exempt
 
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
@@ -438,11 +439,14 @@ def transcript_search(request: HttpRequest) -> HttpResponse:
 
 
 @frontend_login_required
+@csrf_exempt
 def manual_upload(request: HttpRequest) -> HttpResponse:
     """Handle manual file uploads via drag-and-drop.
 
     Direct HTTP request to API endpoint instead of SDK proxy to properly handle
     multipart file uploads (SDK transports don't handle FILES properly).
+
+    CSRF exempt because the request is forwarded to the API which validates its own tokens.
     """
     if request.method != "POST":
         return JsonResponse({"ok": False, "error_message": "POST required"}, status=400)
@@ -464,14 +468,20 @@ def manual_upload(request: HttpRequest) -> HttpResponse:
                 for file_obj in request.FILES.getlist(field_name):
                     files_dict[field_name] = file_obj
 
-            # Add CSRF token as header for API authentication
-            csrf_token = request.POST.get('csrfmiddlewaretoken', '')
+            # Get CSRF token from POST data or X-CSRFToken header
+            csrf_token = request.POST.get('csrfmiddlewaretoken', '') or request.META.get('HTTP_X_CSRFTOKEN', '')
             headers = {}
             if csrf_token:
                 headers['X-CSRFToken'] = csrf_token
 
             # Forward cookies for session/auth
             cookies = request.COOKIES
+
+            log.info(
+                "manual_upload forwarding to API: files=%s csrf_token_present=%s",
+                len(files_dict),
+                bool(csrf_token),
+            )
 
             # Make request to API
             response = requests.post(
@@ -489,6 +499,7 @@ def manual_upload(request: HttpRequest) -> HttpResponse:
                 content_type=response.headers.get('Content-Type', 'application/json'),
             )
         except requests.RequestException as e:
+            log.error("manual_upload API request failed: %s", str(e))
             return JsonResponse(
                 {"ok": False, "error_message": f"Failed to reach API: {str(e)}"},
                 status=500,
