@@ -888,7 +888,9 @@
     event.stopPropagation();
     const files = supportedFiles(event.dataTransfer.files);
     uploadFiles(files).catch((error) => {
-      if (status) status.textContent = error.message || "Upload failed.";
+      const message = error.message || "Upload failed.";
+      if (status) status.textContent = message;
+      window.alert(`Upload Error: ${message}`);
       window.setTimeout(hideOverlay, 2400);
     });
   });
