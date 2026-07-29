@@ -875,7 +875,8 @@
       payload = {};
     }
 
-    if (!response.ok || !payload.ok) {
+    // Check for HTTP error OR JSON payload with ok: false
+    if (!response.ok || (payload && payload.ok === false)) {
       const message =
         payload.error_message ||
         payload.errors?.[0]?.error ||
