@@ -37,10 +37,14 @@ class Command(BaseCommand):
         profile_id = str(options["profile_id"]).strip() or "default"
         recursive = bool(options["recursive"])
 
+        channel_dirs = [p for p in downloads_root.iterdir() if p.is_dir()]
+        if self._contains_media_files(downloads_root):
+            channel_dirs = [downloads_root]
+
         imported = 0
         skipped = 0
         failed = 0
-        for channel_dir in sorted(p for p in downloads_root.iterdir() if p.is_dir()):
+        for channel_dir in sorted(channel_dirs):
             channel_name = channel_dir.name
             candidates = (
                 channel_dir.rglob("*") if recursive else channel_dir.iterdir()
@@ -73,3 +77,9 @@ class Command(BaseCommand):
         )
         if failed:
             raise CommandError("One or more files failed to import.")
+
+    def _contains_media_files(self, directory: Path) -> bool:
+        return any(
+            path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES
+            for path in directory.iterdir()
+        )
