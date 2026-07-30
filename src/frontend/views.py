@@ -71,8 +71,13 @@ def _decorate_download(item):
     ).upper()
     item.display_size = _human_size(getattr(item, "file_size_bytes", None))
     item.display_type = display_type
+    extension = display_type.lower()
     item.display_kind = (
-        "video" if display_type.lower() in {"mp4", "mkv", "webm", "mov"} else "audio"
+        "video"
+        if extension in {"mp4", "mkv", "webm", "mov"}
+        else "document"
+        if extension == "pdf"
+        else "audio"
     )
     item.status_label = "UNPLAYED"
     item.status_class = "status-unplayed"
@@ -316,7 +321,15 @@ def _upstream_response(
         status=status,
         content_type=headers.get("Content-Type", "application/octet-stream"),
     )
-    for header in ("Content-Length", "Content-Range", "Accept-Ranges", "Location"):
+    for header in (
+        "Content-Length",
+        "Content-Range",
+        "Accept-Ranges",
+        "Content-Disposition",
+        "Content-Security-Policy",
+        "Location",
+        "X-Frame-Options",
+    ):
         if headers.get(header):
             response[header] = headers[header]
     for cookie_header in cookies:

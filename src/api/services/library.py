@@ -43,9 +43,12 @@ def decorate_download(item: Download) -> Download:
     item.display_type = (
         item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?"
     ).upper()
+    extension = item.display_type.lower()
     item.display_kind = (
         "video"
-        if item.display_type.lower() in {"mp4", "mkv", "webm", "mov"}
+        if extension in {"mp4", "mkv", "webm", "mov"}
+        else "document"
+        if extension == "pdf"
         else "audio"
     )
     item.status_label = "UNPLAYED"

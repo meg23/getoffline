@@ -32,6 +32,7 @@ from workers.content_filter import (
     screen_transcript,
 )
 from workers.logger import get_logger
+from workers.pdf_ocr import PdfOcrPage, extract_pdf_pages, split_sentences
 from workers.subtitles import create_subtitles
 from workers.utils import sanitize_channel_name
 from workers.ytdlp_helpers import (
@@ -2604,11 +2605,12 @@ def generate_transcript(job: Job) -> None:
                         explicit_match.category,
                     )
                     return
-                log.info(
-                    "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
+            log.info(
+                "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
                     job.id,
                     download_id,
                 )
+
         else:
             log.warning(
                 "Transcript worker completed without subtitle output job_id=%s download_id=%s enabled=%s media_path=%s",
@@ -2628,6 +2630,66 @@ def generate_transcript(job: Job) -> None:
                     download_id,
                     ", ".join(str(path) for path in deleted_paths) or "none",
                 )
+
+
+def ocr_pdf(job: Job) -> None:
+    """Extract searchable text from a PDF, OCRing pages without native text."""
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
+    if not download_id:
+        log.warning("PDF OCR worker skipped job with no download_id job_id=%s", job.id)
+        return
+    download = Download.objects.filter(
+        pk=download_id, profile_id=job.profile_id, file_ext__iexact="pdf"
+    ).first()
+    if download is None:
+        log.warning(
+            "PDF OCR worker skipped missing or non-PDF download job_id=%s download_id=%s profile_id=%s",
+            job.id,
+            download_id,
+            job.profile_id,
+        )
+        return
+    pdf_path = Path(str(download.file_path or "")).expanduser().resolve()
+    if not pdf_path.is_file():
+        log.warning(
+            "PDF OCR worker skipped missing file job_id=%s download_id=%s path=%s",
+            job.id,
+            download_id,
+            pdf_path,
+        )
+        return
+    _touch_active_job(job, stage="pdf_ocr", title=str(download.title or pdf_path.name))
+    pages: list[PdfOcrPage] = extract_pdf_pages(pdf_path)
+    TranscriptSegment.objects.filter(download=download).delete()
+    created_segments: list[TranscriptSegment] = []
+    for page in pages:
+        sentences = split_sentences(page.text)
+        for sentence_index, sentence in enumerate(sentences):
+            # PDF segments use the page number as a virtual timestamp. The
+            # tiny offset preserves sentence order without changing the page
+            # label or the destination page in the player.
+            virtual_position = float(page.page_number - 1) + (
+                sentence_index / 1_000_000
+            )
+            created_segments.append(
+                TranscriptSegment(
+                    download=download,
+                    subtitle_path=f"ocr://download/{download.id}/page/{page.page_number}",
+                    start_seconds=virtual_position,
+                    end_seconds=float(page.page_number),
+                    text=sentence,
+                )
+            )
+    TranscriptSegment.objects.bulk_create(created_segments)
+    log.info(
+        "PDF OCR worker saved searchable text job_id=%s download_id=%s pages=%s segments=%s ocr_pages=%s",
+        job.id,
+        download.id,
+        len(pages),
+        len(created_segments),
+        sum(1 for page in pages if page.used_ocr),
+    )
 
 
 def retention_cleanup(job: Job) -> None:
@@ -2720,5 +2782,6 @@ HANDLERS = {
     "download_single": download_single,
     "transcode_media": transcode_media,
     "generate_transcript": generate_transcript,
+    "generate_ocr": ocr_pdf,
     "retention_cleanup": retention_cleanup,
 }

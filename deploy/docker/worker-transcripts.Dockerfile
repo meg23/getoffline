@@ -36,7 +36,7 @@ ENV WHISPER_MODEL=${WHISPER_MODEL} \
 COPY deploy/requirements/worker-transcripts.txt /tmp/requirements.txt
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libgomp1 libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 libstdc++6 poppler-utils tesseract-ocr \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
@@ -58,7 +58,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 libstdc++6 poppler-utils tesseract-ocr \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv /opt/venv
 WORKDIR /app

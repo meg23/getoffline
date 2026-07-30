@@ -53,6 +53,8 @@ def queue_name(job_type: str, payload: dict[str, object] | None = None) -> str:
         return FFMPEG_QUEUE
     if parsed_job_type is JobType.GENERATE_TRANSCRIPT:
         return TRANSCRIPT_QUEUE
+    if parsed_job_type is JobType.GENERATE_OCR:
+        return TRANSCRIPT_QUEUE
     if parsed_job_type is JobType.RETENTION_CLEANUP:
         return CLEANUP_QUEUE
     return f"getoffline.jobs.{job_type}"

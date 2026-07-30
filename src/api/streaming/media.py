@@ -125,6 +125,15 @@ def media_response(path: Path, range_header: str = "") -> HttpResponse:
         response = FileResponse(path.open("rb"), content_type=content_type)
         response["Content-Length"] = str(file_size)
     response["Accept-Ranges"] = "bytes"
+    response["Content-Disposition"] = "inline"
+    if content_type == "application/pdf":
+        # PDF documents are rendered in the same-origin player iframe. Keep
+        # the default clickjacking policy for other media, while explicitly
+        # allowing this controlled embedding path.
+        response["X-Frame-Options"] = "SAMEORIGIN"
+        response["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'self'"
+        )
     return response
 
 

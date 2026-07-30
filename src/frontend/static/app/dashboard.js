@@ -440,7 +440,7 @@
     searchResults.innerHTML = results
       .map(
         (item) =>
-          `<a class="quick-add-result transcript-result" href="${item.url}"><div class="transcript-result-content"><div class="quick-add-meta-title">${escapeHtml(item.title)}</div><div class="quick-add-meta-sub"><span>${escapeHtml(item.source_name)}</span><span>${formatTime(item.start_seconds)}</span></div><p class="transcript-result-snippet">${escapeHtml(item.text)}</p></div><span class="transcript-result-arrow" aria-hidden="true">›</span></a>`,
+          `<a class="quick-add-result transcript-result" href="${item.url}"><div class="transcript-result-content"><div class="quick-add-meta-title">${escapeHtml(item.title)}</div><div class="quick-add-meta-sub"><span>${escapeHtml(item.source_name)}</span><span>${escapeHtml(item.position_label || formatTime(item.start_seconds))}</span></div><p class="transcript-result-snippet">${escapeHtml(item.text)}</p></div><span class="transcript-result-arrow" aria-hidden="true">›</span></a>`,
       )
       .join("");
   }
@@ -752,6 +752,7 @@
     (event) => {
       const link = event.target?.closest?.('a[data-play-link="1"]');
       if (!link) return;
+      if (link.dataset.kind === "document") return;
       if (
         event.metaKey ||
         event.ctrlKey ||
@@ -816,6 +817,7 @@
     "mkv",
     "webm",
     "mov",
+    "pdf",
   ]);
   let dragDepth = 0;
 
@@ -825,7 +827,7 @@
   function showOverlay() {
     overlay?.classList.add("is-visible");
     overlay?.setAttribute("aria-hidden", "false");
-    if (status) status.textContent = "Drop videos here to upload as manual uploads.";
+    if (status) status.textContent = "Drop audio, video, or PDF files here to store as manual downloads.";
   }
   function hideOverlay() {
     dragDepth = 0;
@@ -835,12 +837,17 @@
   function supportedFiles(fileList) {
     return Array.from(fileList || []).filter((file) => {
       const ext = String(file.name || "").split(".").pop()?.toLowerCase() || "";
-      return supportedExtensions.has(ext) || String(file.type || "").startsWith("video/");
+      return (
+        supportedExtensions.has(ext) ||
+        String(file.type || "").startsWith("audio/") ||
+        String(file.type || "").startsWith("video/") ||
+        String(file.type || "") === "application/pdf"
+      );
     });
   }
   async function uploadFiles(files) {
     if (!files.length) {
-      if (status) status.textContent = "No supported media files were dropped.";
+      if (status) status.textContent = "No supported audio, video, or PDF files were dropped.";
       window.setTimeout(hideOverlay, 1600);
       return;
     }
@@ -863,7 +870,7 @@
       const message = payload.error_message || payload.errors?.[0]?.error || "Upload failed.";
       throw new Error(message);
     }
-    if (status) status.textContent = "Upload queued. Refreshing library…";
+    if (status) status.textContent = "Upload complete. Refreshing library…";
     window.setTimeout(() => window.location.reload(), 800);
   }
 
