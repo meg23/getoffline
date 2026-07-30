@@ -6,8 +6,23 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import DatabaseError
 
 from api.services.dashboard_actions import import_manual_file
+from frontend.queue import publish_job
+from models.domain import JobType
+from models.jobs import create_job
 
-MEDIA_SUFFIXES = {".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg", ".mp4", ".mkv", ".webm", ".mov", ".pdf"}
+MEDIA_SUFFIXES = {
+    ".mp3",
+    ".m4a",
+    ".wav",
+    ".flac",
+    ".aac",
+    ".ogg",
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".mov",
+    ".pdf",
+}
 
 
 class Command(BaseCommand):
@@ -30,6 +45,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Import files recursively under each channel directory.",
         )
+        parser.add_argument(
+            "--generate-transcripts",
+            action="store_true",
+            help="Queue transcript/OCR jobs after each successful import.",
+        )
 
     def handle(self, *args, **options):
         downloads_root = Path(str(options["downloads_root"])).expanduser().resolve()
@@ -37,6 +57,7 @@ class Command(BaseCommand):
             raise CommandError(f"Downloads root not found: {downloads_root}")
         profile_id = str(options["profile_id"]).strip() or "default"
         recursive = bool(options["recursive"])
+        generate_transcripts = bool(options["generate_transcripts"])
 
         channel_dirs = [p for p in downloads_root.iterdir() if p.is_dir()]
         if self._contains_media_files(downloads_root):
@@ -56,13 +77,15 @@ class Command(BaseCommand):
                 if path.suffix.lower() not in MEDIA_SUFFIXES:
                     continue
                 try:
-                    import_manual_file(
+                    result = import_manual_file(
                         profile_id,
                         path,
                         source_name=channel_name,
                         downloads_root=downloads_root,
                     )
                     imported += 1
+                    if generate_transcripts:
+                        self._queue_transcript_job(profile_id, result.download)
                 except (ValueError, OSError, DatabaseError) as exc:
                     skipped += 1
                     self.stderr.write(f"Skipped {path}: {exc}")
@@ -72,6 +95,32 @@ class Command(BaseCommand):
                 f"Imported {imported} file(s) from {downloads_root} "
                 f"(skipped {skipped}, failed {failed})"
             )
+        )
+
+    def _queue_transcript_job(self, profile_id: str, download) -> None:
+        is_document = str(download.file_ext or "").lower() == "pdf"
+        job_type = JobType.GENERATE_OCR if is_document else JobType.GENERATE_TRANSCRIPT
+        payload = {
+            "download_id": download.id,
+            "source_type": "manual",
+            "manual_upload": True,
+            "media_type": "document" if is_document else "audio",
+        }
+        if not is_document:
+            payload.update({"subtitles": True, "recent_download": True})
+        job = create_job(
+            profile_id=profile_id,
+            job_type=job_type,
+            payload=payload,
+            idempotency_key=f"{job_type}:{profile_id}:{download.id}",
+        )
+        publish_job(
+            {
+                "job_id": job.id,
+                "job_type": job.job_type,
+                "profile_id": job.profile_id,
+                "attempt": 1,
+            }
         )
 
     def _contains_media_files(self, directory: Path) -> bool:
