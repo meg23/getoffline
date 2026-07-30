@@ -101,6 +101,11 @@ class Download(models.Model):
     download_status = models.CharField(
         max_length=32, default=DownloadStatus.DOWNLOADED, db_index=True
     )
+    profanity_status = models.CharField(
+        max_length=32, default="clean", db_index=True
+    )
+    is_censored = models.BooleanField(default=False)
+    censored_segments = models.JSONField(default=list)
     raw_metadata_json = models.TextField(blank=True, null=True)
     first_seen_at = models.DateTimeField(default=timezone.now)
     last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)

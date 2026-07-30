@@ -77,9 +77,11 @@ from workers.handlers import (
     _yt_dlp_download_outtmpl,
     check_for_episodes,
     generate_transcript,
+    ocr_pdf,
     retention_cleanup,
     transcode_media,
 )
+from workers.pdf_ocr import split_sentences
 
 
 class AuthenticatedClient(DjangoClient):
@@ -379,6 +381,146 @@ class SharedDjangoModelTests(TestCase):
                     "attempt": 1,
                 }
             )
+
+    def test_manual_pdf_upload_queues_ocr_job(self):
+        client = Client()
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
+        self.assertTrue(client.login(username="default", password="pass"))
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "frontend.views.publish_job"
+        ) as publish:
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=tmpdir
+            )
+            response = client.post(
+                "/manual-upload/",
+                {
+                    "files": SimpleUploadedFile(
+                        "Offline Notes.pdf",
+                        b"%PDF-1.4 test-pdf",
+                        content_type="application/pdf",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 201)
+            download = Download.objects.get(title="Offline Notes.pdf")
+            self.assertEqual(download.source_type, "manual")
+            self.assertEqual(download.file_ext, "pdf")
+            self.assertEqual(download.profanity_status, "clean")
+            self.assertFalse(download.is_censored)
+            self.assertEqual(download.censored_segments, [])
+            self.assertEqual(download.file_path_relative, "manual/Offline Notes.pdf")
+            self.assertEqual(Path(download.file_path).read_bytes(), b"%PDF-1.4 test-pdf")
+            job = Job.objects.get(
+                job_type="generate_ocr", payload__download_id=download.id
+            )
+            self.assertEqual(job.payload["media_type"], "document")
+            publish.assert_called_once_with(
+                {
+                    "job_id": job.id,
+                    "job_type": "generate_ocr",
+                    "profile_id": "default",
+                    "attempt": 1,
+                }
+            )
+            media_response = client.get(f"/media/{download.id}/")
+            self.assertEqual(media_response.status_code, 200)
+            self.assertEqual(media_response["Content-Type"], "application/pdf")
+            self.assertEqual(media_response["Content-Disposition"], "inline")
+            self.assertEqual(media_response["X-Frame-Options"], "SAMEORIGIN")
+            self.assertEqual(
+                media_response["Content-Security-Policy"],
+                "default-src 'none'; frame-ancestors 'self'",
+            )
+            self.assertEqual(
+                b"".join(media_response.streaming_content), b"%PDF-1.4 test-pdf"
+            )
+            player_response = client.get(f"/play/{download.id}/")
+            self.assertEqual(player_response.status_code, 200)
+            self.assertContains(player_response, 'class="document-viewer"')
+            self.assertContains(player_response, 'data-document-viewer')
+            self.assertContains(player_response, 'data-document-fullscreen')
+            self.assertContains(player_response, "allowfullscreen")
+            self.assertContains(player_response, ">Viewing</p>")
+            self.assertNotContains(player_response, "Now playing")
+            self.assertContains(player_response, f"/media/{download.id}/")
+
+    def test_pdf_ocr_worker_saves_searchable_page_segments(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = Path(tmpdir) / "scan.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 test-pdf")
+            download = Download.objects.create(
+                profile_id="default",
+                source_type="manual",
+                source_name="Manual Uploads",
+                item_uid="manual-pdf-ocr",
+                title="Scanned Invoice.pdf",
+                file_path=str(pdf_path),
+                file_ext="pdf",
+                download_status="downloaded",
+            )
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="generate_ocr",
+                payload={"download_id": download.id},
+            )
+            pages = [
+                SimpleNamespace(
+                    page_number=1,
+                    text="Invoice number 12345. The invoice is due today! Contact billing?",
+                    used_ocr=True,
+                ),
+                SimpleNamespace(
+                    page_number=2,
+                    text="Total due 42 dollars.",
+                    used_ocr=False,
+                ),
+            ]
+            with patch("workers.handlers.extract_pdf_pages", return_value=pages):
+                ocr_pdf(job)
+
+            segments = list(
+                TranscriptSegment.objects.filter(download=download).order_by(
+                    "start_seconds"
+                )
+            )
+            self.assertEqual(
+                [segment.text for segment in segments],
+                [
+                    "Invoice number 12345.",
+                    "The invoice is due today!",
+                    "Contact billing?",
+                    "Total due 42 dollars.",
+                ],
+            )
+            self.assertEqual(
+                segments[0].subtitle_path,
+                f"ocr://download/{download.id}/page/1",
+            )
+            client = Client()
+            response = client.get("/transcript-search/?q=invoice")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["results"][0]["position_label"], "Page 1")
+
+    def test_pdf_ocr_sentence_tokenizer_keeps_unsplit_text(self):
+        self.assertEqual(
+            split_sentences("A sentence. Another sentence! A question?"),
+            ["A sentence.", "Another sentence!", "A question?"],
+        )
+        self.assertEqual(split_sentences("A clause without punctuation"), [
+            "A clause without punctuation"
+        ])
+        self.assertEqual(
+            split_sentences("Profile heading\n- First accomplishment\n- Second accomplishment"),
+            [
+                "Profile heading",
+                "- First accomplishment",
+                "- Second accomplishment",
+            ],
+        )
 
     def test_library_preview_keeps_default_limit(self):
         base_seen_at = timezone.now()
@@ -718,6 +860,8 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn('media?.addEventListener("ended"', player_script)
         self.assertIn('window.addEventListener("pagehide"', player_script)
         self.assertIn("navigator.sendBeacon(form.action, body)", player_script)
+        self.assertIn("requestFullscreen", player_script)
+        self.assertIn("Exit fullscreen", player_script)
 
     def test_django_player_position_endpoint_persists_resume_and_completion(self):
         client = Client()
@@ -2007,6 +2151,7 @@ class QueueRoutingTests(unittest.TestCase):
         self.assertEqual(
             queue_name("generate_transcript"), "getoffline.jobs.transcripts"
         )
+        self.assertEqual(queue_name("generate_ocr"), "getoffline.jobs.transcripts")
 
 
 class WorkerRabbitMQConnectionTests(unittest.TestCase):

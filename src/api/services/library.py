@@ -43,19 +43,26 @@ def decorate_download(item: Download) -> Download:
     item.display_type = (
         item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?"
     ).upper()
+    extension = item.display_type.lower()
     item.display_kind = (
         "video"
-        if item.display_type.lower() in {"mp4", "mkv", "webm", "mov"}
+        if extension in {"mp4", "mkv", "webm", "mov"}
+        else "document"
+        if extension == "pdf"
         else "audio"
     )
-    item.status_label = "UNPLAYED"
-    item.status_class = "status-unplayed"
-    if position > 0 and not item.played:
-        item.status_label = "STARTED"
-        item.status_class = "status-started"
-    if item.played:
-        item.status_label = "PLAYED"
-        item.status_class = "status-played"
+    if item.display_kind == "document":
+        item.status_label = "VIEWED" if item.played else "VIEWING"
+        item.status_class = "status-viewed" if item.played else "status-viewing"
+    else:
+        item.status_label = "UNPLAYED"
+        item.status_class = "status-unplayed"
+        if position > 0 and not item.played:
+            item.status_label = "STARTED"
+            item.status_class = "status-started"
+        if item.played:
+            item.status_label = "PLAYED"
+            item.status_class = "status-played"
     download_status = parse_str_enum(DownloadStatus, item.download_status)
     if download_status in {DownloadStatus.MISSING, DownloadStatus.RETENTION_DELETED}:
         item.status_label = (

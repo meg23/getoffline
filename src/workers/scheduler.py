@@ -24,6 +24,7 @@ log = get_logger("workers.scheduler")
 HEAVY_JOB_TYPES = {
     JobType.TRANSCODE_MEDIA: HeavyJobKind.FFMPEG,
     JobType.GENERATE_TRANSCRIPT: HeavyJobKind.TRANSCRIPT,
+    JobType.GENERATE_OCR: HeavyJobKind.TRANSCRIPT,
 }
 DEFAULT_CAPACITY = 3
 DEFAULT_LEASE_SECONDS = 120.0

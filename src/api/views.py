@@ -175,7 +175,13 @@ def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
     media_ext = (
         item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")
     ).lower()
-    media_kind = "video" if media_ext in {"mp4", "mkv", "webm", "mov"} else "audio"
+    media_kind = (
+        "video"
+        if media_ext in {"mp4", "mkv", "webm", "mov"}
+        else "document"
+        if media_ext == "pdf"
+        else "audio"
+    )
     summary["has_subtitles"] = has_subtitles
     return JsonResponse(
         {"item": summary, "seek_seconds": seek, "media_kind": media_kind}

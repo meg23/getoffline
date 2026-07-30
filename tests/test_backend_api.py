@@ -178,6 +178,24 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["media_kind"], "video")
 
+    def test_frontend_player_classifies_pdf_as_document(self):
+        download = Download.objects.create(
+            profile_id="api-user",
+            item_uid="pdf-1",
+            source_type="manual",
+            source_name="Manual Uploads",
+            title="Notes.pdf",
+            file_path="/media/notes.pdf",
+            file_ext="pdf",
+            download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse("api_frontend_player", args=[download.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["media_kind"], "document")
+
     def test_playback_progress_updates_episode_state(self):
         download = self._create_download()
 

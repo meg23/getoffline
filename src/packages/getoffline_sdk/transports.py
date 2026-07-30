@@ -145,6 +145,17 @@ class HttpTransport:
         request_headers = dict(headers or {})
         if body is not None and "Content-Type" not in request_headers:
             request_headers["Content-Type"] = content_type
+        if (
+            body is not None
+            and content_type.startswith("multipart/form-data;")
+            and "Content-Length" not in request_headers
+            and "Transfer-Encoding" not in request_headers
+        ):
+            content_length = _multipart_content_length(
+                data, "----getoffline-sdk-boundary"
+            )
+            if content_length is not None:
+                request_headers["Content-Length"] = str(content_length)
         req = urllib.request.Request(
             url, data=body, headers=request_headers, method=method.upper()
         )
@@ -247,6 +258,35 @@ def _multipart_body(data: object, boundary: str) -> Iterator[bytes]:
             yield str(value).encode()
             yield b"\r\n"
     yield f"--{boundary}--\r\n".encode()
+
+
+def _multipart_content_length(data: object, boundary: str) -> int | None:
+    """Return a multipart body size when every upload exposes its size."""
+
+    total = 0
+    for key, value in _iter_fields(data):
+        total += len(f"--{boundary}\r\n".encode())
+        if _is_upload(value):
+            size = getattr(value, "size", None)
+            if not isinstance(size, int) or size < 0:
+                return None
+            filename = getattr(value, "name", "upload")
+            content_type = (
+                getattr(value, "content_type", None) or "application/octet-stream"
+            )
+            total += len(
+                (
+                    f'Content-Disposition: form-data; name="{key}"; '
+                    f'filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'
+                ).encode()
+            )
+            total += size + len(b"\r\n")
+        else:
+            total += len(
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode()
+            )
+            total += len(str(value).encode()) + len(b"\r\n")
+    return total + len(f"--{boundary}--\r\n".encode())
 
 
 def _contains_upload(data: object) -> bool:

@@ -48,6 +48,7 @@ class AppRoutingTests(unittest.TestCase):
             "update_downloads": SERIAL_EPISODE_CHECK_QUEUE,
             "transcode_media": FFMPEG_QUEUE,
             "generate_transcript": TRANSCRIPT_QUEUE,
+            "generate_ocr": TRANSCRIPT_QUEUE,
             "retention_cleanup": CLEANUP_QUEUE,
         }
         for job_type, expected_queue in cases.items():

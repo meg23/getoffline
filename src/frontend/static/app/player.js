@@ -1,5 +1,7 @@
 (() => {
   const media = document.getElementById("player");
+  const documentViewer = document.querySelector("[data-document-viewer]");
+  const fullscreenButton = document.querySelector("[data-document-fullscreen]");
   const form = document.getElementById("position-form");
   const input = document.getElementById("position-seconds");
   const seek = Number(media?.dataset.seekSeconds || 0);
@@ -8,6 +10,58 @@
   let pendingForcedSave = false;
   let hasAppliedInitialSeek = !(seek > 0);
   const periodicProgressSeconds = 5;
+
+  function documentViewerIsFullscreen() {
+    return (
+      document.fullscreenElement === documentViewer ||
+      document.webkitFullscreenElement === documentViewer
+    );
+  }
+
+  function updateFullscreenButton() {
+    if (!fullscreenButton || !documentViewer) return;
+    const supported = Boolean(
+      documentViewer.requestFullscreen ||
+        documentViewer.webkitRequestFullscreen,
+    );
+    fullscreenButton.hidden = !supported;
+    if (!supported) return;
+    const active = documentViewerIsFullscreen();
+    fullscreenButton.setAttribute("aria-pressed", String(active));
+    fullscreenButton.setAttribute(
+      "aria-label",
+      active ? "Exit fullscreen" : "Enter fullscreen",
+    );
+    fullscreenButton.innerHTML = `<span aria-hidden="true">${
+      active ? "⤢" : "⛶"
+    }</span> ${active ? "Exit fullscreen" : "Fullscreen"}`;
+  }
+
+  async function toggleDocumentFullscreen() {
+    if (!documentViewer) return;
+    try {
+      if (documentViewerIsFullscreen()) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+        return;
+      }
+      if (documentViewer.requestFullscreen) {
+        await documentViewer.requestFullscreen();
+      } else if (documentViewer.webkitRequestFullscreen) {
+        documentViewer.webkitRequestFullscreen();
+      }
+    } catch (err) {
+      console.debug("[getoffline] document fullscreen failed", { err });
+    }
+  }
+
+  fullscreenButton?.addEventListener("click", toggleDocumentFullscreen);
+  document.addEventListener("fullscreenchange", updateFullscreenButton);
+  document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+  updateFullscreenButton();
 
   function initialSeekTarget() {
     if (!media || !(seek > 0)) return 0;

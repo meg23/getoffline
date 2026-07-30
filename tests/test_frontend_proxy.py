@@ -12,6 +12,7 @@ import django
 
 django.setup()
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory
 
 from frontend.views import _api_proxy, _request_headers, _upstream_response
@@ -39,6 +40,8 @@ class FrontendProxyTests(unittest.TestCase):
                 "Content-Type": "video/mp4",
                 "Content-Length": "4",
                 "Content-Range": "bytes 0-3/4",
+                "Content-Security-Policy": "default-src 'none'",
+                "X-Frame-Options": "SAMEORIGIN",
             },
             b"",
             streaming=True,
@@ -48,6 +51,8 @@ class FrontendProxyTests(unittest.TestCase):
         self.assertTrue(response.streaming)
         self.assertEqual(b"".join(response.streaming_content), b"abcd")
         self.assertEqual(response["Content-Range"], "bytes 0-3/4")
+        self.assertEqual(response["Content-Security-Policy"], "default-src 'none'")
+        self.assertEqual(response["X-Frame-Options"], "SAMEORIGIN")
 
     def test_media_proxy_requests_a_streaming_api_response(self):
         class RecordingClient:
@@ -84,6 +89,34 @@ class FrontendProxyTests(unittest.TestCase):
 
         self.assertEqual(headers["Host"], "192.168.86.26:8080")
         self.assertEqual(headers["Cookie"], "sessionid=abc")
+
+    def test_proxy_preserves_uploaded_files_for_multipart_forwarding(self):
+        request = RequestFactory().post(
+            "/manual-upload/",
+            {
+                "files": SimpleUploadedFile(
+                    "notes.pdf", b"pdf-bytes", content_type="application/pdf"
+                )
+            },
+        )
+
+        class RecordingClient:
+            def __init__(self):
+                self.kwargs = None
+
+            def raw_request(self, *args, **kwargs):
+                self.kwargs = kwargs
+                return Response(201, b'{"ok": true}', {"Content-Type": "application/json"})
+
+        client = RecordingClient()
+        with patch("frontend.views._sdk_client", return_value=client):
+            response = _api_proxy(request, "api_dashboard_manual_upload")
+
+        self.assertEqual(response.status_code, 201)
+        uploaded = client.kwargs["data"]["files"]
+        self.assertEqual(len(uploaded), 1)
+        self.assertEqual(uploaded[0].name, "notes.pdf")
+        self.assertEqual(uploaded[0].content_type, "application/pdf")
 
 
 if __name__ == "__main__":
