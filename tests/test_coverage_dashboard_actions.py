@@ -233,12 +233,15 @@ class DashboardActionCoverageTests(TestCase):
             mp3_path = channel_dir / "episode.mp3"
             mp3_path.write_bytes(b"audio")
 
-            call_command(
-                "import_downloads_directory",
-                str(root),
-                profile_id="alice",
-                generate_transcripts=True,
-            )
+            with patch(
+                "models.management.commands.import_downloads_directory.publish_job"
+            ):
+                call_command(
+                    "import_downloads_directory",
+                    str(root),
+                    profile_id="alice",
+                    generate_transcripts=True,
+                )
 
             self.assertEqual(Job.objects.filter(profile_id="alice").count(), 2)
             job_types = sorted(Job.objects.values_list("job_type", flat=True))
