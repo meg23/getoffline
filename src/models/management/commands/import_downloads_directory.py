@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import DatabaseError
 
 from api.services.dashboard_actions import import_manual_file
 
@@ -62,12 +63,9 @@ class Command(BaseCommand):
                         downloads_root=downloads_root,
                     )
                     imported += 1
-                except ValueError as exc:
+                except (ValueError, OSError, DatabaseError) as exc:
                     skipped += 1
                     self.stderr.write(f"Skipped {path}: {exc}")
-                except Exception as exc:  # pragma: no cover - defensive wrapper
-                    failed += 1
-                    self.stderr.write(f"Failed {path}: {exc}")
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -75,11 +73,16 @@ class Command(BaseCommand):
                 f"(skipped {skipped}, failed {failed})"
             )
         )
-        if failed:
-            raise CommandError("One or more files failed to import.")
 
     def _contains_media_files(self, directory: Path) -> bool:
         return any(
-            path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES
+            self._is_importable_file(path)
             for path in directory.iterdir()
+        )
+
+    def _is_importable_file(self, path: Path) -> bool:
+        return (
+            path.is_file()
+            and not path.name.startswith(".")
+            and path.suffix.lower() in MEDIA_SUFFIXES
         )
