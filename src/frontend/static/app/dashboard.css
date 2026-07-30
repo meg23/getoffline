@@ -443,6 +443,14 @@ tbody tr:nth-child(even) td {
   background: #e2f3ff;
   color: #114e78;
 }
+.status-viewing {
+  background: #e9f1ff;
+  color: #294a86;
+}
+.status-viewed {
+  background: #def7e8;
+  color: #127343;
+}
 .status-played {
   background: var(--ok-bg);
   color: var(--ok-text);

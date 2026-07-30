@@ -79,14 +79,18 @@ def _decorate_download(item):
         if extension == "pdf"
         else "audio"
     )
-    item.status_label = "UNPLAYED"
-    item.status_class = "status-unplayed"
-    if position > 0 and not getattr(item, "played", False):
-        item.status_label = "STARTED"
-        item.status_class = "status-started"
-    if getattr(item, "played", False):
-        item.status_label = "PLAYED"
-        item.status_class = "status-played"
+    if item.display_kind == "document":
+        item.status_label = "VIEWED" if getattr(item, "played", False) else "VIEWING"
+        item.status_class = "status-viewed" if getattr(item, "played", False) else "status-viewing"
+    else:
+        item.status_label = "UNPLAYED"
+        item.status_class = "status-unplayed"
+        if position > 0 and not getattr(item, "played", False):
+            item.status_label = "STARTED"
+            item.status_class = "status-started"
+        if getattr(item, "played", False):
+            item.status_label = "PLAYED"
+            item.status_class = "status-played"
     if str(getattr(item, "download_status", "")) in {"missing", "retention_deleted"}:
         item.status_label = (
             "REMOVED"

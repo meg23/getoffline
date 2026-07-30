@@ -105,7 +105,7 @@ h1 {
 .document-fullscreen-toggle {
   position: absolute;
   z-index: 2;
-  top: 0.75rem;
+  bottom: 0.75rem;
   right: 0.75rem;
   min-height: 2.5rem;
   border: 1px solid #8793a8;
@@ -184,6 +184,10 @@ a:focus-visible {
   }
   .document-viewer-shell {
     min-height: 78vh;
+  }
+  .document-fullscreen-toggle {
+    bottom: 0.6rem;
+    right: 0.6rem;
   }
   .player-audio {
     width: calc(100% - 1.25rem);

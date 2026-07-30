@@ -29,8 +29,8 @@
         {% endif %}
       </div>
       <div class="actions" aria-label="Playback actions">
-        <form method="post" action="{% url 'mark_played' item.id %}">{% csrf_token %}<button type="submit">Mark played</button></form>
-        <form method="post" action="{% url 'mark_unplayed' item.id %}">{% csrf_token %}<button type="submit">Mark unplayed</button></form>
+        <form method="post" action="{% url 'mark_played' item.id %}">{% csrf_token %}<button type="submit">{% if media_kind == 'document' %}Mark as viewed{% else %}Mark played{% endif %}</button></form>
+        <form method="post" action="{% url 'mark_unplayed' item.id %}">{% csrf_token %}<button type="submit">{% if media_kind == 'document' %}Mark as unviewed{% else %}Mark unplayed{% endif %}</button></form>
         {% if item.favorite %}<form method="post" action="{% url 'unfavorite' item.id %}">{% csrf_token %}<button type="submit">Unfavorite</button></form>{% else %}<form method="post" action="{% url 'favorite' item.id %}">{% csrf_token %}<button type="submit">Favorite</button></form>{% endif %}
       </div>
       <form id="position-form" method="post" action="{% url 'save_position' item.id %}">{% csrf_token %}<input type="hidden" name="position_seconds" id="position-seconds"></form>
