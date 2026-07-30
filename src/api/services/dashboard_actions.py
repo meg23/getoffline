@@ -7,6 +7,7 @@ API controllers delegate stateful work here.
 """
 
 import hashlib
+import json
 import logging
 import math
 import mimetypes
@@ -261,6 +262,18 @@ def _profile_output_root(profile_id: str) -> Path:
         or PROFILE_DEFAULTS["output_root"]
     )
     return Path(str(value)).expanduser().absolute()
+
+
+def _hash_file(path: Path) -> tuple[str, int]:
+    hasher = hashlib.sha1(usedforsecurity=False)
+    size = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            if not chunk:
+                continue
+            hasher.update(chunk)
+            size += len(chunk)
+    return hasher.hexdigest(), size
 
 
 def _resolve_media_path(item: Download) -> Path:
@@ -1060,6 +1073,77 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> ManualUploadResult:
         destination_path.unlink(missing_ok=True)
         raise
     return ManualUploadResult(download, destination_path)
+
+
+def import_manual_file(
+    profile_id: str,
+    file_path: str | Path,
+    *,
+    source_name: str | None = None,
+    downloads_root: str | Path | None = None,
+) -> ManualUploadResult:
+    path = Path(file_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"File unavailable: {path}")
+    suffix = path.suffix.lower()
+    if suffix not in MEDIA_UPLOAD_EXTENSIONS:
+        raise ValueError(f"Unsupported media type: {path.name}")
+
+    output_root = (
+        Path(downloads_root).expanduser().resolve()
+        if downloads_root is not None
+        else _profile_output_root(profile_id).resolve()
+    )
+    try:
+        relative_path = str(path.relative_to(output_root))
+    except ValueError as exc:
+        raise ValueError(
+            f"File must live under the downloads root: {output_root}"
+        ) from exc
+
+    file_hash, bytes_written = _hash_file(path)
+    now = timezone.now()
+    channel_name = source_name or path.parent.name or "Manual Uploads"
+    item_uid = (
+        f"manualdir-{profile_id}-{channel_name}-{relative_path}-{bytes_written}-{file_hash}"
+    )
+    download, _created = Download.objects.update_or_create(
+        profile_id=profile_id,
+        item_uid=item_uid,
+        defaults={
+            "source_type": "manual",
+            "source_name": channel_name,
+            "source_url": None,
+            "item_id": item_uid,
+            "item_url": None,
+            "media_url": None,
+            "title": path.name,
+            "description": "Imported from downloads directory",
+            "uploader": "local",
+            "channel": channel_name,
+            "upload_date": now.date().isoformat(),
+            "duration_seconds": None,
+            "file_path": str(path),
+            "file_path_relative": relative_path,
+            "file_ext": suffix.lstrip("."),
+            "file_size_bytes": bytes_written,
+            "subtitle_path": None,
+            "subtitle_path_relative": None,
+            "download_status": DownloadStatus.DOWNLOADED,
+            "profanity_status": "clean",
+            "is_censored": False,
+            "censored_segments": [],
+            "raw_metadata_json": json.dumps(
+                {
+                    "ingest_method": "downloads-directory",
+                    "relative_path": relative_path,
+                }
+            ),
+            "last_seen_at": now,
+            "completed_at": now,
+        },
+    )
+    return ManualUploadResult(download, path)
 
 
 @login_required
