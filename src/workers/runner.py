@@ -58,8 +58,8 @@ JOB_TYPES_BY_WORKER = {
     "updates": {JobType.CHECK_FOR_EPISODES, JobType.UPDATE_DOWNLOADS},
     "downloader-youtube": {JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE},
     "downloader-podcast": {JobType.DOWNLOAD_EPISODE, JobType.DOWNLOAD_SINGLE},
-    "ffmpeg": {JobType.TRANSCODE_MEDIA, JobType.CENSOR_AUDIO},
-    "transcripts": {JobType.GENERATE_TRANSCRIPT},
+    "ffmpeg": {JobType.TRANSCODE_MEDIA},
+    "transcripts": {JobType.GENERATE_TRANSCRIPT, JobType.GENERATE_OCR},
     "cleanup": {JobType.RETENTION_CLEANUP},
 }
 

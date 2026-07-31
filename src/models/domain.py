@@ -33,7 +33,7 @@ class JobType(StrEnum):
     DOWNLOAD_SINGLE = "download_single"
     TRANSCODE_MEDIA = "transcode_media"
     GENERATE_TRANSCRIPT = "generate_transcript"
-    CENSOR_AUDIO = "censor_audio"
+    GENERATE_OCR = "generate_ocr"
     RETENTION_CLEANUP = "retention_cleanup"
 
 

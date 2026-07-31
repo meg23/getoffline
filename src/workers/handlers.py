@@ -35,6 +35,7 @@ from workers.content_filter import (
     screen_transcript,
 )
 from workers.logger import get_logger
+from workers.pdf_ocr import PdfOcrPage, extract_pdf_pages, split_sentences
 from workers.subtitles import create_subtitles
 from workers.utils import sanitize_channel_name
 from workers.ytdlp_helpers import (
@@ -2666,122 +2667,32 @@ def generate_transcript(job: Job) -> None:
                     )
                     return
                 if explicit_match is not None:
-                    # Determine if we should censor or delete
-                    censor_enabled = bool(payload.get("censor_profanity", False))
-                    censor_method = str(payload.get("censor_method", "duck"))
-                    keep_original = bool(payload.get("keep_original", False))
-
-                    if censor_enabled:
-                        # Try to censor instead of deleting
-                        try:
-                            profanity_segments = extract_profanity_segments(Path(subtitle_path))
-                            if profanity_segments:
-                                censor_payload = {
-                                    "download_id": download_id,
-                                    "media_path": str(media_path),
-                                    "subtitle_path": str(subtitle_path),
-                                    "censor_method": censor_method,
-                                    "keep_original": keep_original,
-                                    "segments": [
-                                        {
-                                            "start_seconds": seg.start_seconds,
-                                            "end_seconds": seg.end_seconds,
-                                            "text": seg.text,
-                                        }
-                                        for seg in profanity_segments
-                                    ],
-                                }
-
-                                _enqueue_censor_job(
-                                    profile_id=job.profile_id,
-                                    download_id=download_id,
-                                    payload=censor_payload,
-                                    parent_job_id=job.id,
-                                )
-
-                                download.download_status = DownloadStatus.CENSORED
-                                download.last_seen_at = timezone.now()
-                                download.save(update_fields=["download_status", "last_seen_at"])
-
-                                log.info(
-                                    "Queued censoring job for download after transcript profanity screening job_id=%s download_id=%s segment_count=%s category=%s",
-                                    job.id,
-                                    download_id,
-                                    len(profanity_segments),
-                                    explicit_match.category,
-                                )
-                                return
-                            else:
-                                # No segments found, fall back to deletion if delete_explicit_content is True
-                                log.warning(
-                                    "No profanity segments found for censoring job_id=%s download_id=%s",
-                                    job.id,
-                                    download_id,
-                                )
-                                if not bool(payload.get("delete_explicit_content", False)):
-                                    # If not deleting, just mark as downloaded
-                                    download.download_status = DownloadStatus.DOWNLOADED
-                                    download.last_seen_at = timezone.now()
-                                    download.save(update_fields=["download_status", "last_seen_at"])
-                                    return
-                        except Exception as censor_exc:  # noqa: BLE001
-                            log.error(
-                                "Censoring preparation failed job_id=%s download_id=%s error=%s",
-                                job.id,
-                                download_id,
-                                censor_exc,
-                            )
-                            if not bool(payload.get("delete_explicit_content", False)):
-                                # If censoring fails but we're not supposed to delete, still keep the file
-                                log.warning(
-                                    "Censoring failed but delete_explicit_content is False, keeping file job_id=%s download_id=%s",
-                                    job.id,
-                                    download_id,
-                                )
-                                download.download_status = DownloadStatus.DOWNLOADED
-                                download.last_seen_at = timezone.now()
-                                download.save(update_fields=["download_status", "last_seen_at"])
-                                return
-
-                    # If censoring not enabled, delete if delete_explicit_content is True
-                    if bool(payload.get("delete_explicit_content", False)):
-                        deleted_paths = delete_media_artifacts(media_path)
-                        TranscriptSegment.objects.filter(download=download).delete()
-                        download.download_status = DownloadStatus.FILTERED
-                        download.last_seen_at = timezone.now()
-                        download.save(update_fields=["download_status", "last_seen_at"])
-                        log_filtered_deletion(
-                            source_type=download.source_type,
-                            source_name=download.source_name,
-                            title=str(download.title or media_path.stem),
-                            media_path=media_path,
-                            match=explicit_match,
-                            deleted_paths=deleted_paths,
-                        )
-                        log.warning(
-                            "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
-                            job.id,
-                            download_id,
-                            explicit_match.category,
-                        )
-                        return
-                    else:
-                        # Profanity found but neither deleting nor censoring, just keep file
-                        log.info(
-                            "Profanity detected but not deleting/censoring job_id=%s download_id=%s category=%s",
-                            job.id,
-                            download_id,
-                            explicit_match.category,
-                        )
-                        download.download_status = DownloadStatus.DOWNLOADED
-                        download.last_seen_at = timezone.now()
-                        download.save(update_fields=["download_status", "last_seen_at"])
-                        return
-                log.info(
-                    "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
+                    deleted_paths = delete_media_artifacts(media_path)
+                    TranscriptSegment.objects.filter(download=download).delete()
+                    download.download_status = DownloadStatus.FILTERED
+                    download.last_seen_at = timezone.now()
+                    download.save(update_fields=["download_status", "last_seen_at"])
+                    log_filtered_deletion(
+                        source_type=download.source_type,
+                        source_name=download.source_name,
+                        title=str(download.title or media_path.stem),
+                        media_path=media_path,
+                        match=explicit_match,
+                        deleted_paths=deleted_paths,
+                    )
+                    log.warning(
+                        "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
+                        job.id,
+                        download_id,
+                        explicit_match.category,
+                    )
+                    return
+            log.info(
+                "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
                     job.id,
                     download_id,
                 )
+
         else:
             log.warning(
                 "Transcript worker completed without subtitle output job_id=%s download_id=%s enabled=%s media_path=%s",
@@ -2803,285 +2714,64 @@ def generate_transcript(job: Job) -> None:
                 )
 
 
-def censor_audio(job: Job) -> None:
-    """Apply audio profanity censoring (muting or beeping) to media files."""
-    log.info(
-        "Censoring worker started job_id=%s profile_id=%s payload=%s",
-        job.id,
-        job.profile_id,
-        job.payload,
-    )
+def ocr_pdf(job: Job) -> None:
+    """Extract searchable text from a PDF, OCRing pages without native text."""
     payload = job.payload if isinstance(job.payload, dict) else {}
     download_id = payload.get("download_id")
-
     if not download_id:
-        log.warning(
-            "Censoring worker skipped job with no download_id job_id=%s", job.id
-        )
+        log.warning("PDF OCR worker skipped job with no download_id job_id=%s", job.id)
         return
-
     download = Download.objects.filter(
-        pk=download_id, profile_id=job.profile_id
+        pk=download_id, profile_id=job.profile_id, file_ext__iexact="pdf"
     ).first()
-
     if download is None:
         log.warning(
-            "Censoring worker skipped missing download job_id=%s download_id=%s profile_id=%s",
+            "PDF OCR worker skipped missing or non-PDF download job_id=%s download_id=%s profile_id=%s",
             job.id,
             download_id,
             job.profile_id,
         )
         return
-
-    _touch_active_job(
-        job,
-        stage="audio_censoring",
-        title=str(download.title or "").strip(),
-    )
-
-    media_path = Path(str(payload.get("media_path") or "")).expanduser().resolve()
-    censor_method = str(payload.get("censor_method") or "duck").strip().lower()
-    keep_original = bool(payload.get("keep_original", False))
-    segments_data = payload.get("segments", [])
-
-    log.info(
-        "Censoring worker loaded download job_id=%s download_id=%s title=%s file_path=%s method=%s keep_original=%s segment_count=%s",
-        job.id,
-        download_id,
-        download.title,
-        media_path,
-        censor_method,
-        keep_original,
-        len(segments_data),
-    )
-
-    if not media_path.exists():
-        log.error(
-            "Censoring worker failed: media file not found job_id=%s download_id=%s path=%s",
-            job.id,
-            download_id,
-            media_path,
-        )
-        return
-
-    if not segments_data:
+    pdf_path = Path(str(download.file_path or "")).expanduser().resolve()
+    if not pdf_path.is_file():
         log.warning(
-            "Censoring worker skipped: no profanity segments job_id=%s download_id=%s",
+            "PDF OCR worker skipped missing file job_id=%s download_id=%s path=%s",
             job.id,
             download_id,
-        )
-        download.download_status = DownloadStatus.DOWNLOADED
-        download.save(update_fields=["download_status"])
-        return
-
-    # Reconstruct AudioSegment objects from payload data
-    from workers.censor import AudioSegment, build_beep_filter, build_duck_filter
-
-    segments = [
-        AudioSegment(
-            start_seconds=float(seg["start_seconds"]),
-            end_seconds=float(seg["end_seconds"]),
-            text=seg.get("text", ""),
-        )
-        for seg in segments_data
-    ]
-
-    # Generate appropriate FFmpeg audio filter
-    if censor_method == "beep":
-        audio_filter = build_beep_filter(segments)
-    else:  # Default to duck (muting)
-        audio_filter = build_duck_filter(segments)
-
-    if not audio_filter:
-        log.error(
-            "Censoring worker failed to generate filter job_id=%s download_id=%s method=%s",
-            job.id,
-            download_id,
-            censor_method,
+            pdf_path,
         )
         return
-
-    # Apply FFmpeg audio filter
-    output_path = media_path.parent / f"{media_path.stem}_censored{media_path.suffix}"
-
-    # Build FFmpeg command to apply audio filter
-    # Determine if filter is simple (-af) or complex (-filter_complex)
-    is_complex_filter = "[" in audio_filter or "]" in audio_filter
-
-    # Check if input is audio-only by trying to detect streams
-    # For simplicity, assume MP3/AAC/OGG are audio-only, MP4/MKV may have video
-    is_audio_only = media_path.suffix.lower() in [".mp3", ".aac", ".ogg", ".wav", ".m4a"]
-
-    if is_complex_filter:
-        # Use -filter_complex for beep (which uses pad notation)
-        if is_audio_only:
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-i", str(media_path),
-                "-filter_complex", audio_filter,
-                "-c:a", "libmp3lame",  # Encode audio with MP3
-                "-b:a", "128k",  # Audio bitrate
-                "-y",  # Overwrite output
-                str(output_path),
-            ]
-        else:
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-i", str(media_path),
-                "-filter_complex", audio_filter,
-                "-c:v", "copy",  # Copy video codec unchanged
-                "-c:a", "aac",   # Encode audio with AAC
-                "-b:a", "128k",  # Audio bitrate
-                "-y",  # Overwrite output
-                str(output_path),
-            ]
-    else:
-        # Use -af for simple audio filters (duck)
-        if is_audio_only:
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-i", str(media_path),
-                "-af", audio_filter,
-                "-c:a", "libmp3lame",  # Encode audio with MP3
-                "-b:a", "128k",  # Audio bitrate
-                "-y",  # Overwrite output
-                str(output_path),
-            ]
-        else:
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-i", str(media_path),
-                "-af", audio_filter,
-                "-c:v", "copy",  # Copy video codec unchanged
-                "-c:a", "aac",   # Encode audio with AAC
-                "-b:a", "128k",  # Audio bitrate
-                "-y",  # Overwrite output
-                str(output_path),
-            ]
-
-    try:
-        log.info(
-            "Censoring worker applying filter job_id=%s download_id=%s input=%s output=%s filter=%s",
-            job.id,
-            download_id,
-            media_path,
-            output_path,
-            audio_filter[:100],  # Log first 100 chars of filter
-        )
-
-        result = subprocess.run(
-            ffmpeg_cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False,
-        )
-
-        if result.returncode != 0:
-            log.error(
-                "Censoring worker FFmpeg failed job_id=%s download_id=%s stderr=%s",
-                job.id,
-                download_id,
-                result.stderr[:500],
+    _touch_active_job(job, stage="pdf_ocr", title=str(download.title or pdf_path.name))
+    pages: list[PdfOcrPage] = extract_pdf_pages(pdf_path)
+    TranscriptSegment.objects.filter(download=download).delete()
+    created_segments: list[TranscriptSegment] = []
+    for page in pages:
+        sentences = split_sentences(page.text)
+        for sentence_index, sentence in enumerate(sentences):
+            # PDF segments use the page number as a virtual timestamp. The
+            # tiny offset preserves sentence order without changing the page
+            # label or the destination page in the player.
+            virtual_position = float(page.page_number - 1) + (
+                sentence_index / 1_000_000
             )
-            if output_path.exists():
-                output_path.unlink()
-            return
-
-        # Verify output file exists and has reasonable size
-        if not output_path.exists():
-            log.error(
-                "Censoring worker FFmpeg produced no output job_id=%s download_id=%s path=%s",
-                job.id,
-                download_id,
-                output_path,
+            created_segments.append(
+                TranscriptSegment(
+                    download=download,
+                    subtitle_path=f"ocr://download/{download.id}/page/{page.page_number}",
+                    start_seconds=virtual_position,
+                    end_seconds=float(page.page_number),
+                    text=sentence,
+                )
             )
-            return
-
-        output_size = output_path.stat().st_size
-        original_size = media_path.stat().st_size
-
-        if output_size < original_size * 0.5:  # Sanity check: censored should be similar size
-            log.warning(
-                "Censoring worker output suspiciously small job_id=%s download_id=%s original_bytes=%s output_bytes=%s",
-                job.id,
-                download_id,
-                original_size,
-                output_size,
-            )
-
-        log.info(
-            "Censoring worker FFmpeg completed job_id=%s download_id=%s output_size=%s",
-            job.id,
-            download_id,
-            output_size,
-        )
-
-        # Handle original file
-        original_backup_path = None
-        if keep_original:
-            original_backup_path = media_path.parent / f"{media_path.stem}_original{media_path.suffix}"
-            media_path.rename(original_backup_path)
-            log.info(
-                "Censoring worker preserved original job_id=%s download_id=%s backup_path=%s",
-                job.id,
-                download_id,
-                original_backup_path,
-            )
-        else:
-            media_path.unlink()
-            log.info(
-                "Censoring worker deleted original job_id=%s download_id=%s",
-                job.id,
-                download_id,
-            )
-
-        # Replace with censored version
-        output_path.rename(media_path)
-        log.info(
-            "Censoring worker replaced media file job_id=%s download_id=%s final_path=%s",
-            job.id,
-            download_id,
-            media_path,
-        )
-
-        # Update download record
-        download.is_censored = True
-        download.censored_segments = [asdict(seg) for seg in segments]
-        download.download_status = DownloadStatus.DOWNLOADED
-        download.last_seen_at = timezone.now()
-        download.save(update_fields=[
-            "is_censored",
-            "censored_segments",
-            "download_status",
-            "last_seen_at",
-        ])
-
-        log.info(
-            "Censoring worker completed successfully job_id=%s download_id=%s segment_count=%s method=%s",
-            job.id,
-            download_id,
-            len(segments),
-            censor_method,
-        )
-
-    except subprocess.TimeoutExpired:
-        log.error(
-            "Censoring worker FFmpeg timeout job_id=%s download_id=%s",
-            job.id,
-            download_id,
-        )
-        if output_path.exists():
-            output_path.unlink()
-    except Exception as exc:  # noqa: BLE001
-        log.error(
-            "Censoring worker failed with exception job_id=%s download_id=%s error=%s",
-            job.id,
-            download_id,
-            exc,
-        )
-        if output_path.exists():
-            output_path.unlink()
+    TranscriptSegment.objects.bulk_create(created_segments)
+    log.info(
+        "PDF OCR worker saved searchable text job_id=%s download_id=%s pages=%s segments=%s ocr_pages=%s",
+        job.id,
+        download.id,
+        len(pages),
+        len(created_segments),
+        sum(1 for page in pages if page.used_ocr),
+    )
 
 
 def retention_cleanup(job: Job) -> None:
@@ -3174,6 +2864,6 @@ HANDLERS = {
     "download_single": download_single,
     "transcode_media": transcode_media,
     "generate_transcript": generate_transcript,
-    "censor_audio": censor_audio,
+    "generate_ocr": ocr_pdf,
     "retention_cleanup": retention_cleanup,
 }

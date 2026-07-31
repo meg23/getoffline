@@ -89,6 +89,60 @@ h1 {
   width: calc(100% - 2rem);
   border-radius: 999px;
 }
+.document-viewer {
+  display: block;
+  width: 100%;
+  min-height: min(72vh, 52rem);
+  border: 0;
+  background: #fff;
+}
+.document-viewer-fallback {
+  margin: 0;
+  padding: 1.5rem;
+  color: #5f6473;
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+.document-viewer-shell {
+  position: relative;
+  width: 100%;
+  min-height: min(72vh, 52rem);
+  background: #fff;
+}
+.document-fullscreen-toggle {
+  position: absolute;
+  z-index: 2;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  min-height: 2.5rem;
+  border: 1px solid #8793a8;
+  border-radius: 10px;
+  background: rgba(8, 13, 27, 0.88);
+  color: #fff;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.document-fullscreen-toggle:hover,
+.document-fullscreen-toggle:focus-visible {
+  background: #1b2b55;
+}
+.document-viewer-shell:fullscreen,
+.document-viewer-shell:-webkit-full-screen {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  background: #fff;
+}
+.document-viewer-shell:fullscreen .document-viewer,
+.document-viewer-shell:-webkit-full-screen .document-viewer {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -134,6 +188,13 @@ a:focus-visible {
   .player-stage {
     min-height: 9rem;
     border-radius: 14px;
+  }
+  .document-viewer-shell {
+    min-height: 78vh;
+  }
+  .document-fullscreen-toggle {
+    bottom: 0.6rem;
+    right: 0.6rem;
   }
   .player-audio {
     width: calc(100% - 1.25rem);

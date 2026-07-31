@@ -17,6 +17,7 @@ import django
 django.setup()
 
 from django.apps import apps
+from django.core.management import call_command
 from django.db import connection
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
@@ -202,3 +203,46 @@ class DashboardActionCoverageTests(TestCase):
             self.assertEqual(actions._normalize_upload_stem("...bad?.mp3"), "bad-.mp3")
             with self.assertRaises(ValueError):
                 actions._write_manual_upload("alice", SimpleNamespace(name="bad.txt", chunks=list))
+
+    def test_import_downloads_directory_command_registers_channel_folders(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            channel_dir = root / "My Channel"
+            channel_dir.mkdir()
+            pdf_path = channel_dir / "lease.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%EOF\n")
+            mp3_path = channel_dir / "episode.mp3"
+            mp3_path.write_bytes(b"audio")
+
+            call_command("import_downloads_directory", str(root), profile_id="alice")
+
+            pdf = Download.objects.get(profile_id="alice", title="lease.pdf")
+            audio = Download.objects.get(profile_id="alice", title="episode.mp3")
+            self.assertEqual(pdf.source_name, "My Channel")
+            self.assertEqual(audio.source_name, "My Channel")
+            self.assertEqual(pdf.file_path, str(pdf_path.resolve()))
+            self.assertEqual(pdf.file_ext, "pdf")
+
+    def test_import_downloads_directory_command_can_queue_transcripts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            channel_dir = root / "My Channel"
+            channel_dir.mkdir()
+            pdf_path = channel_dir / "lease.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%EOF\n")
+            mp3_path = channel_dir / "episode.mp3"
+            mp3_path.write_bytes(b"audio")
+
+            with patch(
+                "models.management.commands.import_downloads_directory.publish_job"
+            ):
+                call_command(
+                    "import_downloads_directory",
+                    str(root),
+                    profile_id="alice",
+                    generate_transcripts=True,
+                )
+
+            self.assertEqual(Job.objects.filter(profile_id="alice").count(), 2)
+            job_types = sorted(Job.objects.values_list("job_type", flat=True))
+            self.assertEqual(job_types, ["generate_ocr", "generate_transcript"])

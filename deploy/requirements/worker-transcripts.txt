@@ -14,3 +14,4 @@ packaging>=24.0
 protobuf>=5.26
 sympy>=1.12
 profanityfilter>=2.1.0
+pypdf>=5.0

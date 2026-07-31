@@ -60,6 +60,23 @@ class AppViewHelperTests(unittest.TestCase):
         self.assertTrue(item.has_subtitles)
         self.assertIsNone(item.resolved_subtitle_path)
 
+    def test_decorate_download_classifies_pdf_as_document(self):
+        item = SimpleNamespace(
+            last_position_seconds=0,
+            file_size_bytes=12,
+            file_ext="pdf",
+            file_path="/media/notes.pdf",
+            played=False,
+            download_status=DownloadStatus.DOWNLOADED.value,
+            subtitle_path="",
+            subtitle_path_relative="",
+        )
+
+        views._decorate_download(item)
+
+        self.assertEqual(item.display_type, "PDF")
+        self.assertEqual(item.display_kind, "document")
+
     def test_resolve_media_path_prefers_existing_relative_path_before_absolute_path(
         self,
     ):

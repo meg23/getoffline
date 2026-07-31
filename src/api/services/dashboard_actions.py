@@ -7,6 +7,7 @@ API controllers delegate stateful work here.
 """
 
 import hashlib
+import json
 import logging
 import math
 import mimetypes
@@ -21,7 +22,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 from django.contrib.auth.decorators import login_required
-from django.db import connection
+from django.db import DatabaseError, connection
 from django.db.models import Sum
 from django.http import (
     FileResponse,
@@ -77,8 +78,10 @@ MEDIA_UPLOAD_EXTENSIONS = {
     ".mkv",
     ".webm",
     ".mov",
+    ".pdf",
 }
 VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
+DOCUMENT_UPLOAD_EXTENSIONS = {".pdf"}
 
 
 @dataclass(frozen=True)
@@ -180,19 +183,26 @@ def _decorate_download(item: Download) -> Download:
     item.display_type = (
         item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".") or "?"
     ).upper()
+    extension = item.display_type.lower()
     item.display_kind = (
         "video"
-        if item.display_type.lower() in {"mp4", "mkv", "webm", "mov"}
+        if extension in {"mp4", "mkv", "webm", "mov"}
+        else "document"
+        if extension == "pdf"
         else "audio"
     )
-    item.status_label = "UNPLAYED"
-    item.status_class = "status-unplayed"
-    if position > 0 and not item.played:
-        item.status_label = "STARTED"
-        item.status_class = "status-started"
-    if item.played:
-        item.status_label = "PLAYED"
-        item.status_class = "status-played"
+    if item.display_kind == "document":
+        item.status_label = "VIEWED" if item.played else "VIEWING"
+        item.status_class = "status-viewed" if item.played else "status-viewing"
+    else:
+        item.status_label = "UNPLAYED"
+        item.status_class = "status-unplayed"
+        if position > 0 and not item.played:
+            item.status_label = "STARTED"
+            item.status_class = "status-started"
+        if item.played:
+            item.status_label = "PLAYED"
+            item.status_class = "status-played"
     download_status = parse_str_enum(DownloadStatus, item.download_status)
     if download_status in {DownloadStatus.MISSING, DownloadStatus.RETENTION_DELETED}:
         item.status_label = (
@@ -255,6 +265,18 @@ def _profile_output_root(profile_id: str) -> Path:
         or PROFILE_DEFAULTS["output_root"]
     )
     return Path(str(value)).expanduser().absolute()
+
+
+def _hash_file(path: Path) -> tuple[str, int]:
+    hasher = hashlib.sha1(usedforsecurity=False)
+    size = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            if not chunk:
+                continue
+            hasher.update(chunk)
+            size += len(chunk)
+    return hasher.hexdigest(), size
 
 
 def _resolve_media_path(item: Download) -> Path:
@@ -467,8 +489,12 @@ def _job_stage(job: Job) -> JobStage:
         return JobStage("downloading", "Downloading")
     if active_stage == "transcript_generation":
         return JobStage("transcript_generation", "Transcript generation")
+    if active_stage == "pdf_ocr":
+        return JobStage("pdf_ocr", "PDF OCR")
     if job.job_type in {"download_episode", "download_single"}:
         return JobStage("downloading", "Downloading")
+    if job.job_type == "generate_ocr":
+        return JobStage("pdf_ocr", "PDF OCR")
     if job.job_type in {"generate_transcript", "transcode_media"}:
         return JobStage("transcript_generation", "Transcript generation")
     return JobStage("queued", job.job_type.replace("_", " ").title())
@@ -505,7 +531,7 @@ def _job_still_needs_work(job: Job) -> bool:
     ).first()
     if download is None:
         return job.job_type in {"download_episode", "download_single"}
-    if job.job_type in {"generate_transcript", "transcode_media"}:
+    if job.job_type in {"generate_transcript", "generate_ocr", "transcode_media"}:
         has_transcript = TranscriptSegment.objects.filter(
             download_id=download_id
         ).exists()
@@ -529,6 +555,7 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
                 "download_episode",
                 "download_single",
                 "generate_transcript",
+                "generate_ocr",
                 "transcode_media",
             ],
             status=JobStatus.RUNNING,
@@ -580,10 +607,14 @@ def _legacy_player(request: HttpRequest, download_id: int) -> HttpResponse:
     except (TypeError, ValueError):
         requested_seek = 0.0
     seek = max(float(item.last_position_seconds or 0.0), requested_seek)
+    media_ext = (
+        item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")
+    ).lower()
     media_kind = (
         "video"
-        if (item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")).lower()
-        in {"mp4", "mkv", "webm", "mov"}
+        if media_ext in {"mp4", "mkv", "webm", "mov"}
+        else "document"
+        if media_ext == "pdf"
         else "audio"
     )
     log.info(
@@ -1022,35 +1053,113 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> ManualUploadResult:
         if destination_path.is_relative_to(output_root)
         else None
     )
+    try:
+        download, _created = Download.objects.update_or_create(
+            profile_id=profile_id,
+            item_uid=item_uid,
+            defaults={
+                "source_type": "manual",
+                "source_name": "Manual Uploads",
+                "source_url": None,
+                "item_id": item_uid,
+                "item_url": None,
+                "media_url": None,
+                "title": original_name,
+                "description": "Imported via browser drag-and-drop",
+                "uploader": "local",
+                "channel": "Manual Uploads",
+                "upload_date": now.date().isoformat(),
+                "duration_seconds": None,
+                "file_path": str(destination_path),
+                "file_path_relative": relative_path,
+                "file_ext": suffix.lstrip("."),
+                "file_size_bytes": bytes_written,
+                "subtitle_path": None,
+                "subtitle_path_relative": None,
+                "download_status": DownloadStatus.DOWNLOADED,
+                "profanity_status": "clean",
+                "is_censored": False,
+                "censored_segments": [],
+                "raw_metadata_json": '{"ingest_method":"drag-and-drop"}',
+                "last_seen_at": now,
+                "completed_at": now,
+            },
+        )
+    except DatabaseError:
+        destination_path.unlink(missing_ok=True)
+        raise
+    return ManualUploadResult(download, destination_path)
+
+
+def import_manual_file(
+    profile_id: str,
+    file_path: str | Path,
+    *,
+    source_name: str | None = None,
+    downloads_root: str | Path | None = None,
+) -> ManualUploadResult:
+    path = Path(file_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"File unavailable: {path}")
+    suffix = path.suffix.lower()
+    if suffix not in MEDIA_UPLOAD_EXTENSIONS:
+        raise ValueError(f"Unsupported media type: {path.name}")
+
+    output_root = (
+        Path(downloads_root).expanduser().resolve()
+        if downloads_root is not None
+        else _profile_output_root(profile_id).resolve()
+    )
+    try:
+        relative_path = str(path.relative_to(output_root))
+    except ValueError as exc:
+        raise ValueError(
+            f"File must live under the downloads root: {output_root}"
+        ) from exc
+
+    file_hash, bytes_written = _hash_file(path)
+    now = timezone.now()
+    channel_name = source_name or path.parent.name or "Manual Uploads"
+    item_uid = (
+        f"manualdir-{profile_id}-{channel_name}-{relative_path}-{bytes_written}-{file_hash}"
+    )
     download, _created = Download.objects.update_or_create(
         profile_id=profile_id,
         item_uid=item_uid,
         defaults={
             "source_type": "manual",
-            "source_name": "Manual Uploads",
+            "source_name": channel_name,
             "source_url": None,
             "item_id": item_uid,
             "item_url": None,
             "media_url": None,
-            "title": original_name,
-            "description": "Imported via browser drag-and-drop",
+            "title": path.name,
+            "description": "Imported from downloads directory",
             "uploader": "local",
-            "channel": "Manual Uploads",
+            "channel": channel_name,
             "upload_date": now.date().isoformat(),
             "duration_seconds": None,
-            "file_path": str(destination_path),
+            "file_path": str(path),
             "file_path_relative": relative_path,
             "file_ext": suffix.lstrip("."),
             "file_size_bytes": bytes_written,
             "subtitle_path": None,
             "subtitle_path_relative": None,
             "download_status": DownloadStatus.DOWNLOADED,
-            "raw_metadata_json": '{"ingest_method":"drag-and-drop"}',
+            "profanity_status": "clean",
+            "is_censored": False,
+            "censored_segments": [],
+            "raw_metadata_json": json.dumps(
+                {
+                    "ingest_method": "downloads-directory",
+                    "relative_path": relative_path,
+                }
+            ),
             "last_seen_at": now,
             "completed_at": now,
         },
     )
-    return ManualUploadResult(download, destination_path)
+    return ManualUploadResult(download, path)
 
 
 @login_required
@@ -1182,33 +1291,59 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
     for uploaded_file in uploaded_files:
         try:
             download, path = _write_manual_upload(profile_id, uploaded_file)
-            media_type = (
-                "video" if path.suffix.lower() in VIDEO_UPLOAD_EXTENSIONS else "audio"
-            )
-            job = create_job(
-                profile_id=profile_id,
-                job_type="generate_transcript",
-                payload={
-                    "download_id": download.id,
-                    "subtitles": True,
-                    "source_type": "manual",
-                    "media_type": media_type,
-                    "recent_download": True,
-                    "manual_upload": True,
-                },
-                idempotency_key=f"generate_transcript:{profile_id}:{download.id}",
-            )
-            publish_job(
-                {
-                    "job_id": job.id,
-                    "job_type": job.job_type,
-                    "profile_id": job.profile_id,
-                    "attempt": 1,
-                }
-            )
-            created.append(
-                {"id": download.id, "title": download.title, "job_id": job.id}
-            )
+            upload = {"id": download.id, "title": download.title}
+            if path.suffix.lower() in DOCUMENT_UPLOAD_EXTENSIONS:
+                job = create_job(
+                    profile_id=profile_id,
+                    job_type=JobType.GENERATE_OCR,
+                    payload={
+                        "download_id": download.id,
+                        "source_type": "manual",
+                        "media_type": "document",
+                        "manual_upload": True,
+                    },
+                    idempotency_key=(
+                        f"{JobType.GENERATE_OCR}:{profile_id}:{download.id}"
+                    ),
+                )
+                publish_job(
+                    {
+                        "job_id": job.id,
+                        "job_type": job.job_type,
+                        "profile_id": job.profile_id,
+                        "attempt": 1,
+                    }
+                )
+                upload["job_id"] = job.id
+            else:
+                media_type = (
+                    "video"
+                    if path.suffix.lower() in VIDEO_UPLOAD_EXTENSIONS
+                    else "audio"
+                )
+                job = create_job(
+                    profile_id=profile_id,
+                    job_type="generate_transcript",
+                    payload={
+                        "download_id": download.id,
+                        "subtitles": True,
+                        "source_type": "manual",
+                        "media_type": media_type,
+                        "recent_download": True,
+                        "manual_upload": True,
+                    },
+                    idempotency_key=f"generate_transcript:{profile_id}:{download.id}",
+                )
+                publish_job(
+                    {
+                        "job_id": job.id,
+                        "job_type": job.job_type,
+                        "profile_id": job.profile_id,
+                        "attempt": 1,
+                    }
+                )
+                upload["job_id"] = job.id
+            created.append(upload)
         except ValueError as exc:
             errors.append(
                 {"filename": str(getattr(uploaded_file, "name", "")), "error": str(exc)}
@@ -1419,6 +1554,11 @@ def transcript_search(request: HttpRequest) -> JsonResponse:
             "source_name": segment.download.source_name or segment.download.source_type,
             "start_seconds": segment.start_seconds,
             "text": segment.text,
+            "position_label": (
+                f"Page {int(segment.start_seconds) + 1}"
+                if str(segment.subtitle_path).startswith("ocr://")
+                else ""
+            ),
             "url": reverse("player", args=[segment.download_id])
             + f"?t={int(segment.start_seconds)}",
         }

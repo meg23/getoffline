@@ -218,6 +218,46 @@ class GetOfflineSdkTests(unittest.TestCase):
         self.assertIn(b"first-upload-chunk", encoded)
         self.assertIn(b"second-upload-chunk", encoded)
 
+    def test_http_transport_sets_content_length_for_streamed_multipart_upload(self):
+        class Upload:
+            name = "notes.pdf"
+            content_type = "application/pdf"
+            size = 9
+
+            def chunks(self):
+                yield b"pdf-bytes"
+
+        class Upstream:
+            status = 201
+            headers = Message()
+
+            def read(self):
+                return b"{}"
+
+            def close(self):
+                pass
+
+        class Opener:
+            def __init__(self):
+                self.request = None
+
+            def open(self, request, **kwargs):
+                self.request = request
+                return Upstream()
+
+        opener = Opener()
+        with patch("urllib.request.build_opener", return_value=opener):
+            response = HttpTransport("http://api:8000/api").request(
+                "POST", "api_dashboard_manual_upload", data={"files": [Upload()]}
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(opener.request)
+        self.assertEqual(
+            opener.request.get_header("Content-length"),
+            "176",
+        )
+
 
 class StreamingDjangoTransportTests(unittest.TestCase):
     def test_transport_reads_streaming_response_content(self):

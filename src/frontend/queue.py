@@ -48,6 +48,8 @@ def job_priority(message: dict[str, Any]) -> int:
         if payload.get("download_id"):
             return 7
         return 3
+    if job_type is JobType.GENERATE_OCR:
+        return 7 if payload.get("download_id") else 3
     return 0
 
 

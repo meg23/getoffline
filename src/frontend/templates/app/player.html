@@ -12,16 +12,30 @@
     <main class="player-shell">
       <header class="player-header">
         <a class="back-link" href="{% url 'library' %}">← Library</a>
-        <p class="eyebrow">Now playing</p>
+        <p class="eyebrow">{% if media_kind == 'document' %}Viewing{% else %}Now playing{% endif %}</p>
         <h1>{{ item.title|default:"Untitled" }}</h1>
         <p class="meta">{{ item.source_type }}{% if item.source_name %} · {{ item.source_name }}{% endif %}</p>
       </header>
       <div class="player-stage">
-        <{% if media_kind == 'video' %}video{% else %}audio{% endif %} id="player" class="player player-{{ media_kind }}" data-seek-seconds="{{ seek_seconds|default:0 }}" controls autoplay preload="metadata" src="{% url 'media' item.id %}#t={{ seek_seconds|default:0|floatformat:3 }}">{% if item.has_subtitles and media_kind != 'video' %}<track id="subtitle-track" kind="subtitles" srclang="en" label="English" src="{% url 'subtitle' item.id %}" default>{% endif %}</{% if media_kind == 'video' %}video{% else %}audio{% endif %}>
+        {% if media_kind == 'document' %}
+          <div class="document-viewer-shell" data-document-viewer>
+            <button class="document-fullscreen-toggle" type="button" data-document-fullscreen aria-label="Enter fullscreen" aria-pressed="false">
+              <span aria-hidden="true">⛶</span> Fullscreen
+            </button>
+            <object class="document-viewer" type="application/pdf" data="{% url 'media' item.id %}">
+              <p class="document-viewer-fallback">
+                Your browser could not render this PDF inline.
+                <a href="{% url 'media' item.id %}" target="_blank" rel="noopener">Open the PDF directly</a>.
+              </p>
+            </object>
+          </div>
+        {% else %}
+          <{% if media_kind == 'video' %}video{% else %}audio{% endif %} id="player" class="player player-{{ media_kind }}" data-seek-seconds="{{ seek_seconds|default:0 }}" controls autoplay preload="metadata" src="{% url 'media' item.id %}#t={{ seek_seconds|default:0|floatformat:3 }}">{% if item.has_subtitles and media_kind != 'video' %}<track id="subtitle-track" kind="subtitles" srclang="en" label="English" src="{% url 'subtitle' item.id %}" default>{% endif %}</{% if media_kind == 'video' %}video{% else %}audio{% endif %}>
+        {% endif %}
       </div>
       <div class="actions" aria-label="Playback actions">
-        <form method="post" action="{% url 'mark_played' item.id %}">{% csrf_token %}<button type="submit">Mark played</button></form>
-        <form method="post" action="{% url 'mark_unplayed' item.id %}">{% csrf_token %}<button type="submit">Mark unplayed</button></form>
+        <form method="post" action="{% url 'mark_played' item.id %}">{% csrf_token %}<button type="submit">{% if media_kind == 'document' %}Mark as viewed{% else %}Mark played{% endif %}</button></form>
+        <form method="post" action="{% url 'mark_unplayed' item.id %}">{% csrf_token %}<button type="submit">{% if media_kind == 'document' %}Mark as unviewed{% else %}Mark unplayed{% endif %}</button></form>
         {% if item.favorite %}<form method="post" action="{% url 'unfavorite' item.id %}">{% csrf_token %}<button type="submit">Unfavorite</button></form>{% else %}<form method="post" action="{% url 'favorite' item.id %}">{% csrf_token %}<button type="submit">Favorite</button></form>{% endif %}
       </div>
       <form id="position-form" method="post" action="{% url 'save_position' item.id %}">{% csrf_token %}<input type="hidden" name="position_seconds" id="position-seconds"></form>
