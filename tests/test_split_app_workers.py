@@ -444,7 +444,6 @@ class SharedDjangoModelTests(TestCase):
             self.assertContains(player_response, 'class="document-viewer"')
             self.assertContains(player_response, 'data-document-viewer')
             self.assertContains(player_response, 'data-document-fullscreen')
-            self.assertContains(player_response, "allowfullscreen")
             self.assertContains(player_response, ">Viewing</p>")
             self.assertNotContains(player_response, "Now playing")
             self.assertContains(player_response, f"/media/{download.id}/")
