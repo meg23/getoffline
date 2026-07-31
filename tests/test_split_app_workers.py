@@ -440,6 +440,7 @@ class SharedDjangoModelTests(TestCase):
             )
             player_response = client.get(f"/play/{download.id}/")
             self.assertEqual(player_response.status_code, 200)
+            self.assertIn("object-src 'self'", player_response["Content-Security-Policy"])
             self.assertContains(player_response, 'class="document-viewer"')
             self.assertContains(player_response, 'data-document-viewer')
             self.assertContains(player_response, 'data-document-fullscreen')

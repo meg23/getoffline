@@ -392,7 +392,7 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
     )
     if not payload:
         raise Http404("Player item unavailable")
-    return render(
+    response = render(
         request,
         "app/player.html",
         {
@@ -401,6 +401,21 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
             "media_kind": payload["media_kind"],
         },
     )
+    if payload["media_kind"] == "document":
+        response["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "base-uri 'self'; "
+            "connect-src 'self'; "
+            "font-src 'self'; "
+            "form-action 'self'; "
+            "frame-ancestors 'none'; "
+            "img-src 'self' data:; "
+            "media-src 'self' blob:; "
+            "object-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self'"
+        )
+    return response
 
 
 @frontend_login_required
