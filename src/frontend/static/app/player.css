@@ -96,6 +96,13 @@ h1 {
   border: 0;
   background: #fff;
 }
+.document-viewer-fallback {
+  margin: 0;
+  padding: 1.5rem;
+  color: #5f6473;
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
 .document-viewer-shell {
   position: relative;
   width: 100%;
