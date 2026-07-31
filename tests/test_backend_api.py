@@ -1,7 +1,11 @@
 import base64
+import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -14,13 +18,14 @@ django.setup()
 
 from django.apps import apps
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from models.domain import DownloadStatus
-from models.models import Download
+from models.domain import DownloadStatus, JobStatus
+from models.models import Download, Job, ProfileConfigValue
 
 
 class BackendApiTests(unittest.TestCase):
@@ -65,6 +70,236 @@ class BackendApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["episodes"][0]["title"], "Episode One")
         self.assertIn("stream_url", payload["episodes"][0])
+
+    def test_manual_video_censor_is_profile_scoped_and_snapshots_policy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "movie.mp4"
+            media.write_bytes(b"video")
+            ProfileConfigValue.objects.bulk_create(
+                [
+                    ProfileConfigValue(
+                        profile_id="api-user", key="output_root", value=tmpdir
+                    ),
+                    ProfileConfigValue(
+                        profile_id="api-user", key="video_censor_method", value="beep"
+                    ),
+                    ProfileConfigValue(
+                        profile_id="api-user",
+                        key="video_censor_keep_original",
+                        value="1",
+                    ),
+                    ProfileConfigValue(
+                        profile_id="api-user",
+                        key="video_censor_padding_ms",
+                        value="225",
+                    ),
+                ]
+            )
+            download = Download.objects.create(
+                profile_id="api-user",
+                item_uid="video-censor",
+                source_type="youtube",
+                source_name="Channel",
+                file_path="",
+                file_path_relative=media.name,
+                file_ext="mp4",
+                download_status=DownloadStatus.DOWNLOADED,
+                last_seen_at=timezone.now(),
+            )
+
+            with patch("frontend.views.publish_job") as publish:
+                response = self.client.post(
+                    reverse("api_censor_download", args=[download.id])
+                )
+
+            self.assertEqual(response.status_code, 200)
+            download.refresh_from_db()
+            self.assertEqual(download.download_status, DownloadStatus.CENSORING)
+            job = Job.objects.get(pk=response.json()["job_id"])
+            self.assertEqual(download.file_path, str(media.resolve()))
+            self.assertEqual(download.file_path_relative, media.name)
+            self.assertEqual(job.payload["media_path"], str(media.resolve()))
+            self.assertEqual(
+                job.payload["censor_policy"],
+                {
+                    "enabled": True,
+                    "method": "beep",
+                    "keep_original": True,
+                    "padding_ms": 225,
+                    "redact_transcript": True,
+                },
+            )
+            publish.assert_called_once()
+            duplicate = self.client.post(
+                reverse("api_censor_download", args=[download.id])
+            )
+            self.assertEqual(duplicate.status_code, 409)
+
+    def test_download_api_preserves_audio_default_and_snapshots_video_policy(self):
+        ProfileConfigValue.objects.create(
+            profile_id="api-user", key="video_censor_enabled", value="1"
+        )
+        with patch("api.views.publish_job"):
+            audio_response = self.client.post(
+                reverse("api_download"),
+                data=json.dumps({"url": "https://example.test/media"}),
+                content_type="application/json",
+            )
+            video_response = self.client.post(
+                reverse("api_download"),
+                data=json.dumps(
+                    {"url": "https://example.test/media", "media_type": "video"}
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(audio_response.status_code, 200)
+        self.assertEqual(video_response.status_code, 200)
+        audio_job = Job.objects.get(pk=audio_response.json()["download"]["job_id"])
+        video_job = Job.objects.get(pk=video_response.json()["download"]["job_id"])
+        self.assertEqual(audio_job.payload["media_type"], "audio")
+        self.assertFalse(audio_job.payload["censor_policy"]["enabled"])
+        self.assertTrue(video_job.payload["censor_policy"]["enabled"])
+        self.assertNotEqual(audio_job.id, video_job.id)
+        self.assertNotEqual(audio_job.idempotency_key, video_job.idempotency_key)
+
+    def test_download_api_idempotency_is_profile_scoped(self):
+        other = Job.objects.create(
+            profile_id="other-user",
+            job_type="download_single",
+            status=JobStatus.QUEUED,
+            payload={"url": "https://example.test/other"},
+            idempotency_key="client-key",
+        )
+
+        with patch("api.views.publish_job"):
+            response = self.client.post(
+                reverse("api_download"),
+                data=json.dumps(
+                    {
+                        "url": "https://example.test/mine",
+                        "idempotency_key": "client-key",
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        created = Job.objects.get(pk=response.json()["download"]["job_id"])
+        self.assertNotEqual(created.id, other.id)
+        self.assertEqual(created.profile_id, "api-user")
+
+    def test_censor_enabled_manual_upload_is_created_hidden(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ProfileConfigValue.objects.bulk_create(
+                [
+                    ProfileConfigValue(
+                        profile_id="api-user", key="output_root", value=tmpdir
+                    ),
+                    ProfileConfigValue(
+                        profile_id="api-user", key="video_censor_enabled", value="1"
+                    ),
+                ]
+            )
+            from api.services import dashboard_actions
+
+            with (
+                patch(
+                    "api.services.dashboard_actions._write_manual_upload",
+                    wraps=dashboard_actions._write_manual_upload,
+                ) as write_upload,
+                patch("frontend.views.publish_job"),
+            ):
+                response = self.client.post(
+                    reverse("api_dashboard_manual_upload"),
+                    {
+                        "files": SimpleUploadedFile(
+                            "hidden.mp4", b"video", content_type="video/mp4"
+                        )
+                    },
+                )
+
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(
+                write_upload.call_args.kwargs["initial_status"],
+                DownloadStatus.CENSORING,
+            )
+            download = Download.objects.get(title="hidden.mp4")
+            self.assertEqual(download.download_status, DownloadStatus.CENSORING)
+
+    def test_retry_requires_a_failed_supported_stage_with_retained_input(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "retry.mp4"
+            media.write_bytes(b"video")
+            ProfileConfigValue.objects.create(
+                profile_id="api-user", key="output_root", value=tmpdir
+            )
+            download = Download.objects.create(
+                profile_id="api-user",
+                item_uid="retry-video",
+                source_type="youtube",
+                source_name="Channel",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status=DownloadStatus.CENSORING,
+            )
+            failed = Job.objects.create(
+                profile_id="api-user",
+                job_type="generate_transcript",
+                status=JobStatus.FAILED,
+                payload={"download_id": download.id, "post_download_censor": True},
+            )
+            with patch("frontend.views.publish_job") as publish:
+                response = self.client.post(reverse("api_retry_job", args=[failed.id]))
+
+            self.assertEqual(response.status_code, 200)
+            retry = Job.objects.get(pk=response.json()["job_id"])
+            self.assertEqual(retry.job_type, failed.job_type)
+            self.assertNotEqual(retry.idempotency_key, failed.idempotency_key)
+            publish.assert_called_once()
+
+            media.unlink()
+            missing = Job.objects.create(
+                profile_id="api-user",
+                job_type="censor_audio",
+                status=JobStatus.FAILED,
+                payload={"download_id": download.id, "media_path": str(media)},
+            )
+            response = self.client.post(reverse("api_retry_job", args=[missing.id]))
+            self.assertEqual(response.status_code, 409)
+
+    def test_retry_plain_transcript_does_not_hide_download(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "plain.mp3"
+            media.write_bytes(b"audio")
+            ProfileConfigValue.objects.create(
+                profile_id="api-user", key="output_root", value=tmpdir
+            )
+            download = Download.objects.create(
+                profile_id="api-user",
+                item_uid="plain-retry",
+                source_type="podcast",
+                source_name="Feed",
+                file_path="",
+                file_path_relative=media.name,
+                file_ext="mp3",
+                download_status=DownloadStatus.DOWNLOADED,
+            )
+            failed = Job.objects.create(
+                profile_id="api-user",
+                job_type="generate_transcript",
+                status=JobStatus.FAILED,
+                payload={"download_id": download.id, "subtitles": True},
+            )
+
+            with patch("frontend.views.publish_job"):
+                response = self.client.post(
+                    reverse("api_retry_job", args=[failed.id])
+                )
+
+            self.assertEqual(response.status_code, 200)
+            download.refresh_from_db()
+            self.assertEqual(download.download_status, DownloadStatus.DOWNLOADED)
 
     def _create_download(self) -> Download:
         return Download.objects.create(

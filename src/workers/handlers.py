@@ -1,5 +1,6 @@
 import hashlib
 import importlib
+import math
 import os
 import re
 import subprocess
@@ -28,7 +29,19 @@ from models.models import (
     SourceConfig,
     TranscriptSegment,
 )
-from workers.censor import extract_profanity_segments
+from shared.censoring import (
+    CensorPolicySnapshot,
+    profile_censor_policy,
+    source_censor_policy,
+)
+from workers.censor import (
+    AudioSegment,
+    build_beep_filter,
+    build_duck_filter,
+    censor_segments_from_transcription,
+    compose_audio_filters,
+    extract_profanity_segments,
+)
 from workers.content_filter import (
     delete_media_artifacts,
     log_filtered_deletion,
@@ -36,7 +49,7 @@ from workers.content_filter import (
 )
 from workers.logger import get_logger
 from workers.pdf_ocr import PdfOcrPage, extract_pdf_pages, split_sentences
-from workers.subtitles import create_subtitles
+from workers.subtitles import create_subtitles, write_transcription_srt
 from workers.utils import sanitize_channel_name
 from workers.ytdlp_helpers import (
     apply_ytdlp_player_js_variant_workaround,
@@ -48,6 +61,25 @@ log = get_logger("workers.handlers")
 
 _YTDLP_TITLE_FILENAME_BYTES = 160
 _YTDLP_ID_FILENAME_BYTES = 48
+
+
+def _profile_video_censor_policy(profile_id: str) -> CensorPolicySnapshot:
+    return profile_censor_policy(
+        {
+            "video_censor_enabled": _profile_setting(
+                profile_id, "video_censor_enabled", "0"
+            ),
+            "video_censor_method": _profile_setting(
+                profile_id, "video_censor_method", "duck"
+            ),
+            "video_censor_keep_original": _profile_setting(
+                profile_id, "video_censor_keep_original", "0"
+            ),
+            "video_censor_padding_ms": _profile_setting(
+                profile_id, "video_censor_padding_ms", "150"
+            ),
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -496,6 +528,180 @@ def _tail_text(value: str | None, *, limit: int = 4000) -> str:
     return f"...{text[-limit:]}"
 
 
+def _path_has_audio(path: Path) -> bool:
+    completed = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode == 0 and bool(completed.stdout.strip())
+
+
+def _transcription_input_path(paths: list[Path]) -> Path:
+    for path in reversed(paths):
+        if path.exists() and _path_has_audio(path):
+            return path
+    raise RuntimeError("No decodable audio stream found in downloaded video")
+
+
+def _assert_profile_path(profile_id: str, value: object) -> Path:
+    path = Path(str(value or "")).expanduser().resolve()
+    root = _download_output_root(profile_id).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError(f"Media path escapes profile output root: {path}")
+    return path
+
+
+def _audio_segments_from_payload(value: object) -> list[AudioSegment]:
+    if not isinstance(value, list):
+        return []
+    return [
+        AudioSegment(
+            start_seconds=float(item["start_seconds"]),
+            end_seconds=float(item["end_seconds"]),
+            text="",
+        )
+        for item in value
+        if isinstance(item, dict)
+    ]
+
+
+def _without_audio_map(args: list[str]) -> list[str]:
+    result: list[str] = []
+    index = 0
+    while index < len(args):
+        if (
+            args[index] == "-map"
+            and index + 1 < len(args)
+            and ":a:" in args[index + 1]
+        ):
+            index += 2
+            continue
+        result.append(args[index])
+        index += 1
+    return result
+
+
+def _without_audio_filter(args: list[str]) -> list[str]:
+    result: list[str] = []
+    index = 0
+    audio_filter_options = {"-af", "-filter:a", "-filter:a:0"}
+    while index < len(args):
+        if args[index] in audio_filter_options and index + 1 < len(args):
+            index += 2
+            continue
+        result.append(args[index])
+        index += 1
+    return result
+
+
+def _ffmpeg_censor_filter_plan(
+    *,
+    profile_id: str,
+    payload: dict,
+    media_kind: str,
+    input_count: int,
+    codec_args: list[str],
+) -> tuple[list[str], list[str], list[AudioSegment]]:
+    """Compose profile audio processing and censorship into one FFmpeg pass."""
+    segments = _audio_segments_from_payload(payload.get("censor_segments"))
+    configured_filter = _profile_setting(
+        profile_id, "ffmpeg_audio_filter", ""
+    ).strip()
+    if not segments:
+        if (
+            media_kind == "video"
+            and bool(payload.get("pre_transcode_censor"))
+            and configured_filter
+        ):
+            return ["-filter:a", configured_filter], codec_args, segments
+        return [], codec_args, segments
+
+    method = str(payload.get("censor_method") or "duck").strip().lower()
+    if method not in {"duck", "beep"}:
+        raise ValueError("Invalid censor method")
+    codec_args = _without_audio_filter(codec_args)
+    if method == "beep":
+        input_label = "1:a:0" if input_count > 1 else "0:a:0"
+        graph = build_beep_filter(
+            segments,
+            input_label=input_label,
+            output_label="censored_audio",
+            source_filter=configured_filter,
+        )
+        if graph is None:
+            raise RuntimeError("Could not build beep filter")
+        return (
+            ["-filter_complex", graph, "-map", "[censored_audio]"],
+            _without_audio_map(codec_args),
+            segments,
+        )
+
+    censor_filter = build_duck_filter(segments)
+    audio_filter = compose_audio_filters(configured_filter, censor_filter)
+    if audio_filter is None:
+        raise RuntimeError("Could not build mute filter")
+    return ["-filter:a", audio_filter], codec_args, segments
+
+
+def _validate_media_output(path: Path) -> None:
+    completed = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"FFmpeg output failed validation: {path}")
+    try:
+        duration = float(completed.stdout.strip())
+    except ValueError as exc:
+        raise RuntimeError(f"FFmpeg output has no valid duration: {path}") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError(f"FFmpeg output has no valid duration: {path}")
+
+
+def _promote_censored_output(
+    *, output_path: Path, original_path: Path, keep_original: bool
+) -> Path:
+    backup_path = original_path.with_name(
+        f"{original_path.stem}_original{original_path.suffix}"
+    )
+    if not keep_original:
+        os.replace(output_path, original_path)
+        return original_path
+    if backup_path.exists():
+        raise FileExistsError(f"Uncensored backup already exists: {backup_path}")
+    os.replace(original_path, backup_path)
+    try:
+        os.replace(output_path, original_path)
+    except Exception:
+        os.replace(backup_path, original_path)
+        raise
+    return original_path
+
+
 def _transcode_lock_key(profile_id: str, payload: dict) -> str:
     digest = hashlib.sha1(
         _transcode_idempotency_key(profile_id, payload).encode("utf-8"),
@@ -658,6 +864,11 @@ def _postprocess_download_with_ffmpeg(
             .absolute()
         )
         source_paths = [source_path]
+    if payload.get("pre_transcode_censor"):
+        source_paths = [
+            _assert_profile_path(profile_id, path) for path in source_paths
+        ]
+        source_path = source_paths[0]
     log.info(
         "FFmpeg worker post-processing loaded download parent_job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s db_size_bytes=%s status=%s",
         parent_job_id,
@@ -707,6 +918,8 @@ def _postprocess_download_with_ffmpeg(
     )
     if download is not None:
         target_path = target_path.resolve()
+    if payload.get("pre_transcode_censor"):
+        target_path = _assert_profile_path(profile_id, target_path)
     with _transcode_execution_lock(
         profile_id=profile_id, payload=payload, job_id=parent_job_id
     ):
@@ -754,12 +967,27 @@ def _postprocess_download_with_ffmpeg(
                 profile_id, target_ext, input_count=len(source_paths)
             )
         )
+        filter_args, codec_args, censor_segments = _ffmpeg_censor_filter_plan(
+            profile_id=profile_id,
+            payload=payload,
+            media_kind=media_kind,
+            input_count=len(source_paths),
+            codec_args=codec_args,
+        )
         ffmpeg_threads = _ffmpeg_thread_count(profile_id)
         input_args = [
             arg
             for path in source_paths
             for arg in ("-threads", ffmpeg_threads, "-i", str(path))
         ]
+        ffmpeg_output_path = target_path
+        atomic_transcode = bool(payload.get("pre_transcode_censor")) and not bool(
+            payload.get("replace_original_path")
+        )
+        if atomic_transcode:
+            ffmpeg_output_path = target_path.with_name(
+                f".{target_path.stem}.processing{target_path.suffix}"
+            )
         command = [
             ffmpeg_path,
             "-y",
@@ -768,8 +996,9 @@ def _postprocess_download_with_ffmpeg(
             "-filter_complex_threads",
             ffmpeg_threads,
             *input_args,
+            *filter_args,
             *codec_args,
-            str(target_path),
+            str(ffmpeg_output_path),
         ]
         log.info(
             "FFmpeg conversion prepared job_id=%s download_id=%s media_kind=%s input=%s input_size_bytes=%s target=%s target_ext=%s ffmpeg_path=%s codec_args=%s",
@@ -809,7 +1038,7 @@ def _postprocess_download_with_ffmpeg(
             _tail_text(result.stdout, limit=1000),
             _tail_text(result.stderr, limit=1000),
         )
-        if not target_path.exists():
+        if not ffmpeg_output_path.exists():
             log.error(
                 "Downloader FFmpeg conversion output missing parent_job_id=%s download_id=%s target=%s",
                 parent_job_id,
@@ -819,6 +1048,26 @@ def _postprocess_download_with_ffmpeg(
             raise FileNotFoundError(
                 f"FFmpeg output file was not created: {target_path}"
             )
+        _validate_media_output(ffmpeg_output_path)
+        if atomic_transcode:
+            os.replace(ffmpeg_output_path, target_path)
+        replace_original_value = payload.get("replace_original_path")
+        if replace_original_value:
+            original_path = _assert_profile_path(profile_id, replace_original_value)
+            target_path = _promote_censored_output(
+                output_path=target_path,
+                original_path=original_path,
+                keep_original=bool(payload.get("keep_original", False)),
+            )
+            prepared_subtitle = payload.get("prepared_subtitle_path")
+            if prepared_subtitle:
+                prepared_subtitle_path = _assert_profile_path(
+                    profile_id, prepared_subtitle
+                )
+                final_subtitle_path = target_path.with_suffix(".srt")
+                if prepared_subtitle_path.exists():
+                    os.replace(prepared_subtitle_path, final_subtitle_path)
+                    payload["prepared_subtitle_path"] = str(final_subtitle_path)
         old_path = source_path
         output_size = target_path.stat().st_size
         output_root = (
@@ -898,6 +1147,15 @@ def _postprocess_download_with_ffmpeg(
                     "download_status": DownloadStatus.DOWNLOADED,
                     "completed_at": timezone.now(),
                     "last_seen_at": timezone.now(),
+                    "is_censored": bool(payload.get("is_censored", False)),
+                    "censored_segments": [
+                        {
+                            "start_seconds": segment.start_seconds,
+                            "end_seconds": segment.end_seconds,
+                            "method": str(payload.get("censor_method") or "duck"),
+                        }
+                        for segment in censor_segments
+                    ],
                 }
             )
             download, _created = Download.objects.update_or_create(
@@ -915,6 +1173,24 @@ def _postprocess_download_with_ffmpeg(
             download.download_status = DownloadStatus.DOWNLOADED
             download.completed_at = timezone.now()
             download.last_seen_at = timezone.now()
+            download.is_censored = bool(payload.get("is_censored", False))
+            download.censored_segments = [
+                {
+                    "start_seconds": segment.start_seconds,
+                    "end_seconds": segment.end_seconds,
+                    "method": str(payload.get("censor_method") or "duck"),
+                }
+                for segment in censor_segments
+            ]
+            prepared_subtitle = payload.get("prepared_subtitle_path")
+            if prepared_subtitle:
+                subtitle_path = _assert_profile_path(profile_id, prepared_subtitle)
+                download.subtitle_path = str(subtitle_path)
+                download.subtitle_path_relative = (
+                    str(subtitle_path.relative_to(output_root))
+                    if subtitle_path.is_relative_to(output_root)
+                    else None
+                )
             download.save(
                 update_fields=[
                     "file_path",
@@ -924,8 +1200,14 @@ def _postprocess_download_with_ffmpeg(
                     "download_status",
                     "completed_at",
                     "last_seen_at",
+                    "is_censored",
+                    "censored_segments",
+                    "subtitle_path",
+                    "subtitle_path_relative",
                 ]
             )
+            if download.subtitle_path:
+                _save_transcript_segments(download, Path(download.subtitle_path))
         deleted_sources = _delete_ffmpeg_source_files(source_paths, target_path)
         log.info(
             "FFmpeg conversion finished job_id=%s download_id=%s output=%s output_size_bytes=%s deleted_original_files=%s",
@@ -956,6 +1238,13 @@ def transcode_media(job: Job) -> None:
         log.info(
             "Legacy FFmpeg job stopped before transcript queue parent_job_id=%s reason=postprocess-returned-none",
             job.id,
+        )
+        return
+    if payload.get("pre_transcode_censor"):
+        log.info(
+            "FFmpeg job completed pre-transcribed censorship parent_job_id=%s download_id=%s",
+            job.id,
+            download.id,
         )
         return
     media_kind = (
@@ -1353,6 +1642,10 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
         .strip()
         .lower()
     )
+    censor_policy = CensorPolicySnapshot.from_payload(payload.get("censor_policy"))
+    pre_transcode_censor = media_kind == "video" and censor_policy.enabled
+    if pre_transcode_censor:
+        download_defaults["download_status"] = DownloadStatus.CENSORING
     # yt-dlp can report both the final merged/downloaded file and the temporary
     # elementary stream files that were used to create it. After yt-dlp finishes,
     # those temporary .fXXX files may already be removed, so do not pass them to
@@ -1400,8 +1693,12 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
                 payload.get("delete_explicit_content", False)
             ),
             "item_uid": item_uid,
+            "censor_policy": censor_policy.to_payload(),
+            "pre_transcode_censor": pre_transcode_censor,
         }
-        if media_kind == "video" and not transcode_payload["delete_explicit_content"]:
+        if media_kind == "video" and (
+            pre_transcode_censor or not transcode_payload["delete_explicit_content"]
+        ):
             download, _created = Download.objects.update_or_create(
                 **download_lookup,
                 defaults=download_defaults,
@@ -1436,6 +1733,26 @@ def _download_with_yt_dlp(job: Job, payload: dict) -> Download | dict | None:
                 transcode_payload["delete_explicit_content"],
             )
         return transcode_payload
+    if pre_transcode_censor:
+        download, _created = Download.objects.update_or_create(
+            **download_lookup, defaults=download_defaults
+        )
+        return {
+            "source_file_path": str(downloaded_file),
+            "source_file_paths": [str(downloaded_file)],
+            "target_file_path": str(downloaded_file),
+            "output_root": str(output_root),
+            "media_type": "video",
+            "subtitles": payload.get("subtitles", True),
+            "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
+            "source_type": source_type,
+            "recent_download": True,
+            "download_id": download.id,
+            "item_uid": item_uid,
+            "censor_policy": censor_policy.to_payload(),
+            "pre_transcode_censor": True,
+            "skip_transcode_if_clean": True,
+        }
     if media_kind == "video" and bool(payload.get("delete_explicit_content", False)):
         return _screen_deferred_video_before_insert(
             profile_id=job.profile_id,
@@ -2100,6 +2417,32 @@ def check_for_episodes(job: Job) -> None:
                         limit,
                     )
                     continue
+                censor_policy = source_censor_policy(
+                    {
+                        "video_censor_enabled": _profile_setting(
+                            profile_id, "video_censor_enabled", "0"
+                        ),
+                        "video_censor_method": _profile_setting(
+                            profile_id, "video_censor_method", "duck"
+                        ),
+                        "video_censor_keep_original": _profile_setting(
+                            profile_id, "video_censor_keep_original", "0"
+                        ),
+                        "video_censor_padding_ms": _profile_setting(
+                            profile_id, "video_censor_padding_ms", "150"
+                        ),
+                    },
+                    policy=getattr(source, "censor_policy", "inherit"),
+                    legacy_enabled=bool(source.censor_profanity),
+                    method=source.censor_method,
+                    keep_original=bool(source.keep_original),
+                )
+                if str(source.media_type or "").lower() != "video":
+                    censor_policy = CensorPolicySnapshot(
+                        enabled=bool(source.censor_profanity),
+                        method=str(source.censor_method or "duck"),
+                        keep_original=bool(source.keep_original),
+                    )
                 child = create_job(
                     profile_id=profile_id,
                     job_type="download_episode",
@@ -2122,6 +2465,7 @@ def check_for_episodes(job: Job) -> None:
                         "censor_profanity": bool(source.censor_profanity),
                         "censor_method": str(source.censor_method or "duck"),
                         "keep_original": bool(source.keep_original),
+                        "censor_policy": censor_policy.to_payload(),
                         "include_shorts": bool(
                             getattr(source, "include_shorts", False)
                         ),
@@ -2191,16 +2535,39 @@ def download_episode(job: Job) -> None:
             )
             return
         if isinstance(downloaded_result, dict):
-            log.info(
-                "Download worker queued FFmpeg post-processing parent_job_id=%s source_file=%s",
-                job.id,
-                downloaded_result.get("source_file_path"),
-            )
-            _enqueue_transcode_job(
-                profile_id=job.profile_id,
-                payload=downloaded_result,
-                parent_job_id=job.id,
-            )
+            if downloaded_result.get("pre_transcode_censor"):
+                child = create_job(
+                    profile_id=job.profile_id,
+                    job_type="generate_transcript",
+                    payload={
+                        "pre_transcode_payload": downloaded_result,
+                        "download_id": downloaded_result.get("download_id"),
+                        "source_type": downloaded_result.get("source_type"),
+                        "media_type": "video",
+                        "censor_policy": downloaded_result.get("censor_policy"),
+                    },
+                    idempotency_key=(
+                        f"generate_transcript:{job.profile_id}:pre-transcode:"
+                        f"{downloaded_result.get('download_id') or downloaded_result.get('item_uid')}"
+                    ),
+                )
+                _publish_created_job(child)
+                log.info(
+                    "Download worker queued pre-transcode censorship parent_job_id=%s child_job_id=%s",
+                    job.id,
+                    child.id,
+                )
+            else:
+                log.info(
+                    "Download worker queued FFmpeg post-processing parent_job_id=%s source_file=%s",
+                    job.id,
+                    downloaded_result.get("source_file_path"),
+                )
+                _enqueue_transcode_job(
+                    profile_id=job.profile_id,
+                    payload=downloaded_result,
+                    parent_job_id=job.id,
+                )
             return
         download_id = downloaded_result.id
     download = Download.objects.filter(
@@ -2504,6 +2871,192 @@ def _generate_deferred_transcript_screening(job: Job, payload: dict) -> None:
             _delete_ffmpeg_source_files(source_paths, media_path)
 
 
+def _save_transcript_segments(download: Download, subtitle_path: Path) -> None:
+    texts = _load_segments_from_subtitle(subtitle_path)
+    TranscriptSegment.objects.filter(download=download).delete()
+    TranscriptSegment.objects.bulk_create(
+        [
+            TranscriptSegment(
+                download=download,
+                subtitle_path=str(subtitle_path),
+                start_seconds=0.0,
+                end_seconds=None,
+                text=text,
+            )
+            for text in texts
+        ]
+    )
+
+
+def _generate_pre_transcode_censorship(job: Job, payload: dict) -> None:
+    from workers.transcription import transcribe_with_whisper
+
+    transcode_payload = payload.get("pre_transcode_payload")
+    if not isinstance(transcode_payload, dict):
+        raise TypeError("Missing pre-transcode payload")
+    download_id = transcode_payload.get("download_id")
+    download = Download.objects.filter(
+        pk=download_id, profile_id=job.profile_id
+    ).first()
+    if download is None:
+        raise ValueError("Pre-transcode download row is missing")
+    raw_paths = transcode_payload.get("source_file_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        raw_paths = [transcode_payload.get("source_file_path")]
+    source_paths = [
+        _assert_profile_path(job.profile_id, value) for value in raw_paths if value
+    ]
+    transcription_input = _transcription_input_path(source_paths)
+    policy = CensorPolicySnapshot.from_payload(transcode_payload.get("censor_policy"))
+    result = transcribe_with_whisper(
+        transcription_input,
+        _profile_setting(job.profile_id, "subtitle_model", "base"),
+        f"pre-transcode-{download.id}",
+        language=_profile_setting(job.profile_id, "subtitle_language", "en"),
+    )
+    intervals, redacted_result = censor_segments_from_transcription(
+        result,
+        padding_ms=policy.padding_ms,
+        duration_seconds=(
+            float(download.duration_seconds)
+            if download.duration_seconds is not None
+            else None
+        ),
+    )
+    offset = float(transcode_payload.get("subtitle_offset_seconds") or 0.0)
+    if offset:
+        intervals = [
+            AudioSegment(
+                max(0.0, interval.start_seconds + offset),
+                max(0.01, interval.end_seconds + offset),
+                "",
+            )
+            for interval in intervals
+        ]
+    source_path = source_paths[0]
+    target_value = transcode_payload.get("target_file_path")
+    if target_value:
+        target_path = _assert_profile_path(job.profile_id, target_value)
+    else:
+        target_path = _target_path(
+            source_path, _preferred_target_ext(job.profile_id, "video")
+        )
+        transcode_payload["target_file_path"] = str(target_path)
+    if transcode_payload.get("skip_transcode_if_clean") and not intervals:
+        subtitle_path = source_path.with_suffix(".srt")
+        write_transcription_srt(redacted_result, subtitle_path, offset_seconds=offset)
+        download.subtitle_path = str(subtitle_path)
+        download.subtitle_path_relative = str(
+            subtitle_path.relative_to(_download_output_root(job.profile_id))
+        )
+        download.download_status = DownloadStatus.DOWNLOADED
+        download.last_seen_at = timezone.now()
+        download.save(
+            update_fields=[
+                "subtitle_path",
+                "subtitle_path_relative",
+                "download_status",
+                "last_seen_at",
+            ]
+        )
+        _save_transcript_segments(download, subtitle_path)
+        return
+    if transcode_payload.get("skip_transcode_if_clean"):
+        target_path = source_path.with_name(
+            f".{source_path.stem}.censoring{source_path.suffix}"
+        )
+        transcode_payload["target_file_path"] = str(target_path)
+        transcode_payload["replace_original_path"] = str(source_path)
+    subtitle_path = target_path.with_suffix(".srt")
+    write_transcription_srt(redacted_result, subtitle_path, offset_seconds=offset)
+    transcode_payload["prepared_subtitle_path"] = str(subtitle_path)
+    transcode_payload["censor_segments"] = [
+        {
+            "start_seconds": interval.start_seconds,
+            "end_seconds": interval.end_seconds,
+        }
+        for interval in intervals
+    ]
+    transcode_payload["censor_method"] = policy.method
+    transcode_payload["keep_original"] = policy.keep_original
+    transcode_payload["is_censored"] = bool(intervals)
+    _enqueue_transcode_job(
+        profile_id=job.profile_id,
+        payload=transcode_payload,
+        parent_job_id=job.id,
+    )
+
+
+def _generate_post_download_censorship(job: Job, payload: dict) -> None:
+    from workers.transcription import transcribe_with_whisper
+
+    download_id = payload.get("download_id")
+    download = Download.objects.filter(
+        pk=download_id, profile_id=job.profile_id
+    ).first()
+    if download is None:
+        raise ValueError("Post-download censor target is missing")
+    media_path = _assert_profile_path(job.profile_id, download.file_path)
+    if not media_path.is_file():
+        raise FileNotFoundError(f"Post-download media is missing: {media_path}")
+    policy = CensorPolicySnapshot.from_payload(payload.get("censor_policy"))
+    result = transcribe_with_whisper(
+        media_path,
+        _profile_setting(job.profile_id, "subtitle_model", "base"),
+        f"post-download-{download.id}",
+        language=_profile_setting(job.profile_id, "subtitle_language", "en"),
+    )
+    intervals, redacted_result = censor_segments_from_transcription(
+        result,
+        padding_ms=policy.padding_ms,
+        duration_seconds=(
+            float(download.duration_seconds)
+            if download.duration_seconds is not None
+            else None
+        ),
+    )
+    subtitle_path = media_path.with_suffix(".srt")
+    write_transcription_srt(redacted_result, subtitle_path)
+    download.subtitle_path = str(subtitle_path)
+    download.subtitle_path_relative = str(
+        subtitle_path.relative_to(_download_output_root(job.profile_id))
+    )
+    if not intervals:
+        download.download_status = DownloadStatus.DOWNLOADED
+        download.last_seen_at = timezone.now()
+        download.save(
+            update_fields=[
+                "subtitle_path",
+                "subtitle_path_relative",
+                "download_status",
+                "last_seen_at",
+            ]
+        )
+        _save_transcript_segments(download, subtitle_path)
+        return
+    download.save(update_fields=["subtitle_path", "subtitle_path_relative"])
+    _save_transcript_segments(download, subtitle_path)
+    _enqueue_censor_job(
+        profile_id=job.profile_id,
+        download_id=download.id,
+        payload={
+            "download_id": download.id,
+            "media_path": str(media_path),
+            "subtitle_path": str(subtitle_path),
+            "censor_method": policy.method,
+            "keep_original": policy.keep_original,
+            "segments": [
+                {
+                    "start_seconds": interval.start_seconds,
+                    "end_seconds": interval.end_seconds,
+                }
+                for interval in intervals
+            ],
+        },
+        parent_job_id=job.id,
+    )
+
+
 def generate_transcript(job: Job) -> None:
     """Generate Whisper subtitles/transcript segments."""
     log.info(
@@ -2513,6 +3066,12 @@ def generate_transcript(job: Job) -> None:
         job.payload,
     )
     payload = job.payload if isinstance(job.payload, dict) else {}
+    if payload.get("pre_transcode_payload"):
+        _generate_pre_transcode_censorship(job, payload)
+        return
+    if payload.get("post_download_censor"):
+        _generate_post_download_censorship(job, payload)
+        return
     download_id = payload.get("download_id")
     if not download_id:
         if payload.get("deferred_download_lookup") and payload.get(
@@ -2667,28 +3226,119 @@ def generate_transcript(job: Job) -> None:
                     )
                     return
                 if explicit_match is not None:
-                    deleted_paths = delete_media_artifacts(media_path)
-                    TranscriptSegment.objects.filter(download=download).delete()
-                    download.download_status = DownloadStatus.FILTERED
-                    download.last_seen_at = timezone.now()
-                    download.save(update_fields=["download_status", "last_seen_at"])
-                    log_filtered_deletion(
-                        source_type=download.source_type,
-                        source_name=download.source_name,
-                        title=str(download.title or media_path.stem),
-                        media_path=media_path,
-                        match=explicit_match,
-                        deleted_paths=deleted_paths,
-                    )
-                    log.warning(
-                        "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
-                        job.id,
-                        download_id,
-                        explicit_match.category,
-                    )
-                    return
-            log.info(
-                "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
+                    # Determine if we should censor or delete
+                    censor_enabled = bool(payload.get("censor_profanity", False))
+                    censor_method = str(payload.get("censor_method", "duck"))
+                    keep_original = bool(payload.get("keep_original", False))
+
+                    if censor_enabled:
+                        # Try to censor instead of deleting
+                        try:
+                            profanity_segments = extract_profanity_segments(Path(subtitle_path))
+                            if profanity_segments:
+                                censor_payload = {
+                                    "download_id": download_id,
+                                    "media_path": str(media_path),
+                                    "subtitle_path": str(subtitle_path),
+                                    "censor_method": censor_method,
+                                    "keep_original": keep_original,
+                                    "segments": [
+                                        {
+                                            "start_seconds": seg.start_seconds,
+                                            "end_seconds": seg.end_seconds,
+                                            "text": seg.text,
+                                        }
+                                        for seg in profanity_segments
+                                    ],
+                                }
+
+                                _enqueue_censor_job(
+                                    profile_id=job.profile_id,
+                                    download_id=download_id,
+                                    payload=censor_payload,
+                                    parent_job_id=job.id,
+                                )
+
+                                download.download_status = DownloadStatus.CENSORED
+                                download.last_seen_at = timezone.now()
+                                download.save(update_fields=["download_status", "last_seen_at"])
+
+                                log.info(
+                                    "Queued censoring job for download after transcript profanity screening job_id=%s download_id=%s segment_count=%s category=%s",
+                                    job.id,
+                                    download_id,
+                                    len(profanity_segments),
+                                    explicit_match.category,
+                                )
+                                return
+                            else:
+                                # No segments found, fall back to deletion if delete_explicit_content is True
+                                log.warning(
+                                    "No profanity segments found for censoring job_id=%s download_id=%s",
+                                    job.id,
+                                    download_id,
+                                )
+                                if not bool(payload.get("delete_explicit_content", False)):
+                                    # If not deleting, just mark as downloaded
+                                    download.download_status = DownloadStatus.DOWNLOADED
+                                    download.last_seen_at = timezone.now()
+                                    download.save(update_fields=["download_status", "last_seen_at"])
+                                    return
+                        except Exception as censor_exc:  # noqa: BLE001
+                            log.error(
+                                "Censoring preparation failed job_id=%s download_id=%s error=%s",
+                                job.id,
+                                download_id,
+                                censor_exc,
+                            )
+                            if not bool(payload.get("delete_explicit_content", False)):
+                                # If censoring fails but we're not supposed to delete, still keep the file
+                                log.warning(
+                                    "Censoring failed but delete_explicit_content is False, keeping file job_id=%s download_id=%s",
+                                    job.id,
+                                    download_id,
+                                )
+                                download.download_status = DownloadStatus.DOWNLOADED
+                                download.last_seen_at = timezone.now()
+                                download.save(update_fields=["download_status", "last_seen_at"])
+                                return
+
+                    # If censoring not enabled, delete if delete_explicit_content is True
+                    if bool(payload.get("delete_explicit_content", False)):
+                        deleted_paths = delete_media_artifacts(media_path)
+                        TranscriptSegment.objects.filter(download=download).delete()
+                        download.download_status = DownloadStatus.FILTERED
+                        download.last_seen_at = timezone.now()
+                        download.save(update_fields=["download_status", "last_seen_at"])
+                        log_filtered_deletion(
+                            source_type=download.source_type,
+                            source_name=download.source_name,
+                            title=str(download.title or media_path.stem),
+                            media_path=media_path,
+                            match=explicit_match,
+                            deleted_paths=deleted_paths,
+                        )
+                        log.warning(
+                            "Deleted download after transcript profanity screening job_id=%s download_id=%s category=%s",
+                            job.id,
+                            download_id,
+                            explicit_match.category,
+                        )
+                        return
+                    else:
+                        # Profanity found but neither deleting nor censoring, just keep file
+                        log.info(
+                            "Profanity detected but not deleting/censoring job_id=%s download_id=%s category=%s",
+                            job.id,
+                            download_id,
+                            explicit_match.category,
+                        )
+                        download.download_status = DownloadStatus.DOWNLOADED
+                        download.last_seen_at = timezone.now()
+                        download.save(update_fields=["download_status", "last_seen_at"])
+                        return
+                log.info(
+                    "Transcript worker profanity check finished job_id=%s download_id=%s result=clean",
                     job.id,
                     download_id,
                 )
@@ -2712,6 +3362,124 @@ def generate_transcript(job: Job) -> None:
                     download_id,
                     ", ".join(str(path) for path in deleted_paths) or "none",
                 )
+
+
+def censor_audio(job: Job) -> None:
+    """Atomically apply timed censorship to an existing media file."""
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = payload.get("download_id")
+    if not download_id:
+        raise ValueError("Censoring job has no download_id")
+    download = Download.objects.filter(
+        pk=download_id, profile_id=job.profile_id
+    ).first()
+    if download is None:
+        raise ValueError("Censoring download row is missing")
+    _touch_active_job(
+        job,
+        stage="audio_censoring",
+        title=str(download.title or "").strip(),
+    )
+    media_path = _assert_profile_path(job.profile_id, payload.get("media_path"))
+    censor_method = str(payload.get("censor_method") or "duck").strip().lower()
+    keep_original = bool(payload.get("keep_original", False))
+    if censor_method not in {"duck", "beep"}:
+        raise ValueError("Invalid censor method")
+    if not media_path.is_file():
+        raise FileNotFoundError(f"Censoring media is missing: {media_path}")
+    segments = _audio_segments_from_payload(payload.get("segments"))
+    if not segments:
+        raise ValueError("Censoring job has no intervals")
+    output_path = media_path.with_name(
+        f".{media_path.stem}.censoring{media_path.suffix}"
+    )
+    is_video = media_path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+    ffmpeg_cmd = [
+        _profile_setting(job.profile_id, "ffmpeg_path", "ffmpeg"),
+        "-nostdin",
+        "-y",
+        "-i",
+        str(media_path),
+    ]
+    configured_filter = _profile_setting(
+        job.profile_id, "ffmpeg_audio_filter", ""
+    ).strip()
+    if censor_method == "beep":
+        graph = build_beep_filter(
+            segments,
+            output_label="censored_audio",
+            source_filter=configured_filter,
+        )
+        if graph is None:
+            raise RuntimeError("Could not build beep filter")
+        ffmpeg_cmd.extend(["-filter_complex", graph])
+        if is_video:
+            ffmpeg_cmd.extend(["-map", "0:v:0?", "-map", "[censored_audio]", "-c:v", "copy"])
+        else:
+            ffmpeg_cmd.extend(["-map", "[censored_audio]"])
+    else:
+        censor_filter = build_duck_filter(segments)
+        audio_filter = compose_audio_filters(configured_filter, censor_filter)
+        if audio_filter is None:
+            raise RuntimeError("Could not build mute filter")
+        if is_video:
+            ffmpeg_cmd.extend(["-map", "0:v:0?", "-map", "0:a:0", "-c:v", "copy"])
+        ffmpeg_cmd.extend(["-filter:a", audio_filter])
+    suffix = media_path.suffix.lower()
+    if is_video or suffix in {".aac", ".m4a"}:
+        ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+    elif suffix == ".opus":
+        ffmpeg_cmd.extend(["-c:a", "libopus", "-b:a", "96k"])
+    elif suffix == ".ogg":
+        ffmpeg_cmd.extend(["-c:a", "libvorbis", "-b:a", "128k"])
+    elif suffix == ".wav":
+        ffmpeg_cmd.extend(["-c:a", "pcm_s16le"])
+    else:
+        ffmpeg_cmd.extend(["-c:a", "libmp3lame", "-b:a", "128k"])
+    ffmpeg_cmd.append(str(output_path))
+    try:
+        result = subprocess.run(
+            ffmpeg_cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Censoring FFmpeg failed: {_tail_text(result.stderr, limit=1000)}"
+            )
+        if not output_path.exists():
+            raise RuntimeError("Censoring FFmpeg produced no output")
+        _validate_media_output(output_path)
+        _promote_censored_output(
+            output_path=output_path,
+            original_path=media_path,
+            keep_original=keep_original,
+        )
+        download.is_censored = True
+        download.censored_segments = [
+            {
+                "start_seconds": segment.start_seconds,
+                "end_seconds": segment.end_seconds,
+                "method": censor_method,
+            }
+            for segment in segments
+        ]
+        download.download_status = DownloadStatus.DOWNLOADED
+        download.last_seen_at = timezone.now()
+        download.file_size_bytes = media_path.stat().st_size
+        download.save(
+            update_fields=[
+                "is_censored",
+                "censored_segments",
+                "download_status",
+                "last_seen_at",
+                "file_size_bytes",
+            ]
+        )
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
 
 
 def ocr_pdf(job: Job) -> None:
@@ -2864,6 +3632,7 @@ HANDLERS = {
     "download_single": download_single,
     "transcode_media": transcode_media,
     "generate_transcript": generate_transcript,
+    "censor_audio": censor_audio,
     "generate_ocr": ocr_pdf,
     "retention_cleanup": retention_cleanup,
 }

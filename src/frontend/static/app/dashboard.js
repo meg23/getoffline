@@ -59,6 +59,7 @@
     row.dataset.title = item.title || "";
     row.dataset.kind = item.display_kind || "audio";
     row.dataset.downloadStatus = item.download_status || "";
+    row.dataset.censored = item.is_censored ? "1" : "0";
     row.dataset.mediaUrl = item.stream_url || `/api/stream/${id}`;
     row.dataset.subtitleUrl = item.has_subtitles
       ? item.api_subtitles_url || `/api/subtitle/${id}`
@@ -108,6 +109,12 @@
     statusPill.className = `pill ${item.status_class || "status-unplayed"}`;
     statusPill.textContent = item.status_label || "UNPLAYED";
     status.appendChild(statusPill);
+    if (item.is_censored) {
+      const censoredPill = document.createElement("span");
+      censoredPill.className = "pill";
+      censoredPill.textContent = "CENSORED";
+      status.appendChild(censoredPill);
+    }
 
     const selection = document.createElement("td");
     selection.className = "selection-cell";
@@ -166,10 +173,26 @@
   }
 
   function updateBatchState() {
-    const selected = visibleRows().some(
+    const selectedRows = rows.filter(
       (row) => row.querySelector(".row-selector")?.checked,
     );
-    if (batchApply) batchApply.disabled = !selected || !batchAction?.value;
+    const invalidCensorSelection =
+      batchAction?.value === "censor" &&
+      selectedRows.some(
+        (row) =>
+          row.dataset.kind !== "video" ||
+          row.dataset.censored === "1" ||
+          row.dataset.downloadStatus !== "downloaded",
+      );
+    if (batchApply) {
+      batchApply.disabled =
+        selectedRows.length === 0 ||
+        !batchAction?.value ||
+        invalidCensorSelection;
+      batchApply.title = invalidCensorSelection
+        ? "Censoring requires downloaded, uncensored videos."
+        : "";
+    }
     if (selectAll) {
       const visible = visibleRows();
       const checked = visible.filter(
@@ -674,7 +697,7 @@
       }
       return miniResumeApplied;
     };
-    if (state.kind !== "video" && state.hasSubtitles && state.subtitleUrl) {
+    if (state.hasSubtitles && state.subtitleUrl) {
       const track = document.createElement("track");
       track.kind = "subtitles";
       track.srclang = "en";

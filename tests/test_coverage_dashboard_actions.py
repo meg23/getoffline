@@ -23,6 +23,7 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from api.services import dashboard_actions as actions
+from api.services.settings import profile_output_root
 from models.domain import DownloadStatus, SourceType
 from models.models import (
     Download,
@@ -74,6 +75,14 @@ class DashboardActionCoverageTests(TestCase):
         request.user = SimpleNamespace(is_authenticated=False, get_username=lambda: "")
         self.assertEqual(actions._profile_id(request), "default")
         self.assertEqual(actions._profile_id(self.request("get")), "alice")
+        self.assertEqual(
+            actions._profile_output_root("alice").resolve(),
+            (Path.cwd() / "downloads" / "alice").resolve(),
+        )
+        self.assertEqual(
+            profile_output_root("alice"),
+            (Path.cwd() / "downloads" / "alice").resolve(),
+        )
         request = self.request("post", data={"next": "/next"})
         self.assertEqual(actions._redirect_back(request)["Location"], "/next")
 
@@ -96,6 +105,29 @@ class DashboardActionCoverageTests(TestCase):
             self.assertIsNone(actions._active_pipeline_cutoff())
         with patch.dict(os.environ, {"GETOFFLINE_ACTIVE_PIPELINE_STALE_SECONDS": "10"}):
             self.assertTrue(actions._job_is_fresh(Job(created_at=timezone.now())))
+
+        self.assertFalse(
+            actions._retry_requires_censoring(
+                actions.JobType.GENERATE_TRANSCRIPT, {"subtitles": True}
+            )
+        )
+        self.assertTrue(
+            actions._retry_requires_censoring(
+                actions.JobType.GENERATE_TRANSCRIPT,
+                {"post_download_censor": True},
+            )
+        )
+        self.assertFalse(
+            actions._retry_requires_censoring(
+                actions.JobType.TRANSCODE_MEDIA, {"media_type": "video"}
+            )
+        )
+        self.assertTrue(
+            actions._retry_requires_censoring(
+                actions.JobType.TRANSCODE_MEDIA,
+                {"media_type": "video", "censor_segments": [{}]},
+            )
+        )
 
     def test_settings_enqueue_status_and_metadata_actions(self):
         with patch("api.services.dashboard_actions.render", return_value=SimpleNamespace(status_code=200)):

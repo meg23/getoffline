@@ -38,6 +38,16 @@ urlpatterns = [
         name="api_dashboard_manual_upload",
     ),
     path(
+        "downloads/<int:download_id>/censor",
+        views.dashboard_censor_download,
+        name="api_censor_download",
+    ),
+    path(
+        "jobs/<int:job_id>/retry",
+        views.dashboard_retry_job,
+        name="api_retry_job",
+    ),
+    path(
         "dashboard/edit-metadata",
         views.dashboard_edit_metadata,
         name="api_dashboard_edit_metadata",

@@ -89,6 +89,12 @@ class GetOfflineClient:
         data = {"url": url, **options}
         return self.json_request("POST", "/download", data=data)
 
+    def censor_download(self, episode_id: int) -> dict[str, Any]:
+        return self.json_request("POST", f"/downloads/{episode_id}/censor", data={})
+
+    def retry_job(self, job_id: int) -> dict[str, Any]:
+        return self.json_request("POST", f"/jobs/{job_id}/retry", data={})
+
     def playback_start(self, episode_id: int) -> dict[str, Any]:
         return self.json_request(
             "POST", "/playback/start", data={"episode_id": episode_id}

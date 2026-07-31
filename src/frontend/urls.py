@@ -23,6 +23,12 @@ urlpatterns = [
     path("batch-update/", views.batch_update, name="batch_update"),
     path("transcript-search/", views.transcript_search, name="transcript_search"),
     path("manual-upload/", views.manual_upload, name="manual_upload"),
+    path(
+        "downloads/<int:download_id>/censor/",
+        views.censor_download,
+        name="censor_download",
+    ),
+    path("jobs/<int:job_id>/retry/", views.retry_job, name="retry_job"),
     path("edit-metadata/", views.edit_metadata, name="edit_metadata"),
     path("play/<int:download_id>/", views.player, name="player"),
     path("media/<int:download_id>/", views.media, name="media"),

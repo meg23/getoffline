@@ -1,6 +1,8 @@
 """Audio profanity censoring via FFmpeg filters based on Whisper SRT timestamps."""
 
+import math
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +24,7 @@ _SRT_METADATA_RE = re.compile(
     r"^(?:\d+|\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}.*)$"
 )
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+_WORD_RE = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*")
 
 
 def _srt_timestamp_to_seconds(timestamp_str: str) -> float:
@@ -86,6 +89,68 @@ def _is_sentence_profane(sentence: str) -> bool:
         return bool(_PROFANITY_FILTER.is_profane(sentence))
     except Exception:  # noqa: BLE001
         return False
+
+
+def _redact_word(value: str) -> str:
+    return _WORD_RE.sub("****", value)
+
+
+def censor_segments_from_transcription(
+    result: dict,
+    *,
+    padding_ms: int = 150,
+    duration_seconds: float | None = None,
+) -> tuple[list[AudioSegment], dict]:
+    """Return precise profanity intervals and a redacted transcription result.
+
+    A profanity-positive segment without usable word timings is rejected so a
+    caller operating fail-closed cannot accidentally publish uncensored media.
+    """
+    redacted = deepcopy(result)
+    intervals: list[AudioSegment] = []
+    padding = max(0, min(1000, int(padding_ms))) / 1000.0
+    for segment in redacted.get("segments", []):
+        text = str(segment.get("text") or "")
+        if not _is_sentence_profane(text):
+            continue
+        words = segment.get("words")
+        if not isinstance(words, list) or not words:
+            raise ValueError("Profanity detected without word timestamps")
+        found = False
+        for word in words:
+            if not isinstance(word, dict):
+                continue
+            value = str(word.get("word") or "")
+            token_match = _WORD_RE.search(value)
+            if token_match is None or not _is_sentence_profane(token_match.group(0)):
+                continue
+            try:
+                start = float(word["start"])
+                end = float(word["end"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("Profanity word has invalid timestamps") from exc
+            if not math.isfinite(start) or not math.isfinite(end) or end <= start:
+                raise ValueError("Profanity word has invalid timestamps")
+            start = max(0.0, start - padding)
+            end += padding
+            if duration_seconds is not None and math.isfinite(duration_seconds):
+                end = min(end, duration_seconds)
+            if end <= start:
+                raise ValueError("Profanity interval is outside media duration")
+            intervals.append(AudioSegment(start, end, ""))
+            word["word"] = _redact_word(value)
+            found = True
+        if not found:
+            raise ValueError("Profanity detected but no timed profanity word matched")
+        segment["text"] = "".join(
+            str(word.get("word") or "") for word in words if isinstance(word, dict)
+        ).strip()
+    redacted["text"] = " ".join(
+        str(segment.get("text") or "").strip()
+        for segment in redacted.get("segments", [])
+        if str(segment.get("text") or "").strip()
+    )
+    return _merge_overlapping_segments(intervals), redacted
 
 
 def extract_profanity_segments(subtitle_path: Path) -> list[AudioSegment]:
@@ -189,7 +254,7 @@ def build_duck_filter(
     if not segments:
         return None
 
-    merged = _merge_overlapping_segments(segments)
+    merged = _validated_segments(segments)
 
     # Build enable expression: between(t,start,end) OR between(t,start,end) OR ...
     # Commas in FFmpeg filter expressions must be escaped with backslash
@@ -204,18 +269,31 @@ def build_duck_filter(
     return f"volume={volume_level}:enable='{enable_expr}'"
 
 
+def compose_audio_filters(*filters: str | None) -> str | None:
+    """Compose simple FFmpeg audio filter chains in their configured order."""
+    configured = [str(value).strip() for value in filters if str(value or "").strip()]
+    return ",".join(configured) or None
+
+
 def build_beep_filter(
     segments: list[AudioSegment],
     frequency: int = 1000,
+    *,
+    input_label: str = "0:a:0",
+    output_label: str = "censored_audio",
+    source_filter: str | None = None,
 ) -> str | None:
     """Generate FFmpeg audio filter for beeping profane segments.
 
-    Creates a beep tone overlay during profanity timestamps. Uses FFmpeg's
-    'atone' filter to generate a tone and 'amix' to layer it over the source.
+    Creates delayed sine tones and mixes them over a source muted only during
+    the profanity intervals.
 
     Args:
         segments: List of AudioSegment with profanity
         frequency: Beep frequency in Hz (default 1000)
+        input_label: FFmpeg label for the source audio stream
+        output_label: FFmpeg label assigned to the censored result
+        source_filter: Existing simple audio filter chain applied before censoring
 
     Returns:
         FFmpeg -filter_complex string, or None if no segments
@@ -223,27 +301,38 @@ def build_beep_filter(
     if not segments:
         return None
 
-    merged = _merge_overlapping_segments(segments)
-
-    # Build conditions for volume filtering (silence original during beep)
-    silence_conditions = [
-        f"between(t,{seg.start_seconds},{seg.end_seconds})" for seg in merged
-    ]
-    silence_expr = "+".join(silence_conditions)
-
-    # Calculate total beep duration needed for each segment
-    filter_parts = []
-    for seg in merged:
+    merged = _validated_segments(segments)
+    silence_expr = "+".join(
+        f"between(t\\,{seg.start_seconds}\\,{seg.end_seconds})" for seg in merged
+    )
+    muted_filter = compose_audio_filters(
+        source_filter, f"volume=0:enable='{silence_expr}'"
+    )
+    if muted_filter is None:  # pragma: no cover - volume filter is always present
+        raise RuntimeError("Could not build muted source filter")
+    parts = [f"[{input_label}]{muted_filter}[censor_muted]"]
+    beep_labels = []
+    for index, seg in enumerate(merged):
         duration = seg.end_seconds - seg.start_seconds
-        # Generate beep tone for this segment
-        filter_parts.append(f"atone=f={frequency}:d={duration}")
+        delay_ms = round(seg.start_seconds * 1000)
+        label = f"censor_beep_{index}"
+        parts.append(
+            f"sine=f={int(frequency)}:d={duration},adelay={delay_ms}|{delay_ms}[{label}]"
+        )
+        beep_labels.append(f"[{label}]")
+    inputs = "[censor_muted]" + "".join(beep_labels)
+    parts.append(
+        f"{inputs}amix=inputs={len(beep_labels) + 1}:duration=first:dropout_transition=0[{output_label}]"
+    )
+    return ";".join(parts)
 
-    # Since we can't dynamically position beeps in a simple filter,
-    # we use a different approach: silence the original and overlay a continuous beep.
-    # For complex per-segment beeping, users would need to provide multiple beeps
-    # or we'd need to use FFmpeg's drawtext/overlay approach.
 
-    # For now, use a simpler filter: mute during profanity + add beep tone
-    # This generates: volume=0:enable="..." + tone overlay
-    combined_filter = f"[0:a]volume=0:enable=\"{silence_expr}\"[silenced];atone=f={frequency}:d=0.5[beep];[silenced][beep]amix=inputs=2:duration=first[out]"
-    return combined_filter
+def _validated_segments(segments: list[AudioSegment]) -> list[AudioSegment]:
+    valid = []
+    for segment in segments:
+        start = float(segment.start_seconds)
+        end = float(segment.end_seconds)
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+            raise ValueError("Invalid censor interval")
+        valid.append(AudioSegment(start, end, ""))
+    return _merge_overlapping_segments(valid)

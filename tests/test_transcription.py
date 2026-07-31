@@ -13,10 +13,11 @@ from workers import transcription
 
 
 class FakeSegment:
-    def __init__(self, start, end, text):
+    def __init__(self, start, end, text, words=None):
         self.start = start
         self.end = end
         self.text = text
+        self.words = words or []
 
 
 class TranscriptionChunkingTests(unittest.TestCase):
@@ -28,7 +29,21 @@ class TranscriptionChunkingTests(unittest.TestCase):
                 calls.append((Path(audio).name, dict(kwargs)))
                 chunk_number = len(calls)
                 return (
-                    [FakeSegment(1.0, 2.5, f"chunk {chunk_number}")],
+                    [
+                        FakeSegment(
+                            1.0,
+                            2.5,
+                            f"chunk {chunk_number}",
+                            [
+                                SimpleNamespace(
+                                    start=1.25,
+                                    end=1.75,
+                                    word=" chunk",
+                                    probability=0.9,
+                                )
+                            ],
+                        )
+                    ],
                     SimpleNamespace(
                         language="en",
                         language_probability=1.0,
@@ -77,6 +92,11 @@ class TranscriptionChunkingTests(unittest.TestCase):
         self.assertEqual(
             [segment["end"] for segment in result["segments"]], [2.5, 12.5, 22.5]
         )
+        self.assertEqual(
+            [segment["words"][0]["start"] for segment in result["segments"]],
+            [1.25, 11.25, 21.25],
+        )
+        self.assertTrue(all(kwargs["word_timestamps"] for _, kwargs in calls))
         self.assertEqual(result["text"], "chunk 1 chunk 2 chunk 3")
         self.assertEqual(len(calls), 3)
         self.assertTrue(all(kwargs["language"] == "en" for _, kwargs in calls))

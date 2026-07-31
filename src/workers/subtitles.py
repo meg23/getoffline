@@ -121,6 +121,31 @@ def _format_srt_timestamp(value: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
 
+def write_transcription_srt(
+    result: dict, subtitle_path: Path, *, offset_seconds: float = 0.0
+) -> Path:
+    """Write normalized Whisper output to SRT atomically."""
+    subtitle_path = Path(subtitle_path)
+    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = subtitle_path.with_name(f".{subtitle_path.name}.tmp")
+    with temporary_path.open("w", encoding="utf-8") as srt_file:
+        index = 0
+        for segment in result.get("segments", []):
+            text = str(segment.get("text") or "").strip()
+            if not text:
+                continue
+            start = max(0.0, float(segment.get("start", 0.0)) + offset_seconds)
+            end = max(start + 0.01, float(segment.get("end", start)) + offset_seconds)
+            index += 1
+            srt_file.write(f"{index}\n")
+            srt_file.write(
+                f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}\n"
+            )
+            srt_file.write(f"{text}\n\n")
+    temporary_path.replace(subtitle_path)
+    return subtitle_path
+
+
 def _shift_srt_timestamps(srt_path: Path, offset_seconds: float):
     if abs(offset_seconds) < 1e-6:
         return
@@ -246,21 +271,7 @@ def generate_whisper_subtitles(
             input_file,
             len(segments),
         )
-    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
-    with subtitle_path.open("w", encoding="utf-8") as srt_file:
-        for index, segment in enumerate(segments, start=1):
-            start = float(segment.get("start", 0.0))
-            end = float(segment.get("end", start + 0.01))
-            text = str(segment.get("text", "")).strip()
-            if not text:
-                continue
-            if end <= start:
-                end = start + 0.01
-            srt_file.write(f"{index}\n")
-            srt_file.write(
-                f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}\n"
-            )
-            srt_file.write(f"{text}\n\n")
+    write_transcription_srt(result, subtitle_path)
 
     if not subtitle_path.exists():
         raise RuntimeError(f"Subtitle output file was not created: {subtitle_path}")

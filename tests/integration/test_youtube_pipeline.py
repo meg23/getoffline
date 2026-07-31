@@ -115,7 +115,7 @@ def _compose_cmd() -> list[str]:
         text=True,
         check=False,
     )
-    if probe.returncode == 0:
+    if probe.returncode == 0 and "compose version" in probe.stdout.lower():
         return ["docker", "compose"]
     if shutil.which("docker-compose"):
         return ["docker-compose"]

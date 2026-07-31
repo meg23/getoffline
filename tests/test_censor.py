@@ -1,5 +1,7 @@
 """Unit tests for audio profanity censoring module."""
 
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +10,8 @@ from workers.censor import (
     AudioSegment,
     build_beep_filter,
     build_duck_filter,
+    censor_segments_from_transcription,
+    compose_audio_filters,
     extract_profanity_segments,
 )
 
@@ -121,6 +125,49 @@ More profanity here
             srt_path.unlink()
 
 
+class TestWordTimestampCensoring(unittest.TestCase):
+    def test_redacts_words_pads_clamps_and_merges_intervals(self):
+        result = {
+            "text": "clean fucking shit ending",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "text": "clean fucking shit ending",
+                    "words": [
+                        {"start": 0.0, "end": 0.3, "word": "clean "},
+                        {"start": 0.4, "end": 0.8, "word": "fucking "},
+                        {"start": 0.82, "end": 1.1, "word": "shit "},
+                        {"start": 1.2, "end": 1.6, "word": "ending"},
+                    ],
+                }
+            ],
+        }
+
+        intervals, redacted = censor_segments_from_transcription(
+            result, padding_ms=150, duration_seconds=1.0
+        )
+
+        self.assertEqual(len(intervals), 1)
+        self.assertAlmostEqual(intervals[0].start_seconds, 0.25)
+        self.assertAlmostEqual(intervals[0].end_seconds, 1.0)
+        self.assertNotIn("fucking", redacted["text"])
+        self.assertNotIn("shit", redacted["text"])
+        self.assertIn("****", redacted["text"])
+        self.assertEqual(result["segments"][0]["words"][1]["word"], "fucking ")
+
+    def test_profane_segment_without_word_timings_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "without word timestamps"):
+            censor_segments_from_transcription(
+                {
+                    "text": "fucking",
+                    "segments": [
+                        {"start": 0.0, "end": 1.0, "text": "fucking", "words": []}
+                    ],
+                }
+            )
+
+
 class TestFilterGeneration(unittest.TestCase):
     """Test FFmpeg filter string generation."""
 
@@ -186,7 +233,8 @@ class TestFilterGeneration(unittest.TestCase):
         filter_str = build_beep_filter(segments)
 
         self.assertIsNotNone(filter_str)
-        self.assertIn("atone", filter_str)  # FFmpeg tone generator
+        self.assertIn("sine=", filter_str)
+        self.assertIn("adelay=", filter_str)
         self.assertIn("amix", filter_str)  # Audio mixer
         self.assertIn("f=1000", filter_str)  # Default 1000 Hz
 
@@ -265,6 +313,98 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIsNotNone(filter_str)
         self.assertIn("5.123", filter_str)
         self.assertIn("10.456", filter_str)
+
+
+class TestRealFfmpegFilters(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg required")
+    def test_duck_and_beep_preserve_a_valid_video_stream(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=blue:s=160x90:d=2",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=f=440:d=2",
+                    "-shortest",
+                    "-c:v",
+                    "mpeg4",
+                    "-c:a",
+                    "aac",
+                    str(source),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            segment = [AudioSegment(0.4, 0.8, "")]
+            duck_filter = compose_audio_filters(
+                "aresample=48000", build_duck_filter(segment)
+            )
+            beep_filter = build_beep_filter(
+                segment,
+                output_label="out",
+                source_filter="aresample=48000",
+            )
+            if duck_filter is None or beep_filter is None:
+                self.fail("Expected non-empty FFmpeg censor filters")
+            commands = {
+                "duck": ["-af", duck_filter],
+                "beep": [
+                    "-filter_complex",
+                    beep_filter,
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "[out]",
+                ],
+            }
+            for method, filter_args in commands.items():
+                output = root / f"{method}.mp4"
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        str(source),
+                        *filter_args,
+                        "-c:v",
+                        "copy",
+                        "-c:a",
+                        "aac",
+                        str(output),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                probe = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=codec_type",
+                        "-of",
+                        "csv=p=0",
+                        str(output),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(probe.stdout.strip(), "video")
 
 
 if __name__ == "__main__":

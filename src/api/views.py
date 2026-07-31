@@ -33,6 +33,7 @@ from api.services.library import (
     recent_jobs,
 )
 from api.services.profiles import profile_id_for_request
+from api.services.settings import profile_settings
 from api.streaming.media import (
     media_response,
     resolve_media_path,
@@ -40,8 +41,10 @@ from api.streaming.media import (
     subtitle_response,
 )
 from frontend.queue import publish_job
+from models.domain import DownloadStatus
 from models.jobs import create_job
 from models.models import Download, Job, SourceConfig
+from shared.censoring import CensorPolicySnapshot, profile_censor_policy
 
 
 def _safe_login_redirect(request: HttpRequest) -> str:
@@ -159,7 +162,10 @@ def frontend_jobs(request: HttpRequest) -> JsonResponse:
 @require_GET
 def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
     item = get_object_or_404(
-        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+        Download,
+        pk=episode_id,
+        profile_id=profile_id_for_request(request),
+        download_status=DownloadStatus.DOWNLOADED,
     )
     summary = episode_to_summary(item)
     has_subtitles = False
@@ -192,7 +198,10 @@ def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
 @require_GET
 def subtitle(request: HttpRequest, episode_id: int) -> HttpResponse:
     item = get_object_or_404(
-        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+        Download,
+        pk=episode_id,
+        profile_id=profile_id_for_request(request),
+        download_status=DownloadStatus.DOWNLOADED,
     )
     path = resolve_subtitle_path(item)
     if path is None:
@@ -245,6 +254,18 @@ def dashboard_transcript_search(request: HttpRequest) -> JsonResponse:
 @api_login_required
 def dashboard_manual_upload(request: HttpRequest) -> JsonResponse:
     return _dashboard_view("manual_upload", request)
+
+
+@api_login_required
+@require_POST
+def dashboard_censor_download(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _dashboard_view("censor_download", request, download_id)
+
+
+@api_login_required
+@require_POST
+def dashboard_retry_job(request: HttpRequest, job_id: int) -> HttpResponse:
+    return _dashboard_view("retry_job", request, job_id)
 
 
 @api_login_required
@@ -444,6 +465,12 @@ def download(request: HttpRequest) -> JsonResponse:
     if not url:
         return JsonResponse({"ok": False, "error": "Missing url"}, status=400)
     profile_id = profile_id_for_request(request)
+    media_type = str(data.get("media_type") or "audio").strip().lower()
+    policy = (
+        profile_censor_policy(profile_settings(profile_id))
+        if media_type == "video"
+        else CensorPolicySnapshot(enabled=False)
+    )
     job = create_job(
         profile_id=profile_id,
         job_type="download_single",
@@ -451,12 +478,14 @@ def download(request: HttpRequest) -> JsonResponse:
             "source": "api",
             "url": url,
             "source_type": str(data.get("source_type") or "youtube"),
-            "media_type": str(data.get("media_type") or "audio"),
+            "media_type": media_type,
             "subtitles": bool(data.get("subtitles", True)),
             "manual_enqueue": True,
+            "censor_policy": policy.to_payload(),
         },
         idempotency_key=str(
-            data.get("idempotency_key") or f"download_single:{profile_id}:{url}"
+            data.get("idempotency_key")
+            or f"download_single:{profile_id}:{media_type}:{url}"
         ),
     )
     publish_job(
@@ -501,6 +530,9 @@ def csrf(request: HttpRequest) -> JsonResponse:
 @require_GET
 def stream(request: HttpRequest, episode_id: int) -> HttpResponse:
     item = get_object_or_404(
-        Download, pk=episode_id, profile_id=profile_id_for_request(request)
+        Download,
+        pk=episode_id,
+        profile_id=profile_id_for_request(request),
+        download_status=DownloadStatus.DOWNLOADED,
     )
     return media_response(resolve_media_path(item), request.headers.get("Range", ""))

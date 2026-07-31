@@ -67,6 +67,15 @@ class SourceConfig(models.Model):
     include_livestreams = models.BooleanField(default=False)
     title_exclude = models.TextField(blank=True, null=True)
     censor_profanity = models.BooleanField(default=False)
+    censor_policy = models.CharField(
+        max_length=16,
+        choices=[
+            ("inherit", "Use profile setting"),
+            ("enabled", "Enabled"),
+            ("disabled", "Disabled"),
+        ],
+        default="inherit",
+    )
     censor_method = models.CharField(
         max_length=20,
         choices=[("duck", "Mute"), ("beep", "Beep tone")],
@@ -109,10 +118,13 @@ class Download(models.Model):
         max_length=32, default=DownloadStatus.DOWNLOADED, db_index=True
     )
     profanity_status = models.CharField(
-        max_length=32, default="clean", db_index=True
+        max_length=32,
+        default="clean",
+        db_default="clean",
+        db_index=True,
     )
     is_censored = models.BooleanField(default=False)
-    censored_segments = models.JSONField(default=list)
+    censored_segments = models.JSONField(default=list, blank=True)
     raw_metadata_json = models.TextField(blank=True, null=True)
     first_seen_at = models.DateTimeField(default=timezone.now)
     last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -123,8 +135,6 @@ class Download(models.Model):
     last_position_seconds = models.FloatField(default=0.0)
     total_listened_seconds = models.FloatField(default=0.0)
     last_position_updated_at = models.DateTimeField(blank=True, null=True)
-    is_censored = models.BooleanField(default=False)
-    censored_segments = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "downloads"

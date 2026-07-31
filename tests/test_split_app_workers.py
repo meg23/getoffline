@@ -243,6 +243,8 @@ class SharedDjangoModelTests(TestCase):
             )
 
             def fake_run(command, check, capture_output, text):
+                if command[0] == "ffprobe":
+                    return SimpleNamespace(returncode=0, stdout="1.0\n", stderr="")
                 self.assertIn(str(target_path), command)
                 target_path.write_bytes(b"converted")
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -381,6 +383,47 @@ class SharedDjangoModelTests(TestCase):
                     "attempt": 1,
                 }
             )
+
+    def test_manual_video_upload_uses_enabled_profile_censor_policy(self):
+        client = Client()
+        user, _created = User.objects.get_or_create(username="default")
+        user.set_password("pass")
+        user.save(update_fields=["password"])
+        self.assertTrue(client.login(username="default", password="pass"))
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("frontend.views.publish_job"),
+        ):
+            ProfileConfigValue.objects.bulk_create(
+                [
+                    ProfileConfigValue(
+                        profile_id="default", key="output_root", value=tmpdir
+                    ),
+                    ProfileConfigValue(
+                        profile_id="default", key="video_censor_enabled", value="1"
+                    ),
+                    ProfileConfigValue(
+                        profile_id="default", key="video_censor_method", value="beep"
+                    ),
+                ]
+            )
+
+            response = client.post(
+                "/manual-upload/",
+                {
+                    "files": SimpleUploadedFile(
+                        "Censor Movie.mp4", b"video-bytes", content_type="video/mp4"
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 201)
+            download = Download.objects.get(title="Censor Movie.mp4")
+            self.assertEqual(download.download_status, DownloadStatus.CENSORING)
+            job = Job.objects.get(payload__download_id=download.id)
+            self.assertTrue(job.payload["post_download_censor"])
+            self.assertTrue(job.payload["censor_policy"]["enabled"])
+            self.assertEqual(job.payload["censor_policy"]["method"], "beep")
 
     def test_manual_pdf_upload_queues_ocr_job(self):
         client = Client()
@@ -816,7 +859,7 @@ class SharedDjangoModelTests(TestCase):
         self.assertEqual(response["Content-Range"], "bytes 2-5/10")
         self.assertEqual(body, b"2345")
 
-    def test_video_player_omits_subtitle_track_by_default(self):
+    def test_video_player_exposes_subtitle_track(self):
         client = Client()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -850,7 +893,9 @@ class SharedDjangoModelTests(TestCase):
         player_script = (
             Path(__file__).parents[1] / "src/frontend/static/app/player.js"
         ).read_text(encoding="utf-8")
-        self.assertNotIn('id="subtitle-track"', body)
+        self.assertIn('id="subtitle-track"', body)
+        self.assertIn(f'src="/subtitle/{download.id}/"', body)
+        self.assertIn('kind="subtitles"', body)
         self.assertIn(f"/media/{download.id}/#t=42.500", body)
         self.assertIn('/static/app/player.js"', body)
         self.assertIn("const periodicProgressSeconds = 5;", player_script)
@@ -966,6 +1011,7 @@ class SharedDjangoModelTests(TestCase):
             file_ext="mp4",
             download_status="downloaded",
             last_position_seconds=33.25,
+            is_censored=True,
         )
 
         with patch("frontend.views.publish_job"):
@@ -975,10 +1021,33 @@ class SharedDjangoModelTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("Alice Visible Video", body)
         self.assertIn(f'data-row-id="{download.id}"', body)
+        self.assertIn('data-censored="1"', body)
+        self.assertIn("CENSORED", body)
         self.assertIn(f'data-media-url="/media/{download.id}/"', body)
         self.assertIn('data-resume-seconds="33.25"', body)
         self.assertIn(f'href="/play/{download.id}/"', body)
         self.assertNotIn("Bob Hidden Video", body)
+
+        dashboard_script = (
+            Path(__file__).parents[1] / "src/frontend/static/app/dashboard.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'row.dataset.censored = item.is_censored ? "1" : "0";',
+            dashboard_script,
+        )
+        self.assertIn('censoredPill.textContent = "CENSORED";', dashboard_script)
+        self.assertIn('batchAction?.value === "censor"', dashboard_script)
+        self.assertIn('row.dataset.kind !== "video"', dashboard_script)
+        self.assertIn('row.dataset.censored === "1"', dashboard_script)
+        self.assertIn(
+            'row.dataset.downloadStatus !== "downloaded"', dashboard_script
+        )
+        self.assertIn(
+            "if (state.hasSubtitles && state.subtitleUrl)", dashboard_script
+        )
+        self.assertNotIn(
+            'state.kind !== "video" && state.hasSubtitles', dashboard_script
+        )
 
     def test_anonymous_users_must_login_before_playback_or_position_updates(self):
         client = DjangoClient()
@@ -1271,6 +1340,13 @@ class SharedDjangoModelTests(TestCase):
             url="https://www.youtube.com/@example/videos",
             enabled=True,
             max_downloads=1,
+            media_type="video",
+            censor_policy="enabled",
+            censor_method="beep",
+            keep_original=True,
+        )
+        ProfileConfigValue.objects.create(
+            profile_id="default", key="video_censor_padding_ms", value="325"
         )
         job = Job.objects.create(
             profile_id="default",
@@ -1309,6 +1385,16 @@ class SharedDjangoModelTests(TestCase):
         )
         self.assertEqual(jobs.count(), 1)
         self.assertEqual(jobs.first().payload["item_uid"], "video-1")
+        self.assertEqual(
+            jobs.first().payload["censor_policy"],
+            {
+                "enabled": True,
+                "method": "beep",
+                "keep_original": True,
+                "padding_ms": 325,
+                "redact_transcript": True,
+            },
+        )
         publish.assert_called_once()
 
     def test_episode_checker_republishes_existing_queued_download_job(self):
@@ -1798,6 +1884,8 @@ class SharedDjangoModelTests(TestCase):
 
             def fake_run(command, check, capture_output, text):
                 _ = (check, capture_output)
+                if command[0] == "ffprobe":
+                    return SimpleNamespace(returncode=0, stdout="1.0\n", stderr="")
                 self.assertIn("-codec:a", command)
                 output.write_text("converted", encoding="utf-8")
                 return SimpleNamespace(returncode=0, stdout="", stderr="ffmpeg done")
@@ -1823,7 +1911,7 @@ class SharedDjangoModelTests(TestCase):
             )
             self.assertNotIn("original_file_path", transcript_job.payload)
             self.assertFalse(transcript_job.payload["delete_explicit_content"])
-            run.assert_called_once()
+            self.assertEqual(run.call_count, 2)
             publish.assert_called_once()
 
     def test_transcode_media_propagates_explicit_filter_to_transcript_job(self):
@@ -1843,6 +1931,8 @@ class SharedDjangoModelTests(TestCase):
 
             def fake_run(command, check, capture_output, text):
                 _ = (check, capture_output)
+                if command[0] == "ffprobe":
+                    return SimpleNamespace(returncode=0, stdout="1.0\n", stderr="")
                 output.write_text("converted", encoding="utf-8")
                 return SimpleNamespace(returncode=0, stdout="", stderr="ffmpeg done")
 
@@ -1915,6 +2005,153 @@ class SharedDjangoModelTests(TestCase):
                 TranscriptSegment.objects.filter(download=download).exists()
             )
             deletion_log.assert_called_once()
+
+    def test_pre_transcode_clean_video_is_promoted_without_ffmpeg(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "clean.mp4"
+            media.write_bytes(b"video")
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=tmpdir
+            )
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceType.YOUTUBE,
+                source_name="Channel",
+                item_uid="clean-video",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status=DownloadStatus.CENSORING,
+            )
+            transcode_payload = {
+                "download_id": download.id,
+                "source_file_path": str(media),
+                "source_file_paths": [str(media)],
+                "target_file_path": str(media),
+                "output_root": tmpdir,
+                "media_type": "video",
+                "pre_transcode_censor": True,
+                "skip_transcode_if_clean": True,
+                "censor_policy": {
+                    "enabled": True,
+                    "method": "duck",
+                    "keep_original": False,
+                    "padding_ms": 150,
+                },
+            }
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="generate_transcript",
+                payload={"pre_transcode_payload": transcode_payload},
+            )
+            with (
+                patch("workers.handlers._transcription_input_path", return_value=media),
+                patch(
+                    "workers.transcription.transcribe_with_whisper",
+                    return_value={
+                        "text": "clean speech",
+                        "segments": [
+                            {
+                                "start": 0.0,
+                                "end": 1.0,
+                                "text": "clean speech",
+                                "words": [
+                                    {"start": 0.0, "end": 0.5, "word": "clean "},
+                                    {"start": 0.5, "end": 1.0, "word": "speech"},
+                                ],
+                            }
+                        ],
+                    },
+                ),
+                patch("workers.handlers._enqueue_transcode_job") as enqueue,
+            ):
+                generate_transcript(job)
+
+            download.refresh_from_db()
+            self.assertEqual(download.download_status, DownloadStatus.DOWNLOADED)
+            self.assertFalse(download.is_censored)
+            self.assertIn("clean speech", Path(download.subtitle_path).read_text())
+            self.assertTrue(
+                TranscriptSegment.objects.filter(
+                    download=download, text__contains="clean speech"
+                ).exists()
+            )
+            enqueue.assert_not_called()
+
+    def test_pre_transcode_profane_video_queues_one_redacted_conversion(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "profane.mp4"
+            media.write_bytes(b"video")
+            ProfileConfigValue.objects.create(
+                profile_id="default", key="output_root", value=tmpdir
+            )
+            download = Download.objects.create(
+                profile_id="default",
+                source_type=SourceType.YOUTUBE,
+                source_name="Channel",
+                item_uid="profane-video",
+                file_path=str(media),
+                file_ext="mp4",
+                download_status=DownloadStatus.CENSORING,
+            )
+            transcode_payload = {
+                "download_id": download.id,
+                "source_file_path": str(media),
+                "source_file_paths": [str(media)],
+                "target_file_path": str(media),
+                "output_root": tmpdir,
+                "media_type": "video",
+                "pre_transcode_censor": True,
+                "skip_transcode_if_clean": True,
+                "censor_policy": {
+                    "enabled": True,
+                    "method": "beep",
+                    "keep_original": True,
+                    "padding_ms": 100,
+                },
+            }
+            job = Job.objects.create(
+                profile_id="default",
+                job_type="generate_transcript",
+                payload={"pre_transcode_payload": transcode_payload},
+            )
+            transcript = {
+                "text": "this is fucking bad",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 2.0,
+                        "text": "this is fucking bad",
+                        "words": [
+                            {"start": 0.0, "end": 0.3, "word": "this "},
+                            {"start": 0.3, "end": 0.5, "word": "is "},
+                            {"start": 0.5, "end": 0.9, "word": "fucking "},
+                            {"start": 0.9, "end": 1.2, "word": "bad"},
+                        ],
+                    }
+                ],
+            }
+            with (
+                patch("workers.handlers._transcription_input_path", return_value=media),
+                patch(
+                    "workers.transcription.transcribe_with_whisper",
+                    return_value=transcript,
+                ),
+                patch("workers.handlers._enqueue_transcode_job") as enqueue,
+            ):
+                generate_transcript(job)
+
+            queued_payload = enqueue.call_args.kwargs["payload"]
+            self.assertEqual(queued_payload["censor_method"], "beep")
+            self.assertTrue(queued_payload["keep_original"])
+            self.assertEqual(len(queued_payload["censor_segments"]), 1)
+            self.assertNotIn("text", queued_payload["censor_segments"][0])
+            subtitle_text = Path(queued_payload["prepared_subtitle_path"]).read_text()
+            self.assertNotIn("fucking", subtitle_text)
+            self.assertIn("****", subtitle_text)
+            download.refresh_from_db()
+            self.assertEqual(download.download_status, DownloadStatus.CENSORING)
 
     def test_generate_transcript_keeps_media_when_screening_errors(self):
         with tempfile.TemporaryDirectory() as tmpdir:

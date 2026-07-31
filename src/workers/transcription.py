@@ -158,6 +158,13 @@ def _offset_transcription_result(result: dict, offset_seconds: float) -> dict:
             float(offset_segment.get("start", 0.0)) + offset_seconds
         )
         offset_segment["end"] = float(offset_segment.get("end", 0.0)) + offset_seconds
+        offset_words = []
+        for word in offset_segment.get("words", []):
+            offset_word = dict(word)
+            offset_word["start"] = float(offset_word.get("start", 0.0)) + offset_seconds
+            offset_word["end"] = float(offset_word.get("end", 0.0)) + offset_seconds
+            offset_words.append(offset_word)
+        offset_segment["words"] = offset_words
         offset_segments.append(offset_segment)
     return {"text": result.get("text", ""), "segments": offset_segments}
 
@@ -180,6 +187,15 @@ def _normalize_faster_whisper_result(
                 "start": segment_start,
                 "end": segment_end,
                 "text": segment_text,
+                "words": [
+                    {
+                        "start": float(word.start),
+                        "end": float(word.end),
+                        "word": str(word.word or ""),
+                        "probability": float(getattr(word, "probability", 0.0)),
+                    }
+                    for word in (getattr(segment, "words", None) or [])
+                ],
             }
         )
         if index == 1 or index % 10 == 0:
@@ -209,7 +225,7 @@ def _transcribe_in_process(
 ):
     model = _get_or_load_whisper_model(model_name)
 
-    transcribe_kwargs = {"vad_filter": True}
+    transcribe_kwargs = {"vad_filter": True, "word_timestamps": True}
     if language:
         transcribe_kwargs["language"] = language
     input_size = input_file.stat().st_size if input_file.exists() else None

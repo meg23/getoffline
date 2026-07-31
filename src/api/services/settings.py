@@ -12,6 +12,10 @@ PROFILE_DEFAULTS = {
     "auto_update_minutes": "20",
     "auto_delete_content_days": "0",
     "manual_upload_delete_explicit_content": "0",
+    "video_censor_enabled": "0",
+    "video_censor_method": "duck",
+    "video_censor_keep_original": "0",
+    "video_censor_padding_ms": "150",
     "audio_format": "mp3",
     "video_format": "mp4",
     "video_codec": "h264",
@@ -47,6 +51,6 @@ def profile_output_root(profile_id: str) -> Path:
         or AppConfigValue.objects.filter(key="output_root")
         .values_list("value", flat=True)
         .first()
-        or PROFILE_DEFAULTS["output_root"]
+        or f"./downloads/{profile_id}"
     )
     return Path(str(value)).expanduser().resolve()

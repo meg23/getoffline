@@ -36,6 +36,9 @@
                 {% if job.error_message %}<p class="job-error">{{ job.error_message }}</p>{% endif %}
               </div>
               <span class="row-status job-status job-status-{{ job.status|lower }}">{{ job.status }}</span>
+              {% if job.status == 'failed' and job.job_type == 'generate_transcript' or job.status == 'failed' and job.job_type == 'censor_audio' or job.status == 'failed' and job.job_type == 'transcode_media' %}
+                <form method="post" action="{% url 'retry_job' job.id %}">{% csrf_token %}<input type="hidden" name="next" value="{% url 'jobs' %}" /><button type="submit">Retry</button></form>
+              {% endif %}
             </li>
           {% empty %}
             <li class="empty-job-state">No jobs yet. Queue a download from your library to see it here.</li>

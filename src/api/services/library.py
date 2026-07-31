@@ -93,6 +93,7 @@ def library_download_query(profile_id: str) -> QuerySet[Download, Download]:
         "subtitle_path",
         "subtitle_path_relative",
         "download_status",
+        "is_censored",
         "last_seen_at",
         "played",
         "favorite",
@@ -170,6 +171,7 @@ def episode_to_summary(item: Download) -> dict[str, object]:
         last_position_seconds=float(item.last_position_seconds or 0.0),
         total_listened_seconds=float(item.total_listened_seconds or 0.0),
         download_status=str(item.download_status or ""),
+        is_censored=bool(item.is_censored),
         media_url=reverse("media", args=[item.id]),
         stream_url=reverse("api_stream", args=[item.id]),
         subtitles_url=reverse("subtitle", args=[item.id])

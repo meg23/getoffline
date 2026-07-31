@@ -18,6 +18,7 @@ class EpisodeSummary:
     last_position_seconds: float
     total_listened_seconds: float
     download_status: str
+    is_censored: bool
     media_url: str
     stream_url: str
     subtitles_url: str | None

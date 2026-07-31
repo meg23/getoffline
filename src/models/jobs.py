@@ -16,6 +16,7 @@ def create_job(
 ) -> Job:
     if idempotency_key:
         existing = Job.objects.filter(
+            profile_id=profile_id,
             idempotency_key=idempotency_key,
             status__in=[JobStatus.QUEUED, JobStatus.RUNNING],
         ).first()

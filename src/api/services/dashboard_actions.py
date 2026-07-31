@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 from django.contrib.auth.decorators import login_required
-from django.db import DatabaseError, connection
+from django.db import DatabaseError, connection, transaction
 from django.db.models import Sum
 from django.http import (
     FileResponse,
@@ -54,6 +54,7 @@ from models.models import (
     SourceConfig,
     TranscriptSegment,
 )
+from shared.censoring import CensorPolicySnapshot, profile_censor_policy
 
 ALLOWED_JOB_TYPES = frozenset(
     {
@@ -136,6 +137,7 @@ class SourceFormData:
     include_livestreams: bool
     title_exclude: str
     censor_profanity: bool
+    censor_policy: str
     censor_method: str
     keep_original: bool
 
@@ -262,7 +264,7 @@ def _profile_output_root(profile_id: str) -> Path:
         or AppConfigValue.objects.filter(key="output_root")
         .values_list("value", flat=True)
         .first()
-        or PROFILE_DEFAULTS["output_root"]
+        or f"./downloads/{profile_id}"
     )
     return Path(str(value)).expanduser().absolute()
 
@@ -293,6 +295,21 @@ def _resolve_media_path(item: Download) -> Path:
         except Http404:
             continue
     raise Http404("File unavailable")
+
+
+def _resolve_profile_media_path(item: Download) -> Path:
+    """Resolve an existing media file without allowing it outside its profile root."""
+    root = _profile_output_root(item.profile_id).resolve()
+    candidates: list[Path] = []
+    if item.file_path_relative:
+        candidates.append(root / str(item.file_path_relative))
+    if item.file_path:
+        candidates.append(Path(str(item.file_path)))
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved.is_relative_to(root) and resolved.is_file():
+            return resolved
+    raise ValueError("Download media file is unavailable")
 
 
 def _srt_to_vtt(content: str) -> str:
@@ -372,6 +389,7 @@ def _library_download_query(profile_id: str):
             "subtitle_path",
             "subtitle_path_relative",
             "download_status",
+            "is_censored",
             "last_seen_at",
             "played",
             "favorite",
@@ -708,6 +726,10 @@ PROFILE_DEFAULTS = {
     "manual_upload_censor_profanity": "0",
     "manual_upload_censor_method": "duck",
     "manual_upload_keep_original": "0",
+    "video_censor_enabled": "0",
+    "video_censor_method": "duck",
+    "video_censor_keep_original": "0",
+    "video_censor_padding_ms": "150",
     "audio_format": "mp3",
     "video_format": "mp4",
     "video_codec": "h264",
@@ -726,12 +748,14 @@ CONFIG_INTEGER_RULES = {
     "audio_quality": (0, None),
     "ytdlp_video_max_height": (144, None),
     "max_downloads": (1, None),
+    "video_censor_padding_ms": (0, 1000),
 }
 CONFIG_ENUM_RULES = {
     "audio_format": {"mp3", "m4a", "opus"},
     "video_format": {"mp4", "mkv"},
     "video_codec": {"h264", "hevc", "copy"},
     "manual_upload_censor_method": {"duck", "beep"},
+    "video_censor_method": {"duck", "beep"},
 }
 
 
@@ -802,6 +826,10 @@ def _checked(settings: dict[str, str], key: str) -> bool:
     return str(settings.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _video_censor_policy(profile_id: str) -> CensorPolicySnapshot:
+    return profile_censor_policy(_profile_settings(profile_id))
+
+
 def _posted_bool(request: HttpRequest, key: str, default: str = "") -> bool:
     return request.POST.get(key, default) in {"1", "true", "yes", "on"}
 
@@ -833,6 +861,9 @@ def _source_form_data(
         and _posted_bool(request, prefix + "include_livestreams"),
         title_exclude=str(request.POST.get(prefix + "title_exclude") or "").strip(),
         censor_profanity=_posted_bool(request, prefix + "censor_profanity"),
+        censor_policy=str(
+            request.POST.get(prefix + "censor_policy") or "inherit"
+        ).strip().lower(),
         censor_method=str(request.POST.get(prefix + "censor_method") or "duck").strip().lower(),
         keep_original=_posted_bool(request, prefix + "keep_original"),
     )
@@ -854,6 +885,8 @@ def _source_form_errors(
             errors.append("url must be an absolute http(s) URL")
     if source_type is SourceType.YOUTUBE and form.media_type not in {"audio", "video"}:
         errors.append("media_type is invalid")
+    if form.censor_policy not in {"inherit", "enabled", "disabled"}:
+        errors.append("censor_policy is invalid")
 
     raw_offset = str(request.POST.get("subtitle_offset_seconds") or "").strip()
     if raw_offset and (
@@ -882,6 +915,7 @@ def _source_update_fields(*, include_enabled: bool = True) -> list[str]:
         "include_shorts",
         "include_livestreams",
         "censor_profanity",
+        "censor_policy",
         "censor_method",
         "keep_original",
         "updated_at",
@@ -908,6 +942,7 @@ def _apply_source_form_data(
     source.delete_explicit_content = form.delete_explicit_content
     source.title_exclude = form.title_exclude
     source.censor_profanity = form.censor_profanity
+    source.censor_policy = form.censor_policy
     source.censor_method = form.censor_method
     source.keep_original = form.keep_original
     source.updated_at = now
@@ -1015,7 +1050,12 @@ def _normalize_upload_stem(value: str) -> str:
     return normalized or "manual-upload"
 
 
-def _write_manual_upload(profile_id: str, uploaded_file) -> ManualUploadResult:
+def _write_manual_upload(
+    profile_id: str,
+    uploaded_file,
+    *,
+    initial_status: DownloadStatus = DownloadStatus.DOWNLOADED,
+) -> ManualUploadResult:
     original_name = Path(str(uploaded_file.name or "")).name
     if not original_name:
         raise ValueError("Missing filename")
@@ -1076,7 +1116,7 @@ def _write_manual_upload(profile_id: str, uploaded_file) -> ManualUploadResult:
                 "file_size_bytes": bytes_written,
                 "subtitle_path": None,
                 "subtitle_path_relative": None,
-                "download_status": DownloadStatus.DOWNLOADED,
+                "download_status": initial_status,
                 "profanity_status": "clean",
                 "is_censored": False,
                 "censored_segments": [],
@@ -1178,6 +1218,10 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         payload["completion_token"] = completion_marker
     if job_type == "download_single":
         payload["manual_enqueue"] = True
+        payload["source_type"] = "youtube"
+        payload["media_type"] = "video"
+        payload["subtitles"] = True
+        payload["censor_policy"] = _video_censor_policy(profile_id).to_payload()
     if request.POST.get("url"):
         payload["url"] = str(request.POST["url"]).strip()
     default_idempotency = f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"
@@ -1290,7 +1334,27 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
     errors: list[dict[str, str]] = []
     for uploaded_file in uploaded_files:
         try:
-            download, path = _write_manual_upload(profile_id, uploaded_file)
+            upload_suffix = Path(
+                Path(str(getattr(uploaded_file, "name", "") or "")).name
+            ).suffix.lower()
+            media_type = (
+                "video" if upload_suffix in VIDEO_UPLOAD_EXTENSIONS else "audio"
+            )
+            policy = (
+                _video_censor_policy(profile_id)
+                if media_type == "video"
+                else CensorPolicySnapshot(enabled=False)
+            )
+            censor_video = media_type == "video" and policy.enabled
+            download, path = _write_manual_upload(
+                profile_id,
+                uploaded_file,
+                initial_status=(
+                    DownloadStatus.CENSORING
+                    if censor_video
+                    else DownloadStatus.DOWNLOADED
+                ),
+            )
             upload = {"id": download.id, "title": download.title}
             if path.suffix.lower() in DOCUMENT_UPLOAD_EXTENSIONS:
                 job = create_job(
@@ -1316,11 +1380,6 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
                 )
                 upload["job_id"] = job.id
             else:
-                media_type = (
-                    "video"
-                    if path.suffix.lower() in VIDEO_UPLOAD_EXTENSIONS
-                    else "audio"
-                )
                 job = create_job(
                     profile_id=profile_id,
                     job_type="generate_transcript",
@@ -1331,6 +1390,12 @@ def manual_upload(request: HttpRequest) -> JsonResponse:
                         "media_type": media_type,
                         "recent_download": True,
                         "manual_upload": True,
+                        "censor_policy": (
+                            policy.to_payload()
+                            if media_type == "video"
+                            else CensorPolicySnapshot(enabled=False).to_payload()
+                        ),
+                        "post_download_censor": censor_video,
                     },
                     idempotency_key=f"generate_transcript:{profile_id}:{download.id}",
                 )
@@ -1535,6 +1600,195 @@ def delete_file(request: HttpRequest, download_id: int) -> HttpResponseRedirect:
     return _redirect_back(request)
 
 
+def _queue_download_censorship(profile_id: str, download_id: int) -> Job:
+    with transaction.atomic():
+        item = (
+            Download.objects.select_for_update()
+            .filter(pk=download_id, profile_id=profile_id)
+            .first()
+        )
+        if item is None:
+            raise ValueError("Download was not found")
+        if item.is_censored:
+            raise ValueError("Download is already censored")
+        if parse_str_enum(DownloadStatus, item.download_status) is not DownloadStatus.DOWNLOADED:
+            raise ValueError("Download is not available for censorship")
+        root = _profile_output_root(profile_id).resolve()
+        path = _resolve_profile_media_path(item)
+        if path.suffix.lower() not in VIDEO_UPLOAD_EXTENSIONS:
+            raise ValueError("Only downloaded videos can be censored")
+        policy = _video_censor_policy(profile_id)
+        policy = CensorPolicySnapshot(
+            enabled=True,
+            method=policy.method,
+            keep_original=policy.keep_original,
+            padding_ms=policy.padding_ms,
+        )
+        item.download_status = DownloadStatus.CENSORING
+        item.file_path = str(path)
+        item.file_path_relative = str(path.relative_to(root))
+        item.last_seen_at = timezone.now()
+        item.save(
+            update_fields=[
+                "download_status",
+                "file_path",
+                "file_path_relative",
+                "last_seen_at",
+            ]
+        )
+        job = create_job(
+            profile_id=profile_id,
+            job_type=JobType.GENERATE_TRANSCRIPT,
+            payload={
+                "download_id": item.id,
+                "source_type": item.source_type,
+                "media_type": "video",
+                "media_path": str(path),
+                "post_download_censor": True,
+                "censor_policy": policy.to_payload(),
+            },
+            idempotency_key=f"censor_download:{profile_id}:{item.id}",
+        )
+    publish_job(
+        {
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "profile_id": job.profile_id,
+            "attempt": 1,
+        }
+    )
+    return job
+
+
+@login_required
+@require_POST
+def censor_download(request: HttpRequest, download_id: int) -> HttpResponse:
+    try:
+        job = _queue_download_censorship(_profile_id(request), download_id)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=409)
+    if request.POST.get("next"):
+        return _redirect_back(request)
+    return JsonResponse({"ok": True, "job_id": job.id, "status": job.status})
+
+
+@login_required
+@require_POST
+def retry_job(request: HttpRequest, job_id: int) -> HttpResponse:
+    profile_id = _profile_id(request)
+    original = Job.objects.filter(
+        pk=job_id, profile_id=profile_id, status=JobStatus.FAILED
+    ).first()
+    retryable = {
+        JobType.GENERATE_TRANSCRIPT,
+        JobType.CENSOR_AUDIO,
+        JobType.TRANSCODE_MEDIA,
+    }
+    parsed_job_type = (
+        parse_str_enum(JobType, original.job_type) if original is not None else None
+    )
+    if original is None or parsed_job_type not in retryable:
+        return JsonResponse({"ok": False, "error": "Job is not retryable"}, status=409)
+    payload = dict(original.payload) if isinstance(original.payload, dict) else {}
+    if not _retry_inputs_are_valid(profile_id, payload):
+        return JsonResponse(
+            {"ok": False, "error": "Retained processing input is unavailable"},
+            status=409,
+        )
+    download_id = payload.get("download_id")
+    if download_id:
+        downloads = Download.objects.filter(pk=download_id, profile_id=profile_id)
+        now = timezone.now()
+        if _retry_requires_censoring(parsed_job_type, payload):
+            downloads.update(
+                download_status=DownloadStatus.CENSORING,
+                last_seen_at=now,
+            )
+        elif parsed_job_type is JobType.GENERATE_TRANSCRIPT:
+            downloads.filter(download_status=DownloadStatus.CENSORING).update(
+                download_status=DownloadStatus.DOWNLOADED,
+                last_seen_at=now,
+            )
+    retry = create_job(
+        profile_id=profile_id,
+        job_type=original.job_type,
+        payload=payload,
+        idempotency_key=f"retry:{original.id}:{uuid.uuid4().hex}",
+    )
+    publish_job(
+        {
+            "job_id": retry.id,
+            "job_type": retry.job_type,
+            "profile_id": retry.profile_id,
+            "attempt": 1,
+        }
+    )
+    if request.POST.get("next"):
+        return _redirect_back(request)
+    return JsonResponse({"ok": True, "job_id": retry.id, "status": retry.status})
+
+
+def _retry_requires_censoring(job_type: JobType, payload: dict) -> bool:
+    if job_type is JobType.CENSOR_AUDIO:
+        return True
+    if job_type is JobType.GENERATE_TRANSCRIPT:
+        return bool(
+            payload.get("pre_transcode_payload")
+            or payload.get("post_download_censor")
+            or payload.get("censor_profanity")
+        )
+    if job_type is JobType.TRANSCODE_MEDIA:
+        policy = CensorPolicySnapshot.from_payload(payload.get("censor_policy"))
+        return bool(
+            payload.get("pre_transcode_censor")
+            or payload.get("replace_original_path")
+            or payload.get("censor_segments")
+            or payload.get("is_censored")
+            or (policy.enabled and payload.get("media_type") == "video")
+        )
+    return False
+
+
+def _retry_inputs_are_valid(profile_id: str, payload: dict) -> bool:
+    candidates: list[object] = []
+    pre_transcode = payload.get("pre_transcode_payload")
+    if isinstance(pre_transcode, dict):
+        source_paths = pre_transcode.get("source_file_paths")
+        if isinstance(source_paths, list):
+            candidates.extend(source_paths)
+        candidates.append(pre_transcode.get("source_file_path"))
+    source_paths = payload.get("source_file_paths")
+    if isinstance(source_paths, list):
+        candidates.extend(source_paths)
+    candidates.extend(
+        [
+            payload.get("source_file_path"),
+            payload.get("media_path"),
+            payload.get("deferred_media_path"),
+        ]
+    )
+    download_id = _optional_int(payload.get("download_id"))
+    if download_id:
+        download = Download.objects.filter(
+            pk=download_id, profile_id=profile_id
+        ).first()
+        if download is None:
+            return False
+        candidates.append(download.file_path)
+        try:
+            candidates.append(_resolve_profile_media_path(download))
+        except ValueError:
+            pass
+    root = _profile_output_root(profile_id).resolve()
+    for value in candidates:
+        if not value:
+            continue
+        path = Path(str(value)).expanduser().resolve()
+        if path.is_relative_to(root) and path.is_file():
+            return True
+    return False
+
+
 @login_required
 def transcript_search(request: HttpRequest) -> JsonResponse:
     profile_id = _profile_id(request)
@@ -1604,6 +1858,8 @@ def save_config(request: HttpRequest) -> HttpResponseRedirect:
             "manual_upload_delete_explicit_content",
             "manual_upload_censor_profanity",
             "manual_upload_keep_original",
+            "video_censor_enabled",
+            "video_censor_keep_original",
         }
         posted_config_keys = {
             key.removeprefix("config__")
@@ -1675,6 +1931,7 @@ def add_source(request: HttpRequest) -> HttpResponseRedirect:
         include_livestreams=form.include_livestreams,
         title_exclude=form.title_exclude,
         censor_profanity=form.censor_profanity,
+        censor_policy=form.censor_policy,
         censor_method=form.censor_method,
         keep_original=form.keep_original,
         updated_at=timezone.now(),
@@ -1867,6 +2124,17 @@ def batch_update(request: HttpRequest) -> HttpResponseRedirect:
             )
     elif action == "edit-metadata":
         return _redirect_back(request)
+    elif action == "censor":
+        for item in rows:
+            try:
+                _queue_download_censorship(profile_id, item.id)
+            except ValueError as exc:
+                log.warning(
+                    "Batch censor skipped profile_id=%s download_id=%s error=%s",
+                    profile_id,
+                    item.id,
+                    exc,
+                )
     elif action == "download":
         for item in rows:
             job = create_job(

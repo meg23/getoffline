@@ -106,6 +106,7 @@
               <option value="favorite">favorite</option>
               <option value="unfavorite">unfavorite</option>
               <option value="edit-metadata">edit</option>
+              <option value="censor">censor video</option>
               <option value="download">download</option>
               <option value="delete">delete</option>
               <option value="purge">purge</option>
@@ -163,6 +164,7 @@
                 data-title="{{ item.title|default:'' }}"
                 data-kind="{{ item.display_kind }}"
                 data-download-status="{{ item.download_status }}"
+                data-censored="{% if item.is_censored %}1{% else %}0{% endif %}"
                 data-media-url="{% url 'media' item.id %}"
                 data-subtitle-url="{% if item.has_subtitles %}{% url 'subtitle' item.id %}{% endif %}"
                 data-resume-seconds="{{ item.last_position_seconds|default:0 }}"
@@ -199,6 +201,7 @@
 
                 <td class="status-col" data-label="Status">
                   <span class="pill {{ item.status_class }}">{{ item.status_label }}</span>
+                  {% if item.is_censored %}<span class="pill">CENSORED</span>{% endif %}
                 </td>
 
                 <td class="selection-cell">

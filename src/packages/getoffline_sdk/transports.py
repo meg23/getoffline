@@ -23,6 +23,8 @@ _API_ROUTE_PATHS = {
     "api_dashboard_batch_update": "/api/dashboard/batch-update",
     "api_dashboard_transcript_search": "/api/dashboard/transcript-search",
     "api_dashboard_manual_upload": "/api/dashboard/manual-upload",
+    "api_censor_download": "/api/downloads/{0}/censor",
+    "api_retry_job": "/api/jobs/{0}/retry",
     "api_dashboard_edit_metadata": "/api/dashboard/edit-metadata",
     "api_dashboard_mark_played": "/api/dashboard/downloads/{0}/played",
     "api_dashboard_mark_unplayed": "/api/dashboard/downloads/{0}/unplayed",

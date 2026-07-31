@@ -21,13 +21,11 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseRedirect,
-    JsonResponse,
     StreamingHttpResponse,
 )
 from django.shortcuts import render
 from django.test import Client as DjangoClient
 from django.urls import reverse
-from django.views.decorators.csrf import csrf_exempt
 
 from packages.getoffline_sdk import DjangoTransport, GetOfflineClient, HttpTransport
 
@@ -472,79 +470,19 @@ def transcript_search(request: HttpRequest) -> HttpResponse:
 
 
 @frontend_login_required
-@csrf_exempt
 def manual_upload(request: HttpRequest) -> HttpResponse:
-    """Handle manual file uploads via drag-and-drop.
+    return _api_proxy(request, "api_dashboard_manual_upload")
 
-    Direct HTTP request to API endpoint instead of SDK proxy to properly handle
-    multipart file uploads (SDK transports don't handle FILES properly).
 
-    CSRF exempt because the request is forwarded to the API which validates its own tokens.
-    """
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error_message": "POST required"}, status=400)
+@frontend_login_required
+def censor_download(request: HttpRequest, download_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_censor_download", download_id)
 
-    try:
-        # Make direct HTTP request to API endpoint
-        import requests
-        from django.conf import settings
 
-        # Get the API URL from settings or default to localhost
-        api_base_url = getattr(settings, "GETOFFLINE_API_URL", "http://getoffline-api-1:8000")
-        api_url = f"{api_base_url}/api/dashboard/manual-upload"
+@frontend_login_required
+def retry_job(request: HttpRequest, job_id: int) -> HttpResponse:
+    return _api_proxy(request, "api_retry_job", job_id)
 
-        # Forward the request with files
-        try:
-            # Build files dict for requests library
-            files_dict = {}
-            for field_name in request.FILES:
-                for file_obj in request.FILES.getlist(field_name):
-                    files_dict[field_name] = file_obj
-
-            # Get CSRF token from POST data or X-CSRFToken header
-            csrf_token = request.POST.get('csrfmiddlewaretoken', '') or request.META.get('HTTP_X_CSRFTOKEN', '')
-            headers = {}
-            if csrf_token:
-                headers['X-CSRFToken'] = csrf_token
-
-            # Forward cookies for session/auth
-            cookies = request.COOKIES
-
-            log.info(
-                "manual_upload forwarding to API: files=%s csrf_token_present=%s",
-                len(files_dict),
-                bool(csrf_token),
-            )
-
-            # Make request to API
-            response = requests.post(
-                api_url,
-                files=files_dict,
-                headers=headers,
-                cookies=cookies,
-                timeout=30,
-            )
-
-            # Forward the API response
-            return HttpResponse(
-                response.content,
-                status=response.status_code,
-                content_type=response.headers.get('Content-Type', 'application/json'),
-            )
-        except requests.RequestException as e:
-            log.error("manual_upload API request failed: %s", str(e))
-            return JsonResponse(
-                {"ok": False, "error_message": f"Failed to reach API: {e!s}"},
-                status=500,
-            )
-    except Exception as e:  # noqa: BLE001
-        import traceback
-        error_detail = traceback.format_exc()
-        log.error(f"manual_upload exception: {error_detail}")
-        return JsonResponse(
-            {"ok": False, "error_message": f"Upload error: {e!s}", "trace": error_detail},
-            status=500,
-        )
 
 @frontend_login_required
 def edit_metadata(request: HttpRequest) -> HttpResponse:
