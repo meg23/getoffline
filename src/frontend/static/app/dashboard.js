@@ -679,7 +679,7 @@
       data: gridData(),
       index: "_key",
       layout: "fitColumns",
-      responsiveLayout: "collapse",
+      responsiveLayout: "hide",
       movableColumns: true,
       persistence: { columns: true, sort: true },
       persistenceID: "getoffline-library-grid-v1",
@@ -701,7 +701,7 @@
         node.dataset.resumeSeconds = String(item.last_position_seconds || 0);
       },
       columns: [
-        { title: "Channel", field: "source_name", widthGrow: 2 },
+        { title: "Channel", field: "source_name", widthGrow: 2, responsive: 2 },
         {
           title: "Episode",
           field: "title",
@@ -719,6 +719,7 @@
             text: (item) => String(item.source_type || "").toUpperCase(),
           },
           widthGrow: 1,
+          responsive: 3,
         },
         {
           title: "Type",
@@ -729,8 +730,9 @@
             text: (item) => item.display_type || "?",
           },
           widthGrow: 1,
+          responsive: 4,
         },
-        { title: "Size", field: "display_size", hozAlign: "right", widthGrow: 1 },
+        { title: "Size", field: "display_size", hozAlign: "right", widthGrow: 1, responsive: 5 },
         {
           title: "Status",
           field: "grid_status_label",
@@ -752,6 +754,7 @@
           width: 78,
           minWidth: 78,
           headerMenu: false,
+          responsive: 1,
         },
       ],
     });

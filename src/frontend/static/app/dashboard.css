@@ -378,9 +378,11 @@ table {
 }
 .table-card {
   overflow: visible;
+  width: 100%;
 }
 .downloads-grid {
   display: none;
+  width: 100%;
 }
 .downloads-grid.is-ready {
   display: block;
