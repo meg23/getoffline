@@ -1058,6 +1058,13 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn('href="{% url \'jobs\' %}"', library_template)
         self.assertIn('href="{% url \'library\' %}"', jobs_template)
 
+    def test_jobs_template_exposes_expandable_error_logs(self):
+        template = Path("src/frontend/templates/app/jobs.html").read_text()
+
+        self.assertIn('<details class="job-error">', template)
+        self.assertIn("<summary>Error log</summary>", template)
+        self.assertIn("<pre>{{ job.error_message }}</pre>", template)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 

@@ -33,7 +33,12 @@
               <div class="job-card-main">
                 <span class="job-id">#{{ job.id }}</span>
                 <strong>{{ job.job_type }}</strong>
-                {% if job.error_message %}<p class="job-error">{{ job.error_message }}</p>{% endif %}
+                {% if job.error_message %}
+                  <details class="job-error">
+                    <summary>Error log</summary>
+                    <pre>{{ job.error_message }}</pre>
+                  </details>
+                {% endif %}
               </div>
               <span class="row-status job-status job-status-{{ job.status|lower }}">{{ job.status }}</span>
             </li>
