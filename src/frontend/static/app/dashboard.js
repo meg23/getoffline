@@ -127,6 +127,7 @@
 
   let libraryRefreshInFlight = false;
   let lastLibrarySignature = null;
+  let latestProcessingItems = [];
 
   function downloadSignature(downloads) {
     return JSON.stringify(
@@ -173,6 +174,136 @@
       input.checked = selectedIds.has(String(input.value));
     });
     applyFilters();
+    renderProcessingItems(latestProcessingItems);
+  }
+
+  function clearProcessingRows() {
+    document
+      .querySelectorAll("#downloads-table-body tr[data-processing-placeholder]")
+      .forEach((row) => row.remove());
+    rows.forEach((row) => {
+      if (row.dataset.processingOverlay !== "1") return;
+      const pill = row.querySelector(".status-col .pill");
+      if (pill) {
+        pill.className = row.dataset.originalStatusClass || "pill status-unplayed";
+        pill.textContent = row.dataset.originalStatusText || "UNPLAYED";
+      }
+      delete row.dataset.processingOverlay;
+      delete row.dataset.originalStatusClass;
+      delete row.dataset.originalStatusText;
+    });
+  }
+
+  function processingItemKey(item) {
+    if (item.download_id) return `download:${item.download_id}`;
+    return `pending:${String(item.title || "").trim().toLowerCase()}:${String(
+      item.source_name || "",
+    )
+      .trim()
+      .toLowerCase()}`;
+  }
+
+  function processingItemsByMedia(items) {
+    const grouped = new Map();
+    items.forEach((item) => {
+      const key = processingItemKey(item);
+      const current = grouped.get(key);
+      if (!current || current.status === "queued" || item.status === "running") {
+        grouped.set(key, item);
+      }
+    });
+    return Array.from(grouped.values());
+  }
+
+  function matchingDownloadRow(item) {
+    if (item.download_id) {
+      const match = rows.find(
+        (row) => String(row.dataset.rowId) === String(item.download_id),
+      );
+      if (match) return match;
+    }
+    const title = String(item.title || "").trim().toLowerCase();
+    const source = String(item.source_name || "").trim().toLowerCase();
+    return rows.find(
+      (row) =>
+        String(row.dataset.title || "").trim().toLowerCase() === title &&
+        (!source ||
+          String(row.dataset.channel || "").trim().toLowerCase() === source),
+    );
+  }
+
+  function processingRowIsVisible(item) {
+    const mode = filterMode?.value || "unplayed";
+    if (!new Set(["all", "unplayed"]).has(mode)) return false;
+    const term = String(filterInput?.value || "").trim().toLowerCase();
+    const text = `${item.source_name || ""} ${item.title || ""}`.toLowerCase();
+    return !term || text.includes(term);
+  }
+
+  function processingPlaceholderRow(item) {
+    const row = document.createElement("tr");
+    row.className = "processing-row";
+    row.dataset.processingPlaceholder = "1";
+    row.dataset.processingKey = processingItemKey(item);
+    row.dataset.channel = item.source_name || "";
+    row.dataset.title = item.title || "";
+    if (!processingRowIsVisible(item)) row.style.display = "none";
+
+    const channel = renderCell(
+      row,
+      "channel-col",
+      item.source_name || "Pending metadata",
+    );
+    channel.title = item.source_name || "Pending metadata";
+
+    const title = renderCell(
+      row,
+      "episode-col processing-title",
+      item.title || "Preparing download",
+    );
+    title.title = item.title || "Preparing download";
+
+    const source = renderCell(row, "source-col", "");
+    const sourcePill = document.createElement("span");
+    sourcePill.className = "pill status-new";
+    sourcePill.textContent = String(item.source_type || "JOB").toUpperCase();
+    source.appendChild(sourcePill);
+
+    const type = renderCell(row, "type-col", "");
+    const typePill = document.createElement("span");
+    typePill.className = "pill";
+    typePill.textContent = String(item.media_type || "pending").toUpperCase();
+    type.appendChild(typePill);
+
+    renderCell(row, "size-col", "—");
+    const status = renderCell(row, "status-col", "");
+    const statusPill = document.createElement("span");
+    statusPill.className = `pill status-processing status-processing-${item.stage || "queued"}`;
+    statusPill.textContent = item.stage_label || "Queued";
+    status.appendChild(statusPill);
+    renderCell(row, "selection-cell", "—");
+    return row;
+  }
+
+  function renderProcessingItems(items) {
+    if (!tableBody) return;
+    clearProcessingRows();
+    processingItemsByMedia(items).forEach((item) => {
+      const row = matchingDownloadRow(item);
+      if (!row) {
+        tableBody.prepend(processingPlaceholderRow(item));
+        return;
+      }
+      const pill = row.querySelector(".status-col .pill");
+      if (!pill) return;
+      if (row.dataset.processingOverlay !== "1") {
+        row.dataset.processingOverlay = "1";
+        row.dataset.originalStatusClass = pill.className;
+        row.dataset.originalStatusText = pill.textContent || "";
+      }
+      pill.className = `pill status-processing status-processing-${item.stage || "queued"}`;
+      pill.textContent = item.stage_label || "Queued";
+    });
   }
 
   async function refreshLibraryFromApi(force = false) {
@@ -224,6 +355,14 @@
         (!unavailable && mode === "unplayed" && !played);
       row.style.display = matchesText && matchesMode ? "" : "none";
     });
+    document
+      .querySelectorAll("#downloads-table-body tr[data-processing-placeholder]")
+      .forEach((row) => {
+        const text =
+          `${row.dataset.channel || ""} ${row.dataset.title || ""}`.toLowerCase();
+        const matchesMode = mode === "all" || mode === "unplayed";
+        row.style.display = matchesMode && (!term || text.includes(term)) ? "" : "none";
+      });
     updateBatchState();
   }
 
@@ -324,7 +463,14 @@
   });
 
   window.addEventListener("getoffline:library-refresh", (event) => {
-    refreshLibraryFromApi(Boolean(event.detail?.force)).catch(() => {});
+    const processingItems = Array.isArray(event.detail?.processingItems)
+      ? event.detail.processingItems
+      : [];
+    latestProcessingItems = processingItems;
+    renderProcessingItems(processingItems);
+    refreshLibraryFromApi(Boolean(event.detail?.force))
+      .then(() => renderProcessingItems(processingItems))
+      .catch(() => {});
   });
   refreshLibraryFromApi().finally(applyFilters);
 })();
@@ -1016,7 +1162,7 @@
       render(items);
       window.dispatchEvent(
         new CustomEvent("getoffline:library-refresh", {
-          detail: { force: jobFinished },
+          detail: { force: jobFinished, processingItems: items },
         }),
       );
       previousJobIds = currentJobIds;

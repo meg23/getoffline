@@ -1103,8 +1103,15 @@ class SharedDjangoModelTests(TestCase):
 
         self.assertIn('new CustomEvent("getoffline:library-refresh"', script)
         self.assertIn('window.addEventListener("getoffline:library-refresh"', script)
-        self.assertIn("detail: { force: jobFinished }", script)
+        self.assertIn("detail: { force: jobFinished, processingItems: items }", script)
         self.assertIn("downloadSignature(downloads)", script)
+
+    def test_dashboard_renders_processing_jobs_as_library_rows(self):
+        script = Path("src/frontend/static/app/dashboard.js").read_text()
+
+        self.assertIn("function processingPlaceholderRow(item)", script)
+        self.assertIn("function matchingDownloadRow(item)", script)
+        self.assertIn("renderProcessingItems(processingItems)", script)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()

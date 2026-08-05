@@ -476,11 +476,19 @@ def _job_display_title(job: Job) -> str:
         value = str(payload.get(key) or "").strip()
         if value:
             return value
+    for key in ("download_defaults", "deferred_download_defaults"):
+        defaults = payload.get(key)
+        if isinstance(defaults, dict):
+            value = str(defaults.get("title") or "").strip()
+            if value:
+                return value
     return job.job_type.replace("_", " ").title()
 
 
 def _job_stage(job: Job) -> JobStage:
     payload = job.payload if isinstance(job.payload, dict) else {}
+    if parse_str_enum(JobStatus, job.status) is JobStatus.QUEUED:
+        return JobStage("queued", "Queued")
     active_stage = str(payload.get("active_stage") or "").strip()
     if active_stage == "downloading":
         return JobStage("downloading", "Downloading")
@@ -492,9 +500,52 @@ def _job_stage(job: Job) -> JobStage:
         return JobStage("downloading", "Downloading")
     if job.job_type == "generate_ocr":
         return JobStage("pdf_ocr", "PDF OCR")
-    if job.job_type in {"generate_transcript", "transcode_media"}:
-        return JobStage("transcript_generation", "Transcript generation")
+    if job.job_type == "transcode_media":
+        return JobStage("transcoding", "Transcoding")
+    if job.job_type == "generate_transcript":
+        return JobStage("transcribing", "Transcribing")
     return JobStage("queued", job.job_type.replace("_", " ").title())
+
+
+def _job_download(job: Job) -> Download | None:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    download_id = _optional_int(payload.get("download_id"))
+    if not download_id:
+        return None
+    return Download.objects.filter(pk=download_id, profile_id=job.profile_id).first()
+
+
+def _job_source_details(
+    job: Job, download: Download | None
+) -> tuple[str, str, str]:
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    if download is not None:
+        media_type = str(payload.get("media_type") or "").strip().lower()
+        if media_type not in {"audio", "video"}:
+            media_type = (
+                "video"
+                if str(download.file_ext or "").strip().lower()
+                in {"mp4", "mkv", "webm", "mov"}
+                else "audio"
+            )
+        return (
+            str(download.source_name or ""),
+            str(download.source_type or ""),
+            media_type,
+        )
+    for key in ("download_lookup", "deferred_download_lookup"):
+        lookup = payload.get(key)
+        if isinstance(lookup, dict):
+            return (
+                str(lookup.get("source_name") or payload.get("source_name") or ""),
+                str(lookup.get("source_type") or payload.get("source_type") or ""),
+                str(payload.get("media_type") or ""),
+            )
+    return (
+        str(payload.get("source_name") or ""),
+        str(payload.get("source_type") or ""),
+        str(payload.get("media_type") or ""),
+    )
 
 
 def _active_pipeline_cutoff():
@@ -555,23 +606,32 @@ def _active_pipeline_items(profile_id: str) -> list[dict[str, object]]:
                 "generate_ocr",
                 "transcode_media",
             ],
-            status=JobStatus.RUNNING,
-        ).order_by("started_at", "created_at", "id")[:40]
+            status__in=[JobStatus.QUEUED, JobStatus.RUNNING],
+        ).order_by("created_at", "id")[:80]
     )
     active_jobs = [
         job for job in jobs if _job_is_fresh(job) and _job_still_needs_work(job)
     ][:20]
-    return [
-        {
-            "id": job.id,
-            "title": _job_display_title(job),
-            "status": job.status,
-            "stage": _job_stage(job).name,
-            "stage_label": _job_stage(job).label,
-            "updated_at": job.updated_at.isoformat() if job.updated_at else "",
-        }
-        for job in active_jobs
-    ]
+    items = []
+    for job in active_jobs:
+        download = _job_download(job)
+        source_name, source_type, media_type = _job_source_details(job, download)
+        stage = _job_stage(job)
+        items.append(
+            {
+                "id": job.id,
+                "download_id": download.id if download is not None else None,
+                "title": _job_display_title(job),
+                "source_name": source_name,
+                "source_type": source_type,
+                "media_type": media_type,
+                "status": job.status,
+                "stage": stage.name,
+                "stage_label": stage.label,
+                "updated_at": job.updated_at.isoformat() if job.updated_at else "",
+            }
+        )
+    return items
 
 
 @login_required

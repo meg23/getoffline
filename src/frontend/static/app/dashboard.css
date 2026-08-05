@@ -459,6 +459,27 @@ tbody tr:nth-child(even) td {
   background: #fde7e9;
   color: #96253b;
 }
+.processing-row td {
+  background: #f7f9ff;
+  color: #52617d;
+}
+.processing-row .processing-title {
+  font-style: italic;
+}
+.status-processing {
+  background: #e2f3ff;
+  color: #114e78;
+}
+.status-processing-queued {
+  background: #eef3ff;
+  color: #405078;
+}
+.status-processing-transcoding,
+.status-processing-transcribing,
+.status-processing-transcript_generation {
+  background: #fff1cd;
+  color: #745200;
+}
 .selection-cell {
   text-align: right;
 }
