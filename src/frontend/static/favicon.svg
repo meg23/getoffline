@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Circle background -->
+  <circle cx="50" cy="50" r="45" fill="#0f1831" stroke="#e8efff" stroke-width="2"/>
+
+  <!-- Computer monitor -->
+  <rect x="20" y="25" width="60" height="40" rx="3" fill="none" stroke="#e8efff" stroke-width="2"/>
+  <rect x="30" y="30" width="40" height="30" fill="#1a2a4a"/>
+  <rect x="35" y="65" width="30" height="3" fill="#e8efff"/>
+
+  <!-- Diagonal slash through monitor -->
+  <line x1="15" y1="15" x2="85" y2="85" stroke="#ff4444" stroke-width="3" stroke-linecap="round"/>
+</svg>
