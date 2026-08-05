@@ -553,14 +553,14 @@ tbody tr:nth-child(even) td {
   position: fixed;
   inset: 0;
   display: none;
-  align-items: center;
-  justify-content: center;
   background: rgba(6, 10, 24, 0.62);
-  z-index: 30;
+  z-index: 1000;
   padding: 1rem;
 }
 .modal-backdrop.is-open {
   display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .modal {
   width: min(540px, 100%);

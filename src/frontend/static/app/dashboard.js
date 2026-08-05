@@ -1,4 +1,35 @@
 (() => {
+  function openModal(id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.add("is-open");
+      el.setAttribute("aria-hidden", "false");
+    }
+  }
+  function closeModals() {
+    document.querySelectorAll(".modal-backdrop").forEach((el) => {
+      el.classList.remove("is-open");
+      el.setAttribute("aria-hidden", "true");
+    });
+  }
+  document
+    .getElementById("quick-add-open")
+    ?.addEventListener("click", () => openModal("quick-add-backdrop"));
+  document
+    .getElementById("quick-add-open-hero")
+    ?.addEventListener("click", () => openModal("quick-add-backdrop"));
+  document
+    .getElementById("transcript-search-open")
+    ?.addEventListener("click", () => openModal("transcript-search-backdrop"));
+  document
+    .querySelectorAll("[data-modal-close]")
+    .forEach((button) => button.addEventListener("click", closeModals));
+  document.querySelectorAll(".modal-backdrop").forEach((backdrop) =>
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeModals();
+    }),
+  );
+
   const gridElement = document.getElementById("downloads-grid");
   if (gridElement && window.Tabulator) {
     initializeLibraryGrid(gridElement);
@@ -433,37 +464,6 @@
     });
     updateBatchState();
   });
-
-  function openModal(id) {
-    const el = document.getElementById(id);
-    if (el) {
-      el.classList.add("is-open");
-      el.setAttribute("aria-hidden", "false");
-    }
-  }
-  function closeModals() {
-    document.querySelectorAll(".modal-backdrop").forEach((el) => {
-      el.classList.remove("is-open");
-      el.setAttribute("aria-hidden", "true");
-    });
-  }
-  document
-    .getElementById("quick-add-open")
-    ?.addEventListener("click", () => openModal("quick-add-backdrop"));
-  document
-    .getElementById("quick-add-open-hero")
-    ?.addEventListener("click", () => openModal("quick-add-backdrop"));
-  document
-    .getElementById("transcript-search-open")
-    ?.addEventListener("click", () => openModal("transcript-search-backdrop"));
-  document
-    .querySelectorAll("[data-modal-close]")
-    .forEach((button) => button.addEventListener("click", closeModals));
-  document.querySelectorAll(".modal-backdrop").forEach((backdrop) =>
-    backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) closeModals();
-    }),
-  );
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeModals();
   });
