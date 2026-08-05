@@ -32,7 +32,13 @@ from workers.content_filter import (
     screen_transcript,
 )
 from workers.logger import get_logger
-from workers.media_fetch import ensure_local_media
+from workers.media_fetch import (
+    delete_worker_artifact,
+    ensure_local_job_media,
+    ensure_local_media,
+    upload_worker_artifact,
+    worker_cache_output_path,
+)
 from workers.pdf_ocr import PdfOcrPage, extract_pdf_pages, split_sentences
 from workers.subtitles import create_subtitles
 from workers.utils import sanitize_channel_name
@@ -656,6 +662,7 @@ def _postprocess_download_with_ffmpeg(
             .absolute()
         )
         source_paths = [source_path]
+    original_source_paths = list(source_paths)
     log.info(
         "FFmpeg worker post-processing loaded download parent_job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s db_size_bytes=%s status=%s",
         parent_job_id,
@@ -703,6 +710,7 @@ def _postprocess_download_with_ffmpeg(
         if payload.get("target_file_path")
         else _target_path(source_path, target_ext)
     )
+    canonical_target_path = target_path
     if download is not None:
         target_path = target_path.resolve()
     with _transcode_execution_lock(
@@ -736,13 +744,27 @@ def _postprocess_download_with_ffmpeg(
             )
             return download
         if missing_paths:
-            if download is not None:
-                source_paths = [
-                    ensure_local_media(download, path) if not path.is_file() else path
-                    for path in source_paths
-                ]
+            fetched_paths: list[Path] = []
+            for path in source_paths:
+                if path.is_file():
+                    fetched_paths.append(path)
+                elif download is not None:
+                    fetched_paths.append(ensure_local_media(download, path))
+                elif isinstance(parent_job_id, int):
+                    fetched_paths.append(
+                        ensure_local_job_media(profile_id, parent_job_id, path)
+                    )
+            if fetched_paths:
+                source_paths = fetched_paths
                 source_path = source_paths[0]
-                if not payload.get("target_file_path"):
+                if any(
+                    path != original_source_paths[index]
+                    for index, path in enumerate(source_paths)
+                ):
+                    target_path = worker_cache_output_path(
+                        profile_id, parent_job_id, canonical_target_path
+                    )
+                elif not payload.get("target_file_path"):
                     target_path = _target_path(source_path, target_ext)
                 missing_paths = [path for path in source_paths if not path.is_file()]
             if not missing_paths:
@@ -834,6 +856,25 @@ def _postprocess_download_with_ffmpeg(
             raise FileNotFoundError(
                 f"FFmpeg output file was not created: {target_path}"
             )
+        if target_path != canonical_target_path and isinstance(parent_job_id, int):
+            upload_worker_artifact(
+                profile_id,
+                target_path,
+                canonical_target_path,
+                download_id=download.id if download is not None else None,
+                job_id=parent_job_id if download is None else None,
+            )
+            for original_path, local_path in zip(
+                original_source_paths, source_paths, strict=True
+            ):
+                if original_path == local_path:
+                    continue
+                delete_worker_artifact(
+                    profile_id,
+                    original_path,
+                    download_id=download.id if download is not None else None,
+                    job_id=parent_job_id if download is None else None,
+                )
         old_path = source_path
         output_size = target_path.stat().st_size
         output_root = (
@@ -862,20 +903,22 @@ def _postprocess_download_with_ffmpeg(
                     "deferred_download_lookup": deferred_lookup,
                     "deferred_download_defaults": {
                         **deferred_defaults,
-                        "file_path": str(target_path),
+                        "file_path": str(canonical_target_path),
                         "file_path_relative": (
-                            str(target_path.relative_to(output_root))
-                            if target_path.is_relative_to(output_root)
+                            str(canonical_target_path.relative_to(output_root))
+                            if canonical_target_path.is_relative_to(output_root)
                             else None
                         ),
-                        "file_ext": target_path.suffix.lstrip("."),
+                        "file_ext": canonical_target_path.suffix.lstrip("."),
                         "file_size_bytes": output_size,
                         "download_status": DownloadStatus.DOWNLOADED,
                         "completed_at": timezone.now().isoformat(),
                         "last_seen_at": timezone.now().isoformat(),
                     },
-                    "deferred_media_path": str(target_path),
-                    "ffmpeg_source_file_paths": [str(path) for path in source_paths],
+                    "deferred_media_path": str(canonical_target_path),
+                    "ffmpeg_source_file_paths": [
+                        str(path) for path in original_source_paths
+                    ],
                     "subtitles": payload.get("subtitles", True),
                     "subtitle_offset_seconds": payload.get("subtitle_offset_seconds"),
                     "source_type": deferred_lookup.get("source_type"),
@@ -902,13 +945,13 @@ def _postprocess_download_with_ffmpeg(
             final_defaults = dict(deferred_defaults)
             final_defaults.update(
                 {
-                    "file_path": str(target_path),
+                    "file_path": str(canonical_target_path),
                     "file_path_relative": (
-                        str(target_path.relative_to(output_root))
-                        if target_path.is_relative_to(output_root)
+                        str(canonical_target_path.relative_to(output_root))
+                        if canonical_target_path.is_relative_to(output_root)
                         else None
                     ),
-                    "file_ext": target_path.suffix.lstrip("."),
+                    "file_ext": canonical_target_path.suffix.lstrip("."),
                     "file_size_bytes": output_size,
                     "download_status": DownloadStatus.DOWNLOADED,
                     "completed_at": timezone.now(),
@@ -919,13 +962,13 @@ def _postprocess_download_with_ffmpeg(
                 **deferred_lookup, defaults=final_defaults
             )
         else:
-            download.file_path = str(target_path)
+            download.file_path = str(canonical_target_path)
             download.file_path_relative = (
-                str(target_path.relative_to(output_root))
-                if target_path.is_relative_to(output_root)
+                str(canonical_target_path.relative_to(output_root))
+                if canonical_target_path.is_relative_to(output_root)
                 else None
             )
-            download.file_ext = target_path.suffix.lstrip(".")
+            download.file_ext = canonical_target_path.suffix.lstrip(".")
             download.file_size_bytes = output_size
             download.download_status = DownloadStatus.DOWNLOADED
             download.completed_at = timezone.now()
@@ -2295,6 +2338,9 @@ def _screen_deferred_video_before_insert(
     transcription_mode = _profile_setting(
         profile_id, "subtitle_transcription_mode", "in_process"
     )
+    canonical_media_path = Path(
+        str(download_defaults.get("file_path") or media_path)
+    ).expanduser().resolve()
     log.info(
         "Download worker profanity check generating transcript before database insert job_id=%s media_path=%s",
         job_id,
@@ -2311,6 +2357,8 @@ def _screen_deferred_video_before_insert(
     )
     if subtitle_path is None:
         deleted_paths = delete_media_artifacts(media_path)
+        if media_path.resolve() != canonical_media_path.resolve() and isinstance(job_id, int):
+            delete_worker_artifact(profile_id, canonical_media_path, job_id=job_id)
         log.warning(
             "Deleted video because transcript generation failed before profanity screening job_id=%s media_path=%s deleted_artifacts=%s",
             job_id,
@@ -2318,10 +2366,24 @@ def _screen_deferred_video_before_insert(
             ", ".join(str(path) for path in deleted_paths) or "none",
         )
         return None
+    canonical_subtitle_path = canonical_media_path.with_suffix(
+        Path(subtitle_path).suffix
+    )
+    if Path(subtitle_path).resolve() != canonical_subtitle_path.resolve() and isinstance(
+        job_id, int
+    ):
+        upload_worker_artifact(
+            profile_id,
+            Path(subtitle_path),
+            canonical_subtitle_path,
+            job_id=job_id,
+        )
     try:
         explicit_match = screen_transcript(Path(subtitle_path))
     except Exception as screening_exc:  # noqa: BLE001
         deleted_paths = delete_media_artifacts(media_path)
+        if media_path.resolve() != canonical_media_path.resolve() and isinstance(job_id, int):
+            delete_worker_artifact(profile_id, canonical_media_path, job_id=job_id)
         log.warning(
             "Deleted video because profanity screening failed before database insert job_id=%s media_path=%s error=%s deleted_artifacts=%s",
             job_id,
@@ -2332,6 +2394,11 @@ def _screen_deferred_video_before_insert(
         return None
     if explicit_match is not None:
         deleted_paths = delete_media_artifacts(media_path)
+        if media_path.resolve() != canonical_media_path.resolve() and isinstance(job_id, int):
+            delete_worker_artifact(profile_id, canonical_media_path, job_id=job_id)
+            delete_worker_artifact(
+                profile_id, canonical_subtitle_path, job_id=job_id
+            )
         filtered_defaults = dict(download_defaults)
         filtered_defaults.update(
             {
@@ -2366,10 +2433,10 @@ def _screen_deferred_video_before_insert(
         return None
     output_root = _download_output_root(profile_id)
     final_defaults = dict(download_defaults)
-    final_defaults["subtitle_path"] = str(subtitle_path)
+    final_defaults["subtitle_path"] = str(canonical_subtitle_path)
     final_defaults["subtitle_path_relative"] = (
-        str(Path(subtitle_path).relative_to(output_root))
-        if Path(subtitle_path).is_relative_to(output_root)
+        str(canonical_subtitle_path.relative_to(output_root))
+        if canonical_subtitle_path.is_relative_to(output_root)
         else None
     )
     download, _created = Download.objects.update_or_create(
@@ -2381,7 +2448,7 @@ def _screen_deferred_video_before_insert(
         [
             TranscriptSegment(
                 download=download,
-                subtitle_path=str(subtitle_path),
+                subtitle_path=str(canonical_subtitle_path),
                 start_seconds=0.0,
                 end_seconds=None,
                 text=text,
@@ -2418,6 +2485,8 @@ def _generate_deferred_transcript_screening(job: Job, payload: dict) -> None:
         )
         return
     media_path = Path(str(media_path_value)).expanduser().resolve()
+    if not media_path.is_file():
+        media_path = ensure_local_job_media(job.profile_id, job.id, media_path)
     source_paths_payload = (
         payload.get("ffmpeg_source_file_paths")
         if isinstance(payload.get("ffmpeg_source_file_paths"), list)
@@ -2490,6 +2559,7 @@ def generate_transcript(job: Job) -> None:
         title=str(download.title or "").strip(),
     )
     media_path = Path(str(download.file_path or "")).expanduser().resolve()
+    canonical_media_path = media_path
     if not media_path.is_file():
         media_path = ensure_local_media(download, media_path)
     log.info(
@@ -2549,11 +2619,21 @@ def generate_transcript(job: Job) -> None:
             time.monotonic() - subtitle_started_at,
         )
         if subtitle_path is not None:
+            canonical_subtitle_path = canonical_media_path.with_suffix(
+                Path(subtitle_path).suffix
+            )
+            if Path(subtitle_path).resolve() != canonical_subtitle_path.resolve():
+                upload_worker_artifact(
+                    job.profile_id,
+                    Path(subtitle_path),
+                    canonical_subtitle_path,
+                    download_id=download.id,
+                )
             output_root = _download_output_root(job.profile_id)
-            download.subtitle_path = str(subtitle_path)
+            download.subtitle_path = str(canonical_subtitle_path)
             download.subtitle_path_relative = (
-                str(subtitle_path.relative_to(output_root))
-                if subtitle_path.is_relative_to(output_root)
+                str(canonical_subtitle_path.relative_to(output_root))
+                if canonical_subtitle_path.is_relative_to(output_root)
                 else None
             )
             download.save(update_fields=["subtitle_path", "subtitle_path_relative"])
@@ -2564,7 +2644,7 @@ def generate_transcript(job: Job) -> None:
             created_segments = [
                 TranscriptSegment(
                     download=download,
-                    subtitle_path=str(subtitle_path),
+                    subtitle_path=str(canonical_subtitle_path),
                     start_seconds=0.0,
                     end_seconds=None,
                     text=text,
@@ -2606,6 +2686,17 @@ def generate_transcript(job: Job) -> None:
                     return
                 if explicit_match is not None:
                     deleted_paths = delete_media_artifacts(media_path)
+                    if media_path.resolve() != canonical_media_path.resolve():
+                        delete_worker_artifact(
+                            job.profile_id,
+                            canonical_media_path,
+                            download_id=download.id,
+                        )
+                        delete_worker_artifact(
+                            job.profile_id,
+                            canonical_media_path.with_suffix(".srt"),
+                            download_id=download.id,
+                        )
                     TranscriptSegment.objects.filter(download=download).delete()
                     download.download_status = DownloadStatus.FILTERED
                     download.last_seen_at = timezone.now()

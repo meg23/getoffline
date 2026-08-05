@@ -81,6 +81,65 @@ docker compose exec api python -m django create_user alice --password 'change-th
 
 Then sign in through the browser and add YouTube or podcast sources from **Settings**. Use **Update Downloads** to check sources immediately; scheduled updates run using the configured interval.
 
+## Docker Swarm deployment
+
+For a true two-node deployment with shared service DNS and cross-host
+replicas, use [`stacks/docker-stack.yml`](/Users/maxgelman/git/getoffline/stacks/docker-stack.yml)
+instead of the split Compose files above. The stack places the API, frontend,
+database, RabbitMQ, downloaders, scheduler, cleanup, and one copy of each
+heavy worker on the manager. Additional FFmpeg and transcript replicas run on
+the Windows node.
+
+Initialize Swarm on Debian and join the Windows Docker node using the command
+printed by `docker swarm join-token worker`:
+
+```bash
+docker swarm init --advertise-addr DEBIAN_IP
+docker swarm join-token worker
+docker node update --label-add role=manager-processing debian
+docker node update --label-add role=windows-processing WINDOWS_NODE_NAME
+```
+
+Set the stack variables in a protected env file on Debian:
+
+```dotenv
+GETOFFLINE_IMAGE_REGISTRY=192.168.1.10:5000
+GETOFFLINE_IMAGE_TAG=latest
+GETOFFLINE_DJANGO_SECRET_KEY=long-random-secret
+GETOFFLINE_WORKER_API_TOKEN=long-random-worker-token
+GETOFFLINE_DB_PASSWORD=strong-db-password
+GETOFFLINE_DB_ROOT_PASSWORD=strong-root-password
+GETOFFLINE_RABBITMQ_USER=getoffline-worker
+GETOFFLINE_RABBITMQ_PASSWORD=strong-rabbit-password
+GETOFFLINE_MANAGER_DOWNLOADS_DIR=/srv/getoffline/downloads
+GETOFFLINE_WINDOWS_FFMPEG_REPLICAS=3
+GETOFFLINE_WINDOWS_TRANSCRIPT_REPLICAS=3
+```
+
+Build and publish the images, then deploy the single stack from Debian:
+
+```bash
+GETOFFLINE_IMAGE_REGISTRY=192.168.1.10:5000 \
+GETOFFLINE_IMAGE_TAG=latest make registry-release
+docker stack deploy --compose-file stacks/docker-stack.yml getoffline
+docker stack services getoffline
+```
+
+Both Docker daemons must be able to pull from the registry. If it is an HTTP
+registry, configure it as an insecure registry on both nodes; TLS is preferred.
+Windows workers do not mount the manager's downloads directory. They fetch
+missing inputs through the authenticated API, process them in their local
+cache, and upload converted media and subtitles back to the manager API.
+
+The Swarm deployment uses separate named volumes by default:
+`getoffline_swarm_mysql-data`, `getoffline_swarm_rabbitmq-data`, and
+`getoffline_swarm_registry-data`. This prevents it from touching data created
+by the regular Compose deployment. To deliberately migrate or reuse existing
+data, set `GETOFFLINE_SWARM_MYSQL_VOLUME_NAME`,
+`GETOFFLINE_SWARM_RABBITMQ_VOLUME_NAME`, or
+`GETOFFLINE_SWARM_REGISTRY_VOLUME_NAME` to the intended existing volume name
+after taking a backup.
+
 ## Storage and configuration
 
 Downloaded media is stored in `./downloads` by default. To use another host directory, set `GETOFFLINE_DOWNLOADS_DIR` before starting Compose:

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from django.contrib.auth import authenticate
@@ -18,7 +20,9 @@ from django.http import (
 )
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from api.auth import api_login_required, worker_api_login_required
@@ -33,6 +37,7 @@ from api.services.library import (
     recent_jobs,
 )
 from api.services.profiles import profile_id_for_request
+from api.services.settings import profile_output_root
 from api.streaming.media import (
     media_response,
     resolve_media_path,
@@ -506,11 +511,121 @@ def stream(request: HttpRequest, episode_id: int) -> HttpResponse:
     return media_response(resolve_media_path(item), request.headers.get("Range", ""))
 
 
+@csrf_exempt
 @worker_api_login_required
-@require_GET
 def worker_media(
     request: HttpRequest, profile_id: str, episode_id: int
 ) -> HttpResponse:
     """Stream a profile-scoped artifact to a token-authenticated worker."""
+    if request.method not in {"GET", "POST", "DELETE"}:
+        return HttpResponse(status=405)
     item = get_object_or_404(Download, pk=episode_id, profile_id=profile_id)
+    if request.method == "POST":
+        return _receive_worker_artifact(request, profile_id, item.file_path)
+    if request.method == "DELETE":
+        return _delete_worker_artifact(request, profile_id, item.file_path)
     return media_response(resolve_media_path(item), request.headers.get("Range", ""))
+
+
+def _worker_output_path(profile_id: str, raw_path: str | None) -> Path:
+    if not raw_path:
+        raise ValueError("worker artifact path is required")
+    path = Path(raw_path).expanduser().resolve()
+    root = profile_output_root(profile_id)
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("worker artifact path is outside the profile output root") from exc
+    return path
+
+
+def _receive_worker_artifact(
+    request: HttpRequest, profile_id: str, default_path: str | None
+) -> JsonResponse:
+    raw_path = request.headers.get("X-GetOffline-Worker-Path") or default_path
+    try:
+        destination = _worker_output_path(profile_id, raw_path)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".part", dir=destination.parent
+    )
+    temporary_path = Path(temporary_name)
+    bytes_written = 0
+    try:
+        with os.fdopen(fd, "wb") as output:
+            while True:
+                chunk = request.read(1024 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+                bytes_written += len(chunk)
+        temporary_path.replace(destination)
+    except OSError:
+        temporary_path.unlink(missing_ok=True)
+        raise
+    return JsonResponse(
+        {
+            "ok": True,
+            "path": str(destination),
+            "bytes_written": bytes_written,
+            "uploaded_at": timezone.now().isoformat(),
+        }
+    )
+
+
+def _delete_worker_artifact(
+    request: HttpRequest, profile_id: str, default_path: str | None
+) -> JsonResponse:
+    raw_path = request.headers.get("X-GetOffline-Worker-Path") or default_path
+    try:
+        destination = _worker_output_path(profile_id, raw_path)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    destination.unlink(missing_ok=True)
+    return JsonResponse({"ok": True, "path": str(destination)})
+
+
+@csrf_exempt
+@worker_api_login_required
+def worker_job_media(
+    request: HttpRequest, profile_id: str, job_id: int
+) -> HttpResponse:
+    """Fetch or receive a deferred media artifact owned by a worker job."""
+    if request.method not in {"GET", "POST", "DELETE"}:
+        return HttpResponse(status=405)
+    job = get_object_or_404(Job, pk=job_id, profile_id=profile_id)
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    requested_path = request.GET.get("path") or request.headers.get(
+        "X-GetOffline-Worker-Path"
+    )
+    allowed_paths = {
+        str(payload.get(key))
+        for key in (
+            "source_file_path",
+            "target_file_path",
+            "deferred_media_path",
+        )
+        if payload.get(key)
+    }
+    for key in ("source_file_paths", "ffmpeg_source_file_paths"):
+        values = payload.get(key)
+        if isinstance(values, list):
+            allowed_paths.update(str(value) for value in values if value)
+    allowed_paths.update(
+        str(Path(path).with_suffix(".srt"))
+        for path in tuple(allowed_paths)
+        if Path(path).suffix.lower() not in {".srt", ".vtt"}
+    )
+    if requested_path not in allowed_paths:
+        return JsonResponse({"ok": False, "error": "artifact path is not part of the job"}, status=404)
+    try:
+        artifact_path = _worker_output_path(profile_id, requested_path)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    if request.method == "POST":
+        return _receive_worker_artifact(request, profile_id, str(artifact_path))
+    if request.method == "DELETE":
+        return _delete_worker_artifact(request, profile_id, str(artifact_path))
+    return media_response(artifact_path, request.headers.get("Range", ""))

@@ -123,5 +123,10 @@ urlpatterns = [
         views.worker_media,
         name="api_worker_media",
     ),
+    path(
+        "internal/worker/job-media/<str:profile_id>/<int:job_id>",
+        views.worker_job_media,
+        name="api_worker_job_media",
+    ),
     path("subtitle/<int:episode_id>", views.subtitle, name="api_subtitle"),
 ]
