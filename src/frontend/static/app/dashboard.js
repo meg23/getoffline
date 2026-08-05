@@ -718,6 +718,7 @@
             className: () => "status-new",
             text: (item) => String(item.source_type || "").toUpperCase(),
           },
+          widthGrow: 1,
         },
         {
           title: "Type",
@@ -727,8 +728,9 @@
             className: () => "",
             text: (item) => item.display_type || "?",
           },
+          widthGrow: 1,
         },
-        { title: "Size", field: "display_size", hozAlign: "right" },
+        { title: "Size", field: "display_size", hozAlign: "right", widthGrow: 1 },
         {
           title: "Status",
           field: "grid_status_label",
@@ -738,6 +740,7 @@
             text: (item) => item.grid_status_label,
           },
           responsive: 0,
+          widthGrow: 1,
         },
         {
           title: "",
