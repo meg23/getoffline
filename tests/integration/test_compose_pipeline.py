@@ -34,11 +34,14 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="getoffline-integration-") as tmp:
         downloads_dir = Path(tmp) / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
+        remote_worker_downloads_dir = Path(tmp) / "remote-worker-downloads"
+        remote_worker_downloads_dir.mkdir(parents=True, exist_ok=True)
         reserved_ports: set[int] = set()
         frontend_port = youtube._free_tcp_port(reserved_ports)
         api_port = youtube._free_tcp_port(reserved_ports)
         mysql_port = youtube._free_tcp_port(reserved_ports)
         rabbitmq_port = youtube._free_tcp_port(reserved_ports)
+        registry_port = youtube._free_tcp_port(reserved_ports)
         project = f"getoffline-it-{uuid.uuid4().hex[:8]}"
         compose_env = os.environ.copy()
         compose_env.update(
@@ -50,6 +53,11 @@ def main() -> int:
                 "GETOFFLINE_API_PUBLISHED_PORT": str(api_port),
                 "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
                 "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
+                "GETOFFLINE_REGISTRY_PUBLISHED_PORT": str(registry_port),
+                "GETOFFLINE_MYSQL_VOLUME_NAME": f"{project}_mysql-data",
+                "GETOFFLINE_RABBITMQ_VOLUME_NAME": f"{project}_rabbitmq-data",
+                "GETOFFLINE_REGISTRY_VOLUME_NAME": f"{project}_registry-data",
+                "GETOFFLINE_WORKER_API_TOKEN": "integration-worker-token",
                 "GETOFFLINE_DB_HOST": "mysql",
                 "GETOFFLINE_DB_PORT": "3306",
                 "GETOFFLINE_DB_NAME": "getoffline",
@@ -74,12 +82,14 @@ def main() -> int:
             }
         )
         log_stream = None
+        completed = False
         try:
             try:
                 youtube._run(
                     youtube._compose_up_command(compose),
                     env=compose_env,
                     timeout=1800,
+                    stream_output=True,
                 )
             except AssertionError:
                 youtube._run([*compose, "ps"], env=compose_env, timeout=60, check=False)
@@ -97,13 +107,24 @@ def main() -> int:
             youtube._django_setup(host_env)
             youtube._verify_profanity_model()
 
+            print("[integration-test] Starting podcast pipeline...", flush=True)
             podcast_job_id = podcast._queue_episode_check()
             podcast._wait_for_podcast_source(
                 podcast_job_id, deadline, downloads_dir, compose, compose_env
             )
 
+            print("[integration-test] Starting YouTube pipeline...", flush=True)
             youtube_job_id = youtube._queue_download_job()
             youtube._wait_for_pipeline(youtube_job_id, deadline, downloads_dir)
+            youtube._assert_worker_fetched_media_through_api(
+                compose,
+                compose_env,
+                Path(tmp) / "remote-worker-compose.yml",
+                remote_worker_downloads_dir,
+                youtube.PROFILE_ID,
+                youtube.ITEM_UID,
+            )
+            completed = True
         finally:
             youtube._stop_log_stream(log_stream)
             youtube._make_downloads_host_writable(compose, compose_env, force=True)
@@ -115,6 +136,10 @@ def main() -> int:
                     timeout=600,
                     check=False,
                 )
+        if completed:
+            youtube._log_check(
+                f"combined integration completed using {os.getenv('GETOFFLINE_COMPOSE_VARIANT', 'stacks')} compose"
+            )
     return 0
 
 

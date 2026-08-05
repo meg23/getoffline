@@ -118,5 +118,10 @@ urlpatterns = [
     path("user", views.user, name="api_user"),
     path("csrf", views.csrf, name="api_csrf"),
     path("stream/<int:episode_id>", views.stream, name="api_stream"),
+    path(
+        "internal/worker/media/<str:profile_id>/<int:episode_id>",
+        views.worker_media,
+        name="api_worker_media",
+    ),
     path("subtitle/<int:episode_id>", views.subtitle, name="api_subtitle"),
 ]

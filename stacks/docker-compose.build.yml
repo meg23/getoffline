@@ -1,0 +1,37 @@
+services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/docker/frontend.Dockerfile
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/docker/frontend.Dockerfile
+  worker-updates:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker-download.Dockerfile
+  worker-downloader-youtube:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker-download.Dockerfile
+  worker-downloader-podcast:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker-download.Dockerfile
+  worker-ffmpeg:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker-ffmpeg.Dockerfile
+  worker-transcripts:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker-transcripts.Dockerfile
+  scheduler:
+    build:
+      context: ..
+      dockerfile: deploy/docker/frontend.Dockerfile
+  worker-cleanup:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker-base.Dockerfile

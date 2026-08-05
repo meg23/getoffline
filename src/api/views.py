@@ -21,7 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
-from api.auth import api_login_required
+from api.auth import api_login_required, worker_api_login_required
 from api.playback.service import apply_update, build_update, start
 from api.services.library import (
     episode_to_summary,
@@ -503,4 +503,14 @@ def stream(request: HttpRequest, episode_id: int) -> HttpResponse:
     item = get_object_or_404(
         Download, pk=episode_id, profile_id=profile_id_for_request(request)
     )
+    return media_response(resolve_media_path(item), request.headers.get("Range", ""))
+
+
+@worker_api_login_required
+@require_GET
+def worker_media(
+    request: HttpRequest, profile_id: str, episode_id: int
+) -> HttpResponse:
+    """Stream a profile-scoped artifact to a token-authenticated worker."""
+    item = get_object_or_404(Download, pk=episode_id, profile_id=profile_id)
     return media_response(resolve_media_path(item), request.headers.get("Range", ""))

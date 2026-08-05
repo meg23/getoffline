@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=BB49x_uMlGA"
+ITEM_UID = "BB49x_uMlGA"
 PROFILE_ID = "integration"
 SOURCE_NAME = "Integration YouTube Runtime"
 DEFAULT_TIMEOUT_SECONDS = 1800
@@ -51,8 +52,22 @@ def _run(
     env: dict[str, str],
     timeout: int = 300,
     check: bool = True,
+    stream_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     print(f"+ {' '.join(cmd)}", flush=True)
+    if stream_output:
+        completed = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            env=env,
+            timeout=timeout,
+            check=False,
+        )
+        if check and completed.returncode != 0:
+            raise AssertionError(
+                f"command failed with exit code {completed.returncode}: {' '.join(cmd)}"
+            )
+        return completed
     completed = subprocess.run(
         cmd,
         cwd=ROOT,
@@ -77,8 +92,16 @@ def _log_check(message: str) -> None:
 
 
 def _compose_up_command(compose: list[str]) -> list[str]:
-    cmd = [*compose, "up", "-d", "--build"]
-    for service in COMPOSE_SERVICES:
+    services = COMPOSE_SERVICES
+    if "stacks/docker-compose.yml" in compose:
+        services = ("registry", *services)
+    cmd = [
+        *compose,
+        "up",
+        "-d",
+        "--build",
+    ]
+    for service in services:
         cmd.extend(["--scale", f"{service}=1"])
     return cmd
 
@@ -90,6 +113,7 @@ def _start_log_stream(compose: list[str], env: dict[str, str]) -> subprocess.Pop
         cwd=ROOT,
         env=env,
         text=True,
+        stderr=subprocess.DEVNULL,
     )
 
 
@@ -104,6 +128,67 @@ def _stop_log_stream(process: subprocess.Popen[str] | None) -> None:
         process.wait(timeout=10)
 
 
+def _add_remote_worker_override(
+    compose: list[str], override_path: Path, empty_downloads_dir: Path
+) -> list[str]:
+    override_path.write_text(
+        "services:\n"
+        "  worker-transcripts:\n"
+        "    volumes:\n"
+        f'      - "{empty_downloads_dir}:/app/downloads"\n',
+        encoding="utf-8",
+    )
+    return [*compose, "-f", str(override_path)]
+
+
+def _assert_worker_fetched_media_through_api(
+    compose: list[str],
+    env: dict[str, str],
+    override_path: Path,
+    empty_downloads_dir: Path,
+    profile_id: str,
+    item_uid: str,
+) -> None:
+    remote_compose = _add_remote_worker_override(
+        compose, override_path, empty_downloads_dir
+    )
+    python_code = (
+        "import os; "
+        "os.environ['DJANGO_SETTINGS_MODULE']='frontend.settings'; "
+        "import django; django.setup(); "
+        "from models.models import Download; "
+        "from workers.media_fetch import ensure_local_media; "
+        f"download=Download.objects.get(profile_id={profile_id!r}, item_uid={item_uid!r}); "
+        "path=ensure_local_media(download); "
+        "assert path.is_file(); print('REMOTE_WORKER_FETCH_OK')"
+    )
+    result = _run(
+        [
+            *remote_compose,
+            "run",
+            "--rm",
+            "--no-deps",
+            "worker-transcripts",
+            "python",
+            "-c",
+            python_code,
+        ],
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    output = result.stdout or ""
+    if (
+        result.returncode != 0
+        or "Worker fetched media through API" not in output
+        or "REMOTE_WORKER_FETCH_OK" not in output
+    ):
+        raise AssertionError(
+            "transcript worker did not fetch media through the authenticated API"
+        )
+    _log_check("transcript worker fetched media through the authenticated API")
+
+
 def _compose_cmd() -> list[str]:
     if shutil.which("docker") is None:
         raise AssertionError("docker is required for integration-test")
@@ -115,11 +200,26 @@ def _compose_cmd() -> list[str]:
         text=True,
         check=False,
     )
+    variant = os.getenv("GETOFFLINE_COMPOSE_VARIANT", "stacks").lower()
+    if variant not in {"original", "stacks"}:
+        raise AssertionError(
+            "GETOFFLINE_COMPOSE_VARIANT must be 'original' or 'stacks'"
+        )
     if probe.returncode == 0:
-        return ["docker", "compose"]
-    if shutil.which("docker-compose"):
-        return ["docker-compose"]
-    raise AssertionError("docker compose v2 or docker-compose is required")
+        command = ["docker", "compose"]
+    elif shutil.which("docker-compose"):
+        command = ["docker-compose"]
+    else:
+        raise AssertionError("docker compose v2 or docker-compose is required")
+    if variant == "original":
+        return [*command, "-f", "docker-compose.yml"]
+    return [
+        *command,
+        "-f",
+        "stacks/docker-compose.yml",
+        "-f",
+        "stacks/docker-compose.build.yml",
+    ]
 
 
 def _django_setup(env: dict[str, str]) -> None:
@@ -216,7 +316,7 @@ def _queue_download_job() -> int:
             "source_type": SourceType.YOUTUBE,
             "source_name": source.name,
             "source_url": source.url,
-            "item_uid": "BB49x_uMlGA",
+                "item_uid": ITEM_UID,
             "item_url": YOUTUBE_URL,
             "media_url": YOUTUBE_URL,
             "url": YOUTUBE_URL,
@@ -405,6 +505,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="getoffline-integration-") as tmp:
         downloads_dir = Path(tmp) / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
+        remote_worker_downloads_dir = Path(tmp) / "remote-worker-downloads"
+        remote_worker_downloads_dir.mkdir(parents=True, exist_ok=True)
         reserved_ports: set[int] = set()
         frontend_port = _free_tcp_port(reserved_ports)
         api_port = _free_tcp_port(reserved_ports)
@@ -421,6 +523,17 @@ def main() -> int:
                 "GETOFFLINE_API_PUBLISHED_PORT": str(api_port),
                 "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
                 "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
+                "GETOFFLINE_REGISTRY_PUBLISHED_PORT": str(
+                    _free_tcp_port(reserved_ports)
+                ),
+                # The runtime stack deliberately reuses stable named volumes,
+                # but an integration run must have its own database and broker
+                # state. Reusing the development MySQL volume can leave the
+                # test container blocked on InnoDB's ibdata1 lock.
+                "GETOFFLINE_MYSQL_VOLUME_NAME": f"{project}_mysql-data",
+                "GETOFFLINE_RABBITMQ_VOLUME_NAME": f"{project}_rabbitmq-data",
+                "GETOFFLINE_REGISTRY_VOLUME_NAME": f"{project}_registry-data",
+                "GETOFFLINE_WORKER_API_TOKEN": "integration-worker-token",
                 "GETOFFLINE_DB_HOST": "mysql",
                 "GETOFFLINE_DB_PORT": "3306",
                 "GETOFFLINE_DB_NAME": "getoffline",
@@ -445,9 +558,15 @@ def main() -> int:
             }
         )
         log_stream = None
+        completed = False
         try:
             try:
-                _run(_compose_up_command(compose), env=compose_env, timeout=1800)
+                _run(
+                    _compose_up_command(compose),
+                    env=compose_env,
+                    timeout=1800,
+                    stream_output=True,
+                )
             except AssertionError:
                 _run([*compose, "ps"], env=compose_env, timeout=60, check=False)
                 _run(
@@ -465,6 +584,15 @@ def main() -> int:
             _verify_profanity_model()
             job_id = _queue_download_job()
             _wait_for_pipeline(job_id, deadline, downloads_dir)
+            _assert_worker_fetched_media_through_api(
+                compose,
+                compose_env,
+                Path(tmp) / "remote-worker-compose.yml",
+                remote_worker_downloads_dir,
+                PROFILE_ID,
+                ITEM_UID,
+            )
+            completed = True
         finally:
             _stop_log_stream(log_stream)
             _make_downloads_host_writable(compose, compose_env, force=True)
@@ -476,6 +604,10 @@ def main() -> int:
                     timeout=600,
                     check=False,
                 )
+        if completed:
+            _log_check(
+                f"YouTube integration completed using {os.getenv('GETOFFLINE_COMPOSE_VARIANT', 'stacks')} compose"
+            )
     return 0
 
 

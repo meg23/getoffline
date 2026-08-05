@@ -15,7 +15,7 @@ django.setup()
 from django.apps import apps
 from django.contrib.auth.models import User
 from django.db import connection
-from django.test import Client
+from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -46,6 +46,40 @@ class BackendApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ok": True, "service": "api"})
+
+    @override_settings(WORKER_API_TOKEN="worker-test-token")
+    def test_worker_media_endpoint_requires_token_and_profile_scope(self):
+        media_path = self._temporary_media_file(b"worker-media")
+        download = Download.objects.create(
+            profile_id="api-user",
+            item_uid="worker-media",
+            source_type="manual",
+            source_name="Manual Uploads",
+            title="Worker Media",
+            file_path=str(media_path),
+            file_size_bytes=len(b"worker-media"),
+            file_ext="mp3",
+            download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+        url = reverse("api_worker_media", args=["api-user", download.id])
+        self.assertEqual(Client().get(url).status_code, 401)
+        response = Client().get(
+            url, HTTP_X_GETOFFLINE_WORKER_TOKEN="worker-test-token"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"worker-media")
+
+    def _temporary_media_file(self, contents: bytes):
+        import tempfile
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = os.path.join(directory.name, "worker.mp3")
+        with open(path, "wb") as handle:
+            handle.write(contents)
+        return path
 
     def test_library_returns_episode_json(self):
         Download.objects.create(

@@ -1,4 +1,4 @@
-.PHONY: test integration-test integration-test-youtube integration-test-podcast test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-wapiti test-wapiti-public test-wapiti-auth test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-cleanup run-scheduler
+.PHONY: test integration-test integration-test-youtube integration-test-podcast registry-up registry-build registry-push registry-release compose-build compose-up test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test-wapiti test-wapiti-public test-wapiti-auth test-coverage clean venv migrate-db collectstatic run-app run-app-debug run-worker-updates run-worker-downloader-youtube run-worker-downloader-podcast run-worker-transcripts run-worker-cleanup run-scheduler
 
 APP_NAME := GetOffline
 BUILD_DIR := target
@@ -30,6 +30,26 @@ WAPITI_AUTH_URL ?= $(WAPITI_FRONTEND_URL)/login/
 WAPITI_FORMAT ?= html
 WAPITI_STATE_DIR ?= $(WAPITI_REPORT_DIR)/.state
 WAPITI_OPTIONS ?= --no-bugreport --scope folder --flush-session --tasks 1 --depth 2 --timeout 10 --max-attack-time 5 --max-scan-time 120 --store-session $(WAPITI_STATE_DIR)/sessions --store-config $(WAPITI_STATE_DIR)/config
+COMPOSE_RUNTIME := docker compose -f stacks/docker-compose.yml
+COMPOSE_BUILD := $(COMPOSE_RUNTIME) -f stacks/docker-compose.build.yml
+APP_SERVICES := frontend api worker-updates worker-downloader-youtube worker-downloader-podcast worker-ffmpeg worker-transcripts scheduler worker-cleanup
+
+registry-up:
+	$(COMPOSE_RUNTIME) up -d registry
+
+registry-build: registry-up
+	$(COMPOSE_BUILD) build $(APP_SERVICES)
+
+registry-push: registry-build
+	$(COMPOSE_BUILD) push $(APP_SERVICES)
+
+registry-release: registry-push
+	@echo "Published GetOffline images to $${GETOFFLINE_IMAGE_REGISTRY:-localhost:5000} with tag $${GETOFFLINE_IMAGE_TAG:-latest}."
+
+compose-build: registry-release
+
+compose-up:
+	$(COMPOSE_RUNTIME) up -d
 TEST_ENV := PYTHONPATH=$(SRC_DIR) GETOFFLINE_DB_ENGINE=sqlite GETOFFLINE_DB_NAME=":memory:" GETOFFLINE_MODEL_CACHE_DIR=$(PWD)/.test-model-cache GETOFFLINE_LOG_FILE=$(PWD)/.test-model-cache/youtube_batch_dl.log
 PY_FILES := $(shell find src tests crons -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
 SOURCE_PY_FILES := $(shell find src crons -type f -name '*.py' -not -path '*/build/*' -not -path '*/__pycache__/*')
@@ -48,15 +68,18 @@ test: test-compile test-ruff test-mccabe test-mypy test-bandit test-vulture test
 
 integration-test: venv
 	@echo "Running combined Docker Compose integration test..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_compose_pipeline.py
+	GETOFFLINE_COMPOSE_VARIANT=original PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_compose_pipeline.py
+	GETOFFLINE_COMPOSE_VARIANT=stacks PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_compose_pipeline.py
 
 integration-test-youtube: venv
 	@echo "Running Docker Compose YouTube integration test..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_youtube_pipeline.py
+	GETOFFLINE_COMPOSE_VARIANT=original PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_youtube_pipeline.py
+	GETOFFLINE_COMPOSE_VARIANT=stacks PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_youtube_pipeline.py
 
 integration-test-podcast: venv
 	@echo "Running Docker Compose podcast integration test..."
-	PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_podcast_source_pipeline.py
+	GETOFFLINE_COMPOSE_VARIANT=original PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_podcast_source_pipeline.py
+	GETOFFLINE_COMPOSE_VARIANT=stacks PYTHONPATH=$(SRC_DIR) $(PYTHON) tests/integration/test_podcast_source_pipeline.py
 
 test-compile: venv
 	@echo "Compiling Python files..."
@@ -91,7 +114,7 @@ test-wapiti: test-wapiti-auth
 
 test-wapiti-public: venv
 	@echo "Starting frontend and API services for Wapiti..."
-	docker compose up -d --build --wait frontend api
+	$(COMPOSE_BUILD) up -d --build --wait frontend api
 	@mkdir -p $(WAPITI_REPORT_DIR) $(WAPITI_STATE_DIR)/sessions $(WAPITI_STATE_DIR)/config
 	@echo "Scanning frontend: $(WAPITI_FRONTEND_URL)"
 	$(WAPITI) -u "$(WAPITI_FRONTEND_URL)" $(WAPITI_OPTIONS) --format $(WAPITI_FORMAT) -o "$(WAPITI_REPORT_DIR)/frontend-public.$(WAPITI_FORMAT)"
@@ -101,7 +124,7 @@ test-wapiti-public: venv
 
 test-wapiti-auth: venv
 	@echo "Starting frontend and API services for authenticated Wapiti scan..."
-	docker compose up -d --build --wait frontend api
+	$(COMPOSE_BUILD) up -d --build --wait frontend api
 	@mkdir -p $(WAPITI_REPORT_DIR) $(WAPITI_STATE_DIR)/sessions $(WAPITI_STATE_DIR)/config
 	WAPITI_BIN="$(WAPITI)" \
 	REPORT_DIR="$(WAPITI_REPORT_DIR)" \
@@ -110,6 +133,7 @@ test-wapiti-auth: venv
 	AUTH_URL="$(WAPITI_AUTH_URL)" \
 	REPORT_FORMAT="$(WAPITI_FORMAT)" \
 	WAPITI_OPTIONS="$(WAPITI_OPTIONS)" \
+	COMPOSE_FILE="$(PWD)/stacks/docker-compose.yml:$(PWD)/stacks/docker-compose.build.yml" \
 	$(SHELL) scripts/wapiti-authenticated-scan.sh
 	@echo "Authenticated Wapiti reports written to $(WAPITI_REPORT_DIR)/"
 

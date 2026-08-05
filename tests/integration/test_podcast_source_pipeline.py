@@ -331,6 +331,7 @@ def main() -> int:
         api_port = pipeline._free_tcp_port(reserved_ports)
         mysql_port = pipeline._free_tcp_port(reserved_ports)
         rabbitmq_port = pipeline._free_tcp_port(reserved_ports)
+        registry_port = pipeline._free_tcp_port(reserved_ports)
         project = f"getoffline-podcast-it-{uuid.uuid4().hex[:8]}"
         compose_env = os.environ.copy()
         compose_env.update(
@@ -342,6 +343,10 @@ def main() -> int:
                 "GETOFFLINE_API_PUBLISHED_PORT": str(api_port),
                 "GETOFFLINE_DB_PUBLISHED_PORT": str(mysql_port),
                 "GETOFFLINE_RABBITMQ_PUBLISHED_PORT": str(rabbitmq_port),
+                "GETOFFLINE_REGISTRY_PUBLISHED_PORT": str(registry_port),
+                "GETOFFLINE_MYSQL_VOLUME_NAME": f"{project}_mysql-data",
+                "GETOFFLINE_RABBITMQ_VOLUME_NAME": f"{project}_rabbitmq-data",
+                "GETOFFLINE_REGISTRY_VOLUME_NAME": f"{project}_registry-data",
                 "GETOFFLINE_DB_HOST": "mysql",
                 "GETOFFLINE_DB_PORT": "3306",
                 "GETOFFLINE_DB_NAME": "getoffline",
@@ -368,7 +373,10 @@ def main() -> int:
         try:
             try:
                 pipeline._run(
-                    pipeline._compose_up_command(compose), env=compose_env, timeout=1800
+                    pipeline._compose_up_command(compose),
+                    env=compose_env,
+                    timeout=1800,
+                    stream_output=True,
                 )
             except AssertionError:
                 pipeline._run(
