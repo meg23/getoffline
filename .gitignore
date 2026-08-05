@@ -1,3 +1,54 @@
+# Environment and secrets
 .env
-doc
+.env.local
+.env.*.local
+
+# Virtual environments
 .venv
+venv/
+env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python caches and artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Test and coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.test-model-cache/
+target/
+
+# Generated documentation
+doc/
+
+# Local downloads and media
+downloads/
+
+# Docker and deployment
+mysql-data/
+rabbitmq-data/
+
+# Package build outputs
+src/packages/build/
+src/packages/dist/
+
+# VSCode workspace
+.vscode/
+*.code-workspace

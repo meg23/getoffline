@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM python:3.14-alpine AS wheels
+FROM python:3.12-alpine AS wheels
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -8,7 +8,7 @@ COPY deploy/requirements/frontend.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt
 
-FROM python:3.14-alpine AS static
+FROM python:3.12-alpine AS static
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,7 +26,7 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
 COPY src ./src
 RUN python -m django collectstatic --noinput
 
-FROM python:3.14-alpine
+FROM python:3.12-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
