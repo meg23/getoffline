@@ -604,8 +604,23 @@
     function pillFormatter(cell, formatterParams) {
       const data = cell.getRow().getData();
       const pill = document.createElement("span");
-      pill.className = `pill ${formatterParams.className(data)}`.trim();
-      pill.textContent = formatterParams.text(data);
+
+      // Defensive: handle missing formatterParams
+      if (!formatterParams || !formatterParams.className || !formatterParams.text) {
+        pill.className = "pill";
+        pill.textContent = String(cell.getValue() || "");
+        return pill;
+      }
+
+      const className = typeof formatterParams.className === 'function'
+        ? formatterParams.className(data)
+        : formatterParams.className;
+      const text = typeof formatterParams.text === 'function'
+        ? formatterParams.text(data)
+        : formatterParams.text;
+
+      pill.className = `pill ${className}`.trim();
+      pill.textContent = String(text || "");
       return pill;
     }
 
@@ -762,6 +777,12 @@
     fallbackTable?.classList.add("is-enhanced");
     element.classList.add("is-ready");
 
+    // Wait for table to be fully built before applying filters
+    grid.on("tableBuilt", () => {
+      applyFilters();
+      updateBatchState();
+    });
+
     function matchesFilters(item) {
       const term = String(filterInput?.value || "").trim().toLowerCase();
       const mode = filterMode?.value || "unplayed";
@@ -864,10 +885,8 @@
       Array.from(selectedIds).forEach((id) => {
         if (!validIds.has(id)) selectedIds.delete(id);
       });
-      return grid.replaceData(gridData()).then(() => {
-        applyFilters();
-        updateBatchState();
-      });
+      // Don't call applyFilters() here - the tableBuilt event listener will handle it
+      return grid.replaceData(gridData());
     }
 
     async function refreshLibraryFromApi(force = false) {
@@ -905,7 +924,7 @@
         .then(() => refreshLibraryFromApi(Boolean(event.detail?.force)))
         .catch(() => {});
     });
-    applyFilters();
+    // Don't call applyFilters() here - it will be called by the tableBuilt event listener
     refreshLibraryFromApi().catch(() => {});
   }
 })();
