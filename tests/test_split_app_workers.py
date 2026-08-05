@@ -1051,6 +1051,13 @@ class SharedDjangoModelTests(TestCase):
         batch_form = template.split('id="batch-form"', 1)[1]
         self.assertIn('name="next" value="{% url \'library\' %}"', batch_form)
 
+    def test_library_and_jobs_templates_link_to_each_other(self):
+        library_template = Path("src/frontend/templates/app/library.html").read_text()
+        jobs_template = Path("src/frontend/templates/app/jobs.html").read_text()
+
+        self.assertIn('href="{% url \'jobs\' %}"', library_template)
+        self.assertIn('href="{% url \'library\' %}"', jobs_template)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
