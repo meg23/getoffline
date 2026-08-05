@@ -125,22 +125,84 @@
     return row;
   }
 
-  async function hydrateEmptyLibraryFromApi() {
-    if (!tableBody || rows.length > 0) return;
+  let libraryRefreshInFlight = false;
+  let lastLibrarySignature = null;
+
+  function downloadSignature(downloads) {
+    return JSON.stringify(
+      downloads.map((item) => [
+        item.id,
+        item.title,
+        item.source_name,
+        item.download_status,
+        item.display_type,
+        item.display_size,
+        item.status_label,
+        item.status_class,
+        item.played,
+        item.favorite,
+        item.has_subtitles,
+      ]),
+    );
+  }
+
+  function rowIdSignature() {
+    return rows.map((row) => String(row.dataset.rowId || "")).join(",");
+  }
+
+  function renderDownloads(downloads) {
+    if (!tableBody) return;
+    const selectedIds = new Set(
+      selectors()
+        .filter((input) => input.checked)
+        .map((input) => String(input.value)),
+    );
+    if (downloads.length) {
+      tableBody.replaceChildren(...downloads.map(itemRow));
+    } else {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.className = "empty-state";
+      cell.textContent = "No media items found yet.";
+      row.appendChild(cell);
+      tableBody.replaceChildren(row);
+    }
+    refreshRows();
+    selectors().forEach((input) => {
+      input.checked = selectedIds.has(String(input.value));
+    });
+    applyFilters();
+  }
+
+  async function refreshLibraryFromApi(force = false) {
+    if (!tableBody || libraryRefreshInFlight) return;
+    libraryRefreshInFlight = true;
     const url = new URL("/api/frontend/library", window.location.origin);
     const mode = filterMode?.value || "unplayed";
     if (mode !== "unplayed") url.searchParams.set("filter", mode);
-    const response = await fetch(url, {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) return;
-    const payload = await response.json();
-    const downloads = Array.isArray(payload.downloads) ? payload.downloads : [];
-    if (!downloads.length) return;
-    tableBody.replaceChildren(...downloads.map(itemRow));
-    refreshRows();
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const downloads = Array.isArray(payload.downloads) ? payload.downloads : [];
+      const signature = downloadSignature(downloads);
+      if (lastLibrarySignature === null) {
+        const responseIds = downloads.map((item) => String(item.id || "")).join(",");
+        lastLibrarySignature = signature;
+        if (!force && responseIds === rowIdSignature()) return;
+      } else if (!force && signature === lastLibrarySignature) {
+        return;
+      }
+      lastLibrarySignature = signature;
+      renderDownloads(downloads);
+    } finally {
+      libraryRefreshInFlight = false;
+    }
   }
 
   function applyFilters() {
@@ -261,7 +323,10 @@
     if (event.key === "Escape") closeModals();
   });
 
-  hydrateEmptyLibraryFromApi().finally(applyFilters);
+  window.addEventListener("getoffline:library-refresh", (event) => {
+    refreshLibraryFromApi(Boolean(event.detail?.force)).catch(() => {});
+  });
+  refreshLibraryFromApi().finally(applyFilters);
 })();
 (() => {
   function readCookie(name) {
@@ -907,6 +972,7 @@
   if (!panel || !list) return;
   const statusUrl = panel.dataset.statusUrl;
   if (!statusUrl) return;
+  let previousJobIds = null;
 
   function formatItem(item) {
     const title = item.title || "Untitled download";
@@ -942,7 +1008,18 @@
       });
       if (!response.ok) throw new Error("Unable to fetch active jobs.");
       const payload = await response.json();
-      render(Array.isArray(payload.items) ? payload.items : []);
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const currentJobIds = new Set(items.map((item) => String(item.id)));
+      const jobFinished =
+        previousJobIds !== null &&
+        Array.from(previousJobIds).some((id) => !currentJobIds.has(id));
+      render(items);
+      window.dispatchEvent(
+        new CustomEvent("getoffline:library-refresh", {
+          detail: { force: jobFinished },
+        }),
+      );
+      previousJobIds = currentJobIds;
     } catch (_) {
       // Keep the last known state visible; polling will retry shortly.
     } finally {

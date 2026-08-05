@@ -1098,6 +1098,14 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("<summary>Error log</summary>", template)
         self.assertIn("<pre>{{ job.error_message }}</pre>", template)
 
+    def test_dashboard_refreshes_library_for_new_items_and_finished_jobs(self):
+        script = Path("src/frontend/static/app/dashboard.js").read_text()
+
+        self.assertIn('new CustomEvent("getoffline:library-refresh"', script)
+        self.assertIn('window.addEventListener("getoffline:library-refresh"', script)
+        self.assertIn("detail: { force: jobFinished }", script)
+        self.assertIn("downloadSignature(downloads)", script)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 
