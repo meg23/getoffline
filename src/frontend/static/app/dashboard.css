@@ -379,6 +379,58 @@ table {
 .table-card {
   overflow: visible;
 }
+.downloads-grid {
+  display: none;
+}
+.downloads-grid.is-ready {
+  display: block;
+}
+#downloads-fallback-table.is-enhanced {
+  display: none;
+}
+.downloads-grid.tabulator {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  overflow: hidden;
+}
+.downloads-grid .tabulator-header {
+  border-bottom: 1px solid var(--border);
+  background: #f3f6ff;
+  color: #405078;
+  font-weight: 800;
+}
+.downloads-grid .tabulator-header .tabulator-col,
+.downloads-grid .tabulator-row .tabulator-cell {
+  border-right: 1px solid #e2e8f7;
+  padding: 0.72rem 0.85rem;
+}
+.downloads-grid .tabulator-header .tabulator-col {
+  background: #f3f6ff;
+}
+.downloads-grid .tabulator-row {
+  min-height: 2.85rem;
+  border-bottom: 1px solid #e2e8f7;
+  background: #fff;
+}
+.downloads-grid .tabulator-row.tabulator-row-even {
+  background: #fbfcff;
+}
+.downloads-grid .tabulator-row.processing-row {
+  background: #f7f9ff;
+  color: #52617d;
+}
+.downloads-grid .tabulator-col-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.downloads-grid .tabulator-menu-item {
+  white-space: nowrap;
+}
 table {
   width: 100%;
   border-collapse: collapse;

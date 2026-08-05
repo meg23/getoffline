@@ -1113,6 +1113,19 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn("function matchingDownloadRow(item)", script)
         self.assertIn("renderProcessingItems(processingItems)", script)
 
+    def test_library_uses_vendored_tabulator_with_fallback_table(self):
+        template = Path("src/frontend/templates/app/library.html").read_text()
+        script = Path("src/frontend/static/app/dashboard.js").read_text()
+        documentation = Path("docs/frontend-data-grid.md").read_text()
+
+        self.assertIn("vendor/tabulator/tabulator.min.css", template)
+        self.assertIn("vendor/tabulator/tabulator.min.js", template)
+        self.assertIn('id="downloads-grid"', template)
+        self.assertIn('id="downloads-fallback-table"', template)
+        self.assertIn("initializeLibraryGrid", script)
+        self.assertIn('persistenceID: "getoffline-library-grid-v1"', script)
+        self.assertIn("Why Tabulator", documentation)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 

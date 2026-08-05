@@ -5,7 +5,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GetOffline Media Library</title>
+    <link rel="stylesheet" href="{% static 'vendor/tabulator/tabulator.min.css' %}" />
     <link rel="stylesheet" href="{% static 'app/dashboard.css' %}" />
+    <script src="{% static 'vendor/tabulator/tabulator.min.js' %}" defer></script>
     <script src="{% static 'app/dashboard.js' %}" defer></script>
   </head>
   <body>
@@ -128,7 +130,8 @@
       </section>
 
       <main class="table-card" aria-label="Media library">
-        <table>
+        <div id="downloads-grid" class="downloads-grid" aria-label="Media library grid"></div>
+        <table id="downloads-fallback-table">
           <colgroup>
             <col class="channel-col" />
             <col class="episode-col" />
