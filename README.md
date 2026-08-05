@@ -15,10 +15,61 @@ GetOffline is a self-hosted media library for saving YouTube videos and podcast 
 
 ## Start with Docker Compose
 
-Docker Compose starts the frontend, API, database, RabbitMQ, scheduler, and worker services. Set a secret key, then build and start the stack:
+The registry-backed deployment is defined separately under `stacks/`, so the
+normal root Compose file remains the local-build workflow. It starts the
+frontend, API, database, RabbitMQ, an in-cluster Docker Registry, the
+scheduler, and worker services. Set a secret key, publish the application
+images to the registry, then start the stack:
 
 ```bash
 export GETOFFLINE_DJANGO_SECRET_KEY="replace-with-a-long-random-secret"
+make registry-release
+make compose-up
+```
+
+The registry is available to the host Docker daemon at `localhost:5000` and
+stores its data in the `registry-data` volume. The application services pull
+their images from it using `GETOFFLINE_IMAGE_REGISTRY` and
+`GETOFFLINE_IMAGE_TAG`:
+
+```bash
+export GETOFFLINE_IMAGE_REGISTRY="localhost:5000"
+export GETOFFLINE_IMAGE_TAG="2026-07-31"
+make registry-release
+make compose-up
+```
+
+For a private network or remote Docker host, set `GETOFFLINE_IMAGE_REGISTRY`
+to the registry address reachable by that host's Docker daemon. The registry
+must be configured for TLS/authentication before exposing it beyond a trusted
+local network; the bundled registry is intentionally a simple internal
+registry for the Compose cluster.
+
+The stack explicitly reuses the original `getoffline_mysql-data` and
+`getoffline_rabbitmq-data` volumes. If the original Compose project used a
+custom project name, set `GETOFFLINE_MYSQL_VOLUME_NAME` and
+`GETOFFLINE_RABBITMQ_VOLUME_NAME` to those existing Docker volume names.
+
+Workers keep using a mounted file when one is available. If a processing
+worker cannot see that path, configure the API and worker containers with the
+same strong secret and an API URL reachable by the worker:
+
+```bash
+export GETOFFLINE_WORKER_API_TOKEN="replace-with-a-long-random-worker-token"
+export GETOFFLINE_WORKER_API_URL="http://api:8000/api"
+```
+
+The worker then fetches the profile-scoped media artifact from the internal
+authenticated API endpoint and stores it in its local cache at
+`/tmp/getoffline-worker-media` (configurable with
+`GETOFFLINE_WORKER_MEDIA_CACHE_DIR`). The download is written to a temporary
+file and atomically renamed after its size is verified. Keep this endpoint on a
+trusted network and do not expose the worker token to browsers.
+
+For local development and integration tests, use the root Compose file as
+before:
+
+```bash
 docker compose up --build -d
 ```
 

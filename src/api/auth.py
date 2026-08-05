@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import secrets
 from collections.abc import Callable
 from functools import wraps
 from typing import TypeVar, cast
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
@@ -82,3 +84,19 @@ def api_login_required(view_func: ViewFunc) -> ViewFunc:
         return view_func(request, *args, **kwargs)
 
     return cast(ViewFunc, csrf_exempt(wrapper))
+
+
+def worker_api_login_required(view_func: ViewFunc) -> ViewFunc:
+    """Authenticate internal worker media requests with a shared secret."""
+
+    @wraps(view_func)
+    def wrapper(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
+        configured_token = str(getattr(settings, "WORKER_API_TOKEN", "") or "")
+        supplied_token = str(request.headers.get("X-GetOffline-Worker-Token", ""))
+        if not configured_token or not secrets.compare_digest(
+            supplied_token, configured_token
+        ):
+            return _json_unauthorized()
+        return view_func(request, *args, **kwargs)
+
+    return cast(ViewFunc, wrapper)

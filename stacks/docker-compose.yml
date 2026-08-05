@@ -32,8 +32,25 @@ x-worker-env: &worker-env
   GETOFFLINE_WORKER_API_URL: ${GETOFFLINE_WORKER_API_URL:-http://api:8000/api}
   GETOFFLINE_WORKER_API_TOKEN: ${GETOFFLINE_WORKER_API_TOKEN:-}
   GETOFFLINE_WORKER_MEDIA_CACHE_DIR: ${GETOFFLINE_WORKER_MEDIA_CACHE_DIR:-/tmp/getoffline-worker-media}
+  # Keep workers connected long enough to drain normal queues. The application
+  # default is intentionally small for one-shot test workers.
+  GETOFFLINE_WORKER_MAX_MESSAGES: ${GETOFFLINE_WORKER_MAX_MESSAGES:-1000}
+
+x-app-image: &app-image "${GETOFFLINE_IMAGE_REGISTRY:-localhost:5000}/getoffline/app:${GETOFFLINE_IMAGE_TAG:-latest}"
+x-download-worker-image: &download-worker-image "${GETOFFLINE_IMAGE_REGISTRY:-localhost:5000}/getoffline/worker-download:${GETOFFLINE_IMAGE_TAG:-latest}"
+x-ffmpeg-worker-image: &ffmpeg-worker-image "${GETOFFLINE_IMAGE_REGISTRY:-localhost:5000}/getoffline/worker-ffmpeg:${GETOFFLINE_IMAGE_TAG:-latest}"
+x-transcript-worker-image: &transcript-worker-image "${GETOFFLINE_IMAGE_REGISTRY:-localhost:5000}/getoffline/worker-transcripts:${GETOFFLINE_IMAGE_TAG:-latest}"
+x-base-worker-image: &base-worker-image "${GETOFFLINE_IMAGE_REGISTRY:-localhost:5000}/getoffline/worker-base:${GETOFFLINE_IMAGE_TAG:-latest}"
 
 services:
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    ports:
+      - "${GETOFFLINE_REGISTRY_PUBLISHED_PORT:-5000}:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+
   rabbitmq:
     image: rabbitmq:3.13
     restart: unless-stopped
@@ -66,9 +83,7 @@ services:
       retries: 20
 
   frontend:
-    build:
-      context: .
-      dockerfile: deploy/docker/frontend.Dockerfile
+    image: *app-image
     restart: unless-stopped
     environment: *frontend-env
     ports:
@@ -83,9 +98,7 @@ services:
         condition: service_healthy
 
   api:
-    build:
-      context: .
-      dockerfile: deploy/docker/frontend.Dockerfile
+    image: *app-image
     restart: unless-stopped
     environment: *api-env
     command: api-entrypoint.sh
@@ -105,13 +118,11 @@ services:
         condition: service_healthy
 
   worker-updates:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-download.Dockerfile
+    image: *download-worker-image
     restart: unless-stopped
     environment: *worker-env
     command: python -m workers updates
-    depends_on:
+    depends_on: &worker-depends-on
       mysql:
         condition: service_healthy
       rabbitmq:
@@ -120,9 +131,7 @@ services:
         condition: service_healthy
 
   worker-downloader-youtube:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-download.Dockerfile
+    image: *download-worker-image
     restart: unless-stopped
     cpus: 1.5
     environment: *worker-env
@@ -131,18 +140,10 @@ services:
       replicas: 2
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+    depends_on: *worker-depends-on
 
   worker-downloader-podcast:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-download.Dockerfile
+    image: *download-worker-image
     restart: unless-stopped
     environment: *worker-env
     command: python -m workers downloader-podcast
@@ -150,18 +151,10 @@ services:
       replicas: 2
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+    depends_on: *worker-depends-on
 
   worker-ffmpeg:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-ffmpeg.Dockerfile
+    image: *ffmpeg-worker-image
     restart: unless-stopped
     cpus: 1.0
     environment: *worker-env
@@ -170,18 +163,10 @@ services:
       replicas: 3
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+    depends_on: *worker-depends-on
 
   worker-transcripts:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-transcripts.Dockerfile
+    image: *transcript-worker-image
     restart: unless-stopped
     cpus: 1.0
     environment: *worker-env
@@ -190,46 +175,28 @@ services:
       replicas: 3
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+    depends_on: *worker-depends-on
 
   scheduler:
-    build:
-      context: .
-      dockerfile: deploy/docker/frontend.Dockerfile
+    image: *app-image
     restart: unless-stopped
     environment: *worker-env
     command: python -m django run_scheduler --loop --install-defaults
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+    depends_on: *worker-depends-on
 
   worker-cleanup:
-    build:
-      context: .
-      dockerfile: deploy/docker/worker-base.Dockerfile
+    image: *base-worker-image
     restart: unless-stopped
     environment: *worker-env
     command: python -m workers cleanup
     volumes:
       - ${GETOFFLINE_DOWNLOADS_DIR:-./downloads}:/app/downloads
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+    depends_on: *worker-depends-on
 
 volumes:
   mysql-data:
+    name: ${GETOFFLINE_MYSQL_VOLUME_NAME:-getoffline_mysql-data}
   rabbitmq-data:
+    name: ${GETOFFLINE_RABBITMQ_VOLUME_NAME:-getoffline_rabbitmq-data}
+  registry-data:
+    name: ${GETOFFLINE_REGISTRY_VOLUME_NAME:-getoffline_registry-data}

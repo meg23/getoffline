@@ -32,6 +32,7 @@ from workers.content_filter import (
     screen_transcript,
 )
 from workers.logger import get_logger
+from workers.media_fetch import ensure_local_media
 from workers.pdf_ocr import PdfOcrPage, extract_pdf_pages, split_sentences
 from workers.subtitles import create_subtitles
 from workers.utils import sanitize_channel_name
@@ -734,6 +735,23 @@ def _postprocess_download_with_ffmpeg(
                 missing_paths,
             )
             return download
+        if missing_paths:
+            if download is not None:
+                source_paths = [
+                    ensure_local_media(download, path) if not path.is_file() else path
+                    for path in source_paths
+                ]
+                source_path = source_paths[0]
+                if not payload.get("target_file_path"):
+                    target_path = _target_path(source_path, target_ext)
+                missing_paths = [path for path in source_paths if not path.is_file()]
+            if not missing_paths:
+                log.info(
+                    "FFmpeg worker fetched missing input through API job_id=%s download_id=%s paths=%s",
+                    parent_job_id,
+                    download.id if download is not None else "deferred",
+                    source_paths,
+                )
         if missing_paths:
             log.error(
                 "FFmpeg worker post-processing input file is missing parent_job_id=%s download_id=%s paths=%s",
@@ -2472,6 +2490,8 @@ def generate_transcript(job: Job) -> None:
         title=str(download.title or "").strip(),
     )
     media_path = Path(str(download.file_path or "")).expanduser().resolve()
+    if not media_path.is_file():
+        media_path = ensure_local_media(download, media_path)
     log.info(
         "Transcript worker loaded download job_id=%s download_id=%s title=%s source_type=%s source_name=%s file_path=%s file_ext=%s subtitle_path=%s status=%s size_bytes=%s last_seen_at=%s",
         job.id,
@@ -2651,6 +2671,17 @@ def ocr_pdf(job: Job) -> None:
         )
         return
     pdf_path = Path(str(download.file_path or "")).expanduser().resolve()
+    if not pdf_path.is_file():
+        try:
+            pdf_path = ensure_local_media(download, pdf_path)
+        except (FileNotFoundError, OSError) as exc:
+            log.warning(
+                "PDF OCR worker could not fetch missing file through API job_id=%s download_id=%s error=%s",
+                job.id,
+                download_id,
+                exc,
+            )
+            return
     if not pdf_path.is_file():
         log.warning(
             "PDF OCR worker skipped missing file job_id=%s download_id=%s path=%s",
