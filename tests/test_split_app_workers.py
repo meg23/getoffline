@@ -1051,6 +1051,39 @@ class SharedDjangoModelTests(TestCase):
         batch_form = template.split('id="batch-form"', 1)[1]
         self.assertIn('name="next" value="{% url \'library\' %}"', batch_form)
 
+    def test_quick_add_profanity_option_is_profile_defaulted(self):
+        ProfileConfigValue.objects.create(
+            profile_id="default",
+            key="manual_upload_delete_explicit_content",
+            value="1",
+        )
+
+        response = Client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'id="quick-add-profanity-filter" name="delete_explicit_content" '
+            'type="checkbox" value="1" checked',
+        )
+
+    def test_quick_add_profanity_option_is_copied_to_job_payload(self):
+        client = Client()
+
+        with patch("frontend.views.publish_job"):
+            response = client.post(
+                "/jobs/enqueue/",
+                {
+                    "job_type": "download_single",
+                    "url": "https://www.youtube.com/watch?v=profanity-option",
+                    "delete_explicit_content": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get(job_type="download_single")
+        self.assertTrue(job.payload["delete_explicit_content"])
+
     def test_library_and_jobs_templates_link_to_each_other(self):
         library_template = Path("src/frontend/templates/app/library.html").read_text()
         jobs_template = Path("src/frontend/templates/app/jobs.html").read_text()

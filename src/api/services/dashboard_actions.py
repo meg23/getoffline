@@ -1162,6 +1162,9 @@ def enqueue_job(request: HttpRequest) -> HttpResponse:
         payload["completion_token"] = completion_marker
     if job_type == "download_single":
         payload["manual_enqueue"] = True
+        payload["delete_explicit_content"] = _posted_bool(
+            request, "delete_explicit_content"
+        )
     if request.POST.get("url"):
         payload["url"] = str(request.POST["url"]).strip()
     default_idempotency = f"{job_type}:{profile_id}:{payload.get('url', 'manual')}"

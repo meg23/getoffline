@@ -509,6 +509,22 @@ tbody tr:nth-child(even) td {
   padding: 0.75rem 1rem;
   font: inherit;
 }
+.modal .quick-add-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  color: #263553;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.modal .quick-add-option input {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  margin: 0.18rem 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

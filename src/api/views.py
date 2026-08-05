@@ -33,6 +33,7 @@ from api.services.library import (
     recent_jobs,
 )
 from api.services.profiles import profile_id_for_request
+from api.services.settings import profile_settings
 from api.streaming.media import (
     media_response,
     resolve_media_path,
@@ -118,6 +119,7 @@ def _job_to_dict(job: Job) -> dict[str, object]:
 @require_GET
 def frontend_library(request: HttpRequest) -> JsonResponse:
     profile_id = profile_id_for_request(request)
+    settings = profile_settings(profile_id)
     filter_mode = normalize_library_filter(request.GET.get("filter"))
     episodes = list_downloads(profile_id, filter_mode=filter_mode)
     played_count = sum(1 for item in episodes if item.played)
@@ -130,6 +132,10 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "profile_initial": (profile_name[:1] or "U").upper(),
+            "manual_profanity_filter_checked": str(
+                settings.get("manual_upload_delete_explicit_content") or ""
+            ).strip().lower()
+            in {"1", "true", "yes", "on"},
             "library_filter_mode": filter_mode,
             "stats": {
                 "visible": len(episodes),

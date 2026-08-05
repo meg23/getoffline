@@ -229,6 +229,11 @@
           <input type="hidden" name="next" value="{% url 'library' %}" />
           <label for="quick-add-url">URL</label>
           <input id="quick-add-url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          <input type="hidden" name="delete_explicit_content" value="0" />
+          <label class="quick-add-option" for="quick-add-profanity-filter">
+            <input id="quick-add-profanity-filter" name="delete_explicit_content" type="checkbox" value="1" {% if manual_profanity_filter_checked %}checked{% endif %} />
+            Delete download if its transcript contains profanity
+          </label>
           <div class="modal-actions">
             <button type="button" data-modal-close>Cancel</button>
             <button name="job_type" value="download_single" type="submit">Queue download</button>
