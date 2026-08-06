@@ -31,7 +31,12 @@
   );
 
   const gridElement = document.getElementById("downloads-grid");
-  if (gridElement && window.Tabulator) {
+  // Only use Tabulator on viewports wide enough for the table layout; fall back to card layout on mobile.
+  if (
+    gridElement &&
+    window.Tabulator &&
+    window.matchMedia("(min-width: 981px)").matches
+  ) {
     initializeLibraryGrid(gridElement);
     return;
   }
@@ -761,6 +766,7 @@
           widthGrow: 5,
           minWidth: 220,
           responsive: 0,
+          variableHeight: true,
         },
         {
           title: "Source",
@@ -1467,14 +1473,12 @@
     media.autoplay = !state.paused;
     media.load();
     if (!state.paused)
-      media
-        .play()
-        .catch((err) =>
-          console.debug("[getoffline] mini autoplay failed", {
-            rowId: state.rowId,
-            err,
-          }),
-        );
+      media.play().catch((err) =>
+        console.debug("[getoffline] mini autoplay failed", {
+          rowId: state.rowId,
+          err,
+        }),
+      );
     miniPlayer.classList.add("is-visible");
     setExpanded(false);
   }
