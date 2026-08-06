@@ -4,8 +4,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>GetOffline Jobs</title>
-    <link rel="stylesheet" href="{% static 'app/settings.css' %}">
+    <title>GetOffline Jobs</title>    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}" />    <link rel="stylesheet" href="{% static 'app/settings.css' %}">
   </head>
   <body>
     <main class="settings-shell jobs-shell">
@@ -33,7 +32,12 @@
               <div class="job-card-main">
                 <span class="job-id">#{{ job.id }}</span>
                 <strong>{{ job.job_type }}</strong>
-                {% if job.error_message %}<p class="job-error">{{ job.error_message }}</p>{% endif %}
+                {% if job.error_message %}
+                  <details class="job-error">
+                    <summary>Error log</summary>
+                    <pre>{{ job.error_message }}</pre>
+                  </details>
+                {% endif %}
               </div>
               <span class="row-status job-status job-status-{{ job.status|lower }}">{{ job.status }}</span>
             </li>

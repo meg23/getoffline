@@ -5,6 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GetOffline Settings</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}" />
     <link rel="stylesheet" href="{% static 'app/settings.css' %}" />
   </head>
   <body>
@@ -34,8 +35,8 @@
           </div>
           <p class="field-help">Use 0 to disable. Manual uploads are always ignored, and favorites are never automatically deleted. Already absent files are marked missing; expired files are removed while their database records remain available.</p>
           <input type="hidden" name="config__manual_upload_delete_explicit_content" value="0" />
-          <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_delete_explicit_content" value="1" {% if manual_upload_filter_checked %}checked{% endif %} /> Delete drag-and-drop uploads containing profanity</label>
-          <p class="field-help">Reviews the generated audio transcript before retaining media uploaded through the browser.</p>
+          <label class="checkbox-label"><input type="checkbox" name="config__manual_upload_delete_explicit_content" value="1" {% if manual_upload_filter_checked %}checked{% endif %} /> Delete manual downloads and uploads containing profanity</label>
+          <p class="field-help">Sets the default for plus-button downloads and reviews drag-and-drop uploads after generating their audio transcripts.</p>
           <div class="actions"><button class="primary" type="submit">Save general settings</button></div>
         </form>
       </section>

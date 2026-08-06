@@ -81,6 +81,11 @@ docker compose exec api python -m django create_user alice --password 'change-th
 
 Then sign in through the browser and add YouTube or podcast sources from **Settings**. Use **Update Downloads** to check sources immediately; scheduled updates run using the configured interval.
 
+## Developer documentation
+
+- [Application and worker architecture](docs/app-workers-mysql-rabbitmq.md)
+- [Library data grid and Tabulator integration](docs/frontend-data-grid.md)
+
 ## Storage and configuration
 
 Downloaded media is stored in `./downloads` by default. To use another host directory, set `GETOFFLINE_DOWNLOADS_DIR` before starting Compose:
