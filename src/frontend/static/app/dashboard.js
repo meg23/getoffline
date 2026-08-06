@@ -222,7 +222,8 @@
       if (row.dataset.processingOverlay !== "1") return;
       const pill = row.querySelector(".status-col .pill");
       if (pill) {
-        pill.className = row.dataset.originalStatusClass || "pill status-unplayed";
+        pill.className =
+          row.dataset.originalStatusClass || "pill status-unplayed";
         pill.textContent = row.dataset.originalStatusText || "UNPLAYED";
       }
       delete row.dataset.processingOverlay;
@@ -233,9 +234,9 @@
 
   function processingItemKey(item) {
     if (item.download_id) return `download:${item.download_id}`;
-    return `pending:${String(item.title || "").trim().toLowerCase()}:${String(
-      item.source_name || "",
-    )
+    return `pending:${String(item.title || "")
+      .trim()
+      .toLowerCase()}:${String(item.source_name || "")
       .trim()
       .toLowerCase()}`;
   }
@@ -245,7 +246,11 @@
     items.forEach((item) => {
       const key = processingItemKey(item);
       const current = grouped.get(key);
-      if (!current || current.status === "queued" || item.status === "running") {
+      if (
+        !current ||
+        current.status === "queued" ||
+        item.status === "running"
+      ) {
         grouped.set(key, item);
       }
     });
@@ -259,20 +264,30 @@
       );
       if (match) return match;
     }
-    const title = String(item.title || "").trim().toLowerCase();
-    const source = String(item.source_name || "").trim().toLowerCase();
+    const title = String(item.title || "")
+      .trim()
+      .toLowerCase();
+    const source = String(item.source_name || "")
+      .trim()
+      .toLowerCase();
     return rows.find(
       (row) =>
-        String(row.dataset.title || "").trim().toLowerCase() === title &&
+        String(row.dataset.title || "")
+          .trim()
+          .toLowerCase() === title &&
         (!source ||
-          String(row.dataset.channel || "").trim().toLowerCase() === source),
+          String(row.dataset.channel || "")
+            .trim()
+            .toLowerCase() === source),
     );
   }
 
   function processingRowIsVisible(item) {
     const mode = filterMode?.value || "unplayed";
     if (!new Set(["all", "unplayed"]).has(mode)) return false;
-    const term = String(filterInput?.value || "").trim().toLowerCase();
+    const term = String(filterInput?.value || "")
+      .trim()
+      .toLowerCase();
     const text = `${item.source_name || ""} ${item.title || ""}`.toLowerCase();
     return !term || text.includes(term);
   }
@@ -357,10 +372,14 @@
       });
       if (!response.ok) return;
       const payload = await response.json();
-      const downloads = Array.isArray(payload.downloads) ? payload.downloads : [];
+      const downloads = Array.isArray(payload.downloads)
+        ? payload.downloads
+        : [];
       const signature = downloadSignature(downloads);
       if (lastLibrarySignature === null) {
-        const responseIds = downloads.map((item) => String(item.id || "")).join(",");
+        const responseIds = downloads
+          .map((item) => String(item.id || ""))
+          .join(",");
         lastLibrarySignature = signature;
         if (!force && responseIds === rowIdSignature()) return;
       } else if (!force && signature === lastLibrarySignature) {
@@ -398,7 +417,8 @@
         const text =
           `${row.dataset.channel || ""} ${row.dataset.title || ""}`.toLowerCase();
         const matchesMode = mode === "all" || mode === "unplayed";
-        row.style.display = matchesMode && (!term || text.includes(term)) ? "" : "none";
+        row.style.display =
+          matchesMode && (!term || text.includes(term)) ? "" : "none";
       });
     updateBatchState();
   }
@@ -529,9 +549,9 @@
 
     function processingKey(item) {
       if (item.download_id) return `download:${item.download_id}`;
-      return `pending:${String(item.title || "").trim().toLowerCase()}:${String(
-        item.source_name || "",
-      )
+      return `pending:${String(item.title || "")
+        .trim()
+        .toLowerCase()}:${String(item.source_name || "")
         .trim()
         .toLowerCase()}`;
     }
@@ -541,7 +561,11 @@
       items.forEach((item) => {
         const key = processingKey(item);
         const current = grouped.get(key);
-        if (!current || current.status === "queued" || item.status === "running") {
+        if (
+          !current ||
+          current.status === "queued" ||
+          item.status === "running"
+        ) {
           grouped.set(key, item);
         }
       });
@@ -557,14 +581,20 @@
       );
       const matched = new Set();
       const rows = downloads.map((item) => {
-        const title = String(item.title || "").trim().toLowerCase();
-        const source = String(item.source_name || "").trim().toLowerCase();
+        const title = String(item.title || "")
+          .trim()
+          .toLowerCase();
+        const source = String(item.source_name || "")
+          .trim()
+          .toLowerCase();
         const processing =
           byDownloadId.get(String(item.id)) ||
           active.find(
             (candidate) =>
               !candidate.download_id &&
-              String(candidate.title || "").trim().toLowerCase() === title &&
+              String(candidate.title || "")
+                .trim()
+                .toLowerCase() === title &&
               (!candidate.source_name ||
                 String(candidate.source_name).trim().toLowerCase() === source),
           );
@@ -573,7 +603,8 @@
           ...item,
           _key: `download:${item.id}`,
           _processing: Boolean(processing),
-          grid_status_label: processing?.stage_label || item.status_label || "UNPLAYED",
+          grid_status_label:
+            processing?.stage_label || item.status_label || "UNPLAYED",
           grid_status_class: processing
             ? `status-processing status-processing-${processing.stage || "queued"}`
             : item.status_class || "status-unplayed",
@@ -606,18 +637,24 @@
       const pill = document.createElement("span");
 
       // Defensive: handle missing formatterParams
-      if (!formatterParams || !formatterParams.className || !formatterParams.text) {
+      if (
+        !formatterParams ||
+        !formatterParams.className ||
+        !formatterParams.text
+      ) {
         pill.className = "pill";
         pill.textContent = String(cell.getValue() || "");
         return pill;
       }
 
-      const className = typeof formatterParams.className === 'function'
-        ? formatterParams.className(data)
-        : formatterParams.className;
-      const text = typeof formatterParams.text === 'function'
-        ? formatterParams.text(data)
-        : formatterParams.text;
+      const className =
+        typeof formatterParams.className === "function"
+          ? formatterParams.className(data)
+          : formatterParams.className;
+      const text =
+        typeof formatterParams.text === "function"
+          ? formatterParams.text(data)
+          : formatterParams.text;
 
       pill.className = `pill ${className}`.trim();
       pill.textContent = String(text || "");
@@ -747,7 +784,13 @@
           widthGrow: 1,
           responsive: 4,
         },
-        { title: "Size", field: "display_size", hozAlign: "right", widthGrow: 1, responsive: 5 },
+        {
+          title: "Size",
+          field: "display_size",
+          hozAlign: "right",
+          widthGrow: 1,
+          responsive: 5,
+        },
         {
           title: "Status",
           field: "grid_status_label",
@@ -784,9 +827,12 @@
     });
 
     function matchesFilters(item) {
-      const term = String(filterInput?.value || "").trim().toLowerCase();
+      const term = String(filterInput?.value || "")
+        .trim()
+        .toLowerCase();
       const mode = filterMode?.value || "unplayed";
-      const text = `${item.source_name || ""} ${item.title || ""}`.toLowerCase();
+      const text =
+        `${item.source_name || ""} ${item.title || ""}`.toLowerCase();
       if (term && !text.includes(term)) return false;
       if (item._processing) return mode === "all" || mode === "unplayed";
       const unavailable = ["missing", "retention_deleted"].includes(
@@ -1007,7 +1053,8 @@
   }
 
   try {
-    const storedStatusUrl = window.sessionStorage?.getItem(statusStorageKey) || "";
+    const storedStatusUrl =
+      window.sessionStorage?.getItem(statusStorageKey) || "";
     if (storedStatusUrl) startPolling(storedStatusUrl);
   } catch (_) {}
 
@@ -1323,19 +1370,34 @@
     if (miniTitle) miniTitle.textContent = state.title || "Now playing";
     if (miniSource) miniSource.textContent = state.source || "";
     const resumeAtLoad = Math.max(0, Number(state.currentTime || 0));
-    media.src = resumeAtLoad > 0 ? `${state.src}#t=${resumeAtLoad.toFixed(3)}` : state.src;
+    media.src =
+      resumeAtLoad > 0
+        ? `${state.src}#t=${resumeAtLoad.toFixed(3)}`
+        : state.src;
     let miniResumeApplied = !(resumeAtLoad > 0);
     const applyMiniResume = () => {
       if (miniResumeApplied) return true;
-      const target = Number.isFinite(media.duration) && media.duration > 1
-        ? Math.min(resumeAtLoad, Math.max(media.duration - 1, 0))
-        : resumeAtLoad;
+      const target =
+        Number.isFinite(media.duration) && media.duration > 1
+          ? Math.min(resumeAtLoad, Math.max(media.duration - 1, 0))
+          : resumeAtLoad;
       try {
-        if (Math.abs(Number(media.currentTime || 0) - target) > 0.75) media.currentTime = target;
-        miniResumeApplied = Math.abs(Number(media.currentTime || 0) - target) <= 0.75;
-        console.debug('[getoffline] mini resume seek', { rowId: state.rowId, target, currentTime: media.currentTime, applied: miniResumeApplied });
+        if (Math.abs(Number(media.currentTime || 0) - target) > 0.75)
+          media.currentTime = target;
+        miniResumeApplied =
+          Math.abs(Number(media.currentTime || 0) - target) <= 0.75;
+        console.debug("[getoffline] mini resume seek", {
+          rowId: state.rowId,
+          target,
+          currentTime: media.currentTime,
+          applied: miniResumeApplied,
+        });
       } catch (err) {
-        console.debug('[getoffline] mini resume seek failed', { rowId: state.rowId, target, err });
+        console.debug("[getoffline] mini resume seek failed", {
+          rowId: state.rowId,
+          target,
+          err,
+        });
       }
       return miniResumeApplied;
     };
@@ -1358,7 +1420,15 @@
       () => {
         applyMediaSettings(media);
         applyMiniResume();
-        if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay after metadata failed", { rowId: state.rowId, err }));
+        if (!state.paused)
+          media
+            .play()
+            .catch((err) =>
+              console.debug(
+                "[getoffline] mini autoplay after metadata failed",
+                { rowId: state.rowId, err },
+              ),
+            );
       },
       { once: true },
     );
@@ -1396,7 +1466,15 @@
     };
     media.autoplay = !state.paused;
     media.load();
-    if (!state.paused) media.play().catch((err) => console.debug("[getoffline] mini autoplay failed", { rowId: state.rowId, err }));
+    if (!state.paused)
+      media
+        .play()
+        .catch((err) =>
+          console.debug("[getoffline] mini autoplay failed", {
+            rowId: state.rowId,
+            err,
+          }),
+        );
     miniPlayer.classList.add("is-visible");
     setExpanded(false);
   }
@@ -1428,7 +1506,9 @@
         return;
       event.preventDefault();
       event.stopPropagation();
-      const row = link.closest("[data-row-id]");
+      const row =
+        link.parentElement?.closest("[data-row-id]") ??
+        link.closest("[data-row-id]");
       const state = {
         rowId: Number(link.dataset.rowId || row?.dataset.rowId || 0),
         title: link.dataset.title || row?.dataset.title || "",
@@ -1492,7 +1572,9 @@
   function showOverlay() {
     overlay?.classList.add("is-visible");
     overlay?.setAttribute("aria-hidden", "false");
-    if (status) status.textContent = "Drop audio, video, or PDF files here to store as manual downloads.";
+    if (status)
+      status.textContent =
+        "Drop audio, video, or PDF files here to store as manual downloads.";
   }
   function hideOverlay() {
     dragDepth = 0;
@@ -1501,7 +1583,11 @@
   }
   function supportedFiles(fileList) {
     return Array.from(fileList || []).filter((file) => {
-      const ext = String(file.name || "").split(".").pop()?.toLowerCase() || "";
+      const ext =
+        String(file.name || "")
+          .split(".")
+          .pop()
+          ?.toLowerCase() || "";
       return (
         supportedExtensions.has(ext) ||
         String(file.type || "").startsWith("audio/") ||
@@ -1512,12 +1598,15 @@
   }
   async function uploadFiles(files) {
     if (!files.length) {
-      if (status) status.textContent = "No supported audio, video, or PDF files were dropped.";
+      if (status)
+        status.textContent =
+          "No supported audio, video, or PDF files were dropped.";
       window.setTimeout(hideOverlay, 1600);
       return;
     }
     overlay?.classList.add("is-uploading");
-    if (status) status.textContent = `Uploading ${files.length} manual upload${files.length === 1 ? "" : "s"}…`;
+    if (status)
+      status.textContent = `Uploading ${files.length} manual upload${files.length === 1 ? "" : "s"}…`;
     const body = new FormData();
     files.forEach((file) => body.append("files", file, file.name));
     const response = await fetch(uploadUrl, {
@@ -1532,7 +1621,8 @@
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) {
-      const message = payload.error_message || payload.errors?.[0]?.error || "Upload failed.";
+      const message =
+        payload.error_message || payload.errors?.[0]?.error || "Upload failed.";
       throw new Error(message);
     }
     if (status) status.textContent = "Upload complete. Refreshing library…";
