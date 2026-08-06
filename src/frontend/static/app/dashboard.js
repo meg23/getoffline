@@ -710,6 +710,7 @@
     function selectionHeaderFormatter() {
       gridSelectAll = document.createElement("input");
       gridSelectAll.type = "checkbox";
+      gridSelectAll.className = "row-selector";
       gridSelectAll.setAttribute("aria-label", "Select all visible rows");
       gridSelectAll.addEventListener("change", () => {
         visibleDownloadIds().forEach((id) => {
@@ -762,7 +763,7 @@
           title: "Channel",
           field: "source_name",
           widthGrow: 2,
-          minWidth: 110,
+          minWidth: 140,
           responsive: 2,
         },
         {
@@ -782,8 +783,8 @@
             className: () => "status-new",
             text: (item) => String(item.source_type || "").toUpperCase(),
           },
-          widthGrow: 1,
-          minWidth: 110,
+          widthGrow: 2,
+          minWidth: 130,
           responsive: 3,
         },
         {
@@ -794,16 +795,16 @@
             className: () => "",
             text: (item) => item.display_type || "?",
           },
-          widthGrow: 1,
-          minWidth: 90,
+          widthGrow: 2,
+          minWidth: 110,
           responsive: 4,
         },
         {
           title: "Size",
           field: "display_size",
           hozAlign: "right",
-          widthGrow: 1,
-          minWidth: 90,
+          widthGrow: 2,
+          minWidth: 110,
           responsive: 5,
         },
         {
@@ -815,8 +816,8 @@
             text: (item) => item.grid_status_label,
           },
           responsive: 0,
-          widthGrow: 1,
-          minWidth: 110,
+          widthGrow: 2,
+          minWidth: 130,
         },
         {
           title: "",
@@ -825,6 +826,7 @@
           titleFormatter: selectionHeaderFormatter,
           headerSort: false,
           hozAlign: "center",
+          headerHozAlign: "center",
           width: 78,
           minWidth: 78,
           headerMenu: false,
