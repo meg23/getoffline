@@ -758,12 +758,18 @@
         node.dataset.resumeSeconds = String(item.last_position_seconds || 0);
       },
       columns: [
-        { title: "Channel", field: "source_name", widthGrow: 2, responsive: 2 },
+        {
+          title: "Channel",
+          field: "source_name",
+          widthGrow: 2,
+          minWidth: 110,
+          responsive: 2,
+        },
         {
           title: "Episode",
           field: "title",
           formatter: titleFormatter,
-          widthGrow: 5,
+          widthGrow: 3,
           minWidth: 220,
           responsive: 0,
           variableHeight: true,
@@ -777,6 +783,7 @@
             text: (item) => String(item.source_type || "").toUpperCase(),
           },
           widthGrow: 1,
+          minWidth: 110,
           responsive: 3,
         },
         {
@@ -788,6 +795,7 @@
             text: (item) => item.display_type || "?",
           },
           widthGrow: 1,
+          minWidth: 90,
           responsive: 4,
         },
         {
@@ -795,6 +803,7 @@
           field: "display_size",
           hozAlign: "right",
           widthGrow: 1,
+          minWidth: 90,
           responsive: 5,
         },
         {
@@ -807,6 +816,7 @@
           },
           responsive: 0,
           widthGrow: 1,
+          minWidth: 110,
         },
         {
           title: "",
