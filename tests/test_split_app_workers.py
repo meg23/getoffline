@@ -1051,6 +1051,81 @@ class SharedDjangoModelTests(TestCase):
         batch_form = template.split('id="batch-form"', 1)[1]
         self.assertIn('name="next" value="{% url \'library\' %}"', batch_form)
 
+    def test_quick_add_profanity_option_is_profile_defaulted(self):
+        ProfileConfigValue.objects.create(
+            profile_id="default",
+            key="manual_upload_delete_explicit_content",
+            value="1",
+        )
+
+        response = Client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'id="quick-add-profanity-filter" name="delete_explicit_content" '
+            'type="checkbox" value="1" checked',
+        )
+
+    def test_quick_add_profanity_option_is_copied_to_job_payload(self):
+        client = Client()
+
+        with patch("frontend.views.publish_job"):
+            response = client.post(
+                "/jobs/enqueue/",
+                {
+                    "job_type": "download_single",
+                    "url": "https://www.youtube.com/watch?v=profanity-option",
+                    "delete_explicit_content": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get(job_type="download_single")
+        self.assertTrue(job.payload["delete_explicit_content"])
+
+    def test_library_and_jobs_templates_link_to_each_other(self):
+        library_template = Path("src/frontend/templates/app/library.html").read_text()
+        jobs_template = Path("src/frontend/templates/app/jobs.html").read_text()
+
+        self.assertIn('href="{% url \'jobs\' %}"', library_template)
+        self.assertIn('href="{% url \'library\' %}"', jobs_template)
+
+    def test_jobs_template_exposes_expandable_error_logs(self):
+        template = Path("src/frontend/templates/app/jobs.html").read_text()
+
+        self.assertIn('<details class="job-error">', template)
+        self.assertIn("<summary>Error log</summary>", template)
+        self.assertIn("<pre>{{ job.error_message }}</pre>", template)
+
+    def test_dashboard_refreshes_library_for_new_items_and_finished_jobs(self):
+        script = Path("src/frontend/static/app/dashboard.js").read_text()
+
+        self.assertIn('new CustomEvent("getoffline:library-refresh"', script)
+        self.assertIn('window.addEventListener("getoffline:library-refresh"', script)
+        self.assertIn("detail: { force: jobFinished, processingItems: items }", script)
+        self.assertIn("downloadSignature(downloads)", script)
+
+    def test_dashboard_renders_processing_jobs_as_library_rows(self):
+        script = Path("src/frontend/static/app/dashboard.js").read_text()
+
+        self.assertIn("function processingPlaceholderRow(item)", script)
+        self.assertIn("function matchingDownloadRow(item)", script)
+        self.assertIn("renderProcessingItems(processingItems)", script)
+
+    def test_library_uses_vendored_tabulator_with_fallback_table(self):
+        template = Path("src/frontend/templates/app/library.html").read_text()
+        script = Path("src/frontend/static/app/dashboard.js").read_text()
+        documentation = Path("docs/frontend-data-grid.md").read_text()
+
+        self.assertIn("vendor/tabulator/tabulator.min.css", template)
+        self.assertIn("vendor/tabulator/tabulator.min.js", template)
+        self.assertIn('id="downloads-grid"', template)
+        self.assertIn('id="downloads-fallback-table"', template)
+        self.assertIn("initializeLibraryGrid", script)
+        self.assertIn('persistenceID: "getoffline-library-grid-v1"', script)
+        self.assertIn("Why Tabulator", documentation)
+
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()
 

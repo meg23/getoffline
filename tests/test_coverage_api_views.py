@@ -98,9 +98,15 @@ class ApiViewCoverageTests(TestCase):
             patch("api.views.recent_jobs", return_value=[]),
             patch("api.views.episode_to_summary", return_value=summary),
             patch("api.views.listened_seconds", return_value=61),
+            patch(
+                "api.views.profile_settings",
+                return_value={"manual_upload_delete_explicit_content": "1"},
+            ),
         ):
             response = views.frontend_library(self.request("get", "/library"))
-        self.assertEqual(json.loads(response.content)["stats"]["visible"], 1)
+        library_payload = json.loads(response.content)
+        self.assertEqual(library_payload["stats"]["visible"], 1)
+        self.assertTrue(library_payload["manual_profanity_filter_checked"])
 
         job = SimpleNamespace(
             id=8, job_type="download_single", status="queued", error_message=None,

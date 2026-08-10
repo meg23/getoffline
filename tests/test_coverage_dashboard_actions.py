@@ -23,7 +23,7 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from api.services import dashboard_actions as actions
-from models.domain import DownloadStatus, SourceType
+from models.domain import DownloadStatus, JobStatus, SourceType
 from models.models import (
     Download,
     Job,
@@ -83,12 +83,14 @@ class DashboardActionCoverageTests(TestCase):
         self.assertTrue(actions._job_still_needs_work(missing))
         missing.job_type = "other"
         self.assertFalse(actions._job_still_needs_work(missing))
+        self.assertEqual(actions._job_stage(Job(job_type="generate_transcript")).name, "queued")
         for job_type, expected in (
-            ("generate_transcript", "transcript_generation"),
-            ("transcode_media", "transcript_generation"),
+            ("generate_transcript", "transcribing"),
+            ("transcode_media", "transcoding"),
             ("download_episode", "downloading"),
         ):
-            self.assertEqual(actions._job_stage(Job(job_type=job_type)).name, expected)
+            job = Job(job_type=job_type, status=JobStatus.RUNNING.value)
+            self.assertEqual(actions._job_stage(job).name, expected)
         self.assertEqual(actions._job_display_title(Job(job_type="my_job", payload={})), "My Job")
         self.assertEqual(actions._job_display_title(Job(job_type="my_job", payload={"title": "Title"})), "Title")
 

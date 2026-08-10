@@ -453,6 +453,24 @@ button {
 .job-error {
   margin: 0.35rem 0 0;
   color: var(--danger);
+}
+.job-error summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+.job-error pre {
+  max-width: 100%;
+  margin: 0.5rem 0 0;
+  border: 1px solid #f2c7ce;
+  border-radius: 8px;
+  background: #fff6f7;
+  padding: 0.65rem 0.75rem;
+  color: #8e1c31;
+  font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow: auto;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .job-status {

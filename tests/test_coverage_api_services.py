@@ -157,6 +157,18 @@ class ApiCoverageDatabaseTests(TestCase):
             payload={"download_id": current.id, "active_stage": "transcript_generation"},
             updated_at=now,
         )
+        queued_job = Job.objects.create(
+            profile_id="alice",
+            job_type="download_single",
+            status=JobStatus.QUEUED,
+            payload={
+                "title": "Waiting video",
+                "source_name": "Queued channel",
+                "source_type": "youtube",
+                "media_type": "video",
+            },
+            updated_at=now,
+        )
         request = self.request("get", "/?filter=all")
         page = dashboard_actions._library_page_data(request)
         context = dashboard_actions._library_context(page)
@@ -166,12 +178,29 @@ class ApiCoverageDatabaseTests(TestCase):
         self.assertEqual(dashboard_actions._job_display_title(transcript_job), "Current video")
         self.assertEqual(dashboard_actions._job_stage(transcript_job).name, "transcript_generation")
         self.assertTrue(dashboard_actions._job_still_needs_work(transcript_job))
-        self.assertEqual(len(dashboard_actions._active_pipeline_items("alice")), 1)
+        pipeline_items = dashboard_actions._active_pipeline_items("alice")
+        self.assertEqual(len(pipeline_items), 2)
+        queued_item = next(
+            item for item in pipeline_items if item["id"] == queued_job.id
+        )
+        self.assertEqual(queued_item["stage"], "queued")
+        self.assertEqual(queued_item["source_name"], "Queued channel")
 
         current.subtitle_path = "episode.srt"
         current.save(update_fields=["subtitle_path"])
         self.assertFalse(dashboard_actions._job_still_needs_work(transcript_job))
-        self.assertEqual(dashboard_actions._job_stage(Job(job_type="download_single")).name, "downloading")
+        self.assertEqual(
+            dashboard_actions._job_stage(
+                Job(job_type="download_single", status=JobStatus.RUNNING)
+            ).name,
+            "downloading",
+        )
+        self.assertEqual(
+            dashboard_actions._job_stage(
+                Job(job_type="download_single", status=JobStatus.QUEUED)
+            ).name,
+            "queued",
+        )
         self.assertEqual(dashboard_actions._job_stage(Job(job_type="other_job")).name, "queued")
         with patch.dict(os.environ, {"GETOFFLINE_ACTIVE_PIPELINE_STALE_SECONDS": "0"}):
             self.assertIsNone(dashboard_actions._active_pipeline_cutoff())

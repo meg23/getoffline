@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ item.title|default:"Player" }}</title>
     {% load static %}
+    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}" />
     <link rel="stylesheet" href="{% static 'app/player.css' %}" />
     <script src="{% static 'app/player.js' %}" defer></script>
   </head>
