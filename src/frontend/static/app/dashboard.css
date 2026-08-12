@@ -479,6 +479,14 @@ table {
   background: #fbfcff;
 }
 
+/* Keep rows visually stable when the pointer passes over them. */
+.downloads-grid .tabulator-row.tabulator-selectable:hover,
+.downloads-grid .tabulator-row.tabulator-selected:hover,
+.downloads-grid .tabulator-row:hover {
+  background: inherit !important;
+  cursor: default;
+}
+
 .downloads-grid .tabulator-row.processing-row {
   background: #f7f9ff;
   color: #52617d;
