@@ -384,10 +384,6 @@
     if (event.key === "Escape") closeModals();
   });
 
-  window.addEventListener("getoffline:library-refresh", (event) => {
-      refreshLibraryFromApi(Boolean(event.detail?.force))
-      .catch(() => {});
-  });
   refreshLibraryFromApi().finally(applyFilters);
 
   function initializeLibraryGrid(element) {
@@ -783,11 +779,6 @@
       }
     }
 
-    window.addEventListener("getoffline:library-refresh", (event) => {
-      renderGrid()
-        .then(() => refreshLibraryFromApi(Boolean(event.detail?.force)))
-        .catch(() => {});
-    });
     // Don't call applyFilters() here - it will be called by the tableBuilt event listener
     refreshLibraryFromApi().catch(() => {});
   }
@@ -850,12 +841,6 @@
       setLoading(false);
       if (payload.status === "failed" || payload.ok === false) {
         window.alert(payload.error_message || "The source update failed.");
-      } else {
-        window.dispatchEvent(
-          new CustomEvent("getoffline:library-refresh", {
-            detail: { force: true },
-          }),
-        );
       }
       return;
     }
@@ -1488,7 +1473,6 @@
   if (!panel || !list) return;
   const statusUrl = panel.dataset.statusUrl;
   if (!statusUrl) return;
-  let previousJobIds = null;
 
   function formatItem(item) {
     const title = item.title || "Untitled download";
@@ -1525,19 +1509,7 @@
       if (!response.ok) throw new Error("Unable to fetch active jobs.");
       const payload = await response.json();
       const items = Array.isArray(payload.items) ? payload.items : [];
-      const currentJobIds = new Set(items.map((item) => String(item.id)));
-      const jobFinished =
-        previousJobIds !== null &&
-        Array.from(previousJobIds).some((id) => !currentJobIds.has(id));
       render(items);
-      if (jobFinished) {
-        window.dispatchEvent(
-          new CustomEvent("getoffline:library-refresh", {
-            detail: { force: true },
-          }),
-        );
-      }
-      previousJobIds = currentJobIds;
     } catch (_) {
       // Keep the last known state visible; polling will retry shortly.
     } finally {
