@@ -32,23 +32,6 @@
 
   const gridElement = document.getElementById("downloads-grid");
   const libraryPagination = document.getElementById("library-pagination");
-  let scrollVersion = 0;
-  window.addEventListener("scroll", () => {
-    scrollVersion += 1;
-  }, { passive: true });
-
-  function preserveScroll(render) {
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-    const scrollSnapshot = scrollVersion;
-    render();
-    const restore = () => {
-      if (scrollVersion === scrollSnapshot) window.scrollTo(scrollX, scrollY);
-    };
-    window.requestAnimationFrame(restore);
-    window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
-    window.setTimeout(restore, 0);
-  }
 
   function renderLibraryPagination(page, totalPages, loadPage) {
     if (!libraryPagination) return;
@@ -299,7 +282,7 @@
         return;
       }
       lastLibrarySignature = signature;
-      preserveScroll(() => renderDownloads(downloads));
+      renderDownloads(downloads);
     } finally {
       libraryRefreshInFlight = false;
     }
@@ -794,16 +777,7 @@
         if (!force && signature === lastLibrarySignature) return;
         lastLibrarySignature = signature;
         downloads = nextDownloads;
-        const scrollX = window.scrollX;
-        const scrollY = window.scrollY;
-        const scrollSnapshot = scrollVersion;
         await renderGrid();
-        const restore = () => {
-          if (scrollVersion === scrollSnapshot) window.scrollTo(scrollX, scrollY);
-        };
-        window.requestAnimationFrame(restore);
-        window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
-        window.setTimeout(restore, 0);
       } finally {
         libraryRefreshInFlight = false;
       }
@@ -1150,8 +1124,6 @@
         .forEach((line, index) => {
           const isActive = cues[index] === active;
           line.classList.toggle("active", isActive);
-          if (isActive)
-            line.scrollIntoView({ behavior: "smooth", block: "nearest" });
         });
     });
     transcriptReady = true;

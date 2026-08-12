@@ -50,7 +50,6 @@ body {
       transparent 34rem),
     linear-gradient(180deg, #f9fbff 0%, #f1f5fc 100%);
   color: var(--text);
-  overflow-anchor: none;
 }
 
 .container {
@@ -425,7 +424,6 @@ table {
 }
 
 .table-card {
-  overflow-anchor: none;
   overflow: visible;
   width: 100%;
 }
@@ -1388,7 +1386,6 @@ tbody tr:nth-child(even) td {
   gap: 0.75rem;
   margin-bottom: 0.7rem;
   overflow: hidden;
-  overflow-anchor: none;
   padding: 0.42rem 0.7rem;
 }
 
