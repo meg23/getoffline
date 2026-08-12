@@ -33,6 +33,11 @@
   const gridElement = document.getElementById("downloads-grid");
   const libraryPagination = document.getElementById("library-pagination");
 
+  function browserMediaUrl(url, id) {
+    const value = String(url || "");
+    return value.includes("/api/stream/") ? `/media/${id}/` : value;
+  }
+
   function preserveScroll(render) {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
@@ -1346,7 +1351,10 @@
         kind: link.dataset.kind || row?.dataset.kind || "audio",
         hasSubtitles: link.dataset.hasSubtitles === "1",
         subtitleUrl: row?.dataset.subtitleUrl || "",
-        src: row?.dataset.mediaUrl || link.href,
+        src: browserMediaUrl(
+          row?.dataset.mediaUrl || link.href,
+          link.dataset.rowId || row?.dataset.rowId || 0,
+        ),
         currentTime: Number(
           link.dataset.resumeSeconds || row?.dataset.resumeSeconds || 0,
         ),
