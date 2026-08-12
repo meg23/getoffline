@@ -32,12 +32,19 @@
 
   const gridElement = document.getElementById("downloads-grid");
   const libraryPagination = document.getElementById("library-pagination");
+  let scrollVersion = 0;
+  window.addEventListener("scroll", () => {
+    scrollVersion += 1;
+  }, { passive: true });
 
   function preserveScroll(render) {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
+    const scrollSnapshot = scrollVersion;
     render();
-    const restore = () => window.scrollTo(scrollX, scrollY);
+    const restore = () => {
+      if (scrollVersion === scrollSnapshot) window.scrollTo(scrollX, scrollY);
+    };
     window.requestAnimationFrame(restore);
     window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
     window.setTimeout(restore, 0);
@@ -789,8 +796,11 @@
         downloads = nextDownloads;
         const scrollX = window.scrollX;
         const scrollY = window.scrollY;
+        const scrollSnapshot = scrollVersion;
         await renderGrid();
-        const restore = () => window.scrollTo(scrollX, scrollY);
+        const restore = () => {
+          if (scrollVersion === scrollSnapshot) window.scrollTo(scrollX, scrollY);
+        };
         window.requestAnimationFrame(restore);
         window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
         window.setTimeout(restore, 0);
