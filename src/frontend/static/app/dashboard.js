@@ -33,11 +33,6 @@
   const gridElement = document.getElementById("downloads-grid");
   const libraryPagination = document.getElementById("library-pagination");
 
-  function browserMediaUrl(url, id) {
-    const value = String(url || "");
-    return value.includes("/api/stream/") ? `/media/${id}/` : value;
-  }
-
   function preserveScroll(render) {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
@@ -939,6 +934,11 @@
   const metadataId = document.getElementById("metadata-edit-id");
   const metadataTitle = document.getElementById("metadata-edit-item-title");
   const metadataSource = document.getElementById("metadata-edit-source-name");
+
+  function browserMediaUrl(url, id) {
+    const value = String(url || "");
+    return value.includes("/api/stream/") ? `/media/${id}/` : value;
+  }
 
   function selectedRows() {
     return Array.from(document.querySelectorAll(".row-selector:checked"))
