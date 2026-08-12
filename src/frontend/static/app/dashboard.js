@@ -37,7 +37,10 @@
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
     render();
-    window.requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+    const restore = () => window.scrollTo(scrollX, scrollY);
+    window.requestAnimationFrame(restore);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+    window.setTimeout(restore, 0);
   }
 
   function renderLibraryPagination(page, totalPages, loadPage) {
@@ -787,7 +790,10 @@
         const scrollX = window.scrollX;
         const scrollY = window.scrollY;
         await renderGrid();
-        window.requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+        const restore = () => window.scrollTo(scrollX, scrollY);
+        window.requestAnimationFrame(restore);
+        window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+        window.setTimeout(restore, 0);
       } finally {
         libraryRefreshInFlight = false;
       }
