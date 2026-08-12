@@ -50,6 +50,7 @@ body {
       transparent 34rem),
     linear-gradient(180deg, #f9fbff 0%, #f1f5fc 100%);
   color: var(--text);
+  overflow-anchor: none;
 }
 
 .container {

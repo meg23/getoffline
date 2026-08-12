@@ -1558,11 +1558,13 @@
         previousJobIds !== null &&
         Array.from(previousJobIds).some((id) => !currentJobIds.has(id));
       render(items);
-      window.dispatchEvent(
-        new CustomEvent("getoffline:library-refresh", {
-          detail: { force: jobFinished, processingItems: items },
-        }),
-      );
+      if (jobFinished) {
+        window.dispatchEvent(
+          new CustomEvent("getoffline:library-refresh", {
+            detail: { force: true },
+          }),
+        );
+      }
       previousJobIds = currentJobIds;
     } catch (_) {
       // Keep the last known state visible; polling will retry shortly.
