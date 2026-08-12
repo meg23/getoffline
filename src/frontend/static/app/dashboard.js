@@ -33,6 +33,13 @@
   const gridElement = document.getElementById("downloads-grid");
   const libraryPagination = document.getElementById("library-pagination");
 
+  function preserveScroll(render) {
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    render();
+    window.requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+  }
+
   function renderLibraryPagination(page, totalPages, loadPage) {
     if (!libraryPagination) return;
     libraryPagination.replaceChildren();
@@ -125,7 +132,7 @@
     row.dataset.title = item.title || "";
     row.dataset.kind = item.display_kind || "audio";
     row.dataset.downloadStatus = item.download_status || "";
-    row.dataset.mediaUrl = item.stream_url || `/api/stream/${id}`;
+    row.dataset.mediaUrl = `/media/${id}/`;
     row.dataset.subtitleUrl = item.has_subtitles
       ? item.api_subtitles_url || `/api/subtitle/${id}`
       : "";
@@ -282,7 +289,7 @@
         return;
       }
       lastLibrarySignature = signature;
-      renderDownloads(downloads);
+      preserveScroll(() => renderDownloads(downloads));
     } finally {
       libraryRefreshInFlight = false;
     }
@@ -543,7 +550,7 @@
         node.dataset.title = item.title || "";
         node.dataset.channel = item.source_name || "";
         node.dataset.kind = item.display_kind || "audio";
-        node.dataset.mediaUrl = item.stream_url || `/api/stream/${item.id}`;
+        node.dataset.mediaUrl = `/media/${item.id}/`;
         node.dataset.subtitleUrl = item.has_subtitles
           ? item.api_subtitles_url || `/api/subtitle/${item.id}`
           : "";
@@ -777,7 +784,10 @@
         if (!force && signature === lastLibrarySignature) return;
         lastLibrarySignature = signature;
         downloads = nextDownloads;
+        const scrollX = window.scrollX;
+        const scrollY = window.scrollY;
         await renderGrid();
+        window.requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
       } finally {
         libraryRefreshInFlight = false;
       }
@@ -851,7 +861,11 @@
       if (payload.status === "failed" || payload.ok === false) {
         window.alert(payload.error_message || "The source update failed.");
       } else {
-        window.location.reload();
+        window.dispatchEvent(
+          new CustomEvent("getoffline:library-refresh", {
+            detail: { force: true },
+          }),
+        );
       }
       return;
     }
