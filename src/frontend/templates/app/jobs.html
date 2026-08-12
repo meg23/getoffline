@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>GetOffline Jobs</title>    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}" />    <link rel="stylesheet" href="{% static 'app/settings.css' %}">
+    <script src="{% static 'app/jobs.js' %}" defer></script>
   </head>
   <body>
     <main class="settings-shell jobs-shell">
@@ -24,7 +25,7 @@
             <h2 id="jobs-title">Recent activity</h2>
             <p class="section-help">Downloads and maintenance tasks running for this profile.</p>
           </div>
-          <span class="jobs-count">{{ jobs|length }} total</span>
+          <span class="jobs-count">{{ pagination.total|default:0 }} total</span>
         </div>
         <ul class="jobs-list">
           {% for job in jobs %}
@@ -45,6 +46,7 @@
             <li class="empty-job-state">No jobs yet. Queue a download from your library to see it here.</li>
           {% endfor %}
         </ul>
+        <nav id="jobs-pagination" class="pagination" aria-label="Job pages" data-page="{{ pagination.page|default:1 }}" data-total-pages="{{ pagination.total_pages|default:1 }}"></nav>
       </section>
     </main>
   </body>

@@ -360,7 +360,13 @@ def _api_get_json(
 @frontend_login_required
 def library(request: HttpRequest) -> HttpResponse:
     payload = _api_get_json(
-        request, "api_frontend_library", query={"filter": request.GET.get("filter", "")}
+        request,
+        "api_frontend_library",
+        query={
+            "filter": request.GET.get("filter", ""),
+            "page": request.GET.get("page", "1"),
+            "page_size": "100",
+        },
     )
     return render(
         request,
@@ -371,13 +377,18 @@ def library(request: HttpRequest) -> HttpResponse:
 
 @frontend_login_required
 def jobs(request: HttpRequest) -> HttpResponse:
-    payload = _api_get_json(request, "api_frontend_jobs")
+    payload = _api_get_json(
+        request,
+        "api_frontend_jobs",
+        query={"page": request.GET.get("page", "1"), "page_size": "100"},
+    )
     return render(
         request,
         "app/jobs.html",
         {
             "jobs": _namespace(payload.get("jobs") or []),
             "profile_id": payload.get("profile_id", ""),
+            "pagination": _namespace(payload.get("pagination") or {}),
         },
     )
 
