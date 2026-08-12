@@ -93,7 +93,7 @@ class ApiViewCoverageTests(TestCase):
         with (
             patch("api.views.profile_id_for_request", return_value="alice"),
             patch("api.views.normalize_library_filter", return_value="all"),
-            patch("api.views.list_downloads", return_value=[item]),
+            patch("api.views.paginated_downloads", return_value=([item], 1)),
             patch("api.views.library_filter_counts", return_value={"all": 1}),
             patch("api.views.recent_jobs", return_value=[]),
             patch("api.views.episode_to_summary", return_value=summary),
@@ -114,6 +114,7 @@ class ApiViewCoverageTests(TestCase):
         )
         manager = MagicMock()
         manager.filter.return_value.order_by.return_value.__getitem__.return_value = [job]
+        manager.filter.return_value.order_by.return_value.count.return_value = 1
         with patch.object(views.Job, "objects", manager):
             response = views.frontend_jobs(self.request())
         self.assertEqual(json.loads(response.content)["jobs"][0]["id"], 8)

@@ -479,6 +479,14 @@ table {
   background: #fbfcff;
 }
 
+/* Keep rows visually stable when the pointer passes over them. */
+.downloads-grid .tabulator-row.tabulator-selectable:hover,
+.downloads-grid .tabulator-row.tabulator-selected:hover,
+.downloads-grid .tabulator-row:hover {
+  background: inherit !important;
+  cursor: default;
+}
+
 .downloads-grid .tabulator-row.processing-row {
   background: #f7f9ff;
   color: #52617d;
@@ -487,6 +495,11 @@ table {
 .downloads-grid .tabulator-col-title {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Column visibility menus are intentionally disabled for the library. */
+.downloads-grid .tabulator-col-menu {
+  display: none !important;
 }
 
 .downloads-grid .tabulator-cell[tabulator-field="title"] {
@@ -1603,3 +1616,9 @@ tbody tr:nth-child(even) td {
 .transcript-search-actions {
   margin-top: 1rem;
 }
+
+.pagination { display: flex; justify-content: center; gap: 6px; min-height: 38px; margin: 16px 0 4px; }
+.pagination-button { min-width: 36px; height: 36px; border: 1px solid #344563; border-radius: 9px; background: #182238; color: #aab9d7; cursor: pointer; }
+.pagination-button:hover:not(:disabled) { border-color: #6f8cff; color: #fff; }
+.pagination-button.is-current { border-color: #6f8cff; background: #304b89; color: #fff; }
+.pagination-button:disabled { cursor: default; opacity: .42; }

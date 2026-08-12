@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="{% static 'vendor/tabulator/tabulator.min.css' %}" />
     <link rel="stylesheet" href="{% static 'app/dashboard.css' %}" />
     <script src="{% static 'vendor/tabulator/tabulator.min.js' %}" defer></script>
-    <script src="{% static 'app/dashboard.js' %}" defer></script>
+    <script src="{% static 'app/dashboard.js' %}?v=20260812-3" defer></script>
   </head>
   <body>
     <div class="container">
@@ -222,6 +222,7 @@
           </tbody>
         </table>
       </main>
+      <nav id="library-pagination" class="pagination" aria-label="Library pages" data-page="{{ pagination.page|default:1 }}" data-total-pages="{{ pagination.total_pages|default:1 }}"></nav>
 
     </div>
 

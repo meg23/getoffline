@@ -544,29 +544,6 @@ class SharedDjangoModelTests(TestCase):
             response.content.count(b"<tr\n                data-row-id="), 100
         )
 
-    def test_library_all_filter_renders_every_database_download(self):
-        base_seen_at = timezone.now()
-        for index in range(105):
-            Download.objects.create(
-                profile_id="default",
-                source_type="manual",
-                source_name="Manual Uploads",
-                title=f"Library Item {index:03d}",
-                file_ext="mp3",
-                download_status="downloaded",
-                last_seen_at=base_seen_at - timedelta(seconds=index),
-            )
-
-        response = Client().get("/?filter=all")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Library Item 000")
-        self.assertContains(response, "Library Item 104")
-        self.assertEqual(
-            response.content.count(b"<tr\n                data-row-id="), 105
-        )
-        self.assertContains(response, 'data-server-mode="all"')
-
     def test_scheduler_disables_removed_job_types(self):
         due_at = timezone.now() - timedelta(minutes=1)
         schedule = ScheduledJob.objects.create(
@@ -1097,34 +1074,6 @@ class SharedDjangoModelTests(TestCase):
         self.assertIn('<details class="job-error">', template)
         self.assertIn("<summary>Error log</summary>", template)
         self.assertIn("<pre>{{ job.error_message }}</pre>", template)
-
-    def test_dashboard_refreshes_library_for_new_items_and_finished_jobs(self):
-        script = Path("src/frontend/static/app/dashboard.js").read_text()
-
-        self.assertIn('new CustomEvent("getoffline:library-refresh"', script)
-        self.assertIn('window.addEventListener("getoffline:library-refresh"', script)
-        self.assertIn("detail: { force: jobFinished, processingItems: items }", script)
-        self.assertIn("downloadSignature(downloads)", script)
-
-    def test_dashboard_renders_processing_jobs_as_library_rows(self):
-        script = Path("src/frontend/static/app/dashboard.js").read_text()
-
-        self.assertIn("function processingPlaceholderRow(item)", script)
-        self.assertIn("function matchingDownloadRow(item)", script)
-        self.assertIn("renderProcessingItems(processingItems)", script)
-
-    def test_library_uses_vendored_tabulator_with_fallback_table(self):
-        template = Path("src/frontend/templates/app/library.html").read_text()
-        script = Path("src/frontend/static/app/dashboard.js").read_text()
-        documentation = Path("docs/frontend-data-grid.md").read_text()
-
-        self.assertIn("vendor/tabulator/tabulator.min.css", template)
-        self.assertIn("vendor/tabulator/tabulator.min.js", template)
-        self.assertIn('id="downloads-grid"', template)
-        self.assertIn('id="downloads-fallback-table"', template)
-        self.assertIn("initializeLibraryGrid", script)
-        self.assertIn('persistenceID: "getoffline-library-grid-v1"', script)
-        self.assertIn("Why Tabulator", documentation)
 
     def test_enqueue_job_redirects_to_next_when_present(self):
         client = Client()

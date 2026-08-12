@@ -30,6 +30,7 @@ from api.services.library import (
     list_downloads,
     listened_seconds,
     normalize_library_filter,
+    paginated_downloads,
     recent_jobs,
 )
 from api.services.profiles import profile_id_for_request
@@ -115,14 +116,28 @@ def _job_to_dict(job: Job) -> dict[str, object]:
     }
 
 
+def _pagination_params(request: HttpRequest) -> tuple[int, int]:
+    try:
+        page = max(1, int(request.GET.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = max(1, min(100, int(request.GET.get("page_size") or 100)))
+    except (TypeError, ValueError):
+        page_size = 100
+    return page, page_size
+
+
 @api_login_required
 @require_GET
 def frontend_library(request: HttpRequest) -> JsonResponse:
     profile_id = profile_id_for_request(request)
     settings = profile_settings(profile_id)
     filter_mode = normalize_library_filter(request.GET.get("filter"))
-    episodes = list_downloads(profile_id, filter_mode=filter_mode)
-    played_count = sum(1 for item in episodes if item.played)
+    page, page_size = _pagination_params(request)
+    episodes, total = paginated_downloads(
+        profile_id, filter_mode=filter_mode, page=page, page_size=page_size
+    )
     filter_counts = library_filter_counts(profile_id)
     profile_name = request.user.get_username() or profile_id
     return JsonResponse(
@@ -138,12 +153,18 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
             in {"1", "true", "yes", "on"},
             "library_filter_mode": filter_mode,
             "stats": {
-                "visible": len(episodes),
-                "played": played_count,
-                "new": max(len(episodes) - played_count, 0),
-                "favorites": sum(1 for item in episodes if item.favorite),
+                "visible": total,
+                "played": filter_counts.get("played", 0),
+                "new": filter_counts.get("unplayed", 0),
+                "favorites": filter_counts.get("favorites", 0),
                 "listened": human_duration(listened_seconds(profile_id)),
                 "filters": filter_counts,
+            },
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
             },
         }
     )
@@ -153,11 +174,22 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
 @require_GET
 def frontend_jobs(request: HttpRequest) -> JsonResponse:
     profile_id = profile_id_for_request(request)
-    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")[
-        :100
-    ]
+    page, page_size = _pagination_params(request)
+    rows = Job.objects.filter(profile_id=profile_id).order_by("-created_at", "-id")
+    total = rows.count()
+    page = min(page, max(1, (total + page_size - 1) // page_size))
+    start = (page - 1) * page_size
     return JsonResponse(
-        {"profile_id": profile_id, "jobs": [_job_to_dict(job) for job in rows]}
+        {
+            "profile_id": profile_id,
+            "jobs": [_job_to_dict(job) for job in rows[start : start + page_size]],
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
+            },
+        }
     )
 
 
