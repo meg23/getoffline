@@ -9,6 +9,8 @@ urlpatterns = [
     path("logout/", views.logout, name="logout"),
     path("", views.library, name="library"),
     path("jobs/", views.jobs, name="jobs"),
+    path("playlists/", views.playlists, name="playlists"),
+    path("playlists/<int:playlist_id>/", views.playlists, name="playlist_detail"),
     path(
         "jobs/active-status/",
         views.active_pipeline_status,
