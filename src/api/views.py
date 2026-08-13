@@ -18,6 +18,7 @@ from django.http import (
 )
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
@@ -29,6 +30,7 @@ from api.services.library import (
     library_filter_counts,
     list_downloads,
     listened_seconds,
+    next_library_download,
     normalize_library_filter,
     paginated_downloads,
     recent_jobs,
@@ -43,7 +45,7 @@ from api.streaming.media import (
 )
 from frontend.queue import publish_job
 from models.jobs import create_job
-from models.models import Download, Job, SourceConfig
+from models.models import Download, Job, Playlist, PlaylistItem, SourceConfig
 
 
 def _safe_login_redirect(request: HttpRequest) -> str:
@@ -199,6 +201,8 @@ def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
     item = get_object_or_404(
         Download, pk=episode_id, profile_id=profile_id_for_request(request)
     )
+
+
     summary = episode_to_summary(item)
     has_subtitles = False
     try:
@@ -221,8 +225,59 @@ def frontend_player(request: HttpRequest, episode_id: int) -> JsonResponse:
         else "audio"
     )
     summary["has_subtitles"] = has_subtitles
+    playlist_id = request.GET.get("playlist")
+    playlist_items: list[dict[str, object]] = []
+    parsed_playlist_id: int | None = None
+    if playlist_id:
+        try:
+            parsed_playlist_id = int(playlist_id)
+            playlist = Playlist.objects.get(
+                pk=parsed_playlist_id, profile_id=profile_id_for_request(request)
+            )
+        except (TypeError, ValueError, Playlist.DoesNotExist):
+            playlist = None
+            parsed_playlist_id = None
+        if playlist is not None:
+            playlist_items = [
+                {"id": playlist_item.download_id, "title": playlist_item.download.title or "Untitled"}
+                for playlist_item in PlaylistItem.objects.filter(
+                    playlist=playlist
+                ).select_related("download")
+                if playlist_item.download.download_status
+                not in {"missing", "retention_deleted"}
+            ]
     return JsonResponse(
-        {"item": summary, "seek_seconds": seek, "media_kind": media_kind}
+        {
+            "item": summary,
+            "seek_seconds": seek,
+            "media_kind": media_kind,
+            "playlist_id": parsed_playlist_id,
+            "playlist_items": playlist_items,
+        }
+    )
+
+
+@api_login_required
+@require_GET
+def frontend_next_player(request: HttpRequest, episode_id: int) -> JsonResponse:
+    item = next_library_download(profile_id_for_request(request), episode_id)
+    if item is None:
+        return JsonResponse({"next": None})
+    media_ext = (
+        item.file_ext or Path(str(item.file_path or "")).suffix.lstrip(".")
+    ).lower()
+    media_kind = "video" if media_ext in {"mp4", "mkv", "webm", "mov"} else "audio"
+    return JsonResponse(
+        {
+            "next": {
+                "id": item.id,
+                "title": item.title or "Untitled",
+                "source_name": item.source_name or item.source_type or "",
+                "source_type": item.source_type or "",
+                "media_kind": media_kind,
+                "has_subtitles": bool(item.subtitle_path or item.subtitle_path_relative),
+            }
+        }
     )
 
 
@@ -409,6 +464,133 @@ def library(request: HttpRequest) -> JsonResponse:
         profile_id_for_request(request), filter_mode=request.GET.get("filter")
     )
     return JsonResponse({"episodes": [episode_to_summary(item) for item in rows]})
+
+
+def _playlist_summary(playlist: Playlist) -> dict[str, object]:
+    return {
+        "id": playlist.id,
+        "name": playlist.name,
+        "item_count": playlist.items.count(),
+        "created_at": playlist.created_at.isoformat(),
+        "updated_at": playlist.updated_at.isoformat(),
+    }
+
+
+@api_login_required
+@require_GET
+def playlists(request: HttpRequest) -> JsonResponse:
+    profile_id = profile_id_for_request(request)
+    rows = Playlist.objects.filter(profile_id=profile_id).prefetch_related(
+        "items"
+    )
+    return JsonResponse({"playlists": [_playlist_summary(row) for row in rows]})
+
+
+@api_login_required
+@require_POST
+def playlist_create(request: HttpRequest) -> JsonResponse:
+    data = _json_body(request) or request.POST
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"ok": False, "error": "Playlist name is required"}, status=400)
+    if len(name) > 255:
+        return JsonResponse({"ok": False, "error": "Playlist name is too long"}, status=400)
+    profile_id = profile_id_for_request(request)
+    if Playlist.objects.filter(profile_id=profile_id, name=name).exists():
+        return JsonResponse({"ok": False, "error": "A playlist with that name already exists"}, status=409)
+    playlist = Playlist.objects.create(profile_id=profile_id, name=name)
+    return JsonResponse({"ok": True, "playlist": _playlist_summary(playlist)}, status=201)
+
+
+@api_login_required
+@require_GET
+def playlist_detail(request: HttpRequest, playlist_id: int) -> JsonResponse:
+    playlist = get_object_or_404(
+        Playlist, pk=playlist_id, profile_id=profile_id_for_request(request)
+    )
+    items = PlaylistItem.objects.filter(playlist=playlist).select_related("download")
+    return JsonResponse(
+        {
+            "playlist": _playlist_summary(playlist),
+            "items": [
+                {"position": item.position, "episode": episode_to_summary(item.download)}
+                for item in items
+            ],
+        }
+    )
+
+
+@api_login_required
+@require_POST
+def playlist_add_items(request: HttpRequest, playlist_id: int) -> JsonResponse:
+    playlist = get_object_or_404(
+        Playlist, pk=playlist_id, profile_id=profile_id_for_request(request)
+    )
+    data = _json_body(request) or request.POST
+    raw_ids = data.get("download_ids") or data.get("ids") or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    if not isinstance(raw_ids, list):
+        return JsonResponse({"ok": False, "error": "download_ids must be a list"}, status=400)
+    ids: list[int] = []
+    for raw_id in raw_ids:
+        try:
+            ids.append(int(raw_id))
+        except (TypeError, ValueError):
+            continue
+    downloads_by_id = {
+        download.id: download
+        for download in Download.objects.filter(
+            profile_id=playlist.profile_id, pk__in=ids
+        )
+    }
+    downloads = [download for download_id in ids if (download := downloads_by_id.get(download_id))]
+    existing = set(
+        PlaylistItem.objects.filter(playlist=playlist, download_id__in=ids).values_list(
+            "download_id", flat=True
+        )
+    )
+    position = (
+        PlaylistItem.objects.filter(playlist=playlist).order_by("-position", "-id")
+        .values_list("position", flat=True)
+        .first()
+        or -1
+    )
+    created = 0
+    for download in downloads:
+        if download.id in existing:
+            continue
+        position += 1
+        PlaylistItem.objects.create(playlist=playlist, download=download, position=position)
+        created += 1
+    playlist.updated_at = timezone.now()
+    playlist.save(update_fields=["updated_at"])
+    return JsonResponse({"ok": True, "added": created, "playlist": _playlist_summary(playlist)})
+
+
+@api_login_required
+@require_POST
+def playlist_remove_item(request: HttpRequest, playlist_id: int, download_id: int) -> JsonResponse:
+    playlist = get_object_or_404(
+        Playlist, pk=playlist_id, profile_id=profile_id_for_request(request)
+    )
+    deleted, _ = PlaylistItem.objects.filter(
+        playlist=playlist, download_id=download_id
+    ).delete()
+    if deleted:
+        playlist.updated_at = timezone.now()
+        playlist.save(update_fields=["updated_at"])
+    return JsonResponse({"ok": True, "removed": bool(deleted)})
+
+
+@api_login_required
+@require_POST
+def playlist_delete(request: HttpRequest, playlist_id: int) -> JsonResponse:
+    playlist = get_object_or_404(
+        Playlist, pk=playlist_id, profile_id=profile_id_for_request(request)
+    )
+    playlist.delete()
+    return JsonResponse({"ok": True})
 
 
 @api_login_required

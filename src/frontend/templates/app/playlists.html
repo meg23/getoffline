@@ -1,0 +1,38 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playlists · GetOffline</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}" />
+    <link rel="stylesheet" href="{% static 'app/dashboard.css' %}?v=20260813-13" />
+    <script src="{% static 'app/playlists.js' %}?v=20260813-1" defer></script>
+  </head>
+  <body>
+    <div class="container playlists-page" data-playlist-id="{{ playlist_id|default:'' }}">
+      <header class="hero">
+        <div class="hero-heading">
+          <div class="hero-copy">
+            <p class="eyebrow">Your collection</p>
+            <h1>{% if playlist_id %}Playlist{% else %}Playlists{% endif %}</h1>
+            <p class="hero-description">Keep a listening queue ready for uninterrupted playback.</p>
+          </div>
+          <a class="button-link" href="{% url 'library' %}">← Library</a>
+        </div>
+      </header>
+      <section class="panel playlist-create-panel" {% if playlist_id %}hidden{% endif %}>
+        <div>
+          <p class="eyebrow">New playlist</p>
+          <h2>Create a playlist</h2>
+        </div>
+        <form id="create-playlist-form" class="playlist-create-form">
+          {% csrf_token %}
+          <input id="playlist-name" name="name" type="text" maxlength="255" placeholder="Name a playlist" required />
+          <button class="button-primary" type="submit">Create playlist</button>
+        </form>
+      </section>
+      <main id="playlist-list" class="playlist-list" aria-live="polite"></main>
+    </div>
+  </body>
+</html>

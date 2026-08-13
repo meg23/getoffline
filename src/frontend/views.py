@@ -399,7 +399,10 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
         request,
         "api_frontend_player",
         download_id,
-        query={"t": request.GET.get("t", "")},
+        query={
+            "t": request.GET.get("t", ""),
+            "playlist": request.GET.get("playlist", ""),
+        },
     )
     if not payload:
         raise Http404("Player item unavailable")
@@ -410,6 +413,8 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
             "item": _namespace(payload["item"]),
             "seek_seconds": payload["seek_seconds"],
             "media_kind": payload["media_kind"],
+            "playlist_id": payload.get("playlist_id"),
+            "playlist_items": payload.get("playlist_items") or [],
         },
     )
     if payload["media_kind"] == "document":
@@ -427,6 +432,11 @@ def player(request: HttpRequest, download_id: int) -> HttpResponse:
             "style-src 'self'"
         )
     return response
+
+
+@frontend_login_required
+def playlists(request: HttpRequest, playlist_id: int | None = None) -> HttpResponse:
+    return render(request, "app/playlists.html", {"playlist_id": playlist_id})
 
 
 @frontend_login_required

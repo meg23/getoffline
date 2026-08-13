@@ -2,6 +2,7 @@ import base64
 import os
 import sys
 import unittest
+from datetime import timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -20,7 +21,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from models.domain import DownloadStatus
-from models.models import Download
+from models.models import Download, Playlist, PlaylistItem
 
 
 class BackendApiTests(unittest.TestCase):
@@ -99,6 +100,63 @@ class BackendApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["episodes"][0]["title"], "Episode One")
         self.assertIn("stream_url", payload["episodes"][0])
+
+    def test_playlist_crud_is_profile_scoped_and_preserves_order(self):
+        first = Download.objects.create(
+            profile_id="api-user", source_type="manual", source_name="Uploads",
+            title="First", download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+        second = Download.objects.create(
+            profile_id="api-user", source_type="manual", source_name="Uploads",
+            title="Second", download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=timezone.now(),
+        )
+        playlist = self.client.post(
+            reverse("api_playlist_create"), {"name": "Morning"}
+        ).json()["playlist"]
+        add = self.client.post(
+            reverse("api_playlist_add_items", args=[playlist["id"]]),
+            data={"download_ids": [second.id, first.id]},
+            content_type="application/json",
+        )
+        self.assertEqual(add.status_code, 200)
+        detail = self.client.get(reverse("api_playlist_detail", args=[playlist["id"]]))
+        self.assertEqual(
+            [item["episode"]["title"] for item in detail.json()["items"]],
+            ["Second", "First"],
+        )
+        self.assertEqual(PlaylistItem.objects.filter(playlist_id=playlist["id"]).count(), 2)
+        self.assertEqual(
+            self.client.post(
+                reverse("api_playlist_remove_item", args=[playlist["id"], first.id])
+            ).status_code,
+            200,
+        )
+        self.assertEqual(Playlist.objects.get(pk=playlist["id"]).items.count(), 1)
+
+    def test_next_player_skips_pdf_downloads(self):
+        now = timezone.now()
+        current = Download.objects.create(
+            profile_id="api-user", source_type="manual", source_name="Uploads",
+            title="Current", file_ext="mp4", download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=now,
+        )
+        Download.objects.create(
+            profile_id="api-user", source_type="manual", source_name="Uploads",
+            title="Document", file_ext="pdf", download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=now - timedelta(seconds=1),
+        )
+        next_item = Download.objects.create(
+            profile_id="api-user", source_type="manual", source_name="Uploads",
+            title="Next Audio", file_ext="mp3", download_status=DownloadStatus.DOWNLOADED,
+            last_seen_at=now - timedelta(seconds=2),
+        )
+
+        response = self.client.get(reverse("api_frontend_next_player", args=[current.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["next"]["id"], next_item.id)
 
     def _create_download(self) -> Download:
         return Download.objects.create(
