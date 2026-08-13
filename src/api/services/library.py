@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from django.db.models import Q, QuerySet, Sum
 from django.urls import reverse
@@ -155,10 +156,12 @@ def next_library_download(profile_id: str, download_id: int) -> Download | None:
     current = Download.objects.filter(
         pk=download_id, profile_id=profile_id
     ).only("id", "last_seen_at")
-    current_item = current.first()
+    current_item = cast(Download | None, current.first())
     if current_item is None:
         return None
-    return (
+    return cast(
+        Download | None,
+        (
         library_download_query(profile_id)
         .filter(download_status=DownloadStatus.DOWNLOADED)
         .exclude(
@@ -170,6 +173,7 @@ def next_library_download(profile_id: str, download_id: int) -> Download | None:
         )
         .order_by("-last_seen_at", "-id")
         .first()
+        ),
     )
 
 
