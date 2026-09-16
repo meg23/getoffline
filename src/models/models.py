@@ -128,6 +128,49 @@ class Download(models.Model):
         return self.title or f"Download {self.pk}"
 
 
+class Playlist(models.Model):
+    profile_id = models.CharField(max_length=191, default="default", db_index=True)
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "playlists"
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile_id", "name"], name="uniq_playlist_profile_name"
+            )
+        ]
+
+
+class PlaylistItem(models.Model):
+    playlist = models.ForeignKey(
+        Playlist,
+        db_column="playlist_id",
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    download = models.ForeignKey(
+        Download,
+        db_column="download_id",
+        on_delete=models.CASCADE,
+        related_name="playlist_items",
+    )
+    position = models.PositiveIntegerField(default=0)
+    added_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "playlist_items"
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["playlist", "download"], name="uniq_playlist_download"
+            )
+        ]
+        indexes = [models.Index(fields=["playlist", "position"])]
+
+
 class TranscriptSegment(models.Model):
     download = models.ForeignKey(
         Download,

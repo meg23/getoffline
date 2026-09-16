@@ -829,7 +829,7 @@ class SharedDjangoModelTests(TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn('id="subtitle-track"', body)
         self.assertIn(f"/media/{download.id}/#t=42.500", body)
-        self.assertIn('/static/app/player.js"', body)
+        self.assertIn("/static/app/player.js?v=", body)
         self.assertIn("const periodicProgressSeconds = 5;", player_script)
         self.assertIn('media?.addEventListener("timeupdate"', player_script)
         self.assertIn('media?.addEventListener("pause"', player_script)

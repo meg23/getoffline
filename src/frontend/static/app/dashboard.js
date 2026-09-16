@@ -909,6 +909,10 @@
   const metadataId = document.getElementById("metadata-edit-id");
   const metadataTitle = document.getElementById("metadata-edit-item-title");
   const metadataSource = document.getElementById("metadata-edit-source-name");
+  const playlistBackdrop = document.getElementById("playlist-add-backdrop");
+  const playlistOptions = document.getElementById("playlist-options");
+  const playlistCreateForm = document.getElementById("playlist-create-form");
+  const playlistCreateName = document.getElementById("playlist-create-name");
 
   function browserMediaUrl(url, id) {
     const value = String(url || "");
@@ -921,7 +925,72 @@
       .filter(Boolean);
   }
 
+  async function playlistRequest(url, options = {}) {
+    const { headers = {}, ...requestOptions } = options;
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      ...requestOptions,
+      headers: { Accept: "application/json", "X-CSRFToken": csrf, ...headers },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Playlist request failed.");
+    return payload;
+  }
+
+  async function openPlaylistChooser(requestedIds = null) {
+    const rows = selectedRows();
+    const ids = requestedIds || rows.map((row) => Number(row.dataset.rowId)).filter(Boolean);
+    if (!ids.length) return;
+    playlistBackdrop?.classList.add("is-open");
+    playlistBackdrop?.setAttribute("aria-hidden", "false");
+    playlistOptions.textContent = "Loading playlists…";
+    try {
+      const payload = await playlistRequest("/api/playlists");
+      playlistOptions.replaceChildren();
+      (payload.playlists || []).forEach((playlist) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "playlist-option";
+        button.textContent = `${playlist.name} (${playlist.item_count})`;
+        button.addEventListener("click", async () => {
+          await playlistRequest(`/api/playlists/${playlist.id}/items`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ download_ids: ids }),
+          });
+          playlistBackdrop.classList.remove("is-open");
+          playlistBackdrop.setAttribute("aria-hidden", "true");
+          batchAction.value = "";
+          updateBatchState();
+        });
+        playlistOptions.appendChild(button);
+      });
+      if (!payload.playlists?.length) playlistOptions.textContent = "Create a playlist below.";
+    } catch (error) { playlistOptions.textContent = error.message; }
+  }
+
+  playlistCreateForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const playlist = await playlistRequest("/api/playlists/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: playlistCreateName.value }),
+      });
+      playlistCreateName.value = "";
+      openPlaylistChooser();
+    } catch (error) { window.alert(error.message); }
+  });
+  document.addEventListener("getoffline:open-playlist-chooser", (event) => {
+    openPlaylistChooser(event.detail?.ids || null);
+  });
+
   batchForm?.addEventListener("submit", (event) => {
+    if (batchAction?.value === "add-playlist") {
+      event.preventDefault();
+      openPlaylistChooser();
+      return;
+    }
     if (batchAction?.value !== "edit-metadata") return;
     event.preventDefault();
     const rows = selectedRows();
@@ -1010,10 +1079,14 @@
   const miniTitle = document.getElementById("mini-player-title");
   const miniSource = document.getElementById("mini-player-source");
   const miniOpen = document.getElementById("mini-player-open");
+  const miniAdd = document.getElementById("mini-player-add");
+  const miniFavorite = document.getElementById("mini-player-favorite");
+  const miniNext = document.getElementById("mini-player-next");
   const miniClose = document.getElementById("mini-player-close");
   const audio = document.getElementById("mini-player-audio");
   const video = document.getElementById("mini-player-video");
   const transcript = document.getElementById("mini-player-transcript");
+  const miniCsrf = document.querySelector("[name=csrfmiddlewaretoken]")?.value || "";
   const settingsKey = "getofflineMediaElementSettings";
   const stateKey = "getofflineMiniPlayerState";
   let lastPersisted = -9999;
@@ -1064,7 +1137,7 @@
       body,
       credentials: "same-origin",
       keepalive: !!force,
-      headers: { "X-CSRFToken": csrf },
+        headers: { "X-CSRFToken": miniCsrf },
     }).catch(() => {});
   }
   function clearTranscript() {
@@ -1174,11 +1247,24 @@
   }
   function renderMini(state) {
     if (!state?.rowId || !state.src || !miniPlayer) return;
+    const preserveMaximized =
+      Boolean(state.keepMaximized) ||
+      miniPlayer.classList.contains("is-maximized");
     stopMini();
     const media = activeMedia(state.kind);
     if (!media) return;
+    if (miniNext) {
+      miniNext.hidden = state.kind === "document";
+      miniNext.disabled = state.kind === "document" || !state.nextItem;
+    }
     if (miniTitle) miniTitle.textContent = state.title || "Now playing";
     if (miniSource) miniSource.textContent = state.source || "";
+    if (miniFavorite) {
+      miniFavorite.classList.toggle("is-favorite", Boolean(state.favorite));
+      miniFavorite.setAttribute("aria-label", state.favorite ? "Unfavorite" : "Favorite");
+      miniFavorite.title = state.favorite ? "Unfavorite" : "Favorite";
+    }
+    if (miniNext) miniNext.disabled = true;
     const resumeAtLoad = Math.max(0, Number(state.currentTime || 0));
     media.src =
       resumeAtLoad > 0
@@ -1284,9 +1370,63 @@
         }),
       );
     miniPlayer.classList.add("is-visible");
-    setExpanded(false);
+    setExpanded(preserveMaximized);
+    if (miniNext && state.kind !== "document") {
+      fetch(`/api/frontend/player/${state.rowId}/next`, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      })
+        .then((response) => (response.ok ? response.json() : { next: null }))
+        .then((payload) => {
+          state.nextItem = payload.next || null;
+          localStorage.setItem(stateKey, JSON.stringify(state));
+          miniNext.disabled = !state.nextItem;
+        })
+        .catch(() => {
+          miniNext.disabled = true;
+        });
+    }
   }
   miniClose?.addEventListener("click", closeMini);
+  miniAdd?.addEventListener("click", () => {
+    const state = JSON.parse(localStorage.getItem(stateKey) || "null");
+    if (state?.rowId) {
+      document.dispatchEvent(new CustomEvent("getoffline:open-playlist-chooser", {
+        detail: { ids: [Number(state.rowId)] },
+      }));
+    }
+  });
+  miniFavorite?.addEventListener("click", async () => {
+    const state = JSON.parse(localStorage.getItem(stateKey) || "null");
+    if (!state?.rowId) return;
+    const nextFavorite = !state.favorite;
+    const response = await fetch(
+      `/downloads/${state.rowId}/${nextFavorite ? "favorite" : "unfavorite"}/`,
+      { method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf } },
+    );
+    if (!response.ok) return;
+    state.favorite = nextFavorite;
+    localStorage.setItem(stateKey, JSON.stringify(state));
+    renderMini(state);
+  });
+  miniNext?.addEventListener("click", () => {
+    const state = JSON.parse(localStorage.getItem(stateKey) || "null");
+    const next = state?.nextItem;
+    if (!next) return;
+    const wasMaximized = miniPlayer?.classList.contains("is-maximized") || false;
+    renderMini({
+      rowId: next.id,
+      title: next.title,
+      source: next.source_name || next.source_type || "",
+      kind: next.media_kind || "audio",
+      src: `/media/${next.id}/`,
+      subtitleUrl: next.has_subtitles ? `/subtitle/${next.id}/` : "",
+      hasSubtitles: !!next.has_subtitles,
+      currentTime: 0,
+      paused: false,
+      keepMaximized: wasMaximized,
+    });
+  });
   miniOpen?.addEventListener("click", () =>
     setExpanded(!miniPlayer?.classList.contains("is-maximized")),
   );
@@ -1332,6 +1472,7 @@
           link.dataset.resumeSeconds || row?.dataset.resumeSeconds || 0,
         ),
         paused: false,
+        favorite: row?.dataset.favorite === "1",
       };
       localStorage.setItem(stateKey, JSON.stringify(state));
       renderMini(state);

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
-from django.db.models import QuerySet, Sum
+from django.db.models import Q, QuerySet, Sum
 from django.urls import reverse
 
 from models.domain import DownloadStatus, parse_str_enum
@@ -149,6 +150,31 @@ def paginated_downloads(
     page = min(page, max(1, (total + page_size - 1) // page_size))
     start = (page - 1) * page_size
     return [decorate_download(item) for item in rows[start : start + page_size]], total
+
+
+def next_library_download(profile_id: str, download_id: int) -> Download | None:
+    current = Download.objects.filter(
+        pk=download_id, profile_id=profile_id
+    ).only("id", "last_seen_at")
+    current_item = cast(Download | None, current.first())
+    if current_item is None:
+        return None
+    return cast(
+        Download | None,
+        (
+        library_download_query(profile_id)
+        .filter(download_status=DownloadStatus.DOWNLOADED)
+        .exclude(
+            Q(file_ext__iexact="pdf") | Q(file_path__iendswith=".pdf")
+        )
+        .filter(
+            Q(last_seen_at__lt=current_item.last_seen_at)
+            | Q(last_seen_at=current_item.last_seen_at, id__lt=current_item.id)
+        )
+        .order_by("-last_seen_at", "-id")
+        .first()
+        ),
+    )
 
 
 def library_filter_counts(profile_id: str) -> dict[str, int]:
