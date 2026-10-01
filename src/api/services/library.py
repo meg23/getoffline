@@ -131,6 +131,7 @@ def paginated_downloads(
     profile_id: str,
     *,
     filter_mode: str = "unplayed",
+    search_term: str = "",
     page: int = 1,
     page_size: int = LIBRARY_PAGE_SIZE,
 ) -> tuple[list[Download], int]:
@@ -145,6 +146,9 @@ def paginated_downloads(
         rows = rows.filter(played=True, download_status=DownloadStatus.DOWNLOADED)
     elif mode == "favorites":
         rows = rows.filter(favorite=True, download_status=DownloadStatus.DOWNLOADED)
+    search = str(search_term or "").strip()
+    if search:
+        rows = rows.filter(Q(title__icontains=search) | Q(source_name__icontains=search))
     rows = rows.order_by("-last_seen_at", "-id")
     total = rows.count()
     page = min(page, max(1, (total + page_size - 1) // page_size))
