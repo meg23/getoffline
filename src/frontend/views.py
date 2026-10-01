@@ -364,6 +364,11 @@ def library(request: HttpRequest) -> HttpResponse:
         "api_frontend_library",
         query={
             "filter": request.GET.get("filter", ""),
+            "search": request.GET.get("search", ""),
+            "source": request.GET.get("source", ""),
+            "type": request.GET.get("type", ""),
+            "sort": request.GET.get("sort", ""),
+            "direction": request.GET.get("direction", ""),
             "page": request.GET.get("page", "1"),
             "page_size": "100",
         },

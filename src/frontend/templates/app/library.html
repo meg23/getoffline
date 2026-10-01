@@ -7,9 +7,9 @@
     <title>GetOffline Media Library</title>
     <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}" />
     <link rel="stylesheet" href="{% static 'vendor/tabulator/tabulator.min.css' %}" />
-    <link rel="stylesheet" href="{% static 'app/dashboard.css' %}?v=20260813-12" />
+    <link rel="stylesheet" href="{% static 'app/dashboard.css' %}?v=20261001-13" />
     <script src="{% static 'vendor/tabulator/tabulator.min.js' %}" defer></script>
-    <script src="{% static 'app/dashboard.js' %}?v=20260813-8" defer></script>
+    <script src="{% static 'app/dashboard.js' %}?v=20261001-9" defer></script>
   </head>
   <body>
     <div class="container">
@@ -88,18 +88,36 @@
           </a>
 
           <div id="library-filter-wrap" class="library-filter-wrap" role="group" aria-label="Library filters">
-            <button id="library-filter-toggle" class="library-filter-toggle" type="button" title="Filter library" aria-label="Filter library" aria-controls="library-filter-fields" aria-expanded="false">
+              <button id="library-filter-toggle" class="library-filter-toggle" type="button" title="More filters and sorting" aria-label="More filters and sorting" aria-controls="library-filter-fields" aria-expanded="false">
               <svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M4 5h16l-6.5 7v5l-3 2v-7L4 5Z" />
               </svg>
             </button>
             <div id="library-filter-fields" class="library-filter-fields">
-              <input id="library-filter" class="library-filter-input" type="search" placeholder="Filter by artist or title.." aria-label="Filter by artist or title" autocomplete="off" />
+              <input id="library-filter" class="library-filter-input" type="search" value="{{ library_search|default:'' }}" placeholder="Search title or channel…" aria-label="Search title or channel" autocomplete="off" />
               <select id="library-filter-mode" class="library-filter-select" aria-label="Filter mode" data-server-mode="{{ library_filter_mode|default:'unplayed' }}">
                 <option value="unplayed" {% if library_filter_mode == 'unplayed' %}selected{% endif %}>Unplayed</option>
                 <option value="played" {% if library_filter_mode == 'played' %}selected{% endif %}>Played</option>
                 <option value="favorites" {% if library_filter_mode == 'favorites' %}selected{% endif %}>Favorites</option>
                 <option value="all" {% if library_filter_mode == 'all' %}selected{% endif %}>All</option>
+              </select>
+              <select id="library-media-type" class="library-filter-select" aria-label="Filter by media type">
+                <option value="all" {% if library_media_type == 'all' or not library_media_type %}selected{% endif %}>All types</option>
+                <option value="audio" {% if library_media_type == 'audio' %}selected{% endif %}>Audio</option>
+                <option value="video" {% if library_media_type == 'video' %}selected{% endif %}>Video</option>
+                <option value="document" {% if library_media_type == 'document' %}selected{% endif %}>PDF</option>
+              </select>
+              <select id="library-sort" class="library-filter-select" aria-label="Sort library">
+                <option value="newest" {% if library_sort == 'newest' or not library_sort %}selected{% endif %}>Newest</option>
+                <option value="oldest" {% if library_sort == 'oldest' %}selected{% endif %}>Oldest</option>
+                <option value="title" {% if library_sort == 'title' %}selected{% endif %}>Title</option>
+                <option value="channel" {% if library_sort == 'channel' %}selected{% endif %}>Channel</option>
+                <option value="size" {% if library_sort == 'size' %}selected{% endif %}>File size</option>
+                <option value="duration" {% if library_sort == 'duration' %}selected{% endif %}>Duration</option>
+              </select>
+              <select id="library-direction" class="library-filter-select" aria-label="Sort direction">
+                <option value="desc" {% if library_direction == 'desc' or not library_direction %}selected{% endif %}>Descending</option>
+                <option value="asc" {% if library_direction == 'asc' %}selected{% endif %}>Ascending</option>
               </select>
               <button id="library-filter-clear" class="library-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">×</button>
             </div>
@@ -118,7 +136,7 @@
               <option value="download">download</option>
               <option value="delete">delete</option>
               <option value="purge">purge</option>
-              <option value="add-playlist">add to playlist</option>
+              <option value="add-playlist">playlist</option>
             </select>
             <button id="batch-apply" class="batch-apply" type="submit" disabled>Apply</button>
           </form>
@@ -140,6 +158,7 @@
       </section>
 
       <main class="table-card" aria-label="Media library">
+        <div id="library-result-summary" class="library-result-summary" aria-live="polite"></div>
         <div id="downloads-grid" class="downloads-grid" aria-label="Media library grid"></div>
         <table id="downloads-fallback-table">
           <colgroup>
@@ -281,7 +300,7 @@
 
     <div id="playlist-add-backdrop" class="modal-backdrop" aria-hidden="true">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="playlist-add-title">
-        <h2 id="playlist-add-title">Add to playlist</h2>
+        <h2 id="playlist-add-title">Playlist</h2>
         <div id="playlist-options" class="playlist-options">Loading playlists…</div>
         <form id="playlist-create-form" class="modal-form">
           <label for="playlist-create-name">New playlist</label>
@@ -319,7 +338,7 @@
         <div class="mini-player-header">
           <div id="mini-player-title" class="mini-player-title"></div>
           <div id="mini-player-source" class="mini-player-source"></div>
-          <button id="mini-player-add" class="mini-player-header-action" type="button" aria-label="Add to playlist" title="Add to playlist">
+          <button id="mini-player-add" class="mini-player-header-action" type="button" aria-label="Playlist" title="Playlist">
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
           </button>
           <button id="mini-player-favorite" class="mini-player-header-action" type="button" aria-label="Favorite" title="Favorite">

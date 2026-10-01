@@ -275,6 +275,30 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["pagination"]["total_pages"], 1)
 
+    def test_frontend_library_supports_server_sort_and_media_type_filters(self):
+        Download.objects.create(
+            profile_id="api-user", item_uid="sort-a", source_name="Zeta",
+            title="Alpha", file_ext="mp3", file_size_bytes=10,
+            download_status=DownloadStatus.DOWNLOADED, last_seen_at=timezone.now(),
+        )
+        video = Download.objects.create(
+            profile_id="api-user", item_uid="sort-b", source_name="Alpha",
+            title="Zulu", file_ext="mp4", file_size_bytes=20,
+            download_status=DownloadStatus.DOWNLOADED, last_seen_at=timezone.now(),
+        )
+
+        response = self.client.get(
+            reverse("api_frontend_library"),
+            {"filter": "all", "type": "video", "sort": "title", "direction": "asc"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([item["id"] for item in payload["downloads"]], [video.id])
+        self.assertEqual(payload["library_sort"], "title")
+        self.assertEqual(payload["library_direction"], "asc")
+        self.assertEqual(payload["library_media_type"], "video")
+
     def test_frontend_player_falls_back_to_file_path_extension_for_video_kind(self):
         download = Download.objects.create(
             profile_id="api-user",

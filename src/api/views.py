@@ -31,7 +31,10 @@ from api.services.library import (
     list_downloads,
     listened_seconds,
     next_library_download,
+    normalize_library_direction,
     normalize_library_filter,
+    normalize_library_media_type,
+    normalize_library_sort,
     paginated_downloads,
     recent_jobs,
 )
@@ -137,11 +140,19 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
     settings = profile_settings(profile_id)
     filter_mode = normalize_library_filter(request.GET.get("filter"))
     search_term = request.GET.get("search", "")
+    source_term = request.GET.get("source", "")
+    media_type = normalize_library_media_type(request.GET.get("type"))
+    sort = normalize_library_sort(request.GET.get("sort"))
+    direction = normalize_library_direction(request.GET.get("direction"))
     page, page_size = _pagination_params(request)
     episodes, total = paginated_downloads(
         profile_id,
         filter_mode=filter_mode,
         search_term=search_term,
+        source_term=source_term,
+        media_type=media_type,
+        sort=sort,
+        direction=direction,
         page=page,
         page_size=page_size,
     )
@@ -159,6 +170,11 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
             ).strip().lower()
             in {"1", "true", "yes", "on"},
             "library_filter_mode": filter_mode,
+            "library_search": search_term,
+            "library_source": source_term,
+            "library_media_type": media_type,
+            "library_sort": sort,
+            "library_direction": direction,
             "stats": {
                 "visible": total,
                 "played": filter_counts.get("played", 0),

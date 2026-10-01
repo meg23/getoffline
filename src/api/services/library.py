@@ -19,6 +19,8 @@ DOWNLOAD_STATUSES = [
 ]
 LIBRARY_PREVIEW_LIMIT = 100
 LIBRARY_PAGE_SIZE = 100
+LIBRARY_SORTS = {"newest", "oldest", "title", "channel", "size", "duration"}
+LIBRARY_MEDIA_TYPES = {"all", "audio", "video", "document"}
 
 
 def human_size(size: int | None) -> str:
@@ -110,6 +112,21 @@ def normalize_library_filter(value: object) -> str:
     return mode if mode in {"all", "played", "favorites", "unplayed"} else "unplayed"
 
 
+def normalize_library_sort(value: object) -> str:
+    sort = str(value or "newest").strip().lower()
+    return sort if sort in LIBRARY_SORTS else "newest"
+
+
+def normalize_library_direction(value: object) -> str:
+    direction = str(value or "desc").strip().lower()
+    return direction if direction in {"asc", "desc"} else "desc"
+
+
+def normalize_library_media_type(value: object) -> str:
+    media_type = str(value or "all").strip().lower()
+    return media_type if media_type in LIBRARY_MEDIA_TYPES else "all"
+
+
 def list_downloads(
     profile_id: str, *, filter_mode: str = "unplayed", show_all: bool | None = None
 ) -> list[Download]:
@@ -132,6 +149,10 @@ def paginated_downloads(
     *,
     filter_mode: str = "unplayed",
     search_term: str = "",
+    source_term: str = "",
+    media_type: str = "all",
+    sort: str = "newest",
+    direction: str = "desc",
     page: int = 1,
     page_size: int = LIBRARY_PAGE_SIZE,
 ) -> tuple[list[Download], int]:
@@ -149,7 +170,38 @@ def paginated_downloads(
     search = str(search_term or "").strip()
     if search:
         rows = rows.filter(Q(title__icontains=search) | Q(source_name__icontains=search))
-    rows = rows.order_by("-last_seen_at", "-id")
+    source = str(source_term or "").strip()
+    if source:
+        rows = rows.filter(source_name__icontains=source)
+    selected_media_type = normalize_library_media_type(media_type)
+    video_extensions = ("mp4", "mkv", "webm", "mov")
+    video_query = Q(file_ext__in=video_extensions)
+    for extension in video_extensions:
+        video_query |= Q(file_path__iendswith=f".{extension}")
+    pdf_query = Q(file_ext__iexact="pdf") | Q(file_path__iendswith=".pdf")
+    if selected_media_type == "video":
+        rows = rows.filter(video_query)
+    elif selected_media_type == "document":
+        rows = rows.filter(pdf_query)
+    elif selected_media_type == "audio":
+        rows = rows.exclude(video_query | pdf_query)
+    selected_sort = normalize_library_sort(sort)
+    selected_direction = normalize_library_direction(direction)
+    sort_field = {
+        "newest": "last_seen_at",
+        "oldest": "last_seen_at",
+        "title": "title",
+        "channel": "source_name",
+        "size": "file_size_bytes",
+        "duration": "duration_seconds",
+    }[selected_sort]
+    descending = selected_direction == "desc"
+    if selected_sort == "newest":
+        descending = True
+    elif selected_sort == "oldest":
+        descending = False
+    prefix = "-" if descending else ""
+    rows = rows.order_by(f"{prefix}{sort_field}", f"{prefix}id")
     total = rows.count()
     page = min(page, max(1, (total + page_size - 1) // page_size))
     start = (page - 1) * page_size

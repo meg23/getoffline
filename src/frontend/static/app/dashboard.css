@@ -331,7 +331,7 @@ table {
 }
 
 .library-filter-toggle {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 2.7rem;
@@ -354,7 +354,21 @@ table {
 }
 
 .library-filter-fields {
-  display: contents;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+#library-media-type,
+#library-sort,
+#library-direction {
+  display: none;
+}
+
+.library-filter-wrap.is-open #library-media-type,
+.library-filter-wrap.is-open #library-sort,
+.library-filter-wrap.is-open #library-direction {
+  display: block;
 }
 
 .library-filter-input {
@@ -389,6 +403,13 @@ table {
 .library-filter-clear:hover,
 .batch-apply:hover {
   background: #dfe8ff;
+}
+
+.library-result-summary {
+  min-height: 1rem;
+  padding: 0.45rem 0.9rem 0;
+  color: #7180a0;
+  font-size: 0.82rem;
 }
 
 .batch-toolbar-form {
@@ -1218,7 +1239,7 @@ tbody tr:nth-child(even) td {
   }
 
   .library-filter-wrap.is-open {
-    display: flex;
+    display: block;
     width: 100%;
     grid-column: 1/-1;
     border: 1px solid #c9d5ef;
@@ -1228,20 +1249,42 @@ tbody tr:nth-child(even) td {
   }
 
   .library-filter-wrap.is-open .library-filter-fields {
-    display: inline-flex;
-    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.45rem;
+    padding: 0.55rem;
     min-width: 0;
   }
 
-  .library-filter-wrap:not(.is-open) {
+  .library-filter-wrap.is-open .library-filter-toggle {
+    display: none;
+  }
+
+  .library-filter-wrap.is-open .library-filter-input:first-child,
+  .library-filter-wrap.is-open .library-filter-input,
+  .library-filter-wrap.is-open .library-filter-select,
+  .library-filter-wrap.is-open .library-filter-clear {
     width: 100%;
+    min-width: 0;
+    min-height: 2.65rem;
+    border: 1px solid #dbe3f3;
+    border-radius: 9px;
+    box-sizing: border-box;
+  }
+
+  .library-filter-wrap:not(.is-open) {
+    width: auto;
     justify-self: stretch;
   }
 
   .library-filter-wrap:not(.is-open) .library-filter-toggle {
-    width: 100%;
+    width: 2.7rem;
     min-width: 0;
     min-height: 2.7rem;
+  }
+
+  .library-result-summary {
+    padding: 0.55rem 0.7rem 0;
   }
 
   .library-filter-input {

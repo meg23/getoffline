@@ -32,6 +32,10 @@
 
   const gridElement = document.getElementById("downloads-grid");
   const libraryPagination = document.getElementById("library-pagination");
+  const mediaTypeFilter = document.getElementById("library-media-type");
+  const librarySort = document.getElementById("library-sort");
+  const libraryDirection = document.getElementById("library-direction");
+  const resultSummary = document.getElementById("library-result-summary");
 
   function renderLibraryPagination(page, totalPages, loadPage) {
     if (!libraryPagination) return;
@@ -53,6 +57,23 @@
       if (value === page) libraryPagination.lastElementChild.classList.add("is-current");
     }
     addButton("›", page + 1, page >= totalPages);
+  }
+
+  function syncLibraryUrl(page = null) {
+    const url = new URL(window.location.href);
+    const mode = document.getElementById("library-filter-mode")?.value || "unplayed";
+    const search = document.getElementById("library-filter")?.value.trim() || "";
+    const mediaType = document.getElementById("library-media-type")?.value || "all";
+    const sort = document.getElementById("library-sort")?.value || "newest";
+    const direction = document.getElementById("library-direction")?.value || "desc";
+    if (mode === "unplayed") url.searchParams.delete("filter");
+    else url.searchParams.set("filter", mode);
+    if (search) url.searchParams.set("search", search); else url.searchParams.delete("search");
+    if (mediaType === "all") url.searchParams.delete("type"); else url.searchParams.set("type", mediaType);
+    if (sort === "newest") url.searchParams.delete("sort"); else url.searchParams.set("sort", sort);
+    if (direction === "desc") url.searchParams.delete("direction"); else url.searchParams.set("direction", direction);
+    if (page !== null) url.searchParams.set("page", String(page));
+    window.history.replaceState({}, "", url);
   }
 
   // Only use Tabulator on viewports wide enough for the table layout; fall back to card layout on mobile.
@@ -249,6 +270,9 @@
     if (mode !== "unplayed") url.searchParams.set("filter", mode);
     const search = (filterInput?.value || "").trim();
     if (search) url.searchParams.set("search", search);
+    if (mediaTypeFilter?.value && mediaTypeFilter.value !== "all") url.searchParams.set("type", mediaTypeFilter.value);
+    if (librarySort?.value && librarySort.value !== "newest") url.searchParams.set("sort", librarySort.value);
+    if (libraryDirection?.value && libraryDirection.value !== "desc") url.searchParams.set("direction", libraryDirection.value);
     const page = requestedPage || Number(libraryPagination?.dataset.page || 1);
     url.searchParams.set("page", String(page));
     url.searchParams.set("page_size", "100");
@@ -264,6 +288,8 @@
         ? payload.downloads
         : [];
       const pagination = payload.pagination || {};
+      syncLibraryUrl(Number(pagination.page || page));
+      if (resultSummary) resultSummary.textContent = `${pagination.total || 0} result${pagination.total === 1 ? "" : "s"}`;
       if (libraryPagination) {
         libraryPagination.dataset.page = String(pagination.page || page);
         libraryPagination.dataset.totalPages = String(pagination.total_pages || 1);
@@ -361,11 +387,20 @@
       refreshLibraryFromApi(true, 1).catch(() => {});
     }, 250);
   });
+  [mediaTypeFilter, librarySort, libraryDirection].forEach((control) => {
+    control?.addEventListener("change", () => {
+      syncLibraryUrl(1);
+      window.location.href = window.location.href;
+    });
+  });
   filterMode?.addEventListener("change", () => {
     if (!syncServerFilterMode()) applyFilters();
   });
   clearButton?.addEventListener("click", () => {
     if (filterInput) filterInput.value = "";
+    if (mediaTypeFilter) mediaTypeFilter.value = "all";
+    if (librarySort) librarySort.value = "newest";
+    if (libraryDirection) libraryDirection.value = "desc";
     if (filterMode) filterMode.value = "unplayed";
     if (!syncServerFilterMode()) filterInput?.dispatchEvent(new Event("input"));
   });
@@ -379,7 +414,11 @@
     setFilterOpen(!filterWrap?.classList.contains("is-open"), true);
   });
   setFilterOpen(
-    filterMode?.value !== "unplayed" || Boolean(filterInput?.value),
+    filterMode?.value !== "unplayed" ||
+      Boolean(filterInput?.value) ||
+      mediaTypeFilter?.value !== "all" ||
+      librarySort?.value !== "newest" ||
+      libraryDirection?.value !== "desc",
   );
   selectors().forEach(bindSelector);
   batchAction?.addEventListener("change", updateBatchState);
@@ -403,6 +442,9 @@
     const clearButton = document.getElementById("library-filter-clear");
     const filterWrap = document.getElementById("library-filter-wrap");
     const filterToggle = document.getElementById("library-filter-toggle");
+    const mediaTypeFilter = document.getElementById("library-media-type");
+    const librarySort = document.getElementById("library-sort");
+    const libraryDirection = document.getElementById("library-direction");
     const batchAction = document.getElementById("batch-action");
     const batchApply = document.getElementById("batch-apply");
     const selectedIds = new Set();
@@ -715,11 +757,20 @@
         refreshLibraryFromApi(true, 1).catch(() => {});
       }, 250);
     });
+    [mediaTypeFilter, librarySort, libraryDirection].forEach((control) => {
+      control?.addEventListener("change", () => {
+        syncLibraryUrl(1);
+        window.location.href = window.location.href;
+      });
+    });
     filterMode?.addEventListener("change", () => {
       if (!syncServerFilterMode()) applyFilters();
     });
     clearButton?.addEventListener("click", () => {
       if (filterInput) filterInput.value = "";
+      if (mediaTypeFilter) mediaTypeFilter.value = "all";
+      if (librarySort) librarySort.value = "newest";
+      if (libraryDirection) libraryDirection.value = "desc";
       if (filterMode) filterMode.value = "unplayed";
       if (!syncServerFilterMode()) filterInput?.dispatchEvent(new Event("input"));
     });
@@ -727,7 +778,11 @@
       setFilterOpen(!filterWrap?.classList.contains("is-open"), true);
     });
     setFilterOpen(
-      filterMode?.value !== "unplayed" || Boolean(filterInput?.value),
+      filterMode?.value !== "unplayed" ||
+        Boolean(filterInput?.value) ||
+        mediaTypeFilter?.value !== "all" ||
+        librarySort?.value !== "newest" ||
+        libraryDirection?.value !== "desc",
     );
     batchAction?.addEventListener("change", updateBatchState);
     function downloadSignature(items) {
@@ -765,6 +820,9 @@
       if (mode !== "unplayed") url.searchParams.set("filter", mode);
       const search = (filterInput?.value || "").trim();
       if (search) url.searchParams.set("search", search);
+      if (mediaTypeFilter?.value && mediaTypeFilter.value !== "all") url.searchParams.set("type", mediaTypeFilter.value);
+      if (librarySort?.value && librarySort.value !== "newest") url.searchParams.set("sort", librarySort.value);
+      if (libraryDirection?.value && libraryDirection.value !== "desc") url.searchParams.set("direction", libraryDirection.value);
       const page = requestedPage || Number(libraryPagination?.dataset.page || 1);
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", "100");
@@ -780,6 +838,8 @@
           ? payload.downloads
           : [];
         const pagination = payload.pagination || {};
+        syncLibraryUrl(Number(pagination.page || page));
+        if (resultSummary) resultSummary.textContent = `${pagination.total || 0} result${pagination.total === 1 ? "" : "s"}`;
         if (libraryPagination) {
           libraryPagination.dataset.page = String(pagination.page || page);
           libraryPagination.dataset.totalPages = String(pagination.total_pages || 1);
