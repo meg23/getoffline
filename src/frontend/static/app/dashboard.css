@@ -331,7 +331,7 @@ table {
 }
 
 .library-filter-toggle {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   flex: 0 0 2.7rem;
@@ -354,21 +354,7 @@ table {
 }
 
 .library-filter-fields {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-}
-
-#library-media-type,
-#library-sort,
-#library-direction {
-  display: none;
-}
-
-.library-filter-wrap.is-open #library-media-type,
-.library-filter-wrap.is-open #library-sort,
-.library-filter-wrap.is-open #library-direction {
-  display: block;
+  display: contents;
 }
 
 .library-filter-input {
