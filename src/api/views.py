@@ -136,9 +136,14 @@ def frontend_library(request: HttpRequest) -> JsonResponse:
     profile_id = profile_id_for_request(request)
     settings = profile_settings(profile_id)
     filter_mode = normalize_library_filter(request.GET.get("filter"))
+    search_term = request.GET.get("search", "")
     page, page_size = _pagination_params(request)
     episodes, total = paginated_downloads(
-        profile_id, filter_mode=filter_mode, page=page, page_size=page_size
+        profile_id,
+        filter_mode=filter_mode,
+        search_term=search_term,
+        page=page,
+        page_size=page_size,
     )
     filter_counts = library_filter_counts(profile_id)
     profile_name = request.user.get_username() or profile_id

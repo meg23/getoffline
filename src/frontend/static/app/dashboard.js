@@ -247,6 +247,8 @@
     const url = new URL("/api/frontend/library", window.location.origin);
     const mode = filterMode?.value || "unplayed";
     if (mode !== "unplayed") url.searchParams.set("filter", mode);
+    const search = (filterInput?.value || "").trim();
+    if (search) url.searchParams.set("search", search);
     const page = requestedPage || Number(libraryPagination?.dataset.page || 1);
     url.searchParams.set("page", String(page));
     url.searchParams.set("page_size", "100");
@@ -350,14 +352,22 @@
     return true;
   }
 
-  filterInput?.addEventListener("input", applyFilters);
+  let searchRefreshTimer = 0;
+  filterInput?.addEventListener("input", () => {
+    applyFilters();
+    window.clearTimeout(searchRefreshTimer);
+    searchRefreshTimer = window.setTimeout(() => {
+      if (libraryPagination) libraryPagination.dataset.page = "1";
+      refreshLibraryFromApi(true, 1).catch(() => {});
+    }, 250);
+  });
   filterMode?.addEventListener("change", () => {
     if (!syncServerFilterMode()) applyFilters();
   });
   clearButton?.addEventListener("click", () => {
     if (filterInput) filterInput.value = "";
     if (filterMode) filterMode.value = "unplayed";
-    if (!syncServerFilterMode()) applyFilters();
+    if (!syncServerFilterMode()) filterInput?.dispatchEvent(new Event("input"));
   });
   function setFilterOpen(isOpen, focusInput = false) {
     if (!filterWrap || !filterToggle) return;
@@ -696,14 +706,22 @@
       if (isOpen && focusInput) filterInput?.focus();
     }
 
-    filterInput?.addEventListener("input", applyFilters);
+    let searchRefreshTimer = 0;
+    filterInput?.addEventListener("input", () => {
+      applyFilters();
+      window.clearTimeout(searchRefreshTimer);
+      searchRefreshTimer = window.setTimeout(() => {
+        if (libraryPagination) libraryPagination.dataset.page = "1";
+        refreshLibraryFromApi(true, 1).catch(() => {});
+      }, 250);
+    });
     filterMode?.addEventListener("change", () => {
       if (!syncServerFilterMode()) applyFilters();
     });
     clearButton?.addEventListener("click", () => {
       if (filterInput) filterInput.value = "";
       if (filterMode) filterMode.value = "unplayed";
-      if (!syncServerFilterMode()) applyFilters();
+      if (!syncServerFilterMode()) filterInput?.dispatchEvent(new Event("input"));
     });
     filterToggle?.addEventListener("click", () => {
       setFilterOpen(!filterWrap?.classList.contains("is-open"), true);
@@ -745,6 +763,8 @@
       const url = new URL("/api/frontend/library", window.location.origin);
       const mode = filterMode?.value || "unplayed";
       if (mode !== "unplayed") url.searchParams.set("filter", mode);
+      const search = (filterInput?.value || "").trim();
+      if (search) url.searchParams.set("search", search);
       const page = requestedPage || Number(libraryPagination?.dataset.page || 1);
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", "100");

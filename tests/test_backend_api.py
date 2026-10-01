@@ -252,6 +252,29 @@ class BackendApiTests(unittest.TestCase):
             [played.id, favorite.id],
         )
 
+    def test_frontend_library_search_filters_before_pagination(self):
+        for index, title in enumerate(("Other One", "Other Two", "Matching Episode")):
+            Download.objects.create(
+                profile_id="api-user",
+                item_uid=f"search-{index}",
+                source_type="podcast",
+                source_name="Feed",
+                title=title,
+                download_status=DownloadStatus.DOWNLOADED,
+                last_seen_at=timezone.now() - timedelta(seconds=index),
+            )
+
+        response = self.client.get(
+            reverse("api_frontend_library"),
+            {"filter": "all", "search": "matching", "page_size": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([item["title"] for item in payload["downloads"]], ["Matching Episode"])
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["pagination"]["total_pages"], 1)
+
     def test_frontend_player_falls_back_to_file_path_extension_for_video_kind(self):
         download = Download.objects.create(
             profile_id="api-user",
